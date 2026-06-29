@@ -42,6 +42,7 @@ The four-value enum lives in `search/schema.py::METADATA_STATUS_VALUES`.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -67,6 +68,29 @@ many names, the rest are summarised as `'et al.'`."""
 # ---------------------------------------------------------------------------
 # Public ops: OpenAlex resolution for one document.
 # ---------------------------------------------------------------------------
+
+
+async def alookup_known_doi(doc_id: str, doi: str) -> dict[str, Any]:
+    """Async sibling of `lookup_known_doi`. Same contract, awaitable.
+
+    Thin `asyncio.to_thread` wrapper added in the 2026-06-29 async
+    refactor. Native async lands when kg/client + search/client
+    migrate to AsyncDriver / AsyncConnection (Days 5-6).
+    """
+    return await asyncio.to_thread(lookup_known_doi, doc_id, doi)
+
+
+async def aresolve_openalex(
+    doc_id: str, *, skip_manual: bool = False
+) -> dict[str, Any]:
+    """Async sibling of `resolve_openalex`. Same contract, awaitable.
+
+    Thin `asyncio.to_thread` wrapper. Forwards `skip_manual` as a
+    kwarg through `asyncio.to_thread`.
+    """
+    return await asyncio.to_thread(
+        resolve_openalex, doc_id, skip_manual=skip_manual
+    )
 
 
 def lookup_known_doi(doc_id: str, doi: str) -> dict[str, Any]:

@@ -23,6 +23,7 @@ Layer 2 (`pipeline.py`). That keeps the dependency chain
 imports.
 """
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -1600,3 +1601,222 @@ def clear_xref_edges_execute(
         ontology_name=plan.ontology_name,
         n_cleared=n,
     )
+
+
+# =====================================================================
+# Async siblings (added 2026-06-29 in the async refactor).
+#
+# Each public sync function above has a thin `a*` async wrapper that
+# delegates to the sync implementation via `asyncio.to_thread`. This
+# gives async callers (the future async GUI event handlers, the agent
+# read path) an awaitable API surface NOW, before the underlying
+# pipeline.py + kg/client + search/client go fully async.
+#
+# Per-doc parallel fan-out within bulk operations lands in Day 7 of
+# the async refactor — today's siblings preserve the sequential
+# iteration so failure semantics + iteration ordering stay identical
+# to the sync versions.
+#
+# After Day 8 the sync versions disappear and these `a*` wrappers are
+# renamed to the plain names (one search-and-replace turn).
+# =====================================================================
+
+
+async def adelete_doc_plan(doc_id: str) -> DeleteDocPlan:
+    """Async sibling of `delete_doc_plan`. Same contract, awaitable."""
+    return await asyncio.to_thread(delete_doc_plan, doc_id)
+
+
+async def adelete_doc_execute(plan: DeleteDocPlan) -> DeleteDocResult:
+    """Async sibling of `delete_doc_execute`. Same contract, awaitable."""
+    return await asyncio.to_thread(delete_doc_execute, plan)
+
+
+async def abulk_resolve_openalex_plan(
+    *, skip_manual: bool = True,
+) -> BulkResolveOpenAlexPlan:
+    """Async sibling of `bulk_resolve_openalex_plan`. Same contract, awaitable."""
+    return await asyncio.to_thread(
+        bulk_resolve_openalex_plan, skip_manual=skip_manual
+    )
+
+
+async def abulk_resolve_openalex_execute(
+    plan: BulkResolveOpenAlexPlan,
+) -> BulkResolveOpenAlexResult:
+    """Async sibling of `bulk_resolve_openalex_execute`. Same contract, awaitable."""
+    return await asyncio.to_thread(bulk_resolve_openalex_execute, plan)
+
+
+async def abulk_re_embed_plan() -> BulkReEmbedPlan:
+    """Async sibling of `bulk_re_embed_plan`. Same contract, awaitable."""
+    return await asyncio.to_thread(bulk_re_embed_plan)
+
+
+async def abulk_re_embed_execute(
+    plan: BulkReEmbedPlan,
+) -> BulkReEmbedResult:
+    """Async sibling of `bulk_re_embed_execute`. Same contract, awaitable."""
+    return await asyncio.to_thread(bulk_re_embed_execute, plan)
+
+
+async def abulk_backfill_chunks_plan() -> BulkBackfillPlan:
+    """Async sibling of `bulk_backfill_chunks_plan`. Same contract, awaitable."""
+    return await asyncio.to_thread(bulk_backfill_chunks_plan)
+
+
+async def abulk_backfill_chunks_execute(
+    plan: BulkBackfillPlan, config: CorpusConfig,
+) -> BulkBackfillResult:
+    """Async sibling of `bulk_backfill_chunks_execute`. Same contract, awaitable."""
+    return await asyncio.to_thread(
+        bulk_backfill_chunks_execute, plan, config
+    )
+
+
+async def abulk_backfill_entities_plan() -> BulkBackfillPlan:
+    """Async sibling of `bulk_backfill_entities_plan`. Same contract, awaitable."""
+    return await asyncio.to_thread(bulk_backfill_entities_plan)
+
+
+async def abulk_backfill_entities_execute(
+    plan: BulkBackfillPlan, config: CorpusConfig,
+) -> BulkBackfillResult:
+    """Async sibling of `bulk_backfill_entities_execute`. Same contract, awaitable."""
+    return await asyncio.to_thread(
+        bulk_backfill_entities_execute, plan, config
+    )
+
+
+async def abulk_backfill_ontology_plan() -> BulkBackfillPlan:
+    """Async sibling of `bulk_backfill_ontology_plan`. Same contract, awaitable."""
+    return await asyncio.to_thread(bulk_backfill_ontology_plan)
+
+
+async def abulk_backfill_ontology_execute(
+    plan: BulkBackfillPlan, config: CorpusConfig,
+) -> BulkBackfillResult:
+    """Async sibling of `bulk_backfill_ontology_execute`. Same contract, awaitable."""
+    return await asyncio.to_thread(
+        bulk_backfill_ontology_execute, plan, config
+    )
+
+
+async def abulk_backfill_triples_plan() -> BulkBackfillPlan:
+    """Async sibling of `bulk_backfill_triples_plan`. Same contract, awaitable."""
+    return await asyncio.to_thread(bulk_backfill_triples_plan)
+
+
+async def abulk_backfill_triples_execute(
+    plan: BulkBackfillPlan, config: CorpusConfig,
+) -> BulkBackfillResult:
+    """Async sibling of `bulk_backfill_triples_execute`. Same contract, awaitable."""
+    return await asyncio.to_thread(
+        bulk_backfill_triples_execute, plan, config
+    )
+
+
+async def abulk_backfill_cross_doc_plan() -> BulkBackfillPlan:
+    """Async sibling of `bulk_backfill_cross_doc_plan`. Same contract, awaitable."""
+    return await asyncio.to_thread(bulk_backfill_cross_doc_plan)
+
+
+async def abulk_backfill_cross_doc_execute(
+    plan: BulkBackfillPlan, config: CorpusConfig,
+) -> BulkBackfillResult:
+    """Async sibling of `bulk_backfill_cross_doc_execute`. Same contract, awaitable."""
+    return await asyncio.to_thread(
+        bulk_backfill_cross_doc_execute, plan, config
+    )
+
+
+async def aingest_folder_plan(
+    folder: Path, main_label: str, sub_label: str | None = None,
+) -> IngestFolderPlan:
+    """Async sibling of `ingest_folder_plan`. Same contract, awaitable."""
+    return await asyncio.to_thread(
+        ingest_folder_plan, folder, main_label, sub_label
+    )
+
+
+async def aingest_folder_execute(
+    plan: IngestFolderPlan, config: CorpusConfig,
+) -> IngestFolderResult:
+    """Async sibling of `ingest_folder_execute`. Same contract, awaitable."""
+    return await asyncio.to_thread(ingest_folder_execute, plan, config)
+
+
+async def aadd_plan(
+    folder: Path, main_label: str, sub_label: str | None = None,
+) -> AddPlan:
+    """Async sibling of `add_plan`. Same contract, awaitable."""
+    return await asyncio.to_thread(add_plan, folder, main_label, sub_label)
+
+
+async def aadd_execute(plan: AddPlan, config: CorpusConfig) -> AddResult:
+    """Async sibling of `add_execute`. Same contract, awaitable."""
+    return await asyncio.to_thread(add_execute, plan, config)
+
+
+async def async_plan(
+    folder: Path, main_label: str, sub_label: str | None = None,
+) -> SyncPlan:
+    """Async sibling of `sync_plan`. Same contract, awaitable.
+
+    Note the `async_` prefix instead of `a` — `async` is a reserved
+    word in Python so we can't write `def async_plan`; spelled out
+    the prefix here to make the wrapper callable.
+    """
+    return await asyncio.to_thread(sync_plan, folder, main_label, sub_label)
+
+
+async def async_execute(
+    plan: SyncPlan, config: CorpusConfig,
+) -> SyncResult:
+    """Async sibling of `sync_execute`. Same contract, awaitable.
+
+    See `async_plan` for the prefix rationale.
+    """
+    return await asyncio.to_thread(sync_execute, plan, config)
+
+
+async def abackfill_xrefs_plan(
+    config: CorpusConfig,
+) -> BackfillXrefsPlan:
+    """Async sibling of `backfill_xrefs_plan`. Same contract, awaitable."""
+    return await asyncio.to_thread(backfill_xrefs_plan, config)
+
+
+async def abackfill_xrefs_execute(
+    plan: BackfillXrefsPlan, config: CorpusConfig,
+) -> BackfillXrefsResult:
+    """Async sibling of `backfill_xrefs_execute`. Same contract, awaitable."""
+    return await asyncio.to_thread(backfill_xrefs_execute, plan, config)
+
+
+async def arecompute_cross_doc_xrefs_plan(
+    config: CorpusConfig,
+) -> RecomputeCrossDocXrefsPlan:
+    """Async sibling of `recompute_cross_doc_xrefs_plan`. Same contract, awaitable."""
+    return await asyncio.to_thread(recompute_cross_doc_xrefs_plan, config)
+
+
+async def arecompute_cross_doc_xrefs_execute(
+    plan: RecomputeCrossDocXrefsPlan,
+) -> RecomputeCrossDocXrefsResult:
+    """Async sibling of `recompute_cross_doc_xrefs_execute`. Same contract, awaitable."""
+    return await asyncio.to_thread(recompute_cross_doc_xrefs_execute, plan)
+
+
+async def aclear_xref_edges_plan(
+    ontology_name: str,
+) -> ClearXrefEdgesPlan:
+    """Async sibling of `clear_xref_edges_plan`. Same contract, awaitable."""
+    return await asyncio.to_thread(clear_xref_edges_plan, ontology_name)
+
+
+async def aclear_xref_edges_execute(
+    plan: ClearXrefEdgesPlan,
+) -> ClearXrefEdgesResult:
+    """Async sibling of `clear_xref_edges_execute`. Same contract, awaitable."""
+    return await asyncio.to_thread(clear_xref_edges_execute, plan)
