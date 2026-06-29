@@ -159,9 +159,8 @@ def _voyage_call(
 ) -> list[list[float]]:
     """Native-client Voyage call, factored out so it can run in a thread.
 
-    Used by both `embed_texts` (sync, direct call) and `aembed_texts`
-    (async, wrapped in `asyncio.to_thread` since `voyageai.Client`
-    has no async API).
+    Used by `embed_texts` (wrapped in `asyncio.to_thread` since
+    `voyageai.Client` has no async API).
     """
     settings = get_settings()
     client = _build_voyage_client()
@@ -177,7 +176,7 @@ def _voyage_call(
     return result.embeddings
 
 
-def embed_texts(
+async def embed_texts(
     texts: list[str], input_type: str = "document"
 ) -> list[list[float]]:
     """Embed `texts` into fixed-size vectors. Returns vectors aligned 1:1.
@@ -187,37 +186,6 @@ def embed_texts(
     a different prompt internally (Voyage, OpenAI), others ignore it
     (HF). The factory passes it through where the provider supports
     it.
-
-    Empty input returns `[]` (no API call). All API failures
-    propagate as raised exceptions; the orchestrator boundary catches
-    and records a typed error on the relevant result dataclass — see
-    `errors.ErrorDetail.from_exception`.
-    """
-    if not texts:
-        return []
-
-    settings = get_settings()
-    provider = settings.embedding_provider
-    _validate_embedder_config(provider)
-
-    if provider == "voyage":
-        return _voyage_call(texts, input_type)
-
-    # OpenAI / Google / HF — uniform LangChain Embeddings interface.
-    model = _active_model_for(provider)
-    embedder = _build_langchain_embedder(provider, model)
-    if input_type == "query":
-        # `.embed_query` returns a single vector; callers always pass
-        # a one-element list when querying. Embed via embed_documents
-        # to keep the 1:1 list return shape uniform.
-        return [embedder.embed_query(t) for t in texts]
-    return embedder.embed_documents(texts)
-
-
-async def aembed_texts(
-    texts: list[str], input_type: str = "document"
-) -> list[list[float]]:
-    """Async sibling of `embed_texts`. Same contract, async dispatch.
 
     Voyage path runs `_voyage_call` in a worker thread via
     `asyncio.to_thread` — voyageai.Client has no async API and HTTP
@@ -229,10 +197,9 @@ async def aembed_texts(
     `.aembed_query()`. For query mode with multiple inputs, queries
     fan out concurrently via `asyncio.gather`.
 
-    Same error contract as `embed_texts`: failures propagate; the
-    orchestrator boundary catches and records via
-    `ErrorDetail.from_exception`. Same empty-input shortcut returns
-    `[]` with no API call.
+    Failures propagate; the orchestrator boundary catches and records
+    via `ErrorDetail.from_exception`. Empty input returns `[]` with
+    no API call.
     """
     if not texts:
         return []

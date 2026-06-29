@@ -185,9 +185,9 @@ def _build_system_prompt(entity_vocab: list[tuple[str, str]]) -> str:
 def _build_runnable(entity_vocab: list[tuple[str, str]]):
     """Build the per-call retryable structured-output runnable.
 
-    Shared by `extract` (sync) and `aextract` (async). The retry
-    wrapper sits OUTSIDE `.with_structured_output(...)` per LangChain's
-    composition order: structured-output first, retry second.
+    The retry wrapper sits OUTSIDE `.with_structured_output(...)` per
+    LangChain's composition order: structured-output first, retry
+    second.
     """
     settings = get_settings()
     llm = _get_llm(
@@ -238,11 +238,11 @@ def _filter_and_convert_triples(
     return out
 
 
-def extract(
+async def extract(
     text: str,
     entity_vocab: list[tuple[str, str]],
 ) -> list[ExtractedTriple]:
-    """Extract typed triples from `text`, constrained to `entity_vocab` (sync).
+    """Extract typed triples from `text`, constrained to `entity_vocab`.
 
     Args:
       text:          chunk text content.
@@ -257,34 +257,12 @@ def extract(
       or predicates are dropped (caller logs the totals via the
       write-side mismatch check).
 
-    Sync path retained for callers that haven't migrated to async yet.
-    Dropped once `pipeline.ingest_document` is fully async.
+    The structured-output call is wrapped in the standard retry policy
+    via `with_retry` (covers transient 429s after the per-provider
+    InMemoryRateLimiter does its job).
     """
     # Fast-path: a chunk with no L6a entities can't yield any triples
     # (since subject + object must come from L6a). Skip the LLM call.
-    if not entity_vocab:
-        return []
-
-    runnable, system_prompt = _build_runnable(entity_vocab)
-    result = runnable.invoke(
-        [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=text),
-        ]
-    )
-    return _filter_and_convert_triples(result, entity_vocab)
-
-
-async def aextract(
-    text: str,
-    entity_vocab: list[tuple[str, str]],
-) -> list[ExtractedTriple]:
-    """Async sibling of `extract`. Same contract, awaits the LLM call.
-
-    Used by the async ingest path. Wraps the structured-output call
-    in the standard retry policy via `with_retry` (covers transient
-    429s after the per-provider InMemoryRateLimiter does its job).
-    """
     if not entity_vocab:
         return []
 

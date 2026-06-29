@@ -152,9 +152,9 @@ def _mentions_to_list(result: object) -> list[Mention]:
 def _build_runnable(entity_types: list[str]):
     """Build the per-call retryable structured-output runnable.
 
-    Shared by `extract` (sync) and `aextract` (async). The retry
-    wrapper sits OUTSIDE `.with_structured_output(...)` per LangChain's
-    composition order: structured-output first, retry second.
+    The retry wrapper sits OUTSIDE `.with_structured_output(...)` per
+    LangChain's composition order: structured-output first, retry
+    second.
     """
     settings = get_settings()
     llm = _get_llm(
@@ -165,8 +165,8 @@ def _build_runnable(entity_types: list[str]):
     return _with_retry(structured), _build_system_prompt(entity_types)
 
 
-def extract(text: str, entity_types: list[str]) -> list[Mention]:
-    """Extract entity mentions from `text` (sync).
+async def extract(text: str, entity_types: list[str]) -> list[Mention]:
+    """Extract entity mentions from `text`.
 
     Args:
       text:         the chunk's raw text content.
@@ -177,28 +177,9 @@ def extract(text: str, entity_types: list[str]) -> list[Mention]:
       List of `Mention` with `offset` and `confidence` always None.
       Empty list when the LLM finds no matching entities.
 
-    Sync path retained for callers that haven't migrated to async yet.
-    The async refactor will drop this once `dispatcher.dispatch()`
-    + `pipeline.ingest_document()` are on the async path.
-    """
-    runnable, system_prompt = _build_runnable(entity_types)
-    result = runnable.invoke(
-        [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=text),
-        ]
-    )
-    return _mentions_to_list(result)
-
-
-async def aextract(
-    text: str, entity_types: list[str]
-) -> list[Mention]:
-    """Async sibling of `extract`. Same contract, awaits the LLM call.
-
-    Used by the async ingest path. Wraps the structured-output call
-    in the standard retry policy via `with_retry` (covers transient
-    429s after the per-provider InMemoryRateLimiter does its job).
+    The structured-output call is wrapped in the standard retry policy
+    via `with_retry` (covers transient 429s after the per-provider
+    InMemoryRateLimiter does its job).
     """
     runnable, system_prompt = _build_runnable(entity_types)
     result = await runnable.ainvoke(

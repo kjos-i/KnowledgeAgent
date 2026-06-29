@@ -171,8 +171,8 @@ def _run_inference(text: str) -> list[Mention]:
     return mentions
 
 
-def extract(text: str, entity_types: list[str]) -> list[Mention]:
-    """Extract biomedical entity mentions from `text` using HunFlair2 (sync).
+async def extract(text: str, entity_types: list[str]) -> list[Mention]:
+    """Extract biomedical entity mentions from `text` using HunFlair2.
 
     The `entity_types` argument is INTENTIONALLY IGNORED — HunFlair2
     is exposed as an all-or-nothing adapter per the locked 2026-06-23
@@ -192,20 +192,9 @@ def extract(text: str, entity_types: list[str]) -> list[Mention]:
       Confidence and offset are populated from Flair's span data.
       Empty list when HunFlair2 finds no biomedical entities.
 
-    Sync path retained for callers that haven't migrated to async yet.
-    Event-loop callers use `aextract` instead.
+    Offloads inference to a worker thread via `asyncio.to_thread`.
+    HunFlair2 inference is CPU/GPU bound; the PyTorch forward pass
+    releases the GIL while running.
     """
     del entity_types  # Intentional no-op — documented above.
-    return _run_inference(text)
-
-
-async def aextract(text: str, entity_types: list[str]) -> list[Mention]:
-    """Async sibling of `extract`. Offloads inference to a worker thread.
-
-    HunFlair2 inference is CPU/GPU bound; the PyTorch forward pass
-    releases the GIL while running, so `asyncio.to_thread` lets the
-    event loop progress concurrent tasks while the model runs.
-    `entity_types` is ignored — same all-or-nothing contract as `extract`.
-    """
-    del entity_types  # Intentional no-op — same contract as extract.
     return await asyncio.to_thread(_run_inference, text)

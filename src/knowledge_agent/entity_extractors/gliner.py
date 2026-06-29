@@ -130,8 +130,8 @@ def _run_inference(text: str, entity_types: list[str]) -> list[Mention]:
     ]
 
 
-def extract(text: str, entity_types: list[str]) -> list[Mention]:
-    """Extract entity mentions from `text` using GLiNER zero-shot (sync).
+async def extract(text: str, entity_types: list[str]) -> list[Mention]:
+    """Extract entity mentions from `text` using GLiNER zero-shot.
 
     Args:
       text:         the chunk's raw text content.
@@ -144,17 +144,9 @@ def extract(text: str, entity_types: list[str]) -> list[Mention]:
       and `confidence` set from GLiNER's `score`. Empty list when
       GLiNER finds no matching entities above `_SCORE_THRESHOLD`.
 
-    Sync path retained for callers that haven't migrated to async yet.
-    Event-loop callers use `aextract` instead.
-    """
-    return _run_inference(text, entity_types)
-
-
-async def aextract(text: str, entity_types: list[str]) -> list[Mention]:
-    """Async sibling of `extract`. Offloads inference to a worker thread.
-
+    Offloads inference to a worker thread via `asyncio.to_thread`.
     GLiNER inference is CPU/GPU bound; the PyTorch forward pass
-    releases the GIL while running, so `asyncio.to_thread` lets the
+    releases the GIL while running, so the worker thread lets the
     event loop progress concurrent tasks (other chunks embedding,
     KG writes, agent LLM calls) while the model runs.
     """

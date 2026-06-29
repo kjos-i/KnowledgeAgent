@@ -375,7 +375,7 @@ async def neo4j_retriever_node(state: AgentState) -> dict[str, Any]:
 
     try:
         client = get_kg_client()
-        rows = await client.aread_query(wrapped)
+        rows = await client.read_query(wrapped)
     except Exception as exc:
         logger.warning(
             "neo4j_retriever: query failed: %r; cypher=%r",
@@ -448,7 +448,7 @@ async def lancedb_retriever_node(state: AgentState) -> dict[str, Any]:
 
     client = get_search_client()
     try:
-        hits = await client.aretrieve(query=query, top_k=top_k, filters=filters)
+        hits = await client.retrieve(query=query, top_k=top_k, filters=filters)
     except Exception as exc:
         # Search-path methods now raise on failure (typed-errors
         # contract); catch at the node boundary so the agent's response
