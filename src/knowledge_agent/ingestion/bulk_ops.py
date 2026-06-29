@@ -137,7 +137,7 @@ class DeleteDocResult:
     ok: bool
 
 
-def delete_doc_plan(doc_id: str) -> DeleteDocPlan:
+async def delete_doc_plan(doc_id: str) -> DeleteDocPlan:
     """Read-only inventory of what `delete_doc_execute` will remove.
 
     Pulls one chunk row from LanceDB to populate the dialog fields
@@ -150,7 +150,7 @@ def delete_doc_plan(doc_id: str) -> DeleteDocPlan:
 
     search_client = get_search_client()
     try:
-        chunk_rows = search_client.get_chunks_by_doc_id(doc_id)
+        chunk_rows = await search_client.get_chunks_by_doc_id(doc_id)
     except Exception:
         # Read failure → treat as "no info" so the plan dialog can still
         # render. Execute path will surface the real error if there is one.
@@ -219,7 +219,7 @@ class BulkResolveOpenAlexResult:
     failures: tuple[tuple[str, str], ...]
 
 
-def bulk_resolve_openalex_plan(
+async def bulk_resolve_openalex_plan(
     *, skip_manual: bool = True,
 ) -> BulkResolveOpenAlexPlan:
     """List all indexed docs; split into targets vs manual-skipped.
@@ -232,7 +232,7 @@ def bulk_resolve_openalex_plan(
     search_client = get_search_client()
     # LanceDB read errors now propagate to the caller (typed-errors
     # contract); the prior explicit `is None` check is unnecessary.
-    indexed = search_client.list_indexed_docs()
+    indexed = await search_client.list_indexed_docs()
 
     target_ids: list[str] = []
     skipped: list[IndexedDoc] = []
@@ -256,7 +256,7 @@ def bulk_resolve_openalex_plan(
     )
 
 
-def bulk_resolve_openalex_execute(
+async def bulk_resolve_openalex_execute(
     plan: BulkResolveOpenAlexPlan,
 ) -> BulkResolveOpenAlexResult:
     """Iterate `plan.target_doc_ids`; call `pipeline.resolve_openalex`.
@@ -273,7 +273,7 @@ def bulk_resolve_openalex_execute(
 
     for doc_id in plan.target_doc_ids:
         try:
-            result = pipeline.resolve_openalex(doc_id, skip_manual=False)
+            result = await pipeline.resolve_openalex(doc_id, skip_manual=False)
             if result.get("work_resolved"):
                 n_resolved += 1
             else:
@@ -322,11 +322,11 @@ class BulkReEmbedResult:
     failures: tuple[tuple[str, str], ...]
 
 
-def bulk_re_embed_plan() -> BulkReEmbedPlan:
+async def bulk_re_embed_plan() -> BulkReEmbedPlan:
     """List every indexed doc; report total chunk count."""
     search_client = get_search_client()
     # LanceDB read errors propagate (typed-errors contract).
-    indexed = search_client.list_indexed_docs()
+    indexed = await search_client.list_indexed_docs()
 
     target_ids = tuple(d["doc_id"] for d in indexed)
     total_chunks = sum(d.get("n_chunks", 0) for d in indexed)
@@ -335,7 +335,7 @@ def bulk_re_embed_plan() -> BulkReEmbedPlan:
     )
 
 
-def bulk_re_embed_execute(plan: BulkReEmbedPlan) -> BulkReEmbedResult:
+async def bulk_re_embed_execute(plan: BulkReEmbedPlan) -> BulkReEmbedResult:
     """Iterate `plan.target_doc_ids`; call `pipeline.re_embed`.
 
     A doc whose embed call fails (Voyage outage, etc.) is counted as
@@ -348,7 +348,7 @@ def bulk_re_embed_execute(plan: BulkReEmbedPlan) -> BulkReEmbedResult:
 
     for doc_id in plan.target_doc_ids:
         try:
-            result = pipeline.re_embed(doc_id)
+            result = await pipeline.re_embed(doc_id)
             if result.get("embed_ok") and result.get("lancedb_ok"):
                 n_succeeded += 1
             else:
@@ -402,26 +402,26 @@ class BulkBackfillResult:
     failures: tuple[tuple[str, str], ...]
 
 
-def _bulk_backfill_plan(layer_name: str) -> BulkBackfillPlan:
+async def _bulk_backfill_plan(layer_name: str) -> BulkBackfillPlan:
     """Shared plan-building helper: list every indexed doc."""
     search_client = get_search_client()
     # LanceDB read errors propagate (typed-errors contract).
-    indexed = search_client.list_indexed_docs()
+    indexed = await search_client.list_indexed_docs()
     return BulkBackfillPlan(
         target_doc_ids=tuple(d["doc_id"] for d in indexed),
         layer_name=layer_name,
     )
 
 
-def bulk_backfill_chunks_plan() -> BulkBackfillPlan:
+async def bulk_backfill_chunks_plan() -> BulkBackfillPlan:
     """List every indexed doc for the bulk KG L5+ rebuild op."""
-    return _bulk_backfill_plan("chunks")
+    return await _bulk_backfill_plan("chunks")
 
 
-def bulk_backfill_chunks_execute(
+async def bulk_backfill_chunks_execute(
     plan: BulkBackfillPlan, config: CorpusConfig,
 ) -> BulkBackfillResult:
-    """Iterate targets; call `pipeline.backfill_chunks(doc_id, config)`.
+    """Iterate targets; call `await pipeline.backfill_chunks(doc_id, config)`.
 
     Success criterion is `result["chunks_ok"]` - the per-doc function
     returns False when the chunks layer is disabled in the corpus
@@ -434,7 +434,7 @@ def bulk_backfill_chunks_execute(
 
     for doc_id in plan.target_doc_ids:
         try:
-            result = pipeline.backfill_chunks(doc_id, config)
+            result = await pipeline.backfill_chunks(doc_id, config)
             if result.get("chunks_ok"):
                 n_succeeded += 1
             else:
@@ -454,22 +454,22 @@ def bulk_backfill_chunks_execute(
     )
 
 
-def bulk_backfill_entities_plan() -> BulkBackfillPlan:
+async def bulk_backfill_entities_plan() -> BulkBackfillPlan:
     """List every indexed doc for the bulk KG L6a+ rebuild op."""
-    return _bulk_backfill_plan("entities")
+    return await _bulk_backfill_plan("entities")
 
 
-def bulk_backfill_entities_execute(
+async def bulk_backfill_entities_execute(
     plan: BulkBackfillPlan, config: CorpusConfig,
 ) -> BulkBackfillResult:
-    """Iterate targets; call `pipeline.backfill_entities(doc_id, config)`."""
+    """Iterate targets; call `await pipeline.backfill_entities(doc_id, config)`."""
     n_succeeded = 0
     n_failed = 0
     failures: list[tuple[str, str]] = []
 
     for doc_id in plan.target_doc_ids:
         try:
-            result = pipeline.backfill_entities(doc_id, config)
+            result = await pipeline.backfill_entities(doc_id, config)
             if result.get("entities_ok"):
                 n_succeeded += 1
             else:
@@ -490,15 +490,15 @@ def bulk_backfill_entities_execute(
     )
 
 
-def bulk_backfill_ontology_plan() -> BulkBackfillPlan:
+async def bulk_backfill_ontology_plan() -> BulkBackfillPlan:
     """List every indexed doc for the bulk KG L7 re-link op."""
-    return _bulk_backfill_plan("ontology")
+    return await _bulk_backfill_plan("ontology")
 
 
-def bulk_backfill_ontology_execute(
+async def bulk_backfill_ontology_execute(
     plan: BulkBackfillPlan, config: CorpusConfig,
 ) -> BulkBackfillResult:
-    """Iterate targets; call `pipeline.backfill_ontology(doc_id, config)`.
+    """Iterate targets; call `await pipeline.backfill_ontology(doc_id, config)`.
 
     Success criterion: at least one enabled ontology successfully
     imported AND produced canonical links. A doc with zero enabled
@@ -511,7 +511,7 @@ def bulk_backfill_ontology_execute(
 
     for doc_id in plan.target_doc_ids:
         try:
-            result = pipeline.backfill_ontology(doc_id, config)
+            result = await pipeline.backfill_ontology(doc_id, config)
             if not result:
                 # No ontologies enabled - this is a no-op success.
                 n_succeeded += 1
@@ -541,15 +541,15 @@ def bulk_backfill_ontology_execute(
     )
 
 
-def bulk_backfill_triples_plan() -> BulkBackfillPlan:
+async def bulk_backfill_triples_plan() -> BulkBackfillPlan:
     """List every indexed doc for the bulk KG L8 rebuild op."""
-    return _bulk_backfill_plan("triples")
+    return await _bulk_backfill_plan("triples")
 
 
-def bulk_backfill_triples_execute(
+async def bulk_backfill_triples_execute(
     plan: BulkBackfillPlan, config: CorpusConfig,
 ) -> BulkBackfillResult:
-    """Iterate targets; call `pipeline.backfill_triples(doc_id, config)`.
+    """Iterate targets; call `await pipeline.backfill_triples(doc_id, config)`.
 
     Success criterion: the per-doc `triples_ok` flag is True. A doc
     that yielded zero triples still counts as success - empty output
@@ -565,7 +565,7 @@ def bulk_backfill_triples_execute(
 
     for doc_id in plan.target_doc_ids:
         try:
-            result = pipeline.backfill_triples(doc_id, config)
+            result = await pipeline.backfill_triples(doc_id, config)
             if result.get("triples_ok"):
                 n_succeeded += 1
             else:
@@ -586,15 +586,15 @@ def bulk_backfill_triples_execute(
     )
 
 
-def bulk_backfill_cross_doc_plan() -> BulkBackfillPlan:
+async def bulk_backfill_cross_doc_plan() -> BulkBackfillPlan:
     """List every indexed doc for the bulk KG L9 rebuild op."""
-    return _bulk_backfill_plan("cross_doc")
+    return await _bulk_backfill_plan("cross_doc")
 
 
-def bulk_backfill_cross_doc_execute(
+async def bulk_backfill_cross_doc_execute(
     plan: BulkBackfillPlan, config: CorpusConfig,
 ) -> BulkBackfillResult:
-    """Iterate targets; call `pipeline.backfill_cross_doc(doc_id, config)`.
+    """Iterate targets; call `await pipeline.backfill_cross_doc(doc_id, config)`.
 
     Success criterion: `cross_doc_ok=True`. A doc that ends up with
     zero `:RELATED_TO` edges (no other doc met the threshold) is
@@ -607,7 +607,7 @@ def bulk_backfill_cross_doc_execute(
 
     for doc_id in plan.target_doc_ids:
         try:
-            result = pipeline.backfill_cross_doc(doc_id, config)
+            result = await pipeline.backfill_cross_doc(doc_id, config)
             if result.get("cross_doc_ok"):
                 n_succeeded += 1
             else:
@@ -628,14 +628,14 @@ def bulk_backfill_cross_doc_execute(
     )
 
 
-def delete_doc_execute(plan: DeleteDocPlan) -> DeleteDocResult:
+async def delete_doc_execute(plan: DeleteDocPlan) -> DeleteDocResult:
     """Perform the delete promised by `plan`.
 
-    Pure delegation to `pipeline.delete_doc(plan.doc_id)` - the
+    Pure delegation to `await pipeline.delete_doc(plan.doc_id)` - the
     composition is the single source of truth (also called by
     `ingest_document`'s delete-then-write step).
     """
-    ok = pipeline.delete_doc(plan.doc_id)
+    ok = await pipeline.delete_doc(plan.doc_id)
     return DeleteDocResult(doc_id=plan.doc_id, ok=ok)
 
 
@@ -732,7 +732,7 @@ class IngestFolderResult:
     failures: tuple[tuple[str, str], ...]
 
 
-def ingest_folder_plan(
+async def ingest_folder_plan(
     folder: Path, main_label: str, sub_label: str | None = None,
 ) -> IngestFolderPlan:
     """Recursively scan `folder` for supported files; hash each + check DB.
@@ -762,7 +762,7 @@ def ingest_folder_plan(
         # doesn't kill the plan: treat the lookup as a miss and let
         # the execute path surface the real error.
         try:
-            existing = search_client.get_chunks_by_doc_id(doc_id)
+            existing = await search_client.get_chunks_by_doc_id(doc_id)
         except Exception:
             existing = []
         if existing:
@@ -842,7 +842,7 @@ class AddResult:
     failures: tuple[tuple[str, str], ...]
 
 
-def add_plan(
+async def add_plan(
     folder: Path, main_label: str, sub_label: str | None = None,
 ) -> AddPlan:
     """Walk `folder`; classify each supported file as NEW or skipped.
@@ -865,7 +865,7 @@ def add_plan(
         # Per-file read errors are tolerated so one corrupt row
         # doesn't kill the plan: treat the lookup as a miss.
         try:
-            existing = search_client.get_chunks_by_doc_id(doc_id)
+            existing = await search_client.get_chunks_by_doc_id(doc_id)
         except Exception:
             existing = []
         if existing:
@@ -888,7 +888,7 @@ def add_plan(
     )
 
 
-def add_execute(plan: AddPlan, config: CorpusConfig) -> AddResult:
+async def add_execute(plan: AddPlan, config: CorpusConfig) -> AddResult:
     """Ingest each file in `plan.new_items`. Per-file fail-soft."""
     n_succeeded = 0
     n_failed = 0
@@ -896,7 +896,7 @@ def add_execute(plan: AddPlan, config: CorpusConfig) -> AddResult:
 
     for item in plan.new_items:
         try:
-            pipeline.ingest_document(
+            await pipeline.ingest_document(
                 item.path, config, plan.main_label, plan.sub_label,
             )
             n_succeeded += 1
@@ -1003,7 +1003,7 @@ class SyncResult:
     failures: tuple[tuple[str, str], ...]
 
 
-def sync_plan(
+async def sync_plan(
     folder: Path, main_label: str, sub_label: str | None = None,
 ) -> SyncPlan:
     """Build a Sync plan: walk + hash disk, list indexed docs, classify.
@@ -1027,7 +1027,7 @@ def sync_plan(
 
     search_client = get_search_client()
     # LanceDB read errors propagate (typed-errors contract).
-    indexed_dicts = search_client.list_indexed_docs()
+    indexed_dicts = await search_client.list_indexed_docs()
 
     indexed_docs = [
         IndexedDoc(
@@ -1049,7 +1049,7 @@ def sync_plan(
     )
 
 
-def sync_execute(plan: SyncPlan, config: CorpusConfig) -> SyncResult:
+async def sync_execute(plan: SyncPlan, config: CorpusConfig) -> SyncResult:
     """Apply changes per bucket: ingest NEW, patch MOVED, replace EDITED,
     delete ORPHAN.
 
@@ -1074,7 +1074,7 @@ def sync_execute(plan: SyncPlan, config: CorpusConfig) -> SyncResult:
     # NEW: full ingest via Layer 2.
     for disk in plan.buckets.new:
         try:
-            pipeline.ingest_document(
+            await pipeline.ingest_document(
                 disk.path, config, plan.main_label, plan.sub_label,
             )
             n_new_ingested += 1
@@ -1088,7 +1088,7 @@ def sync_execute(plan: SyncPlan, config: CorpusConfig) -> SyncResult:
     # MOVED: just patch source_path on the existing doc.
     for disk, old in plan.buckets.moved:
         try:
-            search_client.update_doc_metadata(
+            await search_client.update_doc_metadata(
                 old.doc_id, {"source_path": disk.path.as_posix()},
             )
             n_moved += 1
@@ -1103,8 +1103,8 @@ def sync_execute(plan: SyncPlan, config: CorpusConfig) -> SyncResult:
     # EDITED: delete the old doc_id, ingest the new content.
     for disk, old in plan.buckets.edited:
         try:
-            pipeline.delete_doc(old.doc_id)
-            pipeline.ingest_document(
+            await pipeline.delete_doc(old.doc_id)
+            await pipeline.ingest_document(
                 disk.path, config, plan.main_label, plan.sub_label,
             )
             n_edited_succeeded += 1
@@ -1117,7 +1117,7 @@ def sync_execute(plan: SyncPlan, config: CorpusConfig) -> SyncResult:
 
     # ORPHAN: delete - dialog confirmation is the caller's responsibility.
     for orphan in plan.buckets.orphan:
-        if pipeline.delete_doc(orphan.doc_id):
+        if await pipeline.delete_doc(orphan.doc_id):
             n_orphans_deleted += 1
         else:
             label = orphan.title or orphan.stored_path or orphan.doc_id[:12]
@@ -1134,7 +1134,7 @@ def sync_execute(plan: SyncPlan, config: CorpusConfig) -> SyncResult:
     )
 
 
-def ingest_folder_execute(
+async def ingest_folder_execute(
     plan: IngestFolderPlan, config: CorpusConfig,
 ) -> IngestFolderResult:
     """Iterate `plan.items`; call `pipeline.ingest_document` per file.
@@ -1155,7 +1155,7 @@ def ingest_folder_execute(
 
     for item in plan.items:
         try:
-            pipeline.ingest_document(
+            await pipeline.ingest_document(
                 item.path, config, plan.main_label, plan.sub_label,
             )
             n_succeeded += 1
@@ -1259,7 +1259,7 @@ class BackfillXrefsResult:
     n_l10_edges_written: int | None
 
 
-def backfill_xrefs_plan(config: CorpusConfig) -> BackfillXrefsPlan:
+async def backfill_xrefs_plan(config: CorpusConfig) -> BackfillXrefsPlan:
     """Build the plan for the `backfill_xrefs` bulk_op.
 
     Cheap: one count query per ontology sub-label (sum across 18) +
@@ -1300,13 +1300,13 @@ def backfill_xrefs_plan(config: CorpusConfig) -> BackfillXrefsPlan:
     )
 
 
-def backfill_xrefs_execute(
+async def backfill_xrefs_execute(
     plan: BackfillXrefsPlan, config: CorpusConfig,
 ) -> BackfillXrefsResult:
     """Perform the backfill promised by `plan`.
 
     Two-phase:
-      1. Always: `ontology_xrefs.backfill_resolved_xrefs(client)` —
+      1. Always: `await ontology_xrefs.backfill_resolved_xrefs(client)` —
          the per-ontology resolve + strip passes.
       2. Conditional on `plan.will_recompute_l10`:
          `cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(
@@ -1327,7 +1327,7 @@ def backfill_xrefs_execute(
 
     kg_client = get_kg_client()
     try:
-        per_ontology = ontology_xrefs.backfill_resolved_xrefs(kg_client)
+        per_ontology = await ontology_xrefs.backfill_resolved_xrefs(kg_client)
     except Exception as exc:
         logger.warning(
             "backfill_xrefs_execute: backfill_resolved_xrefs failed: %r", exc,
@@ -1413,7 +1413,7 @@ class RecomputeCrossDocXrefsResult:
     n_edges_written: int | None
 
 
-def recompute_cross_doc_xrefs_plan(
+async def recompute_cross_doc_xrefs_plan(
     config: CorpusConfig,
 ) -> RecomputeCrossDocXrefsPlan:
     """Build the plan for the standalone L10 recompute.
@@ -1455,7 +1455,7 @@ def recompute_cross_doc_xrefs_plan(
     )
 
 
-def recompute_cross_doc_xrefs_execute(
+async def recompute_cross_doc_xrefs_execute(
     plan: RecomputeCrossDocXrefsPlan,
 ) -> RecomputeCrossDocXrefsResult:
     """Perform the L10 rebuild promised by `plan`."""
@@ -1538,7 +1538,7 @@ class ClearXrefEdgesResult:
     n_cleared: int | None
 
 
-def clear_xref_edges_plan(ontology_name: str) -> ClearXrefEdgesPlan:
+async def clear_xref_edges_plan(ontology_name: str) -> ClearXrefEdgesPlan:
     """Build the plan for clearing one ontology's xref surface.
 
     Cheap: one edge count + one dangling-source count.
@@ -1582,13 +1582,13 @@ def clear_xref_edges_plan(ontology_name: str) -> ClearXrefEdgesPlan:
     )
 
 
-def clear_xref_edges_execute(
+async def clear_xref_edges_execute(
     plan: ClearXrefEdgesPlan,
 ) -> ClearXrefEdgesResult:
     """Perform the wipe promised by `plan`."""
     kg_client = get_kg_client()
     try:
-        n = ontology_xrefs.clear_xref_edges_for_ontology(
+        n = await ontology_xrefs.clear_xref_edges_for_ontology(
             kg_client, plan.term_label,
         )
     except Exception as exc:
@@ -1601,222 +1601,3 @@ def clear_xref_edges_execute(
         ontology_name=plan.ontology_name,
         n_cleared=n,
     )
-
-
-# =====================================================================
-# Async siblings (added 2026-06-29 in the async refactor).
-#
-# Each public sync function above has a thin `a*` async wrapper that
-# delegates to the sync implementation via `asyncio.to_thread`. This
-# gives async callers (the future async GUI event handlers, the agent
-# read path) an awaitable API surface NOW, before the underlying
-# pipeline.py + kg/client + search/client go fully async.
-#
-# Per-doc parallel fan-out within bulk operations lands in Day 7 of
-# the async refactor — today's siblings preserve the sequential
-# iteration so failure semantics + iteration ordering stay identical
-# to the sync versions.
-#
-# After Day 8 the sync versions disappear and these `a*` wrappers are
-# renamed to the plain names (one search-and-replace turn).
-# =====================================================================
-
-
-async def adelete_doc_plan(doc_id: str) -> DeleteDocPlan:
-    """Async sibling of `delete_doc_plan`. Same contract, awaitable."""
-    return await asyncio.to_thread(delete_doc_plan, doc_id)
-
-
-async def adelete_doc_execute(plan: DeleteDocPlan) -> DeleteDocResult:
-    """Async sibling of `delete_doc_execute`. Same contract, awaitable."""
-    return await asyncio.to_thread(delete_doc_execute, plan)
-
-
-async def abulk_resolve_openalex_plan(
-    *, skip_manual: bool = True,
-) -> BulkResolveOpenAlexPlan:
-    """Async sibling of `bulk_resolve_openalex_plan`. Same contract, awaitable."""
-    return await asyncio.to_thread(
-        bulk_resolve_openalex_plan, skip_manual=skip_manual
-    )
-
-
-async def abulk_resolve_openalex_execute(
-    plan: BulkResolveOpenAlexPlan,
-) -> BulkResolveOpenAlexResult:
-    """Async sibling of `bulk_resolve_openalex_execute`. Same contract, awaitable."""
-    return await asyncio.to_thread(bulk_resolve_openalex_execute, plan)
-
-
-async def abulk_re_embed_plan() -> BulkReEmbedPlan:
-    """Async sibling of `bulk_re_embed_plan`. Same contract, awaitable."""
-    return await asyncio.to_thread(bulk_re_embed_plan)
-
-
-async def abulk_re_embed_execute(
-    plan: BulkReEmbedPlan,
-) -> BulkReEmbedResult:
-    """Async sibling of `bulk_re_embed_execute`. Same contract, awaitable."""
-    return await asyncio.to_thread(bulk_re_embed_execute, plan)
-
-
-async def abulk_backfill_chunks_plan() -> BulkBackfillPlan:
-    """Async sibling of `bulk_backfill_chunks_plan`. Same contract, awaitable."""
-    return await asyncio.to_thread(bulk_backfill_chunks_plan)
-
-
-async def abulk_backfill_chunks_execute(
-    plan: BulkBackfillPlan, config: CorpusConfig,
-) -> BulkBackfillResult:
-    """Async sibling of `bulk_backfill_chunks_execute`. Same contract, awaitable."""
-    return await asyncio.to_thread(
-        bulk_backfill_chunks_execute, plan, config
-    )
-
-
-async def abulk_backfill_entities_plan() -> BulkBackfillPlan:
-    """Async sibling of `bulk_backfill_entities_plan`. Same contract, awaitable."""
-    return await asyncio.to_thread(bulk_backfill_entities_plan)
-
-
-async def abulk_backfill_entities_execute(
-    plan: BulkBackfillPlan, config: CorpusConfig,
-) -> BulkBackfillResult:
-    """Async sibling of `bulk_backfill_entities_execute`. Same contract, awaitable."""
-    return await asyncio.to_thread(
-        bulk_backfill_entities_execute, plan, config
-    )
-
-
-async def abulk_backfill_ontology_plan() -> BulkBackfillPlan:
-    """Async sibling of `bulk_backfill_ontology_plan`. Same contract, awaitable."""
-    return await asyncio.to_thread(bulk_backfill_ontology_plan)
-
-
-async def abulk_backfill_ontology_execute(
-    plan: BulkBackfillPlan, config: CorpusConfig,
-) -> BulkBackfillResult:
-    """Async sibling of `bulk_backfill_ontology_execute`. Same contract, awaitable."""
-    return await asyncio.to_thread(
-        bulk_backfill_ontology_execute, plan, config
-    )
-
-
-async def abulk_backfill_triples_plan() -> BulkBackfillPlan:
-    """Async sibling of `bulk_backfill_triples_plan`. Same contract, awaitable."""
-    return await asyncio.to_thread(bulk_backfill_triples_plan)
-
-
-async def abulk_backfill_triples_execute(
-    plan: BulkBackfillPlan, config: CorpusConfig,
-) -> BulkBackfillResult:
-    """Async sibling of `bulk_backfill_triples_execute`. Same contract, awaitable."""
-    return await asyncio.to_thread(
-        bulk_backfill_triples_execute, plan, config
-    )
-
-
-async def abulk_backfill_cross_doc_plan() -> BulkBackfillPlan:
-    """Async sibling of `bulk_backfill_cross_doc_plan`. Same contract, awaitable."""
-    return await asyncio.to_thread(bulk_backfill_cross_doc_plan)
-
-
-async def abulk_backfill_cross_doc_execute(
-    plan: BulkBackfillPlan, config: CorpusConfig,
-) -> BulkBackfillResult:
-    """Async sibling of `bulk_backfill_cross_doc_execute`. Same contract, awaitable."""
-    return await asyncio.to_thread(
-        bulk_backfill_cross_doc_execute, plan, config
-    )
-
-
-async def aingest_folder_plan(
-    folder: Path, main_label: str, sub_label: str | None = None,
-) -> IngestFolderPlan:
-    """Async sibling of `ingest_folder_plan`. Same contract, awaitable."""
-    return await asyncio.to_thread(
-        ingest_folder_plan, folder, main_label, sub_label
-    )
-
-
-async def aingest_folder_execute(
-    plan: IngestFolderPlan, config: CorpusConfig,
-) -> IngestFolderResult:
-    """Async sibling of `ingest_folder_execute`. Same contract, awaitable."""
-    return await asyncio.to_thread(ingest_folder_execute, plan, config)
-
-
-async def aadd_plan(
-    folder: Path, main_label: str, sub_label: str | None = None,
-) -> AddPlan:
-    """Async sibling of `add_plan`. Same contract, awaitable."""
-    return await asyncio.to_thread(add_plan, folder, main_label, sub_label)
-
-
-async def aadd_execute(plan: AddPlan, config: CorpusConfig) -> AddResult:
-    """Async sibling of `add_execute`. Same contract, awaitable."""
-    return await asyncio.to_thread(add_execute, plan, config)
-
-
-async def async_plan(
-    folder: Path, main_label: str, sub_label: str | None = None,
-) -> SyncPlan:
-    """Async sibling of `sync_plan`. Same contract, awaitable.
-
-    Note the `async_` prefix instead of `a` — `async` is a reserved
-    word in Python so we can't write `def async_plan`; spelled out
-    the prefix here to make the wrapper callable.
-    """
-    return await asyncio.to_thread(sync_plan, folder, main_label, sub_label)
-
-
-async def async_execute(
-    plan: SyncPlan, config: CorpusConfig,
-) -> SyncResult:
-    """Async sibling of `sync_execute`. Same contract, awaitable.
-
-    See `async_plan` for the prefix rationale.
-    """
-    return await asyncio.to_thread(sync_execute, plan, config)
-
-
-async def abackfill_xrefs_plan(
-    config: CorpusConfig,
-) -> BackfillXrefsPlan:
-    """Async sibling of `backfill_xrefs_plan`. Same contract, awaitable."""
-    return await asyncio.to_thread(backfill_xrefs_plan, config)
-
-
-async def abackfill_xrefs_execute(
-    plan: BackfillXrefsPlan, config: CorpusConfig,
-) -> BackfillXrefsResult:
-    """Async sibling of `backfill_xrefs_execute`. Same contract, awaitable."""
-    return await asyncio.to_thread(backfill_xrefs_execute, plan, config)
-
-
-async def arecompute_cross_doc_xrefs_plan(
-    config: CorpusConfig,
-) -> RecomputeCrossDocXrefsPlan:
-    """Async sibling of `recompute_cross_doc_xrefs_plan`. Same contract, awaitable."""
-    return await asyncio.to_thread(recompute_cross_doc_xrefs_plan, config)
-
-
-async def arecompute_cross_doc_xrefs_execute(
-    plan: RecomputeCrossDocXrefsPlan,
-) -> RecomputeCrossDocXrefsResult:
-    """Async sibling of `recompute_cross_doc_xrefs_execute`. Same contract, awaitable."""
-    return await asyncio.to_thread(recompute_cross_doc_xrefs_execute, plan)
-
-
-async def aclear_xref_edges_plan(
-    ontology_name: str,
-) -> ClearXrefEdgesPlan:
-    """Async sibling of `clear_xref_edges_plan`. Same contract, awaitable."""
-    return await asyncio.to_thread(clear_xref_edges_plan, ontology_name)
-
-
-async def aclear_xref_edges_execute(
-    plan: ClearXrefEdgesPlan,
-) -> ClearXrefEdgesResult:
-    """Async sibling of `clear_xref_edges_execute`. Same contract, awaitable."""
-    return await asyncio.to_thread(clear_xref_edges_execute, plan)
