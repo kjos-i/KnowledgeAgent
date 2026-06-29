@@ -1,0 +1,39 @@
+# Pre-commit configuration.
+#
+# Runs the same lint + formatter that CI runs (and that you can run by hand
+# via `ruff check .` and `ruff format .`), but enforces them at every local
+# `git commit`. A commit with violations is rejected before it lands in your
+# local git history; you have nothing to push to GitHub until the local lint
+# passes.
+#
+# One-time setup after cloning the repo:
+#     pip install -e ".[dev]"   # installs pre-commit + ruff
+#     pre-commit install        # wires the .git/hooks/pre-commit script
+#
+# Rule versions are pinned by SHA-via-`rev` for reproducibility — every
+# developer runs the exact same lint version, no drift. Bump via
+# `pre-commit autoupdate` when you want newer rule sets.
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      # Lint — same checks as `ruff check .`. The rules + ignores live in
+      # `[tool.ruff.lint]` in pyproject.toml so there's one source of truth.
+      - id: ruff
+        args: ["--fix"]
+      # Format — same formatter as `ruff format .`. Rules live in
+      # `[tool.ruff.format]` in pyproject.toml.
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      # Common hygiene checks that aren't ruff's job.
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]

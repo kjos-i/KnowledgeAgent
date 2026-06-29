@@ -1,0 +1,201 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "knowledge-agent"
+version = "0.1.0"
+description = "LangGraph knowledge agent: hybrid retrieval (LanceDB) + knowledge graph (Neo4j)."
+requires-python = ">=3.13"
+authors = [{ name = "Ingrid Kjos" }]
+license = { text = "MIT" }
+keywords = ["langgraph", "rag", "graphrag", "knowledge-agent", "lancedb", "neo4j", "agent"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Development Status :: 1 - Planning",
+]
+dependencies = [
+    "neo4j>=5,<6",
+    "lancedb>=0.20,<1",
+    "docling>=2.96.0,<3.0.0",
+    "httpx>=0.27,<1",
+    "langchain>=1.3.1,<2.0.0",
+    "langchain-core>=1.4.0,<2.0.0",
+    "langgraph>=1.2.0,<2.0.0",
+    "tomlkit>=0.13,<1",
+    "pronto>=2.7,<3",
+    "rdflib>=7,<8",
+    "platformdirs>=4.2,<5",
+]
+# LLM and embedder provider adapters are intentionally NOT in base
+# dependencies. The first-launch GUI wizard asks the user which
+# providers they want and installs only those via the extras below.
+# This matches how ontology + extractor extras work: every provider
+# is opt-in, no provider is privileged as "the default that's always
+# installed". See [[llm-embedder-provider-swap]] for the wizard spec.
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.3,<10.0.0",
+    "pytest-asyncio>=0.23,<1",
+    "ruff>=0.7.0",
+    "pre-commit>=4,<5",
+    "hypothesis>=6.100,<7",
+]
+# L6a entity extractor backends. Only install what your corpus uses.
+# The `llm` adapter has no extra deps (langchain-anthropic is a base
+# requirement); each NER adapter brings its own model + framework.
+# Zero-shot multilingual NER. Pinned model `urchade/gliner_multi-v2.1`
+# (Apache-2.0, safetensors, ~1.1 GB) auto-downloads on first inference.
+# Pulls PyTorch transitively (~2.5 GB shared with any other transformer
+# adapter). See `entity_extractors/gliner.py` for pinned commit SHA and
+# `extractor_lifecycle.py:_GLINER_PROVENANCE` for the security
+# disclosure shown to the user before download.
+entities-gliner = [
+    "gliner>=0.2.5,<0.3",
+]
+# GLiNER-BioMed: biomedical zero-shot. Shares the `gliner` library
+# with the general adapter — no new pip dep beyond it. Pinned model
+# `Ihor/gliner-biomed-bi-large-v1.0` (Apache-2.0, ~1.1 GB) auto-
+# downloads on first inference. NOTE: this checkpoint ships
+# pytorch_model.bin only (no safetensors); install dialog flags the
+# pickle-load risk prominently. Provenance + pinned SHA mitigate.
+# See `entity_extractors/gliner_biomed.py` and
+# `extractor_lifecycle.py:_GLINER_BIOMED_PROVENANCE`.
+entities-gliner-biomed = [
+    "gliner>=0.2.5,<0.3",
+]
+# HunFlair2 biomedical NER. Pinned model `hunflair/hunflair2-ner`
+# (~1.24 GB) auto-downloads on first inference. Single unified
+# Flair `PrefixedSequenceTagger` covering DISEASE / CHEMICAL / GENE /
+# SPECIES / CELL_LINE. NOTE: ships pytorch_model.bin only (no
+# safetensors) — install dialog flags the pickle-load risk. Pulls
+# PyTorch transitively (~2.5 GB shared with other transformer
+# adapters). MIT-licensed (inherited from Flair library, Zalando SE
+# 2018). See `entity_extractors/hunflair2.py` for the pinned commit
+# SHA and `extractor_lifecycle.py:_HUNFLAIR2_PROVENANCE` for the
+# security disclosure.
+entities-hunflair2 = [
+    "flair>=0.14,<0.16",
+    "huggingface-hub>=0.20",
+]
+# Phase 4 parser strategy extras. Only install what your corpus needs.
+# `parsers-asr` enables docling's audio + video pipeline (Whisper Turbo
+# transcription, ~1.5 GB model). Bundles ffmpeg via `imageio-ffmpeg`
+# (~30 MB platform-specific wheel) so there is NO system-binary
+# dependency — installing this extra is the one and only step a user
+# needs. Activation logic + path-prepend live in
+# `parser_lifecycle.py`.
+parsers-asr = [
+    "docling[asr]>=2.96.0,<3.0.0",
+    "imageio-ffmpeg>=0.5,<1",
+]
+# `parsers-code` enables AST-aware chunking for source-code files.
+# Ships ~30 MB of prebuilt grammars for ~305 languages; our wrapper in
+# `parsers/code_parser.py` uses them directly (no llama-index dep -
+# the AST walker is ours). `tree-sitter` itself comes in as a
+# transitive dep of `tree-sitter-language-pack`.
+parsers-code = [
+    "tree-sitter-language-pack>=1.8,<2",
+]
+
+# ---- LLM provider extras ----
+# All 4 LLM providers live here — there's no privileged "base"
+# provider. The first-launch wizard picks which one(s) to install
+# (see [[llm-embedder-provider-swap]]). The factory in
+# `llm_factory.py` dispatches by `settings.llm_provider`; calling
+# an uninstalled provider raises a clear `ConfigError` pointing
+# the user at the GUI install button. No auto-install on settings
+# change.
+#
+# `llm-anthropic` — Claude family (was in base deps pre-2026-06-29).
+llm-anthropic = [
+    "langchain-anthropic>=1.4.3,<2.0.0",
+]
+# `llm-openai` — OpenAI chat models (GPT-4o family).
+llm-openai = [
+    "langchain-openai>=0.3,<1",
+]
+# `llm-google` — Gemini chat models. Same dep family as embed-google
+# below; pip de-duplicates when both extras are installed.
+llm-google = [
+    "langchain-google-genai>=2,<3",
+]
+# `llm-ollama` — adapter only. The Ollama daemon (Go binary) is NOT
+# pip-installable — user installs it manually from https://ollama.com
+# (no `imageio-ffmpeg`-style wheel exists for it). Model weights come
+# in via `ollama pull <model>`, which the GUI shells out to as a
+# separate step. See `llm_lifecycle.py` for the 3-step UX.
+llm-ollama = [
+    "langchain-ollama>=0.3,<1",
+]
+
+# ---- Embedder provider extras ----
+# All 4 embedder providers live here, same opt-in model as the LLM
+# side. First-launch wizard installs the user's pick.
+#
+# `embed-voyage` — Voyage AI multimodal (was in base deps pre-2026-06-29).
+embed-voyage = [
+    "voyageai>=0.3,<1",
+]
+# `embed-openai` — OpenAI text-embedding-3 models. Shares the
+# `langchain-openai` package with `llm-openai`; pip de-duplicates.
+embed-openai = [
+    "langchain-openai>=0.3,<1",
+]
+# `embed-google` — Gemini text-embedding models. Shares the
+# `langchain-google-genai` package with `llm-google`.
+embed-google = [
+    "langchain-google-genai>=2,<3",
+]
+# `embed-huggingface` — local embedding models via sentence-
+# transformers. PULLS TORCH (~2-3 GB depending on CUDA wheel) so the
+# install dialog surfaces the disk cost prominently. The chosen model
+# (90 MB - 2.3 GB depending on the curated menu entry) downloads
+# separately on first inference via HF cache. See
+# `embedder_lifecycle.py` for the 2-step UX (libs first, then model).
+embed-huggingface = [
+    "sentence-transformers>=3,<4",
+    "torch>=2,<3",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/knowledge_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Default skip: integration + e2e require real services (Neo4j Desktop test
+# instance, Voyage/Anthropic API keys, etc.). Opt in with `pytest -m
+# integration` or `pytest -m e2e`. `--strict-markers` makes any unregistered
+# marker error out, so the `markers` list below is the single source of truth.
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--import-mode=importlib",
+    "-m", "not integration and not e2e",
+]
+# `auto` mode means pytest-asyncio treats every `async def test_*` as an
+# asyncio test without requiring per-function decorators. The async
+# refactor shipped 2026-06-29 made the whole stack coroutine-native;
+# explicit `@pytest.mark.asyncio` on every test would be noise.
+asyncio_mode = "auto"
+markers = [
+    "integration: real-service tests — Neo4j Desktop test instance + LanceDB + Voyage. Opt in via `pytest -m integration`.",
+    "e2e: end-to-end tests with the Flet app launched. Opt in via `pytest -m e2e`.",
+    "slow: tests that take noticeably long (>1s). Filter via `pytest -m 'not slow'` for fast dev loop.",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "RUF", "SIM", "TCH"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

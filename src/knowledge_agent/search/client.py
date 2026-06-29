@@ -1,0 +1,701 @@
+"""LanceDB connection wrapper for the hybrid retrieval store.
+
+Owns the connection lifecycle (lazy open), the schema + write methods used
+by the ingestion pipeline, and the search methods read by the agent.
+
+Error policy: raise-at-leaves across writes, maintenance, AND search.
+All methods raise on preconditions (`ValueError` for empty `doc_id`
+etc.) and propagate Lance / Voyage / disk failures to the caller. The
+ingestion pipeline + bulk_ops + LangGraph nodes are the orchestrator
+boundaries that catch and report via:
+  - `IngestResult.lancedb_error` (ingest pipeline)
+  - per-op `failures` lists (bulk_ops)
+  - `AgentState.lancedb_retrieval_error` (nodes.lancedb_retriever_node)
+
+Sync only for now. When the agent reads from the store (reader slice), an
+`AsyncLanceClient` will mirror this class.
+
+LanceDB is embedded - the "connection" is a handle to an on-disk directory.
+No process, no port. Each `LanceClient` is cheap; one per process is the
+expected pattern (cached via `get_search_client`).
+
+Idempotency note: `write_chunks` is a plain append. Re-ingesting the same
+doc_id will create duplicate rows unless the caller first deletes that
+doc_id's existing rows. The ingestion pipeline owns the dedup contract.
+
+Search modes (mirroring ResearchArticlesAgent's `retrieval.py`):
+  - hybrid  - BM25 + vector kNN fused via LanceDB's native RRF
+  - fts     - BM25 only
+  - vector  - kNN cosine only
+Cross-store RRF (for the future `parallel_fused` agent mode) lives in the
+agent code, not here.
+"""
+
+import logging
+import math
+from functools import lru_cache
+from typing import Any, Literal
+
+import lancedb
+from lancedb.db import DBConnection
+
+from knowledge_agent.config import Settings, get_settings
+from knowledge_agent.ingestion.embed import embed_texts
+from knowledge_agent.models import RetrievedChunk
+from knowledge_agent.search.schema import CHUNKS_TABLE, chunks_schema
+
+logger = logging.getLogger(__name__)
+
+# LanceDB's `search().where()` builder requires an explicit `.limit()`. The
+# methods that scan the chunks table for sync/backfill workflows
+# (`get_chunks_by_doc_id`, `list_indexed_docs`) need ALL matching rows, not
+# a top-K. We pass a very large limit instead of paging - at our scale
+# (10K-100K chunks per corpus) this is one round-trip without surprises;
+# the real ceiling lives in `LanceClient.write_chunks` and a corpus that
+# exceeds this would already be hitting other scalability limits.
+_LANCEDB_SCAN_LIMIT = 10_000_000
+
+# Per-mode score column. LanceDB stores the ranking value under different
+# column names depending on the search type:
+#   vector  -> _distance         (cosine distance, lower = closer)
+#   fts     -> _score            (BM25 score, higher = better)
+#   hybrid  -> _relevance_score  (RRF fused score, higher = better)
+# The _row_to_chunk helper normalises these into one `score` field on
+# RetrievedChunk (higher = better in all modes).
+_SCORE_COLUMN: dict[str, str] = {
+    "vector": "_distance",
+    "fts": "_score",
+    "hybrid": "_relevance_score",
+}
+
+
+class LanceClient:
+    """Thin sync wrapper around the LanceDB connection.
+
+    Lazy-opens the connection on first use. Writes + maintenance methods
+    raise on failure; the caller (pipeline / bulk_ops orchestrator) is
+    the boundary that catches them. The search-path methods still
+    fail-soft (return `[]`) for the agent's read path. `LANCEDB_PATH`
+    is required at `Settings` load, so a LanceClient always has a valid
+    path.
+    """
+
+    def __init__(self, settings: Settings | None = None) -> None:
+        self._settings = settings or get_settings()
+        self._conn: DBConnection | None = None
+
+    # ---- lifecycle ----
+
+    @property
+    def conn(self) -> DBConnection:
+        """Lazy LanceDB connection (a directory handle, no network)."""
+        if self._conn is None:
+            self._settings.lancedb_path.mkdir(parents=True, exist_ok=True)
+            self._conn = lancedb.connect(str(self._settings.lancedb_path))
+        return self._conn
+
+    def close(self) -> None:
+        """Drop the cached connection handle.
+
+        LanceDB's embedded connection has no resources to release - this is
+        a hygiene method that lets `get_search_client.cache_clear()` paths
+        produce fresh clients in tests.
+        """
+        self._conn = None
+
+    # ---- schema ----
+
+    def ensure_schema(self) -> None:
+        """Create the chunks table with the project schema if it doesn't exist.
+
+        Idempotent - safe to call every startup. Does not attempt to
+        migrate an existing table's schema - that's a bigger lift
+        (drop + re-embed) and should be deliberate, not implicit (see
+        `drop_chunks_table` for the explicit-reset path).
+
+        Raises whatever LanceDB / disk failure occurs; the ingestion
+        orchestrator boundary (`pipeline.ingest_document`) catches and
+        reports via `IngestResult.lancedb_error`.
+        """
+        if CHUNKS_TABLE in self.conn.table_names():
+            return
+        self.conn.create_table(CHUNKS_TABLE, schema=chunks_schema())
+        logger.info("LanceDB: created table %r", CHUNKS_TABLE)
+
+    def drop_chunks_table(self) -> None:
+        """Drop the chunks table entirely. Idempotent.
+
+        Intended for explicit schema-reset paths (smoke scripts after a
+        schema change, manual cleanup). The pipeline's per-doc
+        `delete_chunks_by_doc_id` is the right call for normal re-ingest -
+        it preserves other docs' rows. This call wipes ALL rows and the
+        table itself; the next `ensure_schema` will recreate it from the
+        current `chunks_schema()`.
+
+        Returns when the table is gone (dropped or didn't exist). LanceDB
+        / disk failures propagate to the caller.
+        """
+        if CHUNKS_TABLE not in self.conn.table_names():
+            return
+        self.conn.drop_table(CHUNKS_TABLE)
+        logger.info("LanceDB: dropped table %r", CHUNKS_TABLE)
+
+    # ---- writes ----
+
+    def write_chunks(self, chunks: list[dict[str, Any]]) -> None:
+        """Append one batch of chunk rows to the chunks table.
+
+        Each row must match the field set declared in `chunks_schema()` -
+        required fields non-null, optional ones may be missing. Empty
+        batch is a no-op success.
+
+        LanceDB / schema-mismatch / disk failures propagate to the caller.
+        """
+        if not chunks:
+            return
+        table = self.conn.open_table(CHUNKS_TABLE)
+        table.add(chunks)
+        logger.info("LanceDB: wrote %d chunks", len(chunks))
+
+    def delete_chunks_by_doc_id(self, doc_id: str) -> None:
+        """Remove every chunk row for a given doc_id. Idempotent.
+
+        Used by the ingestion pipeline to make re-ingest of the same file
+        replace its rows instead of accumulating duplicates. Treats the
+        missing-table case as a no-op success - "there are no rows to
+        delete because there is no table" is the expected post-state of
+        a fresh corpus or a smoke-test clear.
+
+        Raises `ValueError` for empty `doc_id`. LanceDB / disk failures
+        propagate.
+        """
+        if not doc_id:
+            raise ValueError(
+                "LanceDB: delete_chunks_by_doc_id called with no doc_id"
+            )
+        if CHUNKS_TABLE not in self.conn.table_names():
+            return
+        table = self.conn.open_table(CHUNKS_TABLE)
+        table.delete(f"doc_id = '{doc_id}'")
+
+    def update_doc_metadata(
+        self, doc_id: str, fields: dict[str, Any]
+    ) -> None:
+        """Patch doc-level columns for every chunk row of a doc. Idempotent.
+
+        Used by `pipeline.resolve_openalex` and `pipeline.lookup_known_doi`
+        to refresh the denormalized metadata cache (title, authors_display,
+        year, doi, openalex_id, venue, source_url, language,
+        metadata_status) without touching chunk text or embeddings.
+
+        Uses LanceDB's native partial update so the heavy columns
+        (`embedding`, `text`) are NOT rewritten - just the listed fields.
+        Much faster than read-modify-write for corpora with sizable
+        embedding vectors.
+
+        `fields` keys must be doc-level columns. Patching chunk-level
+        fields (`chunk_id`, `text`, `embedding`, `chunk_index`) would
+        break invariants; the caller is responsible for not doing so.
+
+        Raises `ValueError` for empty `doc_id` or empty `fields`
+        (programming error, not a no-op). Raises `RuntimeError` when
+        the chunks table doesn't exist - asking to patch a doc whose
+        row doesn't exist is a real caller mistake (vs. delete, where
+        "nothing to delete" is a fine outcome). LanceDB / disk failures
+        propagate.
+        """
+        if not doc_id:
+            raise ValueError(
+                "LanceDB: update_doc_metadata called with no doc_id"
+            )
+        if not fields:
+            raise ValueError(
+                "LanceDB: update_doc_metadata called with no fields"
+            )
+        if CHUNKS_TABLE not in self.conn.table_names():
+            raise RuntimeError(
+                "LanceDB: update_doc_metadata: chunks table doesn't exist"
+            )
+        table = self.conn.open_table(CHUNKS_TABLE)
+        table.update(where=f"doc_id = '{doc_id}'", values=fields)
+
+    def list_indexed_docs(self) -> list[dict[str, Any]]:
+        """One entry per unique `doc_id` with doc-level metadata + count.
+
+        Used by `bulk_ops.sync_plan` to compare the corpus index against
+        files on disk. Projects only the doc-level columns we need
+        (`source_path`, `title`, `metadata_status`) via lancedb's
+        native search builder - no `pylance` dependency required.
+
+        Aggregates per-`doc_id` in Python after the projection:
+        keeps the first chunk row's metadata + counts chunks. At
+        moderate corpus scale (10K-100K chunks across 100s-1000s of
+        docs) this is fast; at much larger scale we'd want a native
+        groupby (deferred until needed).
+
+        Returns empty list when the chunks table doesn't yet exist (fresh
+        corpus / post-clear state) OR has no rows. LanceDB / disk read
+        errors propagate to the caller.
+        """
+        if CHUNKS_TABLE not in self.conn.table_names():
+            return []
+        table = self.conn.open_table(CHUNKS_TABLE)
+        rows = (
+            table.search()
+            .select(
+                ["doc_id", "source_path", "title", "metadata_status"]
+            )
+            .limit(_LANCEDB_SCAN_LIMIT)
+            .to_arrow()
+            .to_pylist()
+        )
+
+        seen: dict[str, dict[str, Any]] = {}
+        counts: dict[str, int] = {}
+        for r in rows:
+            did = r["doc_id"]
+            if did not in seen:
+                seen[did] = {
+                    "doc_id": did,
+                    "source_path": r.get("source_path"),
+                    "title": r.get("title"),
+                    "metadata_status": r.get("metadata_status"),
+                }
+            counts[did] = counts.get(did, 0) + 1
+
+        return [
+            {**d, "n_chunks": counts[d["doc_id"]]} for d in seen.values()
+        ]
+
+    def get_chunks_by_doc_id(
+        self, doc_id: str
+    ) -> list[dict[str, Any]]:
+        """Fetch every chunk row for one doc_id, sorted by chunk_index.
+
+        Used by partial-pipeline ops (`backfill_chunks`, `backfill_entities`,
+        `re_embed`) that need to re-process already-ingested content without
+        re-parsing the source file.
+
+        Reads via lancedb's native `search().where()` builder so no
+        separate `pylance` dependency is needed - lancedb's own Rust
+        engine pushes the filter down. Returns chunk dicts (each
+        matches `chunks_schema()`) sorted by chunk_index for
+        deterministic downstream processing.
+
+        Empty list = either no table (fresh corpus / post-clear) OR doc
+        was never ingested.
+
+        Raises `ValueError` for empty `doc_id`. LanceDB / disk read
+        errors propagate to the caller.
+        """
+        if not doc_id:
+            raise ValueError(
+                "LanceDB: get_chunks_by_doc_id called with no doc_id"
+            )
+        if CHUNKS_TABLE not in self.conn.table_names():
+            return []
+        table = self.conn.open_table(CHUNKS_TABLE)
+        rows = (
+            table.search()
+            .where(f"doc_id = '{doc_id}'")
+            .limit(_LANCEDB_SCAN_LIMIT)
+            .to_arrow()
+            .to_pylist()
+        )
+        rows.sort(key=lambda r: r["chunk_index"])
+        return rows
+
+    # ---- indexes ----
+
+    def ensure_indexes(self) -> None:
+        """Create or incrementally optimize the vector + FTS indexes.
+
+        Vector index: attempted only when row count >= `min_rows_for_vector_index`
+        (LanceDB's default IVF_PQ needs ~256 rows to train; below that
+        brute force scan is fast enough). Skipped with a clear INFO log
+        otherwise.
+
+        FTS index: always attempted (no row-count threshold).
+
+        Both creations are idempotent (the inner try/except swallows
+        "already exists" - the same domain-aware pattern as
+        per-ontology import resilience). `table.optimize()` then folds
+        any rows written since the last call into whichever indexes
+        exist - cheap incremental operation, not a rebuild.
+
+        Returns even when the vector index is intentionally skipped -
+        search still works (LanceDB falls back to brute-force scan).
+        Real LanceDB / disk failures (table missing, optimize crash)
+        propagate to the caller.
+        """
+        table = self.conn.open_table(CHUNKS_TABLE)
+        row_count = table.count_rows()
+        threshold = self._settings.min_rows_for_vector_index
+
+        # ---- Vector index (gated by row count threshold).
+        if row_count < threshold:
+            logger.info(
+                "LanceDB: vector index skipped - %d rows < %d threshold "
+                "(brute force scan is fast enough at this scale)",
+                row_count, threshold,
+            )
+        else:
+            try:
+                table.create_index(
+                    metric="cosine",
+                    vector_column_name="embedding",
+                )
+                logger.info(
+                    "LanceDB: created vector index (%d rows)", row_count
+                )
+            except Exception as exc:
+                # Domain-aware swallow: most common cause is "index
+                # already exists". Idempotent path; let other errors
+                # surface via the outer optimize() call instead of
+                # raising here.
+                logger.info(
+                    "LanceDB: vector index create skipped: %r", exc
+                )
+
+        # ---- FTS index (always attempted, no threshold).
+        try:
+            table.create_fts_index("text")
+            logger.info("LanceDB: created FTS index (%d rows)", row_count)
+        except Exception as exc:
+            # Same idempotent-already-exists swallow as the vector index.
+            logger.info("LanceDB: FTS index create skipped: %r", exc)
+
+        # ---- Fold new rows into existing indexes. Failures here
+        # (disk full, lock contention) are real and must propagate.
+        table.optimize()
+
+    # ---- search ----
+
+    def retrieve(
+        self,
+        query: str,
+        top_k: int | None = None,
+        *,
+        mode: Literal["hybrid", "fts", "vector"] | None = None,
+        use_mmr: bool = False,
+        filters: dict[str, Any] | None = None,
+    ) -> list[RetrievedChunk]:
+        """Single dispatch entry point. Picks one of the three search
+        methods based on `mode`.
+
+        `mode=None` falls back to `settings.lancedb_search_mode`. `use_mmr`
+        is silently ignored for `fts` mode (no vectors to compare); a
+        warning is logged in that case.
+        """
+        mode = mode or self._settings.lancedb_search_mode
+        if mode == "hybrid":
+            return self.hybrid_search(
+                query, top_k, filters=filters, use_mmr=use_mmr,
+            )
+        if mode == "fts":
+            if use_mmr:
+                logger.warning(
+                    "LanceDB: use_mmr=True ignored in fts mode (no vectors)"
+                )
+            return self.fts_search(query, top_k, filters=filters)
+        if mode == "vector":
+            return self.vector_search(
+                query, top_k, filters=filters, use_mmr=use_mmr,
+            )
+        logger.warning(
+            "LanceDB: unknown retrieval mode %r; falling back to hybrid", mode
+        )
+        return self.hybrid_search(
+            query, top_k, filters=filters, use_mmr=use_mmr,
+        )
+
+    def hybrid_search(
+        self,
+        query: str,
+        top_k: int | None = None,
+        *,
+        filters: dict[str, Any] | None = None,
+        use_mmr: bool = False,
+    ) -> list[RetrievedChunk]:
+        """Hybrid BM25 + vector search, fused via LanceDB's native RRF.
+
+        With `use_mmr=True`, the search fetches `top_k *
+        mmr_candidate_multiplier` candidates (LanceDB returns each row's
+        embedding so MMR can run), then Python-side MMR re-ranks down to
+        top_k.
+
+        Returns an empty list when Voyage produces no query vector (e.g.
+        empty input). LanceDB / Voyage failures propagate to the caller
+        under the typed-errors contract; `lancedb_retriever_node` is the
+        orchestrator boundary that catches and populates
+        `AgentState.lancedb_retrieval_error`.
+        """
+        settings = self._settings
+        top_k = top_k or settings.top_k
+        query_vector = _embed_query(query)
+        if query_vector is None:
+            return []
+        table = self.conn.open_table(CHUNKS_TABLE)
+        pool_size = (
+            top_k * settings.mmr_candidate_multiplier
+            if use_mmr
+            else top_k
+        )
+        search = (
+            table.search(query_type="hybrid")
+            .vector(query_vector)
+            .text(query)
+            .limit(pool_size)
+        )
+        if filters:
+            where = _filters_to_sql(filters)
+            if where:
+                search = search.where(where)
+        rows = search.to_arrow().to_pylist()
+        if use_mmr:
+            return _mmr_rerank_rows(
+                rows, query_vector, top_k, settings.mmr_lambda, "hybrid",
+            )
+        return [_row_to_chunk(r, "hybrid") for r in rows]
+
+    def fts_search(
+        self,
+        query: str,
+        top_k: int | None = None,
+        *,
+        filters: dict[str, Any] | None = None,
+    ) -> list[RetrievedChunk]:
+        """Lexical-only BM25 search over the `text` column.
+
+        Useful when exact terms matter (gene names, methods) and a
+        query-side embedding cost is unwanted. No MMR variant - there
+        are no vectors at query time to drive diversity. LanceDB
+        failures propagate (typed-errors contract).
+        """
+        settings = self._settings
+        top_k = top_k or settings.top_k
+        table = self.conn.open_table(CHUNKS_TABLE)
+        search = table.search(query, query_type="fts").limit(top_k)
+        if filters:
+            where = _filters_to_sql(filters)
+            if where:
+                search = search.where(where)
+        rows = search.to_arrow().to_pylist()
+        return [_row_to_chunk(r, "fts") for r in rows]
+
+    def vector_search(
+        self,
+        query: str,
+        top_k: int | None = None,
+        *,
+        filters: dict[str, Any] | None = None,
+        use_mmr: bool = False,
+    ) -> list[RetrievedChunk]:
+        """Dense-vector kNN search (cosine).
+
+        Useful for conceptual queries where lexical overlap is weak.
+        With `use_mmr=True`, fetches a candidate pool and Python-side
+        re-ranks for diversity. LanceDB / Voyage failures propagate
+        (typed-errors contract).
+        """
+        settings = self._settings
+        top_k = top_k or settings.top_k
+        query_vector = _embed_query(query)
+        if query_vector is None:
+            return []
+        table = self.conn.open_table(CHUNKS_TABLE)
+        pool_size = (
+            top_k * settings.mmr_candidate_multiplier
+            if use_mmr
+            else top_k
+        )
+        search = table.search(query_vector).limit(pool_size)
+        if filters:
+            where = _filters_to_sql(filters)
+            if where:
+                search = search.where(where)
+        rows = search.to_arrow().to_pylist()
+        if use_mmr:
+            return _mmr_rerank_rows(
+                rows, query_vector, top_k, settings.mmr_lambda, "vector",
+            )
+        return [_row_to_chunk(r, "vector") for r in rows]
+
+
+@lru_cache(maxsize=1)
+def get_search_client() -> LanceClient:
+    """Process-wide singleton `LanceClient`. Mirrors the cached KG client."""
+    return LanceClient()
+
+
+# =========================================================================
+# Module-level helpers (placed after the class per the top-down convention
+# used in kg/client.py and ingestion/parse.py).
+# =========================================================================
+
+
+def _embed_query(text: str) -> list[float] | None:
+    """Embed a query string with `input_type='query'` via the ingest embedder.
+
+    Returns the single 1024-dim vector, or None on Voyage failure / empty
+    result. Voyage exceptions are caught here so the agent's search path
+    stays fail-soft (returns `[]` on embed failure); the typed-errors
+    wiring for the read path lives in `nodes.py` (Phase D). The SAME
+    multimodal model used at ingest time produces query vectors so they
+    share a latent space with the indexed chunks.
+    """
+    try:
+        embeddings = embed_texts([text], input_type="query")
+    except Exception as exc:
+        logger.warning("LanceDB: _embed_query Voyage call failed: %r", exc)
+        return None
+    if not embeddings:
+        return None
+    return embeddings[0]
+
+
+def _filters_to_sql(filters: dict[str, Any]) -> str:
+    """Translate `{field: value | [values]}` dict to a LanceDB WHERE string.
+
+    Strings are single-quoted with internal quotes doubled (SQL escape
+    convention). Ints / floats are written as-is. Lists become `IN (...)`
+    clauses. Multiple keys join with AND. None values and empty lists are
+    skipped. Returns "" when the dict is empty after filtering.
+    """
+    clauses: list[str] = []
+    for field, value in filters.items():
+        if value is None:
+            continue
+        if isinstance(value, (list, tuple, set)):
+            items = [v for v in value if v is not None]
+            if not items:
+                continue
+            parts = ", ".join(_sql_literal(v) for v in items)
+            clauses.append(f"{field} IN ({parts})")
+        else:
+            clauses.append(f"{field} = {_sql_literal(value)}")
+    return " AND ".join(clauses)
+
+
+def _sql_literal(value: Any) -> str:
+    """Render one Python value as a SQL literal for LanceDB's WHERE."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return "'" + value.replace("'", "''") + "'"
+    return str(value)
+
+
+def _row_to_chunk(row: dict[str, Any], mode: str) -> RetrievedChunk:
+    """Map one LanceDB row to a `RetrievedChunk`; normalises the score field.
+
+    Vector mode stores cosine DISTANCE (lower=closer); we convert to
+    similarity (higher=closer) so the `score` field is comparable across
+    hits within a single result set in every mode.
+    """
+    score_col = _SCORE_COLUMN.get(mode)
+    raw = row.get(score_col) if score_col else None
+    if raw is None:
+        score: float | None = None
+    elif mode == "vector":
+        score = 1.0 - float(raw)
+    else:
+        score = float(raw)
+    return RetrievedChunk(
+        chunk_id=row["chunk_id"],
+        doc_id=row["doc_id"],
+        text=row["text"],
+        score=score,
+        title=row.get("title"),
+        year=row.get("year"),
+        authors_display=row.get("authors_display"),
+        doi=row.get("doi"),
+        openalex_id=row.get("openalex_id"),
+        venue=row.get("venue"),
+        source_url=row.get("source_url"),
+        section=row.get("section"),
+        page=row.get("page"),
+    )
+
+
+def _l2_norm(v: list[float]) -> float:
+    """L2 norm; returns 1.0 for a zero vector to avoid divide-by-zero."""
+    return math.sqrt(sum(x * x for x in v)) or 1.0
+
+
+def _cosine_sim(a: list[float], b: list[float], na: float, nb: float) -> float:
+    """Cosine similarity with pre-computed L2 norms (no per-call re-norm)."""
+    return sum(x * y for x, y in zip(a, b, strict=False)) / (na * nb)
+
+
+def _mmr_rerank_rows(
+    rows: list[dict[str, Any]],
+    query_vector: list[float],
+    top_k: int,
+    lambda_: float,
+    mode: str,
+) -> list[RetrievedChunk]:
+    """Re-rank rows by Maximal Marginal Relevance, return the top_k chunks.
+
+    Iteratively picks the row maximising
+
+        score = lambda_ * sim(query, c) - (1 - lambda_) * max_sim(c, selected)
+
+    where `sim` is cosine on each row's `embedding` column. `lambda_=1.0`
+    is pure relevance, `lambda_=0.0` is pure diversity. Pure Python -
+    pool sizes are small enough (~20-50) that the cost is negligible next
+    to the LanceDB round-trip.
+    """
+    pool_size = len(rows)
+    if pool_size == 0 or top_k <= 0:
+        return []
+    top_k = min(top_k, pool_size)
+
+    vectors = [r.get("embedding") for r in rows]
+    if any(v is None for v in vectors):
+        # Defensive: a row missing its embedding can't be MMR-ranked.
+        # Fall back to the original (already-relevance-sorted) order.
+        logger.warning(
+            "LanceDB: MMR pool had rows missing 'embedding'; "
+            "falling back to original order"
+        )
+        return [_row_to_chunk(r, mode) for r in rows[:top_k]]
+
+    q_norm = _l2_norm(query_vector)
+    cand_norms = [_l2_norm(v) for v in vectors]
+    sim_to_query = [
+        _cosine_sim(query_vector, v, q_norm, cn)
+        for v, cn in zip(vectors, cand_norms, strict=False)
+    ]
+
+    selected: list[int] = []
+    is_selected = [False] * pool_size
+    max_sim_to_selected = [0.0] * pool_size
+
+    for _ in range(top_k):
+        best_idx = -1
+        best_score = float("-inf")
+        for i in range(pool_size):
+            if is_selected[i]:
+                continue
+            score = (
+                lambda_ * sim_to_query[i]
+                - (1.0 - lambda_) * max_sim_to_selected[i]
+            )
+            if score > best_score:
+                best_score = score
+                best_idx = i
+        if best_idx == -1:
+            break
+        selected.append(best_idx)
+        is_selected[best_idx] = True
+        new_vec = vectors[best_idx]
+        new_norm = cand_norms[best_idx]
+        for i in range(pool_size):
+            if is_selected[i]:
+                continue
+            s = _cosine_sim(vectors[i], new_vec, cand_norms[i], new_norm)
+            if s > max_sim_to_selected[i]:
+                max_sim_to_selected[i] = s
+
+    return [_row_to_chunk(rows[i], mode) for i in selected]

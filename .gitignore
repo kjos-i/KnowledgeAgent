@@ -1,0 +1,44 @@
+# Environments
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Secrets
+.env
+.env.local
+
+# User-saved search artifacts
+results/
+
+# LanceDB on-disk datasets (created by the search layer)
+lance_data/
+lance_data_test/
+
+# Logging output (crash files + rotated app log)
+crashes/
+*.log
+*.log.*.gz
+
+# Test documents for manual ingestion smoke tests (PDFs, JATS XML, etc.)
+test_documents/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

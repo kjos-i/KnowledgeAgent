@@ -1,0 +1,300 @@
+# corpus.toml - per-corpus settings template.
+#
+# Each corpus folder gets its own `corpus.toml`. Copy this file in,
+# edit to match the corpus's domain + desired layers, and the ingest
+# pipeline + agent will pick it up at startup.
+#
+# Shape lives in `src/knowledge_agent/kg/corpus_config.py`
+# (Pydantic models). Unknown fields are rejected so typos surface as
+# errors rather than silently being ignored.
+#
+# Why TOML over YAML: data-only format (no code-execution risk), no
+# Norway-problem type coercion, comment preservation on automated
+# write-back via `tomlkit`, and matches the project's `pyproject.toml`
+# syntax.
+
+# Informational label for the corpus's domain. Display-only today (no
+# logic depends on it). Future L6+ layer modules may read it for sane
+# defaults (e.g. ontology choice). Free-form string.
+#
+# The 20-tag taxonomy each ontology / extractor declares its
+# `domain_tags` against (used by the install dialogs) covers:
+# biology, cell biology, genomics, biochemistry, chemistry, proteins,
+# medicine, pharmacology, nutrition, environment, experimental-methods,
+# general, legal, finance, agriculture, geographic, mathematics,
+# physics, humanities, computer-science. The `domain` value here is
+# free-form — typical strings are "biomedical", "cell biology",
+# "finance", "legal", "general". See
+# `kg.ontology_lifecycle.import_ontology_plan(name).summary` and
+# `entity_extractors.extractor_lifecycle.install_extractor_plan(name)
+# .summary` for the per-ontology / per-extractor domain coverage that
+# helps you choose what to enable.
+domain = "biomedical"
+
+# Sub-label names this corpus accepts at ingest time. The GUI's ingest
+# dialog populates its dropdown from this list. Case-sensitive; each
+# entry must be a known sub-label (Paper, Book, Note, Report,
+# Presentation, Article, Correspondence, Transcript, Dataset, Code,
+# Figure, Diagram, Audio, Video). Empty list = ingest only allowed
+# without a sub-label.
+allowed_types = ["Paper", "Note", "Report", "Dataset"]
+
+# Per-knowledge-graph-layer on/off toggles.
+[layers]
+
+# L1-L4 bundled: citation + author + venue + topic graph derived from
+# a single OpenAlex API lookup per document. Turn ON for scientific
+# paper corpora; OFF for non-paper corpora (legal, internal reports,
+# finance, etc.) where OpenAlex returns nothing useful.
+openalex_papers = true
+
+# L5: per-chunk :Chunk nodes joinable with LanceDB via the shared
+# chunk_id. Required wherever the agent retrieves and cites specific
+# passages - effectively always on for retrieval use cases.
+chunks = true
+
+# L6a: chunk-level entity extraction. When ON, every chunk's text is
+# fed to the configured extractor; resulting mentions are stored as
+# :Entity nodes and :MENTIONS edges from :Chunk. Requires the
+# [entities] section below. Independent of sub-label - runs on every
+# chunk regardless of whether it came from a :Paper, :Note, :Report,
+# etc.
+entities = false
+
+# L7: ontology canonical-linking layers. Each enables import of one
+# ontology into the KG (as `:MeSHTerm` / `:GOTerm` / etc. nodes + the
+# ontology's internal hierarchy) PLUS a linking pass that matches your
+# existing :Entity nodes to the canonical terms via :CANONICAL_TO
+# edges. Each ontology layer requires entities=true.
+#
+# Source files download lazily on first ingestion after enabling. Per-
+# ontology settings live in [ontology.<name>] sections below (all
+# optional - defaults apply when omitted).
+ontology_mesh = false   # Medical Subject Headings, biomedical broad
+ontology_go = false     # Gene Ontology, cell biology + biochemistry
+ontology_hpo = false    # Human Phenotype Ontology, phenotypic abnormalities
+ontology_uberon = false # Uber Anatomy Ontology, multi-species anatomy
+ontology_mondo = false  # Mondo Disease Ontology, integrated disease
+ontology_chebi = false  # Chemical Entities of Biological Interest (LITE)
+ontology_eco = false    # Evidence & Conclusion Ontology, annotation evidence codes
+ontology_so = false     # Sequence Ontology, sequence features + variant types
+ontology_pr = false     # Protein Ontology, classes / isoforms / complexes
+ontology_cl = false     # Cell Ontology, cell types across organisms
+ontology_po = false     # Plant Ontology, plant anatomy + developmental stages
+ontology_foodon = false # Food Ontology, foods + dietary components
+ontology_envo = false   # Environment Ontology, biomes + features + exposures
+ontology_ncbitaxon = false # NCBI Taxonomy, organisms (HEAVY: ~2.74M classes, ~440 MB)
+ontology_obi = false    # Ontology for Biomedical Investigations, experimental methods
+ontology_efo = false    # Experimental Factor Ontology, EBI study factors
+ontology_dron = false   # Drug Ontology (HEAVY: ~700K classes, ~220 MB)
+ontology_fibo = false   # Financial Industry Business Ontology, modular via GitHub walker
+
+# L8: typed entity-to-entity relations extracted from chunk text by an
+# LLM. Writes one edge per chunk assertion between :Entity nodes, using
+# one of 15 fixed predicate edge types (INHIBITS, ACTIVATES, REGULATES,
+# INTERACTS_WITH, BINDS_TO, IS_PART_OF, IS_A, CAUSES, ASSOCIATED_WITH,
+# TREATS, MEASURED_BY, EXPRESSED_IN, LOCATED_IN, USES, COMPARED_WITH).
+# Requires entities=true (the LLM is constrained to each chunk's L6a
+# entity vocabulary as the allowed subject + object set). Cost: one
+# Haiku call per chunk, similar order to L6a. Per-corpus settings
+# (model, temperature, predicate-list override) live in `config.py`
+# for now - no [triples] section needed.
+triples = false
+
+# L9: cross-document synthesis. Materialises undirected :RELATED_TO
+# edges between any two documents (or artifacts) that share at least N
+# distinct :Entity nodes (N = `cross_doc.threshold`, default 2). Each
+# edge carries shared_entities, shared_count, computed_at - sort by
+# shared_count to rank "most related" docs. Requires entities=true
+# (the shared signal is L6a entities, NOT canonicals - so this layer
+# is unaffected by ontology import/delete). Pure Cypher pass, no LLM
+# cost. Recomputed per-doc on every ingest / backfill (NOT on ontology
+# import). Threshold tunable via the `[cross_doc]` section below.
+cross_doc = false
+
+# L7 cross-ontology xref edges. 3-state flag controlling whether
+# `xref:` annotations declared by each ontology (e.g. MONDO declaring
+# its term is equivalent to a MeSH term) are materialised into the
+# graph.
+#   - "none"         (default): don't extract xrefs at all.
+#   - "collect_only" : extract xrefs and store them as a
+#                      `dangling_xrefs` property on each source term,
+#                      but DON'T write `:<X>_XREF` edges yet. Lets you
+#                      flip to "use" later via the fast `backfill_xrefs`
+#                      bulk_op without re-importing.
+#   - "use"          : extract xrefs AND write resolved `:<X>_XREF`
+#                      edges immediately at ontology import time for
+#                      every xref whose target already exists.
+#                      Unresolved targets stay in `dangling_xrefs` for
+#                      a future backfill.
+# Storage cost ("use" / "collect_only"): ~30-40 MB across the
+# biomedical ontology set. Parse cost: ~5%. Imports of ontologies
+# done BEFORE flipping this flag won't have xrefs — force-re-import
+# them or run `backfill_xrefs`.
+xrefs = "none"
+
+# L10: concept-level cross-document synthesis. Materialises undirected
+# :RELATED_BY_XREF edges between any two documents (or artifacts) that
+# share at least N canonical concepts via xref equivalence (N =
+# `cross_doc_xrefs.threshold`, default 2). Parallel to L9 but joins
+# via the xref graph: two docs share a concept when their entities
+# canonicalise to :OntologyTerm nodes that are EITHER the same node
+# OR connected by a `:<X>_XREF` edge. Surfaces cross-ontology
+# equivalence that L9's raw-entity signal can't reach (e.g. same drug
+# under MeSH and ChEBI). Requires entities=true AND xrefs="use" (the
+# CorpusConfig validator enforces both at load time). Pure Cypher
+# pass; no LLM cost. Per-doc recompute on ingest; graph-wide rebuild
+# via the `recompute_cross_doc_xrefs` bulk_op.
+cross_doc_xrefs = false
+
+
+# L6a entity-extraction settings. Required when `layers.entities=true`;
+# can be omitted entirely otherwise.
+#
+# IMPORTANT: the `entity_types` list at extraction time is upstream of
+# every future canonical-linking layer. If a future layer like
+# ontology_go cares about biological processes but your `entity_types`
+# list didn't include them, the matcher will find nothing to link.
+# When you enable a new linking layer, consult its
+# RECOMMENDED_ENTITY_TYPES constant, broaden this list as needed, and
+# re-ingest affected docs (via bulk_ops, once it lands).
+#
+# [entities]
+#
+# Adapter name from entity_extractors/. Validated at extraction time
+# against the dispatcher's known adapters. The install dialog for each
+# adapter surfaces its full provenance (publisher, license, source
+# URL, pinned model SHA, safetensors flag, trust_remote_code flag) +
+# domain coverage + emitted labels + which shipped ontologies the
+# labels canonicalise to. Call
+# `entity_extractors.extractor_lifecycle.install_extractor_plan(name)
+# .summary` to print this from a shell.
+#
+#   - "llm"           : Anthropic Haiku, domain-agnostic, OPEN
+#                       vocabulary. The model categorises entities
+#                       freely at runtime. Bundled (no extra install).
+#                       Cost: per-chunk LLM call (~$0.05 per 200-chunk
+#                       paper). Best when your domain isn't covered by
+#                       the NER adapters below, OR when you need
+#                       unusual entity types (legal, finance,
+#                       humanities, etc.).
+#   - "gliner"        : GLiNER (Apache-2.0, ~1.1 GB safetensors).
+#                       Zero-shot multilingual general NER. Default
+#                       labels: PERSON, ORGANIZATION, LOCATION, EVENT,
+#                       DATE, MISC. Override `entity_types` to ask for
+#                       any label. Requires `entities-gliner` install
+#                       extra. Domain tags: general.
+#   - "gliner_biomed" : GLiNER-BioMed (Apache-2.0, ~1.1 GB pickle —
+#                       install dialog flags the pickle exec risk).
+#                       Zero-shot biomedical NER. Default labels:
+#                       DISEASE, CHEMICAL, GENE, PROTEIN, SPECIES,
+#                       CELL_LINE, CELL_TYPE, ANATOMY. Override
+#                       `entity_types` to ask for any label. Requires
+#                       `entities-gliner-biomed` install extra. Domain
+#                       tags: medicine, biology, chemistry, proteins,
+#                       cell biology.
+#   - "hunflair2"     : HunFlair2 (MIT inherited from Flair, ~1.24 GB
+#                       pickle). Fixed biomedical 5-label set: DISEASE,
+#                       CHEMICAL, GENE, SPECIES, CELL_LINE — narrower
+#                       than GLiNER-BioMed but tight per-label scores
+#                       from the unified Flair tagger. NOTE:
+#                       all-or-nothing — `entity_types` is IGNORED;
+#                       the adapter always emits its full 5-label set.
+#                       Requires `entities-hunflair2` install extra.
+#                       Domain tags: medicine, biology, chemistry.
+# extractor = "llm"
+#
+# Entity-type labels this corpus extracts. Free-form list; NOT
+# validated against any project-wide enum (these are per-corpus user
+# vocabulary). Empty list = adapter default behaviour:
+#   - For "llm"           : the model categorises entities freely.
+#                           Produces an unpredictable type vocabulary
+#                           across docs unless you constrain.
+#   - For "gliner" /
+#     "gliner_biomed"     : adapter emits its DEFAULT_LABELS set
+#                           (above). Provide a list here to narrow.
+#   - For "hunflair2"     : IGNORED. The adapter emits its fixed
+#                           5-label set regardless.
+# entity_types = ["GENE", "DISEASE", "CHEMICAL"]
+
+
+# L7 per-ontology settings. All fields have sensible defaults so these
+# sections can be omitted entirely - any enabled `ontology_<name>` layer
+# with no explicit section gets `OntologyConfig()` defaults. Define a
+# section here only when you want to override a default.
+#
+# Currently the only setting is `matching` (linking strategy):
+#   "exact" (default) - only links entities whose `key` exactly matches
+#                       a term's label or synonym (lowercased).
+#   "fuzzy"           - tries exact first; falls through to a more
+#                       permissive match (singular/plural collapse,
+#                       edit-distance ≤ 2) on miss. Catches morphological
+#                       variation at some risk of false positives.
+#
+# [ontology.mesh]
+# matching = "exact"
+#
+# [ontology.go]
+# matching = "exact"
+
+
+# L9 cross-document settings (referenced when `layers.cross_doc=true`).
+# Optional - if you turn the layer on without writing this section,
+# the model validator auto-populates `CrossDocConfig()` with the
+# default threshold below. Define the section here only when you want
+# to override the default.
+#
+# `threshold`: minimum number of distinct shared L6a `:Entity` keys
+# required to materialise a `:RELATED_TO` edge between two docs.
+# Default 2: single-shared-entity = noise floor (common generic terms
+# like "patient", "study"); two distinct shared entities = meaningful
+# signal. Bump higher (3-5) to tighten the relationship graph at the
+# cost of recall; lower to 1 only for very small corpora where every
+# overlap matters. Must be >= 1.
+#
+# [cross_doc]
+# threshold = 2
+
+
+# L10 cross-document settings (referenced when
+# `layers.cross_doc_xrefs=true`). Optional - if you turn the layer on
+# without writing this section, the model validator auto-populates
+# `CrossDocXrefsConfig()` with the default threshold below.
+#
+# `threshold`: minimum number of distinct shared canonical concepts
+# (counted on the focal doc's side, joined via xref equivalence)
+# required to materialise a `:RELATED_BY_XREF` edge between two docs.
+# Default 2: single-shared-concept = noise floor (high-level shared
+# term like "Disease" via MeSH-MONDO xref); two distinct shared
+# concepts = meaningful topical overlap. Tune the same way as L9's
+# threshold. Must be >= 1.
+#
+# [cross_doc_xrefs]
+# threshold = 2
+
+
+# ============================================================================
+# Quick reference: what each new bulk_op in this session does.
+# (See `ingestion.bulk_ops` source + `scripts/smoke_kg_l7_xrefs_l10.py` for
+# end-to-end exercise.)
+# ----------------------------------------------------------------------------
+#   backfill_xrefs           Walks every shipped ontology's
+#                            `dangling_xrefs` lists and materialises
+#                            `:<X>_XREF` edges for entries whose
+#                            targets are present, then strips resolved
+#                            entries from the lists. When L10 is on
+#                            (cross_doc_xrefs=true) ALSO runs the
+#                            graph-wide L10 rebuild. One button covers
+#                            both — the plan dialog tells you what'll
+#                            happen.
+#   recompute_cross_doc_xrefs  Standalone L10 graph-wide rebuild
+#                              (when you want to refresh L10 without
+#                              backfilling xrefs — e.g. after manual
+#                              ontology cleanup OR after bumping the
+#                              `[cross_doc_xrefs].threshold` above).
+#   clear_xref_edges         Wipes one ontology's outgoing `:<X>_XREF`
+#                            edges + its `dangling_xrefs` properties.
+#                            Used by `delete_ontology` flows + manual
+#                            maintenance. Per-ontology; call once per
+#                            ontology to wipe both directions.
+# ============================================================================
