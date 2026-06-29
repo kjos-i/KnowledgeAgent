@@ -66,9 +66,16 @@ def _chunk(
 
 
 def _mock_llm_returning(structured_output):
-    """Build the mock chain: llm.with_structured_output(...).ainvoke(...) -> output."""
+    """Build the mock chain: llm.with_structured_output(...).ainvoke(...) -> output.
+
+    `with_retry` is wired so that the production code's
+    `_with_retry(structured)` call resolves to the same mock — the retry
+    wrapper is the identity in tests. Retry behaviour is covered in
+    isolation by `test_llm_factory.with_retry` tests.
+    """
     mock_structured = MagicMock()
     mock_structured.ainvoke = AsyncMock(return_value=structured_output)
+    mock_structured.with_retry = MagicMock(return_value=mock_structured)
     mock_llm = MagicMock()
     mock_llm.with_structured_output = MagicMock(return_value=mock_structured)
     return mock_llm
@@ -155,6 +162,7 @@ def test_mode_classifier_fail_soft_to_lancedb_only_on_exception():
     """LLM call raises -> log + return routed_mode='lancedb_only'."""
     mock_structured = MagicMock()
     mock_structured.ainvoke = AsyncMock(side_effect=RuntimeError("api down"))
+    mock_structured.with_retry = MagicMock(return_value=mock_structured)
     mock_llm = MagicMock()
     mock_llm.with_structured_output = MagicMock(return_value=mock_structured)
     with (
@@ -513,7 +521,7 @@ def test_neo4j_retriever_no_cypher_query_is_noop():
     ):
         result = asyncio.run(neo4j_retriever_node({"query": "q"}))
     assert result == {}
-    mock_client.read_query.assert_not_called()
+    mock_client.aread_query.assert_not_called()
 
 
 def test_neo4j_retriever_empty_cypher_query_is_noop():
@@ -526,7 +534,7 @@ def test_neo4j_retriever_empty_cypher_query_is_noop():
             neo4j_retriever_node({"query": "q", "cypher_query": ""})
         )
     assert result == {}
-    mock_client.read_query.assert_not_called()
+    mock_client.aread_query.assert_not_called()
 
 
 def test_neo4j_retriever_rejects_unsafe_cypher():
@@ -542,13 +550,13 @@ def test_neo4j_retriever_rejects_unsafe_cypher():
             )
         )
     assert result == {"kg_hits": []}
-    mock_client.read_query.assert_not_called()
+    mock_client.aread_query.assert_not_called()
 
 
 def test_neo4j_retriever_wraps_cypher_with_limit():
     """The wrapped Cypher (CALL { ... } RETURN * LIMIT N) is sent to read_query."""
     mock_client = MagicMock()
-    mock_client.read_query.return_value = []
+    mock_client.aread_query = AsyncMock(return_value=[])
     with (
         patch(
             "knowledge_agent.nodes.get_kg_client",
@@ -567,7 +575,7 @@ def test_neo4j_retriever_wraps_cypher_with_limit():
                 }
             )
         )
-    cypher_sent = mock_client.read_query.call_args.args[0]
+    cypher_sent = mock_client.aread_query.call_args.args[0]
     assert "CALL {" in cypher_sent
     assert "MATCH (d:Document) RETURN d" in cypher_sent
     assert "RETURN * LIMIT 50" in cypher_sent
@@ -575,7 +583,7 @@ def test_neo4j_retriever_wraps_cypher_with_limit():
 
 def test_neo4j_retriever_uses_settings_kg_max_rows():
     mock_client = MagicMock()
-    mock_client.read_query.return_value = []
+    mock_client.aread_query = AsyncMock(return_value=[])
     with (
         patch(
             "knowledge_agent.nodes.get_kg_client",
@@ -591,17 +599,19 @@ def test_neo4j_retriever_uses_settings_kg_max_rows():
                 {"query": "q", "cypher_query": "MATCH (n) RETURN n"}
             )
         )
-    cypher_sent = mock_client.read_query.call_args.args[0]
+    cypher_sent = mock_client.aread_query.call_args.args[0]
     assert "LIMIT 7" in cypher_sent
 
 
 def test_neo4j_retriever_returns_rows_as_kg_hits():
     """read_query rows (dicts) become KGHit objects in state["kg_hits"]."""
     mock_client = MagicMock()
-    mock_client.read_query.return_value = [
-        {"name": "Alice", "papers": 5},
-        {"name": "Bob", "papers": 3},
-    ]
+    mock_client.aread_query = AsyncMock(
+        return_value=[
+            {"name": "Alice", "papers": 5},
+            {"name": "Bob", "papers": 3},
+        ]
+    )
     with (
         patch(
             "knowledge_agent.nodes.get_kg_client",
@@ -627,7 +637,9 @@ def test_neo4j_retriever_returns_rows_as_kg_hits():
 def test_neo4j_retriever_fail_soft_on_exception():
     """Any read_query exception is swallowed -> empty kg_hits."""
     mock_client = MagicMock()
-    mock_client.read_query.side_effect = RuntimeError("connection refused")
+    mock_client.aread_query = AsyncMock(
+        side_effect=RuntimeError("connection refused")
+    )
     with (
         patch(
             "knowledge_agent.nodes.get_kg_client",
@@ -657,7 +669,7 @@ def test_neo4j_retriever_fail_soft_on_exception():
 def test_retriever_prefers_rewritten_search_query():
     hits = [_chunk(0)]
     mock_client = MagicMock()
-    mock_client.retrieve = MagicMock(return_value=hits)
+    mock_client.aretrieve = AsyncMock(return_value=hits)
     with (
         patch(
             "knowledge_agent.nodes.get_search_client",
@@ -671,7 +683,7 @@ def test_retriever_prefers_rewritten_search_query():
         mock_settings.return_value.default_retrieval_mode = "lancedb_only"
         state = {"query": "raw", "search_query": "rewritten"}
         result = asyncio.run(lancedb_retriever_node(state))
-    mock_client.retrieve.assert_called_once_with(
+    mock_client.aretrieve.assert_called_once_with(
         query="rewritten", top_k=5, filters=None,
     )
     assert result == {"retrieved_chunks": hits}
@@ -679,7 +691,7 @@ def test_retriever_prefers_rewritten_search_query():
 
 def test_retriever_falls_back_to_raw_query_when_no_search_query():
     mock_client = MagicMock()
-    mock_client.retrieve = MagicMock(return_value=[])
+    mock_client.aretrieve = AsyncMock(return_value=[])
     with (
         patch(
             "knowledge_agent.nodes.get_search_client",
@@ -692,14 +704,14 @@ def test_retriever_falls_back_to_raw_query_when_no_search_query():
         mock_settings.return_value.top_k = 5
         mock_settings.return_value.default_retrieval_mode = "lancedb_only"
         asyncio.run(lancedb_retriever_node({"query": "raw"}))
-    mock_client.retrieve.assert_called_once_with(
+    mock_client.aretrieve.assert_called_once_with(
         query="raw", top_k=5, filters=None,
     )
 
 
 def test_retriever_honours_state_top_k_override():
     mock_client = MagicMock()
-    mock_client.retrieve = MagicMock(return_value=[])
+    mock_client.aretrieve = AsyncMock(return_value=[])
     with (
         patch(
             "knowledge_agent.nodes.get_search_client",
@@ -713,7 +725,7 @@ def test_retriever_honours_state_top_k_override():
         mock_settings.return_value.default_retrieval_mode = "lancedb_only"
         state = {"query": "raw", "search_query": "rewritten", "top_k": 20}
         asyncio.run(lancedb_retriever_node(state))
-    call_kwargs = mock_client.retrieve.call_args.kwargs
+    call_kwargs = mock_client.aretrieve.call_args.kwargs
     assert call_kwargs["query"] == "rewritten"
     assert call_kwargs["top_k"] == 20
 
@@ -721,7 +733,7 @@ def test_retriever_honours_state_top_k_override():
 def test_retriever_mode4_extracts_doc_ids_from_kg_hits_and_filters():
     """Mode neo4j_then_lancedb -> doc_id IN (...) filter applied."""
     mock_client = MagicMock()
-    mock_client.retrieve = MagicMock(return_value=[])
+    mock_client.aretrieve = AsyncMock(return_value=[])
     kg_hits = [
         KGHit(data={"doc_id": "W1", "x": 1}),
         KGHit(data={"doc_id": "W2"}),
@@ -744,13 +756,13 @@ def test_retriever_mode4_extracts_doc_ids_from_kg_hits_and_filters():
             "kg_hits": kg_hits,
         }
         asyncio.run(lancedb_retriever_node(state))
-    call_kwargs = mock_client.retrieve.call_args.kwargs
+    call_kwargs = mock_client.aretrieve.call_args.kwargs
     assert call_kwargs["filters"] == {"doc_id": ["W1", "W2"]}
 
 
 def test_retriever_mode4_empty_kg_hits_falls_back_to_unfiltered():
     mock_client = MagicMock()
-    mock_client.retrieve = MagicMock(return_value=[])
+    mock_client.aretrieve = AsyncMock(return_value=[])
     with (
         patch(
             "knowledge_agent.nodes.get_search_client",
@@ -768,14 +780,14 @@ def test_retriever_mode4_empty_kg_hits_falls_back_to_unfiltered():
             "kg_hits": [],
         }
         asyncio.run(lancedb_retriever_node(state))
-    call_kwargs = mock_client.retrieve.call_args.kwargs
+    call_kwargs = mock_client.aretrieve.call_args.kwargs
     assert call_kwargs["filters"] is None
 
 
 def test_retriever_mode4_no_doc_ids_in_hits_falls_back_to_unfiltered():
     """KG returned rows but none have doc_id key -> log + unfiltered."""
     mock_client = MagicMock()
-    mock_client.retrieve = MagicMock(return_value=[])
+    mock_client.aretrieve = AsyncMock(return_value=[])
     kg_hits = [
         KGHit(data={"author_name": "Smith"}),
         KGHit(data={"paper_count": 5}),
@@ -797,14 +809,14 @@ def test_retriever_mode4_no_doc_ids_in_hits_falls_back_to_unfiltered():
             "kg_hits": kg_hits,
         }
         asyncio.run(lancedb_retriever_node(state))
-    call_kwargs = mock_client.retrieve.call_args.kwargs
+    call_kwargs = mock_client.aretrieve.call_args.kwargs
     assert call_kwargs["filters"] is None
 
 
 def test_retriever_non_mode4_does_not_filter_even_with_kg_hits():
     """Mode lancedb_only: kg_hits in state is ignored, no filter applied."""
     mock_client = MagicMock()
-    mock_client.retrieve = MagicMock(return_value=[])
+    mock_client.aretrieve = AsyncMock(return_value=[])
     with (
         patch(
             "knowledge_agent.nodes.get_search_client",
@@ -822,7 +834,7 @@ def test_retriever_non_mode4_does_not_filter_even_with_kg_hits():
             "kg_hits": [KGHit(data={"doc_id": "W1"})],
         }
         asyncio.run(lancedb_retriever_node(state))
-    call_kwargs = mock_client.retrieve.call_args.kwargs
+    call_kwargs = mock_client.aretrieve.call_args.kwargs
     assert call_kwargs["filters"] is None
 
 
@@ -830,7 +842,9 @@ def test_lancedb_retriever_captures_typed_error_on_failure():
     """Lance / Voyage failures now propagate from `client.retrieve()`;
     the node catches and populates `lancedb_retrieval_error`."""
     mock_client = MagicMock()
-    mock_client.retrieve.side_effect = RuntimeError("voyage outage")
+    mock_client.aretrieve = AsyncMock(
+        side_effect=RuntimeError("voyage outage")
+    )
     with (
         patch(
             "knowledge_agent.nodes.get_search_client",

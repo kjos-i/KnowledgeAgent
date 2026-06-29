@@ -50,6 +50,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from knowledge_agent.config import get_settings
 from knowledge_agent.kg.client import get_kg_client
 from knowledge_agent.llm_factory import get_llm as _get_llm
+from knowledge_agent.llm_factory import with_retry as _with_retry
 from knowledge_agent.kg.cypher_safety import (
     is_cypher_read_only,
     wrap_with_limit,
@@ -143,7 +144,7 @@ async def mode_classifier_node(state: AgentState) -> dict[str, Any]:
         settings.mode_classifier_model,
         settings.mode_classifier_temperature,
     )
-    structured = llm.with_structured_output(ModeChoice)
+    structured = _with_retry(llm.with_structured_output(ModeChoice))
     try:
         result = await structured.ainvoke(
             [
@@ -207,7 +208,7 @@ async def query_builder_node(state: AgentState) -> dict[str, Any]:
     llm = _get_llm(
         settings.query_builder_model, settings.query_builder_temperature
     )
-    structured = llm.with_structured_output(SearchQueryRewrite)
+    structured = _with_retry(llm.with_structured_output(SearchQueryRewrite))
     result = await structured.ainvoke(
         [
             SystemMessage(content=_QUERY_BUILDER_SYSTEM),
@@ -324,7 +325,7 @@ async def cypher_builder_node(state: AgentState) -> dict[str, Any]:
     llm = _get_llm(
         settings.cypher_builder_model, settings.cypher_builder_temperature
     )
-    structured = llm.with_structured_output(CypherQueryRewrite)
+    structured = _with_retry(llm.with_structured_output(CypherQueryRewrite))
     result = await structured.ainvoke(
         [
             SystemMessage(content=system_msg),
@@ -374,7 +375,7 @@ async def neo4j_retriever_node(state: AgentState) -> dict[str, Any]:
 
     try:
         client = get_kg_client()
-        rows = client.read_query(wrapped)
+        rows = await client.aread_query(wrapped)
     except Exception as exc:
         logger.warning(
             "neo4j_retriever: query failed: %r; cypher=%r",
@@ -447,7 +448,7 @@ async def lancedb_retriever_node(state: AgentState) -> dict[str, Any]:
 
     client = get_search_client()
     try:
-        hits = client.retrieve(query=query, top_k=top_k, filters=filters)
+        hits = await client.aretrieve(query=query, top_k=top_k, filters=filters)
     except Exception as exc:
         # Search-path methods now raise on failure (typed-errors
         # contract); catch at the node boundary so the agent's response
@@ -578,7 +579,7 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
     llm = _get_llm(
         settings.synthesizer_model, settings.synthesizer_temperature
     )
-    structured = llm.with_structured_output(AgentAnswer)
+    structured = _with_retry(llm.with_structured_output(AgentAnswer))
     user_msg = (
         f"Question: {state['query']}\n\n"
         f"Chunks:\n{_format_chunks_for_prompt(chunks)}\n\n"
