@@ -104,27 +104,36 @@ async def test_abackfill_cross_doc_xrefs_delegates_to_backfill_cross_doc_xrefs()
 
 
 # ---------------------------------------------------------------------------
-# ingest_document — full signature with optional sub_label
+# ingest_document — NOT a thin sibling anymore.
+#
+# Day 7b of the async refactor rewrote `aingest_document` as a native
+# async implementation with parallel per-chunk fan-out (asyncio.gather +
+# Semaphore for L6a + L8 extraction, gather for L1-L4 OpenAlex writes,
+# gather for L9 + L10 cross-doc, parallel delete-stale). It NO LONGER
+# wraps the sync `ingest_document` via asyncio.to_thread.
+#
+# Full coverage lives in the integration tests
+# (tests/integration/ingestion/test_pipeline.py) which run the real
+# parser + real KG/Lance + real LLM/embedder and verify end-to-end.
+# Unit testing the native version would require mocking ~12 dependencies
+# and would essentially re-implement the function's structure inside the
+# test, which is brittle. The validation guard below + the integration
+# tests are the right shape of coverage.
 # ---------------------------------------------------------------------------
 
 
-async def test_aingest_document_delegates_with_all_args():
+async def test_aingest_document_is_a_coroutine_function():
+    """Sanity guard: name + shape don't drift accidentally."""
+    import inspect
+    assert inspect.iscoroutinefunction(pipeline.aingest_document)
+
+
+async def test_aingest_document_validates_main_label():
+    """Validation happens before any side effects (parser, KG, Lance)."""
     config = MagicMock()
-    path = Path("test.pdf")
-    sentinel = MagicMock(spec=pipeline.IngestResult)
-    with patch.object(pipeline, "ingest_document", return_value=sentinel) as mock_fn:
-        result = await pipeline.aingest_document(
-            path, config, "Document", "Paper"
+    config.layers.entities = False  # avoid the entity_types pre-validation
+    import pytest
+    with pytest.raises(ValueError, match="main_label"):
+        await pipeline.aingest_document(
+            Path("test.pdf"), config, "NotAValidLabel", None
         )
-    mock_fn.assert_called_once_with(path, config, "Document", "Paper")
-    assert result is sentinel
-
-
-async def test_aingest_document_default_sub_label_is_none():
-    config = MagicMock()
-    path = Path("test.pdf")
-    sentinel = MagicMock(spec=pipeline.IngestResult)
-    with patch.object(pipeline, "ingest_document", return_value=sentinel) as mock_fn:
-        result = await pipeline.aingest_document(path, config, "Document")
-    mock_fn.assert_called_once_with(path, config, "Document", None)
-    assert result is sentinel

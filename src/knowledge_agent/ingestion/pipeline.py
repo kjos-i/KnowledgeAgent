@@ -1356,21 +1356,445 @@ async def abackfill_cross_doc_xrefs(
     )
 
 
+async def _try_kg_write_a(coro_fn, *args, log_prefix: str, doc_id: str):
+    """Run an async KG write, returning (ok, error). Logs on failure.
+
+    Used by `aingest_document` for the L1-L4 OpenAlex writes that
+    fan out via `asyncio.gather`. Each write needs the same
+    try/except shape but as a coroutine.
+    """
+    try:
+        await coro_fn(*args)
+        return True, None
+    except Exception as exc:
+        logger.warning(
+            "aingest_document (%s): %s failed: %r",
+            doc_id, log_prefix, exc,
+        )
+        return False, ErrorDetail.from_exception(exc)
+
+
 async def aingest_document(
     path: Path,
     config: CorpusConfig,
     main_label: str,
     sub_label: str | None = None,
 ) -> IngestResult:
-    """Async sibling of `ingest_document`. Same contract, awaitable.
+    """Native-async ingest of one document.
 
-    The headline performance win (per-chunk parallel fan-out) lands in
-    Day 7 when this function is rewritten with native await + a
-    semaphore-bounded asyncio.gather. Today's implementation runs the
-    entire sync pipeline in a worker thread — single-doc latency is
-    unchanged, but concurrent multi-doc ingest (bulk_ops) gets thread-
-    level parallelism (up to ~32 default thread-pool workers).
+    Same contract + IngestResult shape as the sync `ingest_document`.
+    The native implementation parallelises the embarrassingly-parallel
+    stages:
+
+      - delete_doc: LanceDB + KG side wipes run concurrently
+      - L1-L4 OpenAlex writes (4 independent writes) gather concurrently
+      - L6a per-chunk entity extraction fans out via
+        `asyncio.gather` bounded by an `asyncio.Semaphore` of size
+        `settings.pipeline_max_concurrent_chunks`
+      - L8 per-chunk triples extraction fans out the same way
+      - L9 + L10 cross-doc recomputes run concurrently
+
+    Sequential stages (CPU-bound, single API call, or state-
+    dependent):
+
+      - parse, _build_lance_rows (CPU-bound; wrapped in
+        `asyncio.to_thread`)
+      - OpenAlex metadata resolution (one HTTP call)
+      - embed (one batched Voyage call)
+      - LanceDB write (one batch insert)
+      - L5 chunks write (one batch write)
+      - L7 ontology linking (state-dependent: was_imported chains
+        into the link-globally vs link-per-doc decision)
+
+    Error semantics match the sync version: per-stage try/except,
+    fail-soft for individual layer writes (each populates its own
+    `*_error` field on the result), per-chunk fail-soft for L6a and
+    L8 (one bad chunk doesn't poison the doc).
     """
-    return await asyncio.to_thread(
-        ingest_document, path, config, main_label, sub_label
+    path = Path(path)
+
+    # ---- 0. Validate inputs before any side effects.
+    if main_label not in MAIN_LABELS:
+        raise ValueError(
+            f"main_label must be one of {MAIN_LABELS}, got {main_label!r}"
+        )
+    if sub_label is not None:
+        if sub_label not in config.allowed_types:
+            raise ValueError(
+                f"sub_label {sub_label!r} is not in this corpus's "
+                f"allowed_types {config.allowed_types}. Either pick a "
+                f"different sub_label or add it to corpus.toml."
+            )
+        expected_main = SUB_LABEL_TO_MAIN.get(sub_label)
+        if expected_main != main_label:
+            raise ValueError(
+                f"sub_label {sub_label!r} belongs under "
+                f":{expected_main}, not :{main_label}."
+            )
+    ext = path.suffix.lower().lstrip(".")
+    if ext not in supported_extensions():
+        raise ValueError(
+            f"No parser available for extension {ext!r} (path={path}). "
+            f"Supported: {sorted(supported_extensions())}."
+        )
+    if config.layers.entities:
+        assert config.entities is not None  # noqa: S101
+        validate_entity_types(
+            config.entities.extractor, config.entities.entity_types
+        )
+
+    # ---- 1. Identity ----
+    doc_id = compute_doc_id(path)
+    logger.info("aingest %s -> doc_id=%s", path.name, doc_id[:12])
+
+    settings = get_settings()
+    search_client = get_search_client()
+    kg_client = get_kg_client()
+
+    # ---- 2. Parse (CPU-bound, threaded) ----
+    chunks = await asyncio.to_thread(parse_document, path)
+
+    # ---- 2b. Delete stale across BOTH stores in parallel ----
+    # adelete_doc on pipeline.py would re-call sync delete via thread;
+    # split into the two underlying calls and gather instead for true
+    # 2-way parallelism.
+    await asyncio.gather(
+        search_client.adelete_chunks_by_doc_id(doc_id),
+        kg_client.adelete_doc(doc_id),
+    )
+
+    # ---- 3. Metadata resolution (one HTTP call) ----
+    work = await asyncio.to_thread(resolve_metadata, chunks)
+    if work is not None:
+        metadata_status = "enriched"
+    elif extract_doi_candidates(chunks):
+        metadata_status = "pending"
+    else:
+        metadata_status = "baseline"
+
+    # ---- 4. Embed (one batched Voyage call) ----
+    embed_ok = False
+    embed_error: ErrorDetail | None = None
+    embeddings: list[list[float]] | None = None
+    try:
+        from knowledge_agent.embedder_factory import aembed_texts
+        embeddings = await aembed_texts([c.text for c in chunks])
+        embed_ok = True
+    except Exception as exc:
+        logger.warning(
+            "aingest_document (%s): aembed_texts failed: %r", doc_id, exc
+        )
+        embed_error = ErrorDetail.from_exception(exc)
+
+    # ---- 5. LanceDB write ----
+    lancedb_ok = False
+    lancedb_error: ErrorDetail | None = None
+    if embed_ok and embeddings is not None:
+        rows = await asyncio.to_thread(
+            _build_lance_rows,
+            doc_id, chunks, embeddings, work, metadata_status,
+            main_label, sub_label, path,
+        )
+        try:
+            await search_client.aensure_schema()
+            await search_client.awrite_chunks(rows)
+            lancedb_ok = True
+        except Exception as exc:
+            logger.warning(
+                "aingest_document (%s): LanceDB write failed: %r",
+                doc_id, exc,
+            )
+            lancedb_error = ErrorDetail.from_exception(exc)
+        if lancedb_ok and settings.optimize_indexes_per_ingest:
+            try:
+                await search_client.aensure_indexes()
+            except Exception as exc:
+                logger.warning(
+                    "aingest_document (%s): aensure_indexes failed: %r",
+                    doc_id, exc,
+                )
+
+    # ---- 6. KG writes ----
+    try:
+        await kg_client.aensure_constraints()
+    except Exception as exc:
+        logger.warning(
+            "aingest_document (%s): aensure_constraints failed: %r",
+            doc_id, exc,
+        )
+
+    # 6a. L1-L4 OpenAlex writes (4 independent writes -> gather)
+    kg_citations_ok: bool = False
+    kg_citations_error: ErrorDetail | None = None
+    kg_authorships_ok: bool = False
+    kg_authorships_error: ErrorDetail | None = None
+    kg_venue_ok: bool = False
+    kg_venue_error: ErrorDetail | None = None
+    kg_topics_ok: bool = False
+    kg_topics_error: ErrorDetail | None = None
+    if (
+        sub_label == PAPER_LABEL
+        and config.layers.openalex_papers
+        and work is not None
+    ):
+        results = await asyncio.gather(
+            _try_kg_write_a(
+                kg_client.awrite_citations, doc_id, work,
+                log_prefix="KG L1 citations", doc_id=doc_id,
+            ),
+            _try_kg_write_a(
+                kg_client.awrite_authorships, doc_id, work,
+                log_prefix="KG L2 authorships", doc_id=doc_id,
+            ),
+            _try_kg_write_a(
+                kg_client.awrite_venue, doc_id, work,
+                log_prefix="KG L3 venue", doc_id=doc_id,
+            ),
+            _try_kg_write_a(
+                kg_client.awrite_topics, doc_id, work,
+                log_prefix="KG L4 topics", doc_id=doc_id,
+            ),
+        )
+        (kg_citations_ok, kg_citations_error) = results[0]
+        (kg_authorships_ok, kg_authorships_error) = results[1]
+        (kg_venue_ok, kg_venue_error) = results[2]
+        (kg_topics_ok, kg_topics_error) = results[3]
+
+    # 6b. L5 chunks
+    kg_chunks_ok = False
+    kg_chunks_error: ErrorDetail | None = None
+    if config.layers.chunks:
+        try:
+            await kg_client.awrite_chunks(
+                doc_id, chunks, main_label, sub_label
+            )
+            kg_chunks_ok = True
+        except Exception as exc:
+            logger.warning(
+                "aingest_document (%s): KG L5 write failed: %r",
+                doc_id, exc,
+            )
+            kg_chunks_error = ErrorDetail.from_exception(exc)
+
+    # ---- 7. L6a entity extraction — PARALLEL per-chunk fan-out ----
+    kg_entities_ok = False
+    kg_entities_error: ErrorDetail | None = None
+    n_entity_mentions = 0
+    chunk_mentions: list[tuple[str, list[Mention]]] = []
+    if config.layers.entities and kg_chunks_ok:
+        assert config.entities is not None  # noqa: S101
+        extractor = get_extractor(config.entities.extractor)
+        entity_types = config.entities.entity_types
+        sem = asyncio.Semaphore(settings.pipeline_max_concurrent_chunks)
+
+        async def _extract_entities_one(chunk):
+            chunk_id = make_chunk_id(doc_id, chunk.chunk_index)
+            async with sem:
+                try:
+                    mentions = await extractor.aextract(
+                        chunk.text, entity_types
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "L6a: extraction failed for chunk %s: %r; "
+                        "skipping",
+                        chunk_id, exc,
+                    )
+                    mentions = []
+            return chunk_id, mentions
+
+        chunk_mentions = list(
+            await asyncio.gather(
+                *(_extract_entities_one(c) for c in chunks)
+            )
+        )
+        n_entity_mentions = sum(len(m) for _, m in chunk_mentions)
+        try:
+            await kg_client.awrite_entities(doc_id, chunk_mentions)
+            kg_entities_ok = True
+        except Exception as exc:
+            logger.warning(
+                "aingest_document (%s): KG L6a write failed: %r",
+                doc_id, exc,
+            )
+            kg_entities_error = ErrorDetail.from_exception(exc)
+
+    # ---- 8. L7 ontology linking — sequential per ontology
+    #         (was_imported chains into link-globally vs link-per-doc) ----
+    kg_ontology_results: dict[str, dict[str, Any]] = {}
+    if kg_entities_ok:
+        for ontology_name in config._enabled_ontology_layers():
+            ontology_cfg = config.ontology[ontology_name]
+            import_ok = True
+            was_imported = False
+            try:
+                was_imported = await kg_client.aensure_ontology_imported(
+                    ontology_name,
+                    xrefs_mode=config.layers.xrefs,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "L7 (%s): ensure_imported failed: %r",
+                    ontology_name, exc,
+                )
+                import_ok = False
+
+            n_links = 0
+            if import_ok:
+                try:
+                    link_doc_id = None if not was_imported else doc_id
+                    n_links = await kg_client.alink_entities_to_ontology(
+                        ontology_name,
+                        ontology_cfg.matching,
+                        doc_id=link_doc_id,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "L7 (%s): linking pass failed: %r",
+                        ontology_name, exc,
+                    )
+
+            kg_ontology_results[ontology_name] = {
+                "imported": not was_imported,
+                "import_ok": import_ok,
+                "n_links": n_links,
+            }
+
+    # ---- 9. L8 triples extraction — PARALLEL per-chunk fan-out ----
+    kg_triples_ok = False
+    kg_triples_error: ErrorDetail | None = None
+    n_triples_written = 0
+    if config.layers.triples and kg_entities_ok:
+        sem_l8 = asyncio.Semaphore(
+            settings.pipeline_max_concurrent_chunks
+        )
+        chunk_text_by_id = {
+            make_chunk_id(doc_id, c.chunk_index): c.text for c in chunks
+        }
+
+        async def _extract_triples_one(chunk_id, mentions):
+            entity_vocab = [
+                (m.raw_text.lower(), m.entity_type) for m in mentions
+            ]
+            if not entity_vocab:
+                return chunk_id, []
+            async with sem_l8:
+                try:
+                    triples = await triples_extractor.aextract(
+                        chunk_text_by_id[chunk_id], entity_vocab,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "L8: extraction failed for chunk %s: %r; "
+                        "skipping",
+                        chunk_id, exc,
+                    )
+                    triples = []
+            return chunk_id, triples
+
+        chunk_triples = list(
+            await asyncio.gather(
+                *(
+                    _extract_triples_one(cid, m)
+                    for cid, m in chunk_mentions
+                )
+            )
+        )
+        n_triples_written = sum(len(t) for _, t in chunk_triples)
+        try:
+            await kg_client.awrite_triples(doc_id, chunk_triples)
+            kg_triples_ok = True
+        except Exception as exc:
+            logger.warning(
+                "aingest_document (%s): KG L8 write_triples failed: %r",
+                doc_id, exc,
+            )
+            kg_triples_error = ErrorDetail.from_exception(exc)
+
+    # ---- 10/11. L9 + L10 cross-doc — concurrent recomputes ----
+    kg_cross_doc_ok = False
+    kg_cross_doc_error: ErrorDetail | None = None
+    n_cross_doc_edges_written = 0
+    kg_cross_doc_xrefs_ok = False
+    kg_cross_doc_xrefs_error: ErrorDetail | None = None
+    n_cross_doc_xrefs_edges_written = 0
+    if kg_entities_ok:
+        do_l9 = config.layers.cross_doc
+        do_l10 = config.layers.cross_doc_xrefs
+        tasks: list = []
+        if do_l9:
+            tasks.append(
+                kg_client.arecompute_cross_doc_edges(
+                    doc_id, config.cross_doc.threshold,
+                )
+            )
+        if do_l10:
+            tasks.append(
+                kg_client.arecompute_cross_doc_xrefs_edges(
+                    doc_id, config.cross_doc_xrefs.threshold,
+                )
+            )
+        if tasks:
+            cross_results = await asyncio.gather(
+                *tasks, return_exceptions=True
+            )
+            i = 0
+            if do_l9:
+                r = cross_results[i]; i += 1
+                if isinstance(r, Exception):
+                    logger.warning(
+                        "aingest_document (%s): KG L9 recompute failed: %r",
+                        doc_id, r,
+                    )
+                    kg_cross_doc_error = ErrorDetail.from_exception(r)
+                else:
+                    n_cross_doc_edges_written = r
+                    kg_cross_doc_ok = True
+            if do_l10:
+                r = cross_results[i]
+                if isinstance(r, Exception):
+                    logger.warning(
+                        "aingest_document (%s): KG L10 recompute failed: %r",
+                        doc_id, r,
+                    )
+                    kg_cross_doc_xrefs_error = ErrorDetail.from_exception(r)
+                else:
+                    n_cross_doc_xrefs_edges_written = r
+                    kg_cross_doc_xrefs_ok = True
+
+    return IngestResult(
+        doc_id=doc_id,
+        path=path,
+        n_chunks=len(chunks),
+        metadata_status=metadata_status,
+        work=work,
+        embed_ok=embed_ok,
+        embed_error=embed_error,
+        lancedb_ok=lancedb_ok,
+        lancedb_error=lancedb_error,
+        kg_citations_ok=kg_citations_ok,
+        kg_citations_error=kg_citations_error,
+        kg_authorships_ok=kg_authorships_ok,
+        kg_authorships_error=kg_authorships_error,
+        kg_venue_ok=kg_venue_ok,
+        kg_venue_error=kg_venue_error,
+        kg_topics_ok=kg_topics_ok,
+        kg_topics_error=kg_topics_error,
+        kg_chunks_ok=kg_chunks_ok,
+        kg_chunks_error=kg_chunks_error,
+        kg_entities_ok=kg_entities_ok,
+        kg_entities_error=kg_entities_error,
+        n_entity_mentions=n_entity_mentions,
+        kg_ontology_results=kg_ontology_results,
+        kg_triples_ok=kg_triples_ok,
+        kg_triples_error=kg_triples_error,
+        n_triples_written=n_triples_written,
+        kg_cross_doc_ok=kg_cross_doc_ok,
+        kg_cross_doc_error=kg_cross_doc_error,
+        n_cross_doc_edges_written=n_cross_doc_edges_written,
+        kg_cross_doc_xrefs_ok=kg_cross_doc_xrefs_ok,
+        kg_cross_doc_xrefs_error=kg_cross_doc_xrefs_error,
+        n_cross_doc_xrefs_edges_written=(
+            n_cross_doc_xrefs_edges_written
+        ),
     )
