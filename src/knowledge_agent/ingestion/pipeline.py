@@ -869,8 +869,8 @@ async def ingest_document(
     # split into the two underlying calls and gather instead for true
     # 2-way parallelism.
     await asyncio.gather(
-        await search_client.delete_chunks_by_doc_id(doc_id),
-        await kg_client.delete_doc(doc_id),
+        search_client.delete_chunks_by_doc_id(doc_id),
+        kg_client.delete_doc(doc_id),
     )
 
     # ---- 3. Metadata resolution (one HTTP call) ----

@@ -10,7 +10,7 @@ are called vs skipped for a given `CorpusConfig`.
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 
 import pytest
 
@@ -107,9 +107,9 @@ def _patch_delete_clients(search_ok: bool, kg_ok: dict[str, bool]):
     """
     search_mock = MagicMock()
     if search_ok:
-        search_mock.delete_chunks_by_doc_id.return_value = None
+        search_mock.delete_chunks_by_doc_id = AsyncMock(return_value=None)
     else:
-        search_mock.delete_chunks_by_doc_id.side_effect = RuntimeError("boom")
+        search_mock.delete_chunks_by_doc_id = AsyncMock(side_effect=RuntimeError("boom"))
 
     kg_mock = MagicMock()
     for key, attr in (
@@ -118,14 +118,18 @@ def _patch_delete_clients(search_ok: bool, kg_ok: dict[str, bool]):
         ("delete_entities", "delete_entities_by_doc_id"),
     ):
         if kg_ok[key]:
-            getattr(kg_mock, attr).return_value = None
+            setattr(kg_mock, attr, AsyncMock(return_value=None))
         else:
-            getattr(kg_mock, attr).side_effect = RuntimeError("boom")
+            setattr(kg_mock, attr, AsyncMock(side_effect=RuntimeError("boom")))
+    # delete_triples_by_doc_id is called as part of delete_doc's sequential gather;
+    # keep it as a success-AsyncMock unless the test specifies otherwise.
+    if not isinstance(kg_mock.delete_triples_by_doc_id, AsyncMock):
+        kg_mock.delete_triples_by_doc_id = AsyncMock(return_value=None)
 
     return search_mock, kg_mock
 
 
-def test_delete_doc_calls_all_four_primitives():
+async def test_delete_doc_calls_all_four_primitives():
     """delete_doc composes 4 store primitives - one LanceDB, three KG."""
     search_mock, kg_mock = _patch_delete_clients(
         True, {"delete_doc": True, "delete_chunks": True, "delete_entities": True}
@@ -136,7 +140,7 @@ def test_delete_doc_calls_all_four_primitives():
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
     ):
-        result = delete_doc("doc-xyz")
+        result = await delete_doc("doc-xyz")
 
     assert result is True
     search_mock.delete_chunks_by_doc_id.assert_called_once_with("doc-xyz")
@@ -145,7 +149,7 @@ def test_delete_doc_calls_all_four_primitives():
     kg_mock.delete_entities_by_doc_id.assert_called_once_with("doc-xyz")
 
 
-def test_delete_doc_returns_false_when_lancedb_delete_fails():
+async def test_delete_doc_returns_false_when_lancedb_delete_fails():
     """LanceDB primitive raising flows through the `_safe` wrapper
     and surfaces as overall False."""
     search_mock, kg_mock = _patch_delete_clients(
@@ -157,12 +161,12 @@ def test_delete_doc_returns_false_when_lancedb_delete_fails():
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
     ):
-        result = delete_doc("doc-xyz")
+        result = await delete_doc("doc-xyz")
 
     assert result is False
 
 
-def test_delete_doc_runs_all_primitives_even_when_first_fails():
+async def test_delete_doc_runs_all_primitives_even_when_first_fails():
     """No short-circuit: a failed LanceDB delete must NOT skip the KG cleanup."""
     search_mock, kg_mock = _patch_delete_clients(
         False, {"delete_doc": True, "delete_chunks": True, "delete_entities": True}
@@ -173,7 +177,7 @@ def test_delete_doc_runs_all_primitives_even_when_first_fails():
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
     ):
-        delete_doc("doc-xyz")
+        await delete_doc("doc-xyz")
 
     # Every primitive ran exactly once even though the first raised.
     search_mock.delete_chunks_by_doc_id.assert_called_once()
@@ -182,7 +186,7 @@ def test_delete_doc_runs_all_primitives_even_when_first_fails():
     kg_mock.delete_entities_by_doc_id.assert_called_once()
 
 
-def test_delete_doc_returns_false_when_any_kg_primitive_fails():
+async def test_delete_doc_returns_false_when_any_kg_primitive_fails():
     """Any single primitive failure causes the overall return to be False.
 
     All migrated primitives (delete_doc, delete_chunks, delete_entities)
@@ -198,18 +202,18 @@ def test_delete_doc_returns_false_when_any_kg_primitive_fails():
         }
         search_mock, kg_mock = _patch_delete_clients(True, kg_returns)
         if failing_key == "delete_doc":
-            kg_mock.delete_doc.side_effect = RuntimeError("boom")
+            kg_mock.delete_doc = AsyncMock(side_effect=RuntimeError("boom"))
         elif failing_key == "delete_chunks":
-            kg_mock.delete_chunks_by_doc_id.side_effect = RuntimeError("boom")
+            kg_mock.delete_chunks_by_doc_id = AsyncMock(side_effect=RuntimeError("boom"))
         elif failing_key == "delete_entities":
-            kg_mock.delete_entities_by_doc_id.side_effect = RuntimeError("boom")
+            kg_mock.delete_entities_by_doc_id = AsyncMock(side_effect=RuntimeError("boom"))
         with (
             patch("knowledge_agent.ingestion.pipeline.get_search_client",
                   return_value=search_mock),
             patch("knowledge_agent.ingestion.pipeline.get_kg_client",
                   return_value=kg_mock),
         ):
-            assert delete_doc("doc-xyz") is False, (
+            assert await delete_doc("doc-xyz") is False, (
                 f"delete_doc should return False when {failing_key} fails"
             )
 
@@ -233,62 +237,62 @@ def _config_with_ontologies(*names: str) -> CorpusConfig:
     )
 
 
-def test_backfill_ontology_iterates_each_enabled_ontology():
+async def test_backfill_ontology_iterates_each_enabled_ontology():
     """Both enabled ontologies get ensure_imported + link calls."""
     kg_mock = MagicMock()
-    kg_mock.ensure_ontology_imported.return_value = (False, True)
-    kg_mock.link_entities_to_ontology.return_value = 7
+    kg_mock.ensure_ontology_imported = AsyncMock(return_value=(False, True))
+    kg_mock.link_entities_to_ontology = AsyncMock(return_value=7)
 
     config = _config_with_ontologies("mesh", "go")
     with patch(
         "knowledge_agent.ingestion.pipeline.get_kg_client",
         return_value=kg_mock,
     ):
-        results = backfill_ontology("doc-xyz", config)
+        results = await backfill_ontology("doc-xyz", config)
 
     assert set(results.keys()) == {"mesh", "go"}
     assert kg_mock.ensure_ontology_imported.call_count == 2
     assert kg_mock.link_entities_to_ontology.call_count == 2
 
 
-def test_backfill_ontology_passes_doc_id_and_matching_strategy():
+async def test_backfill_ontology_passes_doc_id_and_matching_strategy():
     """Link call must scope to doc_id and use the per-ontology matching."""
     kg_mock = MagicMock()
-    kg_mock.ensure_ontology_imported.return_value = (False, True)
-    kg_mock.link_entities_to_ontology.return_value = 3
+    kg_mock.ensure_ontology_imported = AsyncMock(return_value=(False, True))
+    kg_mock.link_entities_to_ontology = AsyncMock(return_value=3)
 
     config = _config_with_ontologies("mesh")
     with patch(
         "knowledge_agent.ingestion.pipeline.get_kg_client",
         return_value=kg_mock,
     ):
-        backfill_ontology("doc-xyz", config)
+        await backfill_ontology("doc-xyz", config)
 
     kg_mock.link_entities_to_ontology.assert_called_once_with(
         "mesh", "exact", doc_id="doc-xyz"
     )
 
 
-def test_backfill_ontology_result_shape_matches_full_ingest():
+async def test_backfill_ontology_result_shape_matches_full_ingest():
     """Per-ontology dict has the same keys as IngestResult.kg_ontology_results."""
     kg_mock = MagicMock()
     # was_imported=False (just ran the import) -> "imported"=True in result.
-    kg_mock.ensure_ontology_imported.return_value = False
-    kg_mock.link_entities_to_ontology.return_value = 4
+    kg_mock.ensure_ontology_imported = AsyncMock(return_value=False)
+    kg_mock.link_entities_to_ontology = AsyncMock(return_value=4)
 
     config = _config_with_ontologies("mesh")
     with patch(
         "knowledge_agent.ingestion.pipeline.get_kg_client",
         return_value=kg_mock,
     ):
-        results = backfill_ontology("doc-xyz", config)
+        results = await backfill_ontology("doc-xyz", config)
 
     assert results == {
         "mesh": {"imported": True, "import_ok": True, "n_links": 4},
     }
 
 
-def test_backfill_ontology_one_ontology_failure_does_not_block_others():
+async def test_backfill_ontology_one_ontology_failure_does_not_block_others():
     """If MeSH ensure_imported raises, GO still gets a link call."""
     kg_mock = MagicMock()
 
@@ -297,15 +301,15 @@ def test_backfill_ontology_one_ontology_failure_does_not_block_others():
             raise RuntimeError("network down")
         return False
 
-    kg_mock.ensure_ontology_imported.side_effect = ensure_side_effect
-    kg_mock.link_entities_to_ontology.return_value = 2
+    kg_mock.ensure_ontology_imported = AsyncMock(side_effect=ensure_side_effect)
+    kg_mock.link_entities_to_ontology = AsyncMock(return_value=2)
 
     config = _config_with_ontologies("mesh", "go")
     with patch(
         "knowledge_agent.ingestion.pipeline.get_kg_client",
         return_value=kg_mock,
     ):
-        results = backfill_ontology("doc-xyz", config)
+        results = await backfill_ontology("doc-xyz", config)
 
     # MeSH ensure_imported raised - import_ok False, no link call.
     assert results["mesh"]["import_ok"] is False
@@ -319,7 +323,7 @@ def test_backfill_ontology_one_ontology_failure_does_not_block_others():
     )
 
 
-def test_backfill_ontology_empty_when_no_ontology_layers_enabled():
+async def test_backfill_ontology_empty_when_no_ontology_layers_enabled():
     """No enabled ontologies -> empty result, no client calls."""
     kg_mock = MagicMock()
     config = CorpusConfig(
@@ -332,7 +336,7 @@ def test_backfill_ontology_empty_when_no_ontology_layers_enabled():
         "knowledge_agent.ingestion.pipeline.get_kg_client",
         return_value=kg_mock,
     ):
-        results = backfill_ontology("doc-xyz", config)
+        results = await backfill_ontology("doc-xyz", config)
 
     assert results == {}
     kg_mock.ensure_ontology_imported.assert_not_called()
@@ -399,20 +403,20 @@ def _row_with(**overrides: Any) -> dict[str, Any]:
     return row
 
 
-def test_resolve_openalex_aborts_when_no_chunks_in_lancedb():
+async def test_resolve_openalex_aborts_when_no_chunks_in_lancedb():
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = None
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=None)
     with patch(
         "knowledge_agent.ingestion.metadata_resolution.get_search_client",
         return_value=search_mock,
     ):
-        result = resolve_openalex("docZ")
+        result = await resolve_openalex("docZ")
 
     assert result["work_resolved"] is False
     assert result["metadata_patched"] is False
 
 
-def test_resolve_openalex_skipped_when_manual_and_skip_manual_true():
+async def test_resolve_openalex_skipped_when_manual_and_skip_manual_true():
     """skip_manual=True + status=manual -> no-op, no client calls."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
@@ -423,14 +427,14 @@ def test_resolve_openalex_skipped_when_manual_and_skip_manual_true():
               return_value=search_mock),
         patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi") as rd,
     ):
-        result = resolve_openalex("docZ", skip_manual=True)
+        result = await resolve_openalex("docZ", skip_manual=True)
 
     assert result["skipped"] is True
     assert result["work_resolved"] is False
     rd.assert_not_called()
 
 
-def test_resolve_openalex_not_skipped_when_manual_and_skip_manual_false():
+async def test_resolve_openalex_not_skipped_when_manual_and_skip_manual_false():
     """skip_manual=False + status=manual -> proceeds and overwrites."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
@@ -443,24 +447,24 @@ def test_resolve_openalex_not_skipped_when_manual_and_skip_manual_false():
         patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
               return_value=work),
     ):
-        result = resolve_openalex("docZ", skip_manual=False)
+        result = await resolve_openalex("docZ", skip_manual=False)
 
     assert result["skipped"] is False
     assert result["work_resolved"] is True
 
 
-def test_resolve_openalex_uses_stored_doi_first():
+async def test_resolve_openalex_uses_stored_doi_first():
     """Stored DOI is the fast path; resolve_metadata is not called."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(doi="10.1/stored"),
     ]
-    search_mock.update_doc_metadata.return_value = True
+    search_mock.update_doc_metadata = AsyncMock(return_value=True)
     kg_mock = MagicMock()
-    kg_mock.write_citations.return_value = True
-    kg_mock.write_authorships.return_value = True
-    kg_mock.write_venue.return_value = True
-    kg_mock.write_topics.return_value = True
+    kg_mock.write_citations = AsyncMock(return_value=True)
+    kg_mock.write_authorships = AsyncMock(return_value=True)
+    kg_mock.write_venue = AsyncMock(return_value=True)
+    kg_mock.write_topics = AsyncMock(return_value=True)
 
     work = {"id": "W2", "title": "Found"}
     with (
@@ -472,25 +476,25 @@ def test_resolve_openalex_uses_stored_doi_first():
               return_value=work) as rd,
         patch("knowledge_agent.ingestion.metadata_resolution.resolve_metadata") as rm,
     ):
-        result = resolve_openalex("docZ")
+        result = await resolve_openalex("docZ")
 
     rd.assert_called_once_with("10.1/stored")
     rm.assert_not_called()  # stored DOI succeeded; fallback skipped
     assert result["work_resolved"] is True
 
 
-def test_resolve_openalex_falls_back_to_chunk_extraction_when_stored_doi_fails():
+async def test_resolve_openalex_falls_back_to_chunk_extraction_when_stored_doi_fails():
     """Stored DOI doesn't resolve -> fall through to resolve_metadata."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(doi="10.1/stale"),
     ]
-    search_mock.update_doc_metadata.return_value = True
+    search_mock.update_doc_metadata = AsyncMock(return_value=True)
     kg_mock = MagicMock()
-    kg_mock.write_citations.return_value = True
-    kg_mock.write_authorships.return_value = True
-    kg_mock.write_venue.return_value = True
-    kg_mock.write_topics.return_value = True
+    kg_mock.write_citations = AsyncMock(return_value=True)
+    kg_mock.write_authorships = AsyncMock(return_value=True)
+    kg_mock.write_venue = AsyncMock(return_value=True)
+    kg_mock.write_topics = AsyncMock(return_value=True)
 
     work = {"id": "W3", "title": "Found Via Extraction"}
     with (
@@ -503,13 +507,13 @@ def test_resolve_openalex_falls_back_to_chunk_extraction_when_stored_doi_fails()
         patch("knowledge_agent.ingestion.metadata_resolution.resolve_metadata",
               return_value=work) as rm,
     ):
-        result = resolve_openalex("docZ")
+        result = await resolve_openalex("docZ")
 
     rm.assert_called_once()
     assert result["work_resolved"] is True
 
 
-def test_resolve_openalex_uses_extraction_when_no_stored_doi():
+async def test_resolve_openalex_uses_extraction_when_no_stored_doi():
     """No stored doi -> skip resolve_doi, go to resolve_metadata."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
@@ -525,16 +529,16 @@ def test_resolve_openalex_uses_extraction_when_no_stored_doi():
         patch("knowledge_agent.ingestion.metadata_resolution.resolve_metadata",
               return_value=work) as rm,
     ):
-        resolve_openalex("docZ")
+        await resolve_openalex("docZ")
 
     rd.assert_not_called()  # no stored DOI to try
     rm.assert_called_once()
 
 
-def test_resolve_openalex_no_work_resolved_leaves_state_untouched():
+async def test_resolve_openalex_no_work_resolved_leaves_state_untouched():
     """Nothing resolves -> no LanceDB patch, no KG writes."""
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = [_row_with()]
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=[_row_with()])
     kg_mock = MagicMock()
     with (
         patch("knowledge_agent.ingestion.metadata_resolution.get_search_client",
@@ -546,7 +550,7 @@ def test_resolve_openalex_no_work_resolved_leaves_state_untouched():
         patch("knowledge_agent.ingestion.metadata_resolution.resolve_metadata",
               return_value=None),
     ):
-        result = resolve_openalex("docZ")
+        result = await resolve_openalex("docZ")
 
     assert result["work_resolved"] is False
     assert result["metadata_patched"] is False
@@ -556,18 +560,18 @@ def test_resolve_openalex_no_work_resolved_leaves_state_untouched():
     kg_mock.delete_doc_l1_l4_edges.assert_not_called()
 
 
-def test_resolve_openalex_paper_path_does_surgical_wipe_then_writes():
+async def test_resolve_openalex_paper_path_does_surgical_wipe_then_writes():
     """Successful resolve for Paper -> delete_doc_l1_l4_edges + 4 writes."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(doi="10.1/x", sub_label="Paper"),
     ]
-    search_mock.update_doc_metadata.return_value = True
+    search_mock.update_doc_metadata = AsyncMock(return_value=True)
     kg_mock = MagicMock()
-    kg_mock.write_citations.return_value = True
-    kg_mock.write_authorships.return_value = True
-    kg_mock.write_venue.return_value = True
-    kg_mock.write_topics.return_value = True
+    kg_mock.write_citations = AsyncMock(return_value=True)
+    kg_mock.write_authorships = AsyncMock(return_value=True)
+    kg_mock.write_venue = AsyncMock(return_value=True)
+    kg_mock.write_topics = AsyncMock(return_value=True)
     work = {"id": "W5", "title": "OK"}
 
     with (
@@ -578,7 +582,7 @@ def test_resolve_openalex_paper_path_does_surgical_wipe_then_writes():
         patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
               return_value=work),
     ):
-        result = resolve_openalex("docZ")
+        result = await resolve_openalex("docZ")
 
     assert result["kg_l1_l4_ok"] is True
     # Surgical wipe used - NOT delete_doc.
@@ -590,13 +594,13 @@ def test_resolve_openalex_paper_path_does_surgical_wipe_then_writes():
     kg_mock.write_topics.assert_called_once_with("docZ", work)
 
 
-def test_resolve_openalex_non_paper_patches_lancedb_only_skips_kg_writes():
+async def test_resolve_openalex_non_paper_patches_lancedb_only_skips_kg_writes():
     """sub_label != Paper -> LanceDB patched, no KG L1-L4 writes."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(doi="10.1/x", sub_label="Note"),
     ]
-    search_mock.update_doc_metadata.return_value = True
+    search_mock.update_doc_metadata = AsyncMock(return_value=True)
     kg_mock = MagicMock()
     work = {"id": "W6", "title": "Note resolved"}
 
@@ -608,7 +612,7 @@ def test_resolve_openalex_non_paper_patches_lancedb_only_skips_kg_writes():
         patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
               return_value=work),
     ):
-        result = resolve_openalex("docZ")
+        result = await resolve_openalex("docZ")
 
     assert result["metadata_patched"] is True
     assert result["kg_l1_l4_ok"] is False  # KG L1-L4 not applicable
@@ -617,18 +621,18 @@ def test_resolve_openalex_non_paper_patches_lancedb_only_skips_kg_writes():
     kg_mock.write_citations.assert_not_called()
 
 
-def test_resolve_openalex_patches_with_enriched_status():
+async def test_resolve_openalex_patches_with_enriched_status():
     """metadata_status in the patch dict becomes 'enriched' after success."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(doi="10.1/x", metadata_status="pending"),
     ]
-    search_mock.update_doc_metadata.return_value = True
+    search_mock.update_doc_metadata = AsyncMock(return_value=True)
     kg_mock = MagicMock()
-    kg_mock.write_citations.return_value = True
-    kg_mock.write_authorships.return_value = True
-    kg_mock.write_venue.return_value = True
-    kg_mock.write_topics.return_value = True
+    kg_mock.write_citations = AsyncMock(return_value=True)
+    kg_mock.write_authorships = AsyncMock(return_value=True)
+    kg_mock.write_venue = AsyncMock(return_value=True)
+    kg_mock.write_topics = AsyncMock(return_value=True)
     work = {"id": "W7", "title": "Resolved", "publication_year": 2026}
 
     with (
@@ -639,7 +643,7 @@ def test_resolve_openalex_patches_with_enriched_status():
         patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
               return_value=work),
     ):
-        result = resolve_openalex("docZ")
+        result = await resolve_openalex("docZ")
 
     assert result["new_status"] == "enriched"
     # LanceDB patch fields include enriched status + the work-derived cols.
@@ -655,33 +659,33 @@ def test_resolve_openalex_patches_with_enriched_status():
 # ---- lookup_known_doi ----
 
 
-def test_lookup_known_doi_empty_doi_returns_failure():
+async def test_lookup_known_doi_empty_doi_returns_failure():
     """Empty DOI is a programming error - return failure, no client calls."""
     search_mock = MagicMock()
     with patch(
         "knowledge_agent.ingestion.metadata_resolution.get_search_client",
         return_value=search_mock,
     ):
-        result = lookup_known_doi("docZ", "")
+        result = await lookup_known_doi("docZ", "")
     assert result["work_resolved"] is False
     search_mock.get_chunks_by_doc_id.assert_not_called()
 
 
-def test_lookup_known_doi_no_chunks_returns_failure():
+async def test_lookup_known_doi_no_chunks_returns_failure():
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = None
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=None)
     with patch(
         "knowledge_agent.ingestion.metadata_resolution.get_search_client",
         return_value=search_mock,
     ):
-        result = lookup_known_doi("docZ", "10.1/x")
+        result = await lookup_known_doi("docZ", "10.1/x")
     assert result["work_resolved"] is False
 
 
-def test_lookup_known_doi_never_falls_back_to_chunk_extraction():
+async def test_lookup_known_doi_never_falls_back_to_chunk_extraction():
     """resolve_doi returning None -> failure, NOT a resolve_metadata call."""
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = [_row_with()]
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=[_row_with()])
     with (
         patch("knowledge_agent.ingestion.metadata_resolution.get_search_client",
               return_value=search_mock),
@@ -689,7 +693,7 @@ def test_lookup_known_doi_never_falls_back_to_chunk_extraction():
               return_value=None),
         patch("knowledge_agent.ingestion.metadata_resolution.resolve_metadata") as rm,
     ):
-        result = lookup_known_doi("docZ", "10.1/nonexistent")
+        result = await lookup_known_doi("docZ", "10.1/nonexistent")
 
     assert result["work_resolved"] is False
     # Critical contract: NO fallback to chunk-text extraction. The user
@@ -698,18 +702,18 @@ def test_lookup_known_doi_never_falls_back_to_chunk_extraction():
     rm.assert_not_called()
 
 
-def test_lookup_known_doi_happy_path_patches_lancedb_and_kg():
+async def test_lookup_known_doi_happy_path_patches_lancedb_and_kg():
     """Successful resolve -> LanceDB patch + surgical KG L1-L4 rewrite."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(sub_label="Paper", doi=None),
     ]
-    search_mock.update_doc_metadata.return_value = True
+    search_mock.update_doc_metadata = AsyncMock(return_value=True)
     kg_mock = MagicMock()
-    kg_mock.write_citations.return_value = True
-    kg_mock.write_authorships.return_value = True
-    kg_mock.write_venue.return_value = True
-    kg_mock.write_topics.return_value = True
+    kg_mock.write_citations = AsyncMock(return_value=True)
+    kg_mock.write_authorships = AsyncMock(return_value=True)
+    kg_mock.write_venue = AsyncMock(return_value=True)
+    kg_mock.write_topics = AsyncMock(return_value=True)
     work = {"id": "W11", "title": "User-Supplied"}
 
     with (
@@ -720,7 +724,7 @@ def test_lookup_known_doi_happy_path_patches_lancedb_and_kg():
         patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
               return_value=work) as rd,
     ):
-        result = lookup_known_doi("docZ", "10.1/typed-by-user")
+        result = await lookup_known_doi("docZ", "10.1/typed-by-user")
 
     rd.assert_called_once_with("10.1/typed-by-user")
     assert result["work_resolved"] is True
@@ -730,13 +734,13 @@ def test_lookup_known_doi_happy_path_patches_lancedb_and_kg():
     kg_mock.delete_doc_l1_l4_edges.assert_called_once_with("docZ")
 
 
-def test_lookup_known_doi_non_paper_patches_lancedb_only():
+async def test_lookup_known_doi_non_paper_patches_lancedb_only():
     """Non-Paper sub_label -> LanceDB patched, KG L1-L4 skipped."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(sub_label="Note"),
     ]
-    search_mock.update_doc_metadata.return_value = True
+    search_mock.update_doc_metadata = AsyncMock(return_value=True)
     kg_mock = MagicMock()
     work = {"id": "W12", "title": "Note"}
 
@@ -748,25 +752,25 @@ def test_lookup_known_doi_non_paper_patches_lancedb_only():
         patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
               return_value=work),
     ):
-        result = lookup_known_doi("docZ", "10.1/note")
+        result = await lookup_known_doi("docZ", "10.1/note")
 
     assert result["metadata_patched"] is True
     assert result["kg_l1_l4_ok"] is False
     kg_mock.delete_doc_l1_l4_edges.assert_not_called()
 
 
-def test_lookup_known_doi_has_no_skip_manual_concept():
+async def test_lookup_known_doi_has_no_skip_manual_concept():
     """Even manual-edited docs proceed (clicking the DOI button is consent)."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(metadata_status="manual", sub_label="Paper"),
     ]
-    search_mock.update_doc_metadata.return_value = True
+    search_mock.update_doc_metadata = AsyncMock(return_value=True)
     kg_mock = MagicMock()
-    kg_mock.write_citations.return_value = True
-    kg_mock.write_authorships.return_value = True
-    kg_mock.write_venue.return_value = True
-    kg_mock.write_topics.return_value = True
+    kg_mock.write_citations = AsyncMock(return_value=True)
+    kg_mock.write_authorships = AsyncMock(return_value=True)
+    kg_mock.write_venue = AsyncMock(return_value=True)
+    kg_mock.write_topics = AsyncMock(return_value=True)
     work = {"id": "W13", "title": "Replaced manual"}
 
     with (
@@ -777,7 +781,7 @@ def test_lookup_known_doi_has_no_skip_manual_concept():
         patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
               return_value=work),
     ):
-        result = lookup_known_doi("docZ", "10.1/new")
+        result = await lookup_known_doi("docZ", "10.1/new")
 
     assert result["work_resolved"] is True
     assert result["metadata_patched"] is True
@@ -786,31 +790,31 @@ def test_lookup_known_doi_has_no_skip_manual_concept():
 # ---- re_embed ----
 
 
-def test_re_embed_aborts_when_lancedb_read_fails():
+async def test_re_embed_aborts_when_lancedb_read_fails():
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = None
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=None)
     with patch(
         "knowledge_agent.ingestion.pipeline.get_search_client",
         return_value=search_mock,
     ):
-        result = re_embed("docZ")
+        result = await re_embed("docZ")
 
     assert result == {"embed_ok": False, "lancedb_ok": False, "n_chunks": 0}
 
 
-def test_re_embed_skips_when_no_chunks_found():
+async def test_re_embed_skips_when_no_chunks_found():
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = []
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=[])
     with patch(
         "knowledge_agent.ingestion.pipeline.get_search_client",
         return_value=search_mock,
     ):
-        result = re_embed("docZ")
+        result = await re_embed("docZ")
 
     assert result == {"embed_ok": False, "lancedb_ok": False, "n_chunks": 0}
 
 
-def test_re_embed_returns_embed_false_when_embedder_fails():
+async def test_re_embed_returns_embed_false_when_embedder_fails():
     """embed_texts raising -> embed_ok False; no LanceDB writes.
     Under the typed-errors contract embed_texts raises on Voyage
     failure; re_embed's wrapper converts that into the dict signal."""
@@ -819,14 +823,13 @@ def test_re_embed_returns_embed_false_when_embedder_fails():
          "text": "alpha", "embedding": [0.0] * 4},
     ]
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = rows
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
     with (
         patch("knowledge_agent.ingestion.pipeline.get_search_client",
               return_value=search_mock),
-        patch("knowledge_agent.ingestion.pipeline.embed_texts",
-              side_effect=RuntimeError("voyage boom")),
+        patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, side_effect=RuntimeError("voyage boom")),
     ):
-        result = re_embed("docZ")
+        result = await re_embed("docZ")
 
     assert result["embed_ok"] is False
     assert result["lancedb_ok"] is False
@@ -835,7 +838,7 @@ def test_re_embed_returns_embed_false_when_embedder_fails():
     search_mock.write_chunks.assert_not_called()
 
 
-def test_re_embed_happy_path_swaps_embeddings_and_rewrites():
+async def test_re_embed_happy_path_swaps_embeddings_and_rewrites():
     """Reads rows, re-embeds text, mutates embeddings, delete+write."""
     rows = [
         {"chunk_id": "docZ#0", "doc_id": "docZ", "chunk_index": 0,
@@ -844,8 +847,8 @@ def test_re_embed_happy_path_swaps_embeddings_and_rewrites():
          "text": "beta",  "embedding": [0.3, 0.4], "title": "old"},
     ]
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = rows
-    search_mock.write_chunks.return_value = True
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
+    search_mock.write_chunks = AsyncMock(return_value=True)
 
     new_vecs = [[0.9, 0.8], [0.7, 0.6]]
     settings_mock = MagicMock()
@@ -854,12 +857,11 @@ def test_re_embed_happy_path_swaps_embeddings_and_rewrites():
     with (
         patch("knowledge_agent.ingestion.pipeline.get_search_client",
               return_value=search_mock),
-        patch("knowledge_agent.ingestion.pipeline.embed_texts",
-              return_value=new_vecs),
+        patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=new_vecs),
         patch("knowledge_agent.ingestion.pipeline.get_settings",
               return_value=settings_mock),
     ):
-        result = re_embed("docZ")
+        result = await re_embed("docZ")
 
     assert result["embed_ok"] is True
     assert result["lancedb_ok"] is True
@@ -876,31 +878,30 @@ def test_re_embed_happy_path_swaps_embeddings_and_rewrites():
     search_mock.ensure_indexes.assert_not_called()
 
 
-def test_re_embed_rebuilds_index_when_setting_enabled():
+async def test_re_embed_rebuilds_index_when_setting_enabled():
     rows = [
         {"chunk_id": "docZ#0", "doc_id": "docZ", "chunk_index": 0,
          "text": "alpha", "embedding": [0.0]},
     ]
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = rows
-    search_mock.write_chunks.return_value = True
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
+    search_mock.write_chunks = AsyncMock(return_value=True)
     settings_mock = MagicMock()
     settings_mock.optimize_indexes_per_ingest = True
 
     with (
         patch("knowledge_agent.ingestion.pipeline.get_search_client",
               return_value=search_mock),
-        patch("knowledge_agent.ingestion.pipeline.embed_texts",
-              return_value=[[1.0]]),
+        patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=[[1.0]]),
         patch("knowledge_agent.ingestion.pipeline.get_settings",
               return_value=settings_mock),
     ):
-        re_embed("docZ")
+        await re_embed("docZ")
 
     search_mock.ensure_indexes.assert_called_once()
 
 
-def test_re_embed_skips_index_rebuild_when_lancedb_write_fails():
+async def test_re_embed_skips_index_rebuild_when_lancedb_write_fails():
     """Don't waste an index rebuild on a doc whose write didn't land.
 
     write_chunks raising under the typed-errors contract flips
@@ -911,20 +912,19 @@ def test_re_embed_skips_index_rebuild_when_lancedb_write_fails():
          "text": "a", "embedding": [0.0]},
     ]
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = rows
-    search_mock.write_chunks.side_effect = RuntimeError("boom")
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
+    search_mock.write_chunks = AsyncMock(side_effect=RuntimeError("boom"))
     settings_mock = MagicMock()
     settings_mock.optimize_indexes_per_ingest = True
 
     with (
         patch("knowledge_agent.ingestion.pipeline.get_search_client",
               return_value=search_mock),
-        patch("knowledge_agent.ingestion.pipeline.embed_texts",
-              return_value=[[1.0]]),
+        patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=[[1.0]]),
         patch("knowledge_agent.ingestion.pipeline.get_settings",
               return_value=settings_mock),
     ):
-        re_embed("docZ")
+        await re_embed("docZ")
 
     search_mock.ensure_indexes.assert_not_called()
 
@@ -951,7 +951,7 @@ def _chunk_row(
     }
 
 
-def test_backfill_chunks_no_op_when_layer_disabled():
+async def test_backfill_chunks_no_op_when_layer_disabled():
     config = CorpusConfig(
         domain="biomedical",
         allowed_types=["Paper"],
@@ -965,15 +965,15 @@ def test_backfill_chunks_no_op_when_layer_disabled():
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
     ):
-        result = backfill_chunks("docZ", config)
+        result = await backfill_chunks("docZ", config)
 
     assert result == {"chunks_ok": False, "entities": {}}
     search_mock.get_chunks_by_doc_id.assert_not_called()
 
 
-def test_backfill_chunks_aborts_when_lancedb_read_fails():
+async def test_backfill_chunks_aborts_when_lancedb_read_fails():
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = None
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=None)
     kg_mock = MagicMock()
     config = _entities_enabled_config()
     with (
@@ -982,16 +982,16 @@ def test_backfill_chunks_aborts_when_lancedb_read_fails():
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
     ):
-        result = backfill_chunks("docZ", config)
+        result = await backfill_chunks("docZ", config)
 
     assert result["chunks_ok"] is False
     kg_mock.delete_chunks_by_doc_id.assert_not_called()
     kg_mock.write_chunks.assert_not_called()
 
 
-def test_backfill_chunks_skips_when_no_chunks_found():
+async def test_backfill_chunks_skips_when_no_chunks_found():
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = []
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=[])
     kg_mock = MagicMock()
     config = _entities_enabled_config()
     with (
@@ -1000,22 +1000,22 @@ def test_backfill_chunks_skips_when_no_chunks_found():
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
     ):
-        result = backfill_chunks("docZ", config)
+        result = await backfill_chunks("docZ", config)
 
     assert result == {"chunks_ok": False, "entities": {}}
     kg_mock.write_chunks.assert_not_called()
 
 
-def test_backfill_chunks_happy_path_rewrites_kg_and_chains_into_entities():
+async def test_backfill_chunks_happy_path_rewrites_kg_and_chains_into_entities():
     rows = [
         _chunk_row(0, "hello", section="Intro", page=1),
         _chunk_row(1, "world", section="Methods", page=2),
     ]
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = rows
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
     kg_mock = MagicMock()
-    kg_mock.write_chunks.return_value = True
-    kg_mock.write_entities.return_value = True
+    kg_mock.write_chunks = AsyncMock(return_value=True)
+    kg_mock.write_entities = AsyncMock(return_value=True)
     extractor_mock = MagicMock()
     extractor_mock.extract.return_value = []
 
@@ -1029,7 +1029,7 @@ def test_backfill_chunks_happy_path_rewrites_kg_and_chains_into_entities():
         patch("knowledge_agent.ingestion.pipeline.get_extractor",
               return_value=extractor_mock),
     ):
-        result = backfill_chunks("docZ", config)
+        result = await backfill_chunks("docZ", config)
 
     assert result["chunks_ok"] is True
     # Old KG chunks wiped first.
@@ -1048,16 +1048,16 @@ def test_backfill_chunks_happy_path_rewrites_kg_and_chains_into_entities():
     assert "entities_ok" in result["entities"]
 
 
-def test_backfill_chunks_recovers_labels_from_first_row():
+async def test_backfill_chunks_recovers_labels_from_first_row():
     """main_label/sub_label come from row[0] (all rows share these fields)."""
     rows = [
         _chunk_row(0, "x", main_label="Artifact", sub_label="Dataset"),
         _chunk_row(1, "y", main_label="Artifact", sub_label="Dataset"),
     ]
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = rows
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
     kg_mock = MagicMock()
-    kg_mock.write_chunks.return_value = True
+    kg_mock.write_chunks = AsyncMock(return_value=True)
     config = CorpusConfig(
         domain="biomedical",
         allowed_types=["Dataset"],
@@ -1070,7 +1070,7 @@ def test_backfill_chunks_recovers_labels_from_first_row():
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
     ):
-        backfill_chunks("docZ", config)
+        await backfill_chunks("docZ", config)
 
     args, _ = kg_mock.write_chunks.call_args
     _, _, main_label, sub_label = args
@@ -1078,14 +1078,14 @@ def test_backfill_chunks_recovers_labels_from_first_row():
     assert sub_label == "Dataset"
 
 
-def test_backfill_chunks_skips_entities_when_kg_write_fails():
+async def test_backfill_chunks_skips_entities_when_kg_write_fails():
     """write_chunks raising -> orchestrator records chunks_ok=False and
     doesn't propagate downstream on a known-broken layer."""
     rows = [_chunk_row(0, "a")]
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = rows
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
     kg_mock = MagicMock()
-    kg_mock.write_chunks.side_effect = RuntimeError("boom")
+    kg_mock.write_chunks = AsyncMock(side_effect=RuntimeError("boom"))
     config = _entities_enabled_config()
 
     with (
@@ -1094,7 +1094,7 @@ def test_backfill_chunks_skips_entities_when_kg_write_fails():
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
     ):
-        result = backfill_chunks("docZ", config)
+        result = await backfill_chunks("docZ", config)
 
     assert result["chunks_ok"] is False
     assert result["entities"] == {}
@@ -1122,7 +1122,7 @@ def _entities_enabled_config(*ontology_names: str) -> CorpusConfig:
     )
 
 
-def test_backfill_entities_no_op_when_layer_disabled():
+async def test_backfill_entities_no_op_when_layer_disabled():
     """entities=False -> immediate return, no client calls."""
     config = CorpusConfig(
         domain="biomedical",
@@ -1137,7 +1137,7 @@ def test_backfill_entities_no_op_when_layer_disabled():
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
     ):
-        result = backfill_entities("doc-1", config)
+        result = await backfill_entities("doc-1", config)
 
     assert result == {
         "entities_ok": False, "n_mentions": 0, "ontology": {}
@@ -1146,10 +1146,10 @@ def test_backfill_entities_no_op_when_layer_disabled():
     kg_mock.delete_entities_by_doc_id.assert_not_called()
 
 
-def test_backfill_entities_aborts_when_lancedb_read_fails():
+async def test_backfill_entities_aborts_when_lancedb_read_fails():
     """LanceDB None -> abort, no KG side effects."""
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = None
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=None)
     kg_mock = MagicMock()
     config = _entities_enabled_config()
     with (
@@ -1158,17 +1158,17 @@ def test_backfill_entities_aborts_when_lancedb_read_fails():
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
     ):
-        result = backfill_entities("doc-1", config)
+        result = await backfill_entities("doc-1", config)
 
     assert result["entities_ok"] is False
     kg_mock.delete_entities_by_doc_id.assert_not_called()
     kg_mock.write_entities.assert_not_called()
 
 
-def test_backfill_entities_skips_when_no_chunks_found():
+async def test_backfill_entities_skips_when_no_chunks_found():
     """Doc has no chunks in LanceDB -> nothing to backfill."""
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = []
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=[])
     kg_mock = MagicMock()
     config = _entities_enabled_config()
     with (
@@ -1177,14 +1177,14 @@ def test_backfill_entities_skips_when_no_chunks_found():
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
     ):
-        result = backfill_entities("doc-1", config)
+        result = await backfill_entities("doc-1", config)
 
     assert result["entities_ok"] is False
     assert result["n_mentions"] == 0
     kg_mock.delete_entities_by_doc_id.assert_not_called()
 
 
-def test_backfill_entities_happy_path_extracts_and_writes():
+async def test_backfill_entities_happy_path_extracts_and_writes():
     """Reads chunks, deletes old entities, writes new, returns mention count."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
@@ -1192,7 +1192,7 @@ def test_backfill_entities_happy_path_extracts_and_writes():
         {"chunk_id": "doc-1#1", "text": "beta",  "chunk_index": 1},
     ]
     kg_mock = MagicMock()
-    kg_mock.write_entities.return_value = True
+    kg_mock.write_entities = AsyncMock(return_value=True)
 
     extractor_mock = MagicMock()
     # Two mentions in chunk 0, one in chunk 1.
@@ -1211,7 +1211,7 @@ def test_backfill_entities_happy_path_extracts_and_writes():
         patch("knowledge_agent.ingestion.pipeline.get_extractor",
               return_value=extractor_mock),
     ):
-        result = backfill_entities("doc-1", config)
+        result = await backfill_entities("doc-1", config)
 
     assert result["entities_ok"] is True
     assert result["n_mentions"] == 3
@@ -1226,7 +1226,7 @@ def test_backfill_entities_happy_path_extracts_and_writes():
     assert len(chunk_mentions[1][1]) == 1
 
 
-def test_backfill_entities_one_chunk_extraction_failure_does_not_poison_others():
+async def test_backfill_entities_one_chunk_extraction_failure_does_not_poison_others():
     """Extractor raising on one chunk -> that chunk gets [], others run normally."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
@@ -1234,7 +1234,7 @@ def test_backfill_entities_one_chunk_extraction_failure_does_not_poison_others()
         {"chunk_id": "doc-1#1", "text": "beta",  "chunk_index": 1},
     ]
     kg_mock = MagicMock()
-    kg_mock.write_entities.return_value = True
+    kg_mock.write_entities = AsyncMock(return_value=True)
 
     extractor_mock = MagicMock()
     # First chunk extraction raises; second succeeds.
@@ -1252,7 +1252,7 @@ def test_backfill_entities_one_chunk_extraction_failure_does_not_poison_others()
         patch("knowledge_agent.ingestion.pipeline.get_extractor",
               return_value=extractor_mock),
     ):
-        result = backfill_entities("doc-1", config)
+        result = await backfill_entities("doc-1", config)
 
     assert result["entities_ok"] is True
     # Only chunk 1 produced a mention; chunk 0 contributed 0.
@@ -1263,16 +1263,16 @@ def test_backfill_entities_one_chunk_extraction_failure_does_not_poison_others()
     assert len(chunk_mentions[1][1]) == 1
 
 
-def test_backfill_entities_chains_into_backfill_ontology_when_entities_ok():
+async def test_backfill_entities_chains_into_backfill_ontology_when_entities_ok():
     """Happy path with ontology enabled -> backfill_ontology runs after write."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
         {"chunk_id": "doc-1#0", "text": "alpha", "chunk_index": 0},
     ]
     kg_mock = MagicMock()
-    kg_mock.write_entities.return_value = True
-    kg_mock.ensure_ontology_imported.return_value = False
-    kg_mock.link_entities_to_ontology.return_value = 5
+    kg_mock.write_entities = AsyncMock(return_value=True)
+    kg_mock.ensure_ontology_imported = AsyncMock(return_value=False)
+    kg_mock.link_entities_to_ontology = AsyncMock(return_value=5)
 
     extractor_mock = MagicMock()
     extractor_mock.extract.return_value = [
@@ -1289,7 +1289,7 @@ def test_backfill_entities_chains_into_backfill_ontology_when_entities_ok():
         patch("knowledge_agent.ingestion.pipeline.get_extractor",
               return_value=extractor_mock),
     ):
-        result = backfill_entities("doc-1", config)
+        result = await backfill_entities("doc-1", config)
 
     assert result["ontology"] == {
         "mesh": {"imported": True, "import_ok": True, "n_links": 5},
@@ -1299,7 +1299,7 @@ def test_backfill_entities_chains_into_backfill_ontology_when_entities_ok():
     )
 
 
-def test_backfill_entities_skips_ontology_when_entity_write_fails():
+async def test_backfill_entities_skips_ontology_when_entity_write_fails():
     """write_entities raising -> orchestrator records entities_ok=False
     and doesn't run ontology linking on stale state."""
     search_mock = MagicMock()
@@ -1307,7 +1307,7 @@ def test_backfill_entities_skips_ontology_when_entity_write_fails():
         {"chunk_id": "doc-1#0", "text": "alpha", "chunk_index": 0},
     ]
     kg_mock = MagicMock()
-    kg_mock.write_entities.side_effect = RuntimeError("boom")  # fail
+    kg_mock.write_entities = AsyncMock(side_effect=RuntimeError("boom"))
 
     extractor_mock = MagicMock()
     extractor_mock.extract.return_value = []
@@ -1321,7 +1321,7 @@ def test_backfill_entities_skips_ontology_when_entity_write_fails():
         patch("knowledge_agent.ingestion.pipeline.get_extractor",
               return_value=extractor_mock),
     ):
-        result = backfill_entities("doc-1", config)
+        result = await backfill_entities("doc-1", config)
 
     assert result["entities_ok"] is False
     assert result["ontology"] == {}
@@ -1343,7 +1343,7 @@ def _triples_enabled_config() -> CorpusConfig:
     )
 
 
-def test_backfill_triples_no_op_when_layer_disabled():
+async def test_backfill_triples_no_op_when_layer_disabled():
     """triples=False -> immediate return, no client calls."""
     search_mock = MagicMock()
     kg_mock = MagicMock()
@@ -1355,16 +1355,16 @@ def test_backfill_triples_no_op_when_layer_disabled():
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
     ):
-        result = backfill_triples("doc-x", config)
+        result = await backfill_triples("doc-x", config)
 
     assert result == {"triples_ok": False, "n_triples": 0}
     search_mock.get_chunks_by_doc_id.assert_not_called()
     kg_mock.write_triples.assert_not_called()
 
 
-def test_backfill_triples_aborts_when_lancedb_read_fails():
+async def test_backfill_triples_aborts_when_lancedb_read_fails():
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = None
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=None)
     kg_mock = MagicMock()
     config = _triples_enabled_config()
 
@@ -1374,16 +1374,16 @@ def test_backfill_triples_aborts_when_lancedb_read_fails():
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
     ):
-        result = backfill_triples("doc-x", config)
+        result = await backfill_triples("doc-x", config)
 
     assert result == {"triples_ok": False, "n_triples": 0}
     kg_mock.delete_triples_by_doc_id.assert_not_called()
     kg_mock.write_triples.assert_not_called()
 
 
-def test_backfill_triples_skips_when_no_chunks_found():
+async def test_backfill_triples_skips_when_no_chunks_found():
     search_mock = MagicMock()
-    search_mock.get_chunks_by_doc_id.return_value = []
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=[])
     kg_mock = MagicMock()
     config = _triples_enabled_config()
 
@@ -1393,13 +1393,13 @@ def test_backfill_triples_skips_when_no_chunks_found():
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
     ):
-        result = backfill_triples("doc-x", config)
+        result = await backfill_triples("doc-x", config)
 
     assert result == {"triples_ok": False, "n_triples": 0}
     kg_mock.write_triples.assert_not_called()
 
 
-def test_backfill_triples_happy_path_extracts_and_writes():
+async def test_backfill_triples_happy_path_extracts_and_writes():
     """Chunks + entities present -> LLM extracts -> write_triples called."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
@@ -1409,7 +1409,7 @@ def test_backfill_triples_happy_path_extracts_and_writes():
     kg_mock.get_entities_by_chunk.return_value = {
         "doc-1#0": [("brca1", "GENE"), ("tp53", "GENE")],
     }
-    kg_mock.write_triples.return_value = True
+    kg_mock.write_triples = AsyncMock(return_value=True)
 
     triple = ExtractedTriple(
         subject_key="brca1",
@@ -1429,7 +1429,7 @@ def test_backfill_triples_happy_path_extracts_and_writes():
         patch("knowledge_agent.ingestion.pipeline.triples_extractor.extract",
               return_value=[triple]) as mock_extract,
     ):
-        result = backfill_triples("doc-1", config)
+        result = await backfill_triples("doc-1", config)
 
     assert result["triples_ok"] is True
     assert result["n_triples"] == 1
@@ -1444,7 +1444,7 @@ def test_backfill_triples_happy_path_extracts_and_writes():
     )
 
 
-def test_backfill_triples_skips_chunk_with_empty_vocab():
+async def test_backfill_triples_skips_chunk_with_empty_vocab():
     """Chunk has no L6a entities -> no LLM call, but doc still written."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
@@ -1456,7 +1456,7 @@ def test_backfill_triples_skips_chunk_with_empty_vocab():
     kg_mock.get_entities_by_chunk.return_value = {
         "doc-1#1": [("brca1", "GENE"), ("tp53", "GENE")],
     }
-    kg_mock.write_triples.return_value = True
+    kg_mock.write_triples = AsyncMock(return_value=True)
 
     config = _triples_enabled_config()
 
@@ -1468,7 +1468,7 @@ def test_backfill_triples_skips_chunk_with_empty_vocab():
         patch("knowledge_agent.ingestion.pipeline.triples_extractor.extract",
               return_value=[]) as mock_extract,
     ):
-        result = backfill_triples("doc-1", config)
+        result = await backfill_triples("doc-1", config)
 
     assert result["triples_ok"] is True
     # Only ONE LLM call - the empty-vocab chunk was skipped.
@@ -1481,7 +1481,7 @@ def test_backfill_triples_skips_chunk_with_empty_vocab():
     assert chunk_ids == ["doc-1#0", "doc-1#1"]
 
 
-def test_backfill_triples_one_chunk_extraction_failure_does_not_poison_others():
+async def test_backfill_triples_one_chunk_extraction_failure_does_not_poison_others():
     """LLM raises on chunk #0 -> log + skip + continue to chunk #1."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
@@ -1493,7 +1493,7 @@ def test_backfill_triples_one_chunk_extraction_failure_does_not_poison_others():
         "doc-1#0": [("a", "GENE"), ("b", "GENE")],
         "doc-1#1": [("c", "GENE"), ("d", "GENE")],
     }
-    kg_mock.write_triples.return_value = True
+    kg_mock.write_triples = AsyncMock(return_value=True)
     config = _triples_enabled_config()
 
     good_triple = ExtractedTriple(
@@ -1516,26 +1516,26 @@ def test_backfill_triples_one_chunk_extraction_failure_does_not_poison_others():
         patch("knowledge_agent.ingestion.pipeline.triples_extractor.extract",
               side_effect=fake_extract),
     ):
-        result = backfill_triples("doc-1", config)
+        result = await backfill_triples("doc-1", config)
 
     # The doc still succeeded; n_triples counts only the good chunk.
     assert result["triples_ok"] is True
     assert result["n_triples"] == 1
 
 
-def test_backfill_entities_chains_into_backfill_triples_when_triples_enabled():
+async def test_backfill_entities_chains_into_backfill_triples_when_triples_enabled():
     """Propagation: backfill_entities -> backfill_triples (when triples on)."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
         {"chunk_id": "doc-1#0", "text": "alpha"},
     ]
     kg_mock = MagicMock()
-    kg_mock.write_entities.return_value = True
+    kg_mock.write_entities = AsyncMock(return_value=True)
     # backfill_triples re-reads chunks + entities from these mocks.
     kg_mock.get_entities_by_chunk.return_value = {
         "doc-1#0": [("alpha", "GENE")],
     }
-    kg_mock.write_triples.return_value = True
+    kg_mock.write_triples = AsyncMock(return_value=True)
 
     extractor_mock = MagicMock()
     extractor_mock.extract.return_value = [
@@ -1554,7 +1554,7 @@ def test_backfill_entities_chains_into_backfill_triples_when_triples_enabled():
         patch("knowledge_agent.ingestion.pipeline.triples_extractor.extract",
               return_value=[]),
     ):
-        result = backfill_entities("doc-1", config)
+        result = await backfill_entities("doc-1", config)
 
     # backfill_entities chained into backfill_triples; both write paths
     # ran.
@@ -1564,7 +1564,7 @@ def test_backfill_entities_chains_into_backfill_triples_when_triples_enabled():
     kg_mock.write_triples.assert_called_once()
 
 
-def test_backfill_entities_does_not_run_triples_when_triples_off():
+async def test_backfill_entities_does_not_run_triples_when_triples_off():
     """triples=False but entities on -> ontology still runs but triples
     sub-result stays empty (no-op return)."""
     search_mock = MagicMock()
@@ -1572,7 +1572,7 @@ def test_backfill_entities_does_not_run_triples_when_triples_off():
         {"chunk_id": "doc-1#0", "text": "alpha"},
     ]
     kg_mock = MagicMock()
-    kg_mock.write_entities.return_value = True
+    kg_mock.write_entities = AsyncMock(return_value=True)
     extractor_mock = MagicMock()
     extractor_mock.extract.return_value = []
     # triples disabled in this config.
@@ -1586,7 +1586,7 @@ def test_backfill_entities_does_not_run_triples_when_triples_off():
         patch("knowledge_agent.ingestion.pipeline.get_extractor",
               return_value=extractor_mock),
     ):
-        result = backfill_entities("doc-1", config)
+        result = await backfill_entities("doc-1", config)
 
     # triples short-circuited at the layer-disabled check.
     assert result["triples"] == {"triples_ok": False, "n_triples": 0}
@@ -1596,21 +1596,21 @@ def test_backfill_entities_does_not_run_triples_when_triples_off():
 # ---- pipeline.delete_doc must wipe triples before entity GC ----
 
 
-def test_delete_doc_calls_delete_triples_before_delete_entities():
+async def test_delete_doc_calls_delete_triples_before_delete_entities():
     """Order matters: triples reference :Entity nodes via Cypher edges;
     if the entity-orphan GC runs first while triples still point at
     those entities, the plain DELETE crashes. Verify the call order."""
     search_mock = MagicMock()
-    search_mock.delete_chunks_by_doc_id.return_value = True
+    search_mock.delete_chunks_by_doc_id = AsyncMock(return_value=True)
     kg_mock = MagicMock()
-    kg_mock.delete_doc.return_value = True
-    kg_mock.delete_chunks_by_doc_id.return_value = True
-    kg_mock.delete_triples_by_doc_id.return_value = True
-    kg_mock.delete_entities_by_doc_id.return_value = True
+    kg_mock.delete_doc = AsyncMock(return_value=True)
+    kg_mock.delete_chunks_by_doc_id = AsyncMock(return_value=True)
+    kg_mock.delete_triples_by_doc_id = AsyncMock(return_value=True)
+    kg_mock.delete_entities_by_doc_id = AsyncMock(return_value=True)
 
     # Record the order of calls across both mocks via a single Mock.
     call_order = []
-    kg_mock.delete_doc.side_effect = lambda *a, **kw: call_order.append("delete_doc") or True
+    kg_mock.delete_doc = AsyncMock(side_effect=lambda *a, **kw: call_order.append("delete_doc") or True)
     kg_mock.delete_chunks_by_doc_id.side_effect = (
         lambda *a, **kw: call_order.append("delete_chunks") or True
     )
@@ -1627,7 +1627,7 @@ def test_delete_doc_calls_delete_triples_before_delete_entities():
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
     ):
-        ok = delete_doc("doc-1")
+        ok = await delete_doc("doc-1")
 
     assert ok is True
     # The crucial ordering: triples wiped BEFORE entity GC.
@@ -1685,7 +1685,7 @@ def _cross_doc_enabled_config() -> CorpusConfig:
     )
 
 
-def test_backfill_cross_doc_no_op_when_layer_disabled():
+async def test_backfill_cross_doc_no_op_when_layer_disabled():
     """cross_doc=False -> immediate return, no client calls."""
     kg_mock = MagicMock()
     config = _entities_enabled_config()  # entities on, cross_doc off
@@ -1694,68 +1694,68 @@ def test_backfill_cross_doc_no_op_when_layer_disabled():
         "knowledge_agent.ingestion.pipeline.get_kg_client",
         return_value=kg_mock,
     ):
-        result = backfill_cross_doc("doc-x", config)
+        result = await backfill_cross_doc("doc-x", config)
 
     assert result == {"cross_doc_ok": False, "n_edges": 0}
     kg_mock.recompute_cross_doc_edges.assert_not_called()
 
 
-def test_backfill_cross_doc_happy_path_returns_count():
+async def test_backfill_cross_doc_happy_path_returns_count():
     """recompute returns int -> ok=True, n=that int."""
     kg_mock = MagicMock()
-    kg_mock.recompute_cross_doc_edges.return_value = 4
+    kg_mock.recompute_cross_doc_edges = AsyncMock(return_value=4)
     config = _cross_doc_enabled_config()
 
     with patch(
         "knowledge_agent.ingestion.pipeline.get_kg_client",
         return_value=kg_mock,
     ):
-        result = backfill_cross_doc("doc-1", config)
+        result = await backfill_cross_doc("doc-1", config)
 
     assert result == {"cross_doc_ok": True, "n_edges": 4}
     kg_mock.recompute_cross_doc_edges.assert_called_once_with("doc-1", 2)
 
 
-def test_backfill_cross_doc_zero_edges_is_success():
+async def test_backfill_cross_doc_zero_edges_is_success():
     """No other doc met threshold -> ok=True, n=0 (distinct from
     cross_doc_ok=False which means Cypher failure)."""
     kg_mock = MagicMock()
-    kg_mock.recompute_cross_doc_edges.return_value = 0
+    kg_mock.recompute_cross_doc_edges = AsyncMock(return_value=0)
     config = _cross_doc_enabled_config()
 
     with patch(
         "knowledge_agent.ingestion.pipeline.get_kg_client",
         return_value=kg_mock,
     ):
-        result = backfill_cross_doc("doc-1", config)
+        result = await backfill_cross_doc("doc-1", config)
 
     assert result == {"cross_doc_ok": True, "n_edges": 0}
 
 
-def test_backfill_cross_doc_exception_means_failure():
+async def test_backfill_cross_doc_exception_means_failure():
     """recompute raising -> ok=False, n=0 (orchestrator catches)."""
     kg_mock = MagicMock()
-    kg_mock.recompute_cross_doc_edges.side_effect = RuntimeError("boom")
+    kg_mock.recompute_cross_doc_edges = AsyncMock(side_effect=RuntimeError("boom"))
     config = _cross_doc_enabled_config()
 
     with patch(
         "knowledge_agent.ingestion.pipeline.get_kg_client",
         return_value=kg_mock,
     ):
-        result = backfill_cross_doc("doc-1", config)
+        result = await backfill_cross_doc("doc-1", config)
 
     assert result == {"cross_doc_ok": False, "n_edges": 0}
 
 
-def test_backfill_entities_chains_into_backfill_cross_doc_when_enabled():
+async def test_backfill_entities_chains_into_backfill_cross_doc_when_enabled():
     """Propagation: backfill_entities -> backfill_cross_doc (when L9 on)."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
         {"chunk_id": "doc-1#0", "text": "alpha"},
     ]
     kg_mock = MagicMock()
-    kg_mock.write_entities.return_value = True
-    kg_mock.recompute_cross_doc_edges.return_value = 3
+    kg_mock.write_entities = AsyncMock(return_value=True)
+    kg_mock.recompute_cross_doc_edges = AsyncMock(return_value=3)
 
     extractor_mock = MagicMock()
     extractor_mock.extract.return_value = [
@@ -1772,21 +1772,21 @@ def test_backfill_entities_chains_into_backfill_cross_doc_when_enabled():
         patch("knowledge_agent.ingestion.pipeline.get_extractor",
               return_value=extractor_mock),
     ):
-        result = backfill_entities("doc-1", config)
+        result = await backfill_entities("doc-1", config)
 
     assert result["entities_ok"] is True
     assert result["cross_doc"] == {"cross_doc_ok": True, "n_edges": 3}
     kg_mock.recompute_cross_doc_edges.assert_called_once_with("doc-1", 2)
 
 
-def test_backfill_entities_does_not_run_cross_doc_when_disabled():
+async def test_backfill_entities_does_not_run_cross_doc_when_disabled():
     """L9 off -> cross_doc sub-result is the no-op shape."""
     search_mock = MagicMock()
     search_mock.get_chunks_by_doc_id.return_value = [
         {"chunk_id": "doc-1#0", "text": "alpha"},
     ]
     kg_mock = MagicMock()
-    kg_mock.write_entities.return_value = True
+    kg_mock.write_entities = AsyncMock(return_value=True)
     extractor_mock = MagicMock()
     extractor_mock.extract.return_value = []
     # cross_doc disabled.
@@ -1800,7 +1800,7 @@ def test_backfill_entities_does_not_run_cross_doc_when_disabled():
         patch("knowledge_agent.ingestion.pipeline.get_extractor",
               return_value=extractor_mock),
     ):
-        result = backfill_entities("doc-1", config)
+        result = await backfill_entities("doc-1", config)
 
     assert result["cross_doc"] == {"cross_doc_ok": False, "n_edges": 0}
     kg_mock.recompute_cross_doc_edges.assert_not_called()
@@ -2095,12 +2095,10 @@ def _make_mock_kg() -> MagicMock:
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch(
-    "knowledge_agent.ingestion.pipeline.embed_texts",
-    return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
-def test_ingest_document_skips_openalex_writes_when_layer_off(
+async def test_ingest_document_skips_openalex_writes_when_layer_off(
     mock_get_kg,
     _mock_embed,
     _mock_extract_doi,
@@ -2120,7 +2118,7 @@ def test_ingest_document_skips_openalex_writes_when_layer_off(
         allowed_types=["Paper"],
         layers=LayerFlags(openalex_papers=False, chunks=True),
     )
-    ingest_document(_DUMMY_PATH, config, "Document", "Paper")
+    await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
     # L1-L4 writes skipped despite work being resolved and sub_label=Paper.
     mock_kg.write_citations.assert_not_called()
@@ -2145,12 +2143,10 @@ def test_ingest_document_skips_openalex_writes_when_layer_off(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch(
-    "knowledge_agent.ingestion.pipeline.embed_texts",
-    return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
-def test_ingest_document_skips_chunk_writes_when_layer_off(
+async def test_ingest_document_skips_chunk_writes_when_layer_off(
     mock_get_kg,
     _mock_embed,
     _mock_extract_doi,
@@ -2170,7 +2166,7 @@ def test_ingest_document_skips_chunk_writes_when_layer_off(
         allowed_types=["Paper"],
         layers=LayerFlags(openalex_papers=True, chunks=False),
     )
-    ingest_document(_DUMMY_PATH, config, "Document", "Paper")
+    await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
     # L1-L4 ran.
     mock_kg.write_citations.assert_called_once()
@@ -2193,12 +2189,10 @@ def test_ingest_document_skips_chunk_writes_when_layer_off(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch(
-    "knowledge_agent.ingestion.pipeline.embed_texts",
-    return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
-def test_ingest_document_runs_all_kg_writes_when_both_layers_on(
+async def test_ingest_document_runs_all_kg_writes_when_both_layers_on(
     mock_get_kg,
     _mock_embed,
     _mock_extract_doi,
@@ -2217,7 +2211,7 @@ def test_ingest_document_runs_all_kg_writes_when_both_layers_on(
         allowed_types=["Paper"],
         layers=LayerFlags(openalex_papers=True, chunks=True),
     )
-    ingest_document(_DUMMY_PATH, config, "Document", "Paper")
+    await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
     mock_kg.write_citations.assert_called_once()
     mock_kg.write_authorships.assert_called_once()
@@ -2236,12 +2230,10 @@ def test_ingest_document_runs_all_kg_writes_when_both_layers_on(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch(
-    "knowledge_agent.ingestion.pipeline.embed_texts",
-    return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
-def test_ingest_document_skips_openalex_writes_when_layer_on_but_work_none(
+async def test_ingest_document_skips_openalex_writes_when_layer_on_but_work_none(
     mock_get_kg,
     _mock_embed,
     _mock_extract_doi,
@@ -2262,7 +2254,7 @@ def test_ingest_document_skips_openalex_writes_when_layer_on_but_work_none(
         allowed_types=["Paper"],
         layers=LayerFlags(openalex_papers=True, chunks=True),
     )
-    ingest_document(_DUMMY_PATH, config, "Document", "Paper")
+    await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
     mock_kg.write_citations.assert_not_called()
     mock_kg.write_authorships.assert_not_called()
@@ -2285,12 +2277,10 @@ def test_ingest_document_skips_openalex_writes_when_layer_on_but_work_none(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch(
-    "knowledge_agent.ingestion.pipeline.embed_texts",
-    return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
-def test_ingest_document_skips_openalex_when_sub_label_is_not_paper(
+async def test_ingest_document_skips_openalex_when_sub_label_is_not_paper(
     mock_get_kg,
     _mock_embed,
     _mock_extract_doi,
@@ -2312,7 +2302,7 @@ def test_ingest_document_skips_openalex_when_sub_label_is_not_paper(
         allowed_types=["Paper", "Note"],
         layers=LayerFlags(openalex_papers=True, chunks=True),
     )
-    ingest_document(_DUMMY_PATH, config, "Document", "Note")
+    await ingest_document(_DUMMY_PATH, config, "Document", "Note")
 
     mock_kg.write_citations.assert_not_called()
     mock_kg.write_authorships.assert_not_called()
@@ -2321,27 +2311,27 @@ def test_ingest_document_skips_openalex_when_sub_label_is_not_paper(
     mock_kg.write_chunks.assert_called_once()
 
 
-def test_ingest_document_rejects_invalid_main_label():
+async def test_ingest_document_rejects_invalid_main_label():
     config = CorpusConfig(allowed_types=["Paper"])
     with pytest.raises(ValueError, match="main_label"):
-        ingest_document(_DUMMY_PATH, config, "NotAThing", "Paper")
+        await ingest_document(_DUMMY_PATH, config, "NotAThing", "Paper")
 
 
-def test_ingest_document_rejects_sub_label_not_in_allowed_types():
+async def test_ingest_document_rejects_sub_label_not_in_allowed_types():
     config = CorpusConfig(allowed_types=["Note"])  # Paper not allowed here
     with pytest.raises(ValueError, match="allowed_types"):
-        ingest_document(_DUMMY_PATH, config, "Document", "Paper")
+        await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
 
-def test_ingest_document_rejects_sub_label_wrong_family():
+async def test_ingest_document_rejects_sub_label_wrong_family():
     """A :Document-family sub_label paired with `main_label='Artifact'`
     is rejected at validation time."""
     config = CorpusConfig(allowed_types=["Paper"])
     with pytest.raises(ValueError, match="belongs under"):
-        ingest_document(_DUMMY_PATH, config, "Artifact", "Paper")
+        await ingest_document(_DUMMY_PATH, config, "Artifact", "Paper")
 
 
-def test_ingest_document_rejects_unsupported_extension(tmp_path: Path):
+async def test_ingest_document_rejects_unsupported_extension(tmp_path: Path):
     # .parquet is the canonical unsupported example - deferred from
     # Phase 4 launch (see roadmap). If/when a Parquet parser ships,
     # swap this for another extension that's still unsupported.
@@ -2349,7 +2339,7 @@ def test_ingest_document_rejects_unsupported_extension(tmp_path: Path):
     parquet_path.write_bytes(b"PAR1")  # parquet magic, not a real file
     config = CorpusConfig(allowed_types=["Dataset"])
     with pytest.raises(ValueError, match="No parser available"):
-        ingest_document(parquet_path, config, "Artifact", "Dataset")
+        await ingest_document(parquet_path, config, "Artifact", "Dataset")
 
 
 # ---- ingest_document L6a (entities) gating ----
@@ -2381,13 +2371,11 @@ def _config_with_entities(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch(
-    "knowledge_agent.ingestion.pipeline.embed_texts",
-    return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
 @patch("knowledge_agent.ingestion.pipeline.get_extractor")
-def test_ingest_document_runs_l6a_when_entities_layer_on(
+async def test_ingest_document_runs_l6a_when_entities_layer_on(
     mock_get_extractor,
     mock_get_kg,
     _mock_embed,
@@ -2410,7 +2398,7 @@ def test_ingest_document_runs_l6a_when_entities_layer_on(
     mock_get_extractor.return_value = fake_extractor
 
     config = _config_with_entities(["GENE"])
-    result = ingest_document(_DUMMY_PATH, config, "Document", "Paper")
+    result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
     # Dispatcher resolved the configured extractor.
     mock_get_extractor.assert_called_once_with("llm")
@@ -2444,13 +2432,11 @@ def test_ingest_document_runs_l6a_when_entities_layer_on(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch(
-    "knowledge_agent.ingestion.pipeline.embed_texts",
-    return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
 @patch("knowledge_agent.ingestion.pipeline.get_extractor")
-def test_ingest_document_skips_l6a_when_entities_layer_off(
+async def test_ingest_document_skips_l6a_when_entities_layer_off(
     mock_get_extractor,
     mock_get_kg,
     _mock_embed,
@@ -2470,7 +2456,7 @@ def test_ingest_document_skips_l6a_when_entities_layer_off(
         allowed_types=["Paper"],
         layers=LayerFlags(chunks=True),  # entities defaults to False
     )
-    result = ingest_document(_DUMMY_PATH, config, "Document", "Paper")
+    result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
     mock_get_extractor.assert_not_called()
     mock_kg.write_entities.assert_not_called()
@@ -2490,13 +2476,11 @@ def test_ingest_document_skips_l6a_when_entities_layer_off(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch(
-    "knowledge_agent.ingestion.pipeline.embed_texts",
-    return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
 @patch("knowledge_agent.ingestion.pipeline.get_extractor")
-def test_ingest_document_skips_l6a_when_chunks_write_fails(
+async def test_ingest_document_skips_l6a_when_chunks_write_fails(
     mock_get_extractor,
     mock_get_kg,
     _mock_embed,
@@ -2516,7 +2500,7 @@ def test_ingest_document_skips_l6a_when_chunks_write_fails(
     mock_get_kg.return_value = mock_kg
 
     config = _config_with_entities(["GENE"])
-    result = ingest_document(_DUMMY_PATH, config, "Document", "Paper")
+    result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
     mock_get_extractor.assert_not_called()
     mock_kg.write_entities.assert_not_called()
@@ -2536,13 +2520,11 @@ def test_ingest_document_skips_l6a_when_chunks_write_fails(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch(
-    "knowledge_agent.ingestion.pipeline.embed_texts",
-    return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
 @patch("knowledge_agent.ingestion.pipeline.get_extractor")
-def test_ingest_document_l6a_extractor_exception_skips_only_failing_chunk(
+async def test_ingest_document_l6a_extractor_exception_skips_only_failing_chunk(
     mock_get_extractor,
     mock_get_kg,
     _mock_embed,
@@ -2569,7 +2551,7 @@ def test_ingest_document_l6a_extractor_exception_skips_only_failing_chunk(
     mock_get_extractor.return_value = fake_extractor
 
     config = _config_with_entities(["GENE"])
-    result = ingest_document(_DUMMY_PATH, config, "Document", "Paper")
+    result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
     # Both chunks attempted; per-chunk failure didn't propagate.
     assert fake_extractor.extract.call_count == 2
@@ -2630,13 +2612,11 @@ def _config_with_ontology_mesh(matching: str = "exact") -> CorpusConfig:
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch(
-    "knowledge_agent.ingestion.pipeline.embed_texts",
-    return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
 @patch("knowledge_agent.ingestion.pipeline.get_extractor")
-def test_ingest_document_skips_l7_when_no_ontology_layer_enabled(
+async def test_ingest_document_skips_l7_when_no_ontology_layer_enabled(
     mock_get_extractor,
     mock_get_kg,
     _mock_embed,
@@ -2657,7 +2637,7 @@ def test_ingest_document_skips_l7_when_no_ontology_layer_enabled(
     mock_get_extractor.return_value = fake_extractor
 
     config = _config_with_entities(["GENE"])  # entities on, no ontology
-    result = ingest_document(_DUMMY_PATH, config, "Document", "Paper")
+    result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
     mock_kg.ensure_ontology_imported.assert_not_called()
     mock_kg.link_entities_to_ontology.assert_not_called()
@@ -2674,13 +2654,11 @@ def test_ingest_document_skips_l7_when_no_ontology_layer_enabled(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch(
-    "knowledge_agent.ingestion.pipeline.embed_texts",
-    return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
 @patch("knowledge_agent.ingestion.pipeline.get_extractor")
-def test_ingest_document_l7_skipped_when_entities_failed(
+async def test_ingest_document_l7_skipped_when_entities_failed(
     mock_get_extractor,
     mock_get_kg,
     _mock_embed,
@@ -2703,7 +2681,7 @@ def test_ingest_document_l7_skipped_when_entities_failed(
     mock_get_extractor.return_value = fake_extractor
 
     config = _config_with_ontology_mesh()
-    result = ingest_document(_DUMMY_PATH, config, "Document", "Paper")
+    result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
     mock_kg.ensure_ontology_imported.assert_not_called()
     mock_kg.link_entities_to_ontology.assert_not_called()
@@ -2720,13 +2698,11 @@ def test_ingest_document_l7_skipped_when_entities_failed(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch(
-    "knowledge_agent.ingestion.pipeline.embed_texts",
-    return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
 @patch("knowledge_agent.ingestion.pipeline.get_extractor")
-def test_ingest_document_l7_first_import_runs_global_link(
+async def test_ingest_document_l7_first_import_runs_global_link(
     mock_get_extractor,
     mock_get_kg,
     _mock_embed,
@@ -2754,7 +2730,7 @@ def test_ingest_document_l7_first_import_runs_global_link(
     mock_get_extractor.return_value = fake_extractor
 
     config = _config_with_ontology_mesh()
-    result = ingest_document(_DUMMY_PATH, config, "Document", "Paper")
+    result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
     mock_kg.ensure_ontology_imported.assert_called_once_with(
         "mesh", xrefs_mode="none",
@@ -2778,13 +2754,11 @@ def test_ingest_document_l7_first_import_runs_global_link(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch(
-    "knowledge_agent.ingestion.pipeline.embed_texts",
-    return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
 @patch("knowledge_agent.ingestion.pipeline.get_extractor")
-def test_ingest_document_l7_subsequent_ingest_links_only_this_doc(
+async def test_ingest_document_l7_subsequent_ingest_links_only_this_doc(
     mock_get_extractor,
     mock_get_kg,
     _mock_embed,
@@ -2809,7 +2783,7 @@ def test_ingest_document_l7_subsequent_ingest_links_only_this_doc(
     mock_get_extractor.return_value = fake_extractor
 
     config = _config_with_ontology_mesh(matching="fuzzy")
-    result = ingest_document(_DUMMY_PATH, config, "Document", "Paper")
+    result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
     mock_kg.link_entities_to_ontology.assert_called_once_with(
         "mesh", "fuzzy", doc_id="doc-abc"
@@ -2829,13 +2803,11 @@ def test_ingest_document_l7_subsequent_ingest_links_only_this_doc(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch(
-    "knowledge_agent.ingestion.pipeline.embed_texts",
-    return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
 @patch("knowledge_agent.ingestion.pipeline.get_extractor")
-def test_ingest_document_l7_import_failure_skips_linking_returns_status(
+async def test_ingest_document_l7_import_failure_skips_linking_returns_status(
     mock_get_extractor,
     mock_get_kg,
     _mock_embed,
@@ -2860,7 +2832,7 @@ def test_ingest_document_l7_import_failure_skips_linking_returns_status(
     mock_get_extractor.return_value = fake_extractor
 
     config = _config_with_ontology_mesh()
-    result = ingest_document(_DUMMY_PATH, config, "Document", "Paper")
+    result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
     mock_kg.link_entities_to_ontology.assert_not_called()
     assert result.kg_ontology_results == {
@@ -2878,13 +2850,11 @@ def test_ingest_document_l7_import_failure_skips_linking_returns_status(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch(
-    "knowledge_agent.ingestion.pipeline.embed_texts",
-    return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
 @patch("knowledge_agent.ingestion.pipeline.get_extractor")
-def test_ingest_document_l7_runs_each_enabled_ontology_independently(
+async def test_ingest_document_l7_runs_each_enabled_ontology_independently(
     mock_get_extractor,
     mock_get_kg,
     _mock_embed,
@@ -2924,7 +2894,7 @@ def test_ingest_document_l7_runs_each_enabled_ontology_independently(
             "go": OntologyConfig(matching="fuzzy"),
         },
     )
-    result = ingest_document(_DUMMY_PATH, config, "Document", "Paper")
+    result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
     # Both ontologies got an ensure_imported call.
     ensure_calls = mock_kg.ensure_ontology_imported.call_args_list
@@ -2966,56 +2936,56 @@ def _config_with_xrefs(
     )
 
 
-def test_backfill_ontology_threads_xrefs_use_through_ensure_imported():
+async def test_backfill_ontology_threads_xrefs_use_through_ensure_imported():
     """`xrefs="use"` on the config flows through `ensure_ontology_imported`
     as the `xrefs_mode` kwarg — that's how the helper writes resolved
     edges at import time."""
     kg_mock = MagicMock()
-    kg_mock.ensure_ontology_imported.return_value = (False, True)
-    kg_mock.link_entities_to_ontology.return_value = 0
+    kg_mock.ensure_ontology_imported = AsyncMock(return_value=(False, True))
+    kg_mock.link_entities_to_ontology = AsyncMock(return_value=0)
     config = _config_with_xrefs("use", ("mesh",))
 
     with patch(
         "knowledge_agent.ingestion.pipeline.get_kg_client",
         return_value=kg_mock,
     ):
-        backfill_ontology("doc-x", config)
+        await backfill_ontology("doc-x", config)
 
     kg_mock.ensure_ontology_imported.assert_called_once_with(
         "mesh", xrefs_mode="use",
     )
 
 
-def test_backfill_ontology_threads_xrefs_collect_only_mode():
+async def test_backfill_ontology_threads_xrefs_collect_only_mode():
     """`xrefs="collect_only"` flows verbatim. Default behaviour for
     users who want dangling_xrefs stored without writing edges yet."""
     kg_mock = MagicMock()
-    kg_mock.ensure_ontology_imported.return_value = (False, True)
+    kg_mock.ensure_ontology_imported = AsyncMock(return_value=(False, True))
     config = _config_with_xrefs("collect_only", ("mesh",))
 
     with patch(
         "knowledge_agent.ingestion.pipeline.get_kg_client",
         return_value=kg_mock,
     ):
-        backfill_ontology("doc-x", config)
+        await backfill_ontology("doc-x", config)
 
     kg_mock.ensure_ontology_imported.assert_called_once_with(
         "mesh", xrefs_mode="collect_only",
     )
 
 
-def test_backfill_ontology_default_xrefs_mode_is_none():
+async def test_backfill_ontology_default_xrefs_mode_is_none():
     """When the config omits `xrefs`, the default `"none"` mode reaches
     the helper — preserves pre-L7-xrefs behaviour."""
     kg_mock = MagicMock()
-    kg_mock.ensure_ontology_imported.return_value = (False, True)
+    kg_mock.ensure_ontology_imported = AsyncMock(return_value=(False, True))
     config = _config_with_ontologies("mesh")  # no xrefs flag set -> default "none"
 
     with patch(
         "knowledge_agent.ingestion.pipeline.get_kg_client",
         return_value=kg_mock,
     ):
-        backfill_ontology("doc-x", config)
+        await backfill_ontology("doc-x", config)
 
     kg_mock.ensure_ontology_imported.assert_called_once_with(
         "mesh", xrefs_mode="none",
@@ -3053,7 +3023,7 @@ def _cross_doc_xrefs_enabled_config(
     )
 
 
-def test_backfill_cross_doc_xrefs_no_op_when_layer_disabled():
+async def test_backfill_cross_doc_xrefs_no_op_when_layer_disabled():
     """L10 layer off -> immediate return, no client calls."""
     kg_mock = MagicMock()
     config = _entities_enabled_config()  # cross_doc_xrefs is off
@@ -3062,25 +3032,25 @@ def test_backfill_cross_doc_xrefs_no_op_when_layer_disabled():
         "knowledge_agent.ingestion.pipeline.get_kg_client",
         return_value=kg_mock,
     ):
-        result = backfill_cross_doc_xrefs("doc-x", config)
+        result = await backfill_cross_doc_xrefs("doc-x", config)
 
     assert result == {"cross_doc_xrefs_ok": False, "n_edges": 0}
     kg_mock.recompute_cross_doc_xrefs_edges.assert_not_called()
 
 
-def test_backfill_cross_doc_xrefs_happy_path_returns_count():
+async def test_backfill_cross_doc_xrefs_happy_path_returns_count():
     """recompute returns int -> ok=True, n=that int. Threshold from
     the [cross_doc_xrefs] config block flows through as the positional
     arg to the delegate."""
     kg_mock = MagicMock()
-    kg_mock.recompute_cross_doc_xrefs_edges.return_value = 7
+    kg_mock.recompute_cross_doc_xrefs_edges = AsyncMock(return_value=7)
     config = _cross_doc_xrefs_enabled_config(threshold=3)
 
     with patch(
         "knowledge_agent.ingestion.pipeline.get_kg_client",
         return_value=kg_mock,
     ):
-        result = backfill_cross_doc_xrefs("doc-1", config)
+        result = await backfill_cross_doc_xrefs("doc-1", config)
 
     assert result == {"cross_doc_xrefs_ok": True, "n_edges": 7}
     kg_mock.recompute_cross_doc_xrefs_edges.assert_called_once_with(
@@ -3088,33 +3058,33 @@ def test_backfill_cross_doc_xrefs_happy_path_returns_count():
     )
 
 
-def test_backfill_cross_doc_xrefs_zero_edges_is_success():
+async def test_backfill_cross_doc_xrefs_zero_edges_is_success():
     """No other doc met threshold -> ok=True, n=0 (distinct from
     cross_doc_xrefs_ok=False which means Cypher failure)."""
     kg_mock = MagicMock()
-    kg_mock.recompute_cross_doc_xrefs_edges.return_value = 0
+    kg_mock.recompute_cross_doc_xrefs_edges = AsyncMock(return_value=0)
     config = _cross_doc_xrefs_enabled_config()
 
     with patch(
         "knowledge_agent.ingestion.pipeline.get_kg_client",
         return_value=kg_mock,
     ):
-        result = backfill_cross_doc_xrefs("doc-1", config)
+        result = await backfill_cross_doc_xrefs("doc-1", config)
 
     assert result == {"cross_doc_xrefs_ok": True, "n_edges": 0}
 
 
-def test_backfill_cross_doc_xrefs_exception_means_failure():
+async def test_backfill_cross_doc_xrefs_exception_means_failure():
     """recompute raising -> ok=False, n=0 (orchestrator catches)."""
     kg_mock = MagicMock()
-    kg_mock.recompute_cross_doc_xrefs_edges.side_effect = RuntimeError("boom")
+    kg_mock.recompute_cross_doc_xrefs_edges = AsyncMock(side_effect=RuntimeError("boom"))
     config = _cross_doc_xrefs_enabled_config()
 
     with patch(
         "knowledge_agent.ingestion.pipeline.get_kg_client",
         return_value=kg_mock,
     ):
-        result = backfill_cross_doc_xrefs("doc-1", config)
+        result = await backfill_cross_doc_xrefs("doc-1", config)
 
     assert result == {"cross_doc_xrefs_ok": False, "n_edges": 0}
 
