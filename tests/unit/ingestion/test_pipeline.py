@@ -33,6 +33,8 @@ from knowledge_agent.ingestion.pipeline import (
     re_embed,
     resolve_openalex,
 )
+from knowledge_agent.kg.client import Neo4jClient
+from knowledge_agent.search.client import LanceClient
 from knowledge_agent.kg.triples_writes import ExtractedTriple
 from knowledge_agent.kg.corpus_config import (
     CorpusConfig,
@@ -105,13 +107,13 @@ def _patch_delete_clients(search_ok: bool, kg_ok: dict[str, bool]):
     a `RuntimeError("boom")` `side_effect` on the corresponding mock.
     `kg_ok` keys: "delete_doc", "delete_chunks", "delete_entities".
     """
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     if search_ok:
         search_mock.delete_chunks_by_doc_id = AsyncMock(return_value=None)
     else:
         search_mock.delete_chunks_by_doc_id = AsyncMock(side_effect=RuntimeError("boom"))
 
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     for key, attr in (
         ("delete_doc", "delete_doc"),
         ("delete_chunks", "delete_chunks_by_doc_id"),
@@ -239,7 +241,7 @@ def _config_with_ontologies(*names: str) -> CorpusConfig:
 
 async def test_backfill_ontology_iterates_each_enabled_ontology():
     """Both enabled ontologies get ensure_imported + link calls."""
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.ensure_ontology_imported = AsyncMock(return_value=(False, True))
     kg_mock.link_entities_to_ontology = AsyncMock(return_value=7)
 
@@ -257,7 +259,7 @@ async def test_backfill_ontology_iterates_each_enabled_ontology():
 
 async def test_backfill_ontology_passes_doc_id_and_matching_strategy():
     """Link call must scope to doc_id and use the per-ontology matching."""
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.ensure_ontology_imported = AsyncMock(return_value=(False, True))
     kg_mock.link_entities_to_ontology = AsyncMock(return_value=3)
 
@@ -275,7 +277,7 @@ async def test_backfill_ontology_passes_doc_id_and_matching_strategy():
 
 async def test_backfill_ontology_result_shape_matches_full_ingest():
     """Per-ontology dict has the same keys as IngestResult.kg_ontology_results."""
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     # was_imported=False (just ran the import) -> "imported"=True in result.
     kg_mock.ensure_ontology_imported = AsyncMock(return_value=False)
     kg_mock.link_entities_to_ontology = AsyncMock(return_value=4)
@@ -294,7 +296,7 @@ async def test_backfill_ontology_result_shape_matches_full_ingest():
 
 async def test_backfill_ontology_one_ontology_failure_does_not_block_others():
     """If MeSH ensure_imported raises, GO still gets a link call."""
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
 
     def ensure_side_effect(name, **kwargs):
         if name == "mesh":
@@ -325,7 +327,7 @@ async def test_backfill_ontology_one_ontology_failure_does_not_block_others():
 
 async def test_backfill_ontology_empty_when_no_ontology_layers_enabled():
     """No enabled ontologies -> empty result, no client calls."""
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     config = CorpusConfig(
         domain="biomedical",
         allowed_types=["Paper"],
@@ -404,7 +406,7 @@ def _row_with(**overrides: Any) -> dict[str, Any]:
 
 
 async def test_resolve_openalex_aborts_when_no_chunks_in_lancedb():
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=None)
     with patch(
         "knowledge_agent.ingestion.metadata_resolution.get_search_client",
@@ -418,7 +420,7 @@ async def test_resolve_openalex_aborts_when_no_chunks_in_lancedb():
 
 async def test_resolve_openalex_skipped_when_manual_and_skip_manual_true():
     """skip_manual=True + status=manual -> no-op, no client calls."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(metadata_status="manual", doi="10.1/manual"),
     ]
@@ -436,7 +438,7 @@ async def test_resolve_openalex_skipped_when_manual_and_skip_manual_true():
 
 async def test_resolve_openalex_not_skipped_when_manual_and_skip_manual_false():
     """skip_manual=False + status=manual -> proceeds and overwrites."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(metadata_status="manual", doi="10.1/manual"),
     ]
@@ -455,12 +457,12 @@ async def test_resolve_openalex_not_skipped_when_manual_and_skip_manual_false():
 
 async def test_resolve_openalex_uses_stored_doi_first():
     """Stored DOI is the fast path; resolve_metadata is not called."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(doi="10.1/stored"),
     ]
     search_mock.update_doc_metadata = AsyncMock(return_value=True)
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_citations = AsyncMock(return_value=True)
     kg_mock.write_authorships = AsyncMock(return_value=True)
     kg_mock.write_venue = AsyncMock(return_value=True)
@@ -485,12 +487,12 @@ async def test_resolve_openalex_uses_stored_doi_first():
 
 async def test_resolve_openalex_falls_back_to_chunk_extraction_when_stored_doi_fails():
     """Stored DOI doesn't resolve -> fall through to resolve_metadata."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(doi="10.1/stale"),
     ]
     search_mock.update_doc_metadata = AsyncMock(return_value=True)
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_citations = AsyncMock(return_value=True)
     kg_mock.write_authorships = AsyncMock(return_value=True)
     kg_mock.write_venue = AsyncMock(return_value=True)
@@ -515,7 +517,7 @@ async def test_resolve_openalex_falls_back_to_chunk_extraction_when_stored_doi_f
 
 async def test_resolve_openalex_uses_extraction_when_no_stored_doi():
     """No stored doi -> skip resolve_doi, go to resolve_metadata."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(doi=None),
     ]
@@ -537,9 +539,9 @@ async def test_resolve_openalex_uses_extraction_when_no_stored_doi():
 
 async def test_resolve_openalex_no_work_resolved_leaves_state_untouched():
     """Nothing resolves -> no LanceDB patch, no KG writes."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=[_row_with()])
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     with (
         patch("knowledge_agent.ingestion.metadata_resolution.get_search_client",
               return_value=search_mock),
@@ -562,12 +564,12 @@ async def test_resolve_openalex_no_work_resolved_leaves_state_untouched():
 
 async def test_resolve_openalex_paper_path_does_surgical_wipe_then_writes():
     """Successful resolve for Paper -> delete_doc_l1_l4_edges + 4 writes."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(doi="10.1/x", sub_label="Paper"),
     ]
     search_mock.update_doc_metadata = AsyncMock(return_value=True)
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_citations = AsyncMock(return_value=True)
     kg_mock.write_authorships = AsyncMock(return_value=True)
     kg_mock.write_venue = AsyncMock(return_value=True)
@@ -596,12 +598,12 @@ async def test_resolve_openalex_paper_path_does_surgical_wipe_then_writes():
 
 async def test_resolve_openalex_non_paper_patches_lancedb_only_skips_kg_writes():
     """sub_label != Paper -> LanceDB patched, no KG L1-L4 writes."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(doi="10.1/x", sub_label="Note"),
     ]
     search_mock.update_doc_metadata = AsyncMock(return_value=True)
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     work = {"id": "W6", "title": "Note resolved"}
 
     with (
@@ -623,12 +625,12 @@ async def test_resolve_openalex_non_paper_patches_lancedb_only_skips_kg_writes()
 
 async def test_resolve_openalex_patches_with_enriched_status():
     """metadata_status in the patch dict becomes 'enriched' after success."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(doi="10.1/x", metadata_status="pending"),
     ]
     search_mock.update_doc_metadata = AsyncMock(return_value=True)
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_citations = AsyncMock(return_value=True)
     kg_mock.write_authorships = AsyncMock(return_value=True)
     kg_mock.write_venue = AsyncMock(return_value=True)
@@ -661,7 +663,7 @@ async def test_resolve_openalex_patches_with_enriched_status():
 
 async def test_lookup_known_doi_empty_doi_returns_failure():
     """Empty DOI is a programming error - return failure, no client calls."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     with patch(
         "knowledge_agent.ingestion.metadata_resolution.get_search_client",
         return_value=search_mock,
@@ -672,7 +674,7 @@ async def test_lookup_known_doi_empty_doi_returns_failure():
 
 
 async def test_lookup_known_doi_no_chunks_returns_failure():
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=None)
     with patch(
         "knowledge_agent.ingestion.metadata_resolution.get_search_client",
@@ -684,7 +686,7 @@ async def test_lookup_known_doi_no_chunks_returns_failure():
 
 async def test_lookup_known_doi_never_falls_back_to_chunk_extraction():
     """resolve_doi returning None -> failure, NOT a resolve_metadata call."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=[_row_with()])
     with (
         patch("knowledge_agent.ingestion.metadata_resolution.get_search_client",
@@ -704,12 +706,12 @@ async def test_lookup_known_doi_never_falls_back_to_chunk_extraction():
 
 async def test_lookup_known_doi_happy_path_patches_lancedb_and_kg():
     """Successful resolve -> LanceDB patch + surgical KG L1-L4 rewrite."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(sub_label="Paper", doi=None),
     ]
     search_mock.update_doc_metadata = AsyncMock(return_value=True)
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_citations = AsyncMock(return_value=True)
     kg_mock.write_authorships = AsyncMock(return_value=True)
     kg_mock.write_venue = AsyncMock(return_value=True)
@@ -736,12 +738,12 @@ async def test_lookup_known_doi_happy_path_patches_lancedb_and_kg():
 
 async def test_lookup_known_doi_non_paper_patches_lancedb_only():
     """Non-Paper sub_label -> LanceDB patched, KG L1-L4 skipped."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(sub_label="Note"),
     ]
     search_mock.update_doc_metadata = AsyncMock(return_value=True)
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     work = {"id": "W12", "title": "Note"}
 
     with (
@@ -761,12 +763,12 @@ async def test_lookup_known_doi_non_paper_patches_lancedb_only():
 
 async def test_lookup_known_doi_has_no_skip_manual_concept():
     """Even manual-edited docs proceed (clicking the DOI button is consent)."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         _row_with(metadata_status="manual", sub_label="Paper"),
     ]
     search_mock.update_doc_metadata = AsyncMock(return_value=True)
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_citations = AsyncMock(return_value=True)
     kg_mock.write_authorships = AsyncMock(return_value=True)
     kg_mock.write_venue = AsyncMock(return_value=True)
@@ -791,7 +793,7 @@ async def test_lookup_known_doi_has_no_skip_manual_concept():
 
 
 async def test_re_embed_aborts_when_lancedb_read_fails():
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=None)
     with patch(
         "knowledge_agent.ingestion.pipeline.get_search_client",
@@ -803,7 +805,7 @@ async def test_re_embed_aborts_when_lancedb_read_fails():
 
 
 async def test_re_embed_skips_when_no_chunks_found():
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=[])
     with patch(
         "knowledge_agent.ingestion.pipeline.get_search_client",
@@ -822,7 +824,7 @@ async def test_re_embed_returns_embed_false_when_embedder_fails():
         {"chunk_id": "docZ#0", "doc_id": "docZ", "chunk_index": 0,
          "text": "alpha", "embedding": [0.0] * 4},
     ]
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
     with (
         patch("knowledge_agent.ingestion.pipeline.get_search_client",
@@ -846,7 +848,7 @@ async def test_re_embed_happy_path_swaps_embeddings_and_rewrites():
         {"chunk_id": "docZ#1", "doc_id": "docZ", "chunk_index": 1,
          "text": "beta",  "embedding": [0.3, 0.4], "title": "old"},
     ]
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
     search_mock.write_chunks = AsyncMock(return_value=True)
 
@@ -883,7 +885,7 @@ async def test_re_embed_rebuilds_index_when_setting_enabled():
         {"chunk_id": "docZ#0", "doc_id": "docZ", "chunk_index": 0,
          "text": "alpha", "embedding": [0.0]},
     ]
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
     search_mock.write_chunks = AsyncMock(return_value=True)
     settings_mock = MagicMock()
@@ -911,7 +913,7 @@ async def test_re_embed_skips_index_rebuild_when_lancedb_write_fails():
         {"chunk_id": "docZ#0", "doc_id": "docZ", "chunk_index": 0,
          "text": "a", "embedding": [0.0]},
     ]
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
     search_mock.write_chunks = AsyncMock(side_effect=RuntimeError("boom"))
     settings_mock = MagicMock()
@@ -957,8 +959,8 @@ async def test_backfill_chunks_no_op_when_layer_disabled():
         allowed_types=["Paper"],
         layers=LayerFlags(chunks=False),
     )
-    search_mock = MagicMock()
-    kg_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
+    kg_mock = MagicMock(spec=Neo4jClient)
     with (
         patch("knowledge_agent.ingestion.pipeline.get_search_client",
               return_value=search_mock),
@@ -972,9 +974,9 @@ async def test_backfill_chunks_no_op_when_layer_disabled():
 
 
 async def test_backfill_chunks_aborts_when_lancedb_read_fails():
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=None)
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     config = _entities_enabled_config()
     with (
         patch("knowledge_agent.ingestion.pipeline.get_search_client",
@@ -990,9 +992,9 @@ async def test_backfill_chunks_aborts_when_lancedb_read_fails():
 
 
 async def test_backfill_chunks_skips_when_no_chunks_found():
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=[])
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     config = _entities_enabled_config()
     with (
         patch("knowledge_agent.ingestion.pipeline.get_search_client",
@@ -1011,9 +1013,9 @@ async def test_backfill_chunks_happy_path_rewrites_kg_and_chains_into_entities()
         _chunk_row(0, "hello", section="Intro", page=1),
         _chunk_row(1, "world", section="Methods", page=2),
     ]
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_chunks = AsyncMock(return_value=True)
     kg_mock.write_entities = AsyncMock(return_value=True)
     extractor_mock = MagicMock()
@@ -1054,9 +1056,9 @@ async def test_backfill_chunks_recovers_labels_from_first_row():
         _chunk_row(0, "x", main_label="Artifact", sub_label="Dataset"),
         _chunk_row(1, "y", main_label="Artifact", sub_label="Dataset"),
     ]
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_chunks = AsyncMock(return_value=True)
     config = CorpusConfig(
         domain="biomedical",
@@ -1082,9 +1084,9 @@ async def test_backfill_chunks_skips_entities_when_kg_write_fails():
     """write_chunks raising -> orchestrator records chunks_ok=False and
     doesn't propagate downstream on a known-broken layer."""
     rows = [_chunk_row(0, "a")]
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_chunks = AsyncMock(side_effect=RuntimeError("boom"))
     config = _entities_enabled_config()
 
@@ -1129,8 +1131,8 @@ async def test_backfill_entities_no_op_when_layer_disabled():
         allowed_types=["Paper"],
         layers=LayerFlags(chunks=True),
     )
-    search_mock = MagicMock()
-    kg_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
+    kg_mock = MagicMock(spec=Neo4jClient)
     with (
         patch("knowledge_agent.ingestion.pipeline.get_search_client",
               return_value=search_mock),
@@ -1148,9 +1150,9 @@ async def test_backfill_entities_no_op_when_layer_disabled():
 
 async def test_backfill_entities_aborts_when_lancedb_read_fails():
     """LanceDB None -> abort, no KG side effects."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=None)
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     config = _entities_enabled_config()
     with (
         patch("knowledge_agent.ingestion.pipeline.get_search_client",
@@ -1167,9 +1169,9 @@ async def test_backfill_entities_aborts_when_lancedb_read_fails():
 
 async def test_backfill_entities_skips_when_no_chunks_found():
     """Doc has no chunks in LanceDB -> nothing to backfill."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=[])
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     config = _entities_enabled_config()
     with (
         patch("knowledge_agent.ingestion.pipeline.get_search_client",
@@ -1186,12 +1188,12 @@ async def test_backfill_entities_skips_when_no_chunks_found():
 
 async def test_backfill_entities_happy_path_extracts_and_writes():
     """Reads chunks, deletes old entities, writes new, returns mention count."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         {"chunk_id": "doc-1#0", "text": "alpha", "chunk_index": 0},
         {"chunk_id": "doc-1#1", "text": "beta",  "chunk_index": 1},
     ]
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_entities = AsyncMock(return_value=True)
 
     extractor_mock = MagicMock()
@@ -1228,12 +1230,12 @@ async def test_backfill_entities_happy_path_extracts_and_writes():
 
 async def test_backfill_entities_one_chunk_extraction_failure_does_not_poison_others():
     """Extractor raising on one chunk -> that chunk gets [], others run normally."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         {"chunk_id": "doc-1#0", "text": "alpha", "chunk_index": 0},
         {"chunk_id": "doc-1#1", "text": "beta",  "chunk_index": 1},
     ]
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_entities = AsyncMock(return_value=True)
 
     extractor_mock = MagicMock()
@@ -1265,11 +1267,11 @@ async def test_backfill_entities_one_chunk_extraction_failure_does_not_poison_ot
 
 async def test_backfill_entities_chains_into_backfill_ontology_when_entities_ok():
     """Happy path with ontology enabled -> backfill_ontology runs after write."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         {"chunk_id": "doc-1#0", "text": "alpha", "chunk_index": 0},
     ]
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_entities = AsyncMock(return_value=True)
     kg_mock.ensure_ontology_imported = AsyncMock(return_value=False)
     kg_mock.link_entities_to_ontology = AsyncMock(return_value=5)
@@ -1302,11 +1304,11 @@ async def test_backfill_entities_chains_into_backfill_ontology_when_entities_ok(
 async def test_backfill_entities_skips_ontology_when_entity_write_fails():
     """write_entities raising -> orchestrator records entities_ok=False
     and doesn't run ontology linking on stale state."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         {"chunk_id": "doc-1#0", "text": "alpha", "chunk_index": 0},
     ]
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_entities = AsyncMock(side_effect=RuntimeError("boom"))
 
     extractor_mock = MagicMock()
@@ -1345,8 +1347,8 @@ def _triples_enabled_config() -> CorpusConfig:
 
 async def test_backfill_triples_no_op_when_layer_disabled():
     """triples=False -> immediate return, no client calls."""
-    search_mock = MagicMock()
-    kg_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
+    kg_mock = MagicMock(spec=Neo4jClient)
     config = _entities_enabled_config()  # entities on, triples off
 
     with (
@@ -1363,9 +1365,9 @@ async def test_backfill_triples_no_op_when_layer_disabled():
 
 
 async def test_backfill_triples_aborts_when_lancedb_read_fails():
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=None)
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     config = _triples_enabled_config()
 
     with (
@@ -1382,9 +1384,9 @@ async def test_backfill_triples_aborts_when_lancedb_read_fails():
 
 
 async def test_backfill_triples_skips_when_no_chunks_found():
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=[])
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     config = _triples_enabled_config()
 
     with (
@@ -1401,11 +1403,11 @@ async def test_backfill_triples_skips_when_no_chunks_found():
 
 async def test_backfill_triples_happy_path_extracts_and_writes():
     """Chunks + entities present -> LLM extracts -> write_triples called."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         {"chunk_id": "doc-1#0", "text": "BRCA1 inhibits TP53."},
     ]
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.get_entities_by_chunk.return_value = {
         "doc-1#0": [("brca1", "GENE"), ("tp53", "GENE")],
     }
@@ -1446,12 +1448,12 @@ async def test_backfill_triples_happy_path_extracts_and_writes():
 
 async def test_backfill_triples_skips_chunk_with_empty_vocab():
     """Chunk has no L6a entities -> no LLM call, but doc still written."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         {"chunk_id": "doc-1#0", "text": "Methodology overview."},
         {"chunk_id": "doc-1#1", "text": "BRCA1 inhibits TP53."},
     ]
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     # First chunk has no vocab; second has two entities.
     kg_mock.get_entities_by_chunk.return_value = {
         "doc-1#1": [("brca1", "GENE"), ("tp53", "GENE")],
@@ -1483,12 +1485,12 @@ async def test_backfill_triples_skips_chunk_with_empty_vocab():
 
 async def test_backfill_triples_one_chunk_extraction_failure_does_not_poison_others():
     """LLM raises on chunk #0 -> log + skip + continue to chunk #1."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         {"chunk_id": "doc-1#0", "text": "bad chunk"},
         {"chunk_id": "doc-1#1", "text": "good chunk"},
     ]
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.get_entities_by_chunk.return_value = {
         "doc-1#0": [("a", "GENE"), ("b", "GENE")],
         "doc-1#1": [("c", "GENE"), ("d", "GENE")],
@@ -1525,11 +1527,11 @@ async def test_backfill_triples_one_chunk_extraction_failure_does_not_poison_oth
 
 async def test_backfill_entities_chains_into_backfill_triples_when_triples_enabled():
     """Propagation: backfill_entities -> backfill_triples (when triples on)."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         {"chunk_id": "doc-1#0", "text": "alpha"},
     ]
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_entities = AsyncMock(return_value=True)
     # backfill_triples re-reads chunks + entities from these mocks.
     kg_mock.get_entities_by_chunk.return_value = {
@@ -1567,11 +1569,11 @@ async def test_backfill_entities_chains_into_backfill_triples_when_triples_enabl
 async def test_backfill_entities_does_not_run_triples_when_triples_off():
     """triples=False but entities on -> ontology still runs but triples
     sub-result stays empty (no-op return)."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         {"chunk_id": "doc-1#0", "text": "alpha"},
     ]
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_entities = AsyncMock(return_value=True)
     extractor_mock = MagicMock()
     extractor_mock.extract.return_value = []
@@ -1600,9 +1602,9 @@ async def test_delete_doc_calls_delete_triples_before_delete_entities():
     """Order matters: triples reference :Entity nodes via Cypher edges;
     if the entity-orphan GC runs first while triples still point at
     those entities, the plain DELETE crashes. Verify the call order."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.delete_chunks_by_doc_id = AsyncMock(return_value=True)
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.delete_doc = AsyncMock(return_value=True)
     kg_mock.delete_chunks_by_doc_id = AsyncMock(return_value=True)
     kg_mock.delete_triples_by_doc_id = AsyncMock(return_value=True)
@@ -1687,7 +1689,7 @@ def _cross_doc_enabled_config() -> CorpusConfig:
 
 async def test_backfill_cross_doc_no_op_when_layer_disabled():
     """cross_doc=False -> immediate return, no client calls."""
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     config = _entities_enabled_config()  # entities on, cross_doc off
 
     with patch(
@@ -1702,7 +1704,7 @@ async def test_backfill_cross_doc_no_op_when_layer_disabled():
 
 async def test_backfill_cross_doc_happy_path_returns_count():
     """recompute returns int -> ok=True, n=that int."""
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.recompute_cross_doc_edges = AsyncMock(return_value=4)
     config = _cross_doc_enabled_config()
 
@@ -1719,7 +1721,7 @@ async def test_backfill_cross_doc_happy_path_returns_count():
 async def test_backfill_cross_doc_zero_edges_is_success():
     """No other doc met threshold -> ok=True, n=0 (distinct from
     cross_doc_ok=False which means Cypher failure)."""
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.recompute_cross_doc_edges = AsyncMock(return_value=0)
     config = _cross_doc_enabled_config()
 
@@ -1734,7 +1736,7 @@ async def test_backfill_cross_doc_zero_edges_is_success():
 
 async def test_backfill_cross_doc_exception_means_failure():
     """recompute raising -> ok=False, n=0 (orchestrator catches)."""
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.recompute_cross_doc_edges = AsyncMock(side_effect=RuntimeError("boom"))
     config = _cross_doc_enabled_config()
 
@@ -1749,11 +1751,11 @@ async def test_backfill_cross_doc_exception_means_failure():
 
 async def test_backfill_entities_chains_into_backfill_cross_doc_when_enabled():
     """Propagation: backfill_entities -> backfill_cross_doc (when L9 on)."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         {"chunk_id": "doc-1#0", "text": "alpha"},
     ]
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_entities = AsyncMock(return_value=True)
     kg_mock.recompute_cross_doc_edges = AsyncMock(return_value=3)
 
@@ -1781,11 +1783,11 @@ async def test_backfill_entities_chains_into_backfill_cross_doc_when_enabled():
 
 async def test_backfill_entities_does_not_run_cross_doc_when_disabled():
     """L9 off -> cross_doc sub-result is the no-op shape."""
-    search_mock = MagicMock()
+    search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         {"chunk_id": "doc-1#0", "text": "alpha"},
     ]
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_entities = AsyncMock(return_value=True)
     extractor_mock = MagicMock()
     extractor_mock.extract.return_value = []
@@ -2940,7 +2942,7 @@ async def test_backfill_ontology_threads_xrefs_use_through_ensure_imported():
     """`xrefs="use"` on the config flows through `ensure_ontology_imported`
     as the `xrefs_mode` kwarg — that's how the helper writes resolved
     edges at import time."""
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.ensure_ontology_imported = AsyncMock(return_value=(False, True))
     kg_mock.link_entities_to_ontology = AsyncMock(return_value=0)
     config = _config_with_xrefs("use", ("mesh",))
@@ -2959,7 +2961,7 @@ async def test_backfill_ontology_threads_xrefs_use_through_ensure_imported():
 async def test_backfill_ontology_threads_xrefs_collect_only_mode():
     """`xrefs="collect_only"` flows verbatim. Default behaviour for
     users who want dangling_xrefs stored without writing edges yet."""
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.ensure_ontology_imported = AsyncMock(return_value=(False, True))
     config = _config_with_xrefs("collect_only", ("mesh",))
 
@@ -2977,7 +2979,7 @@ async def test_backfill_ontology_threads_xrefs_collect_only_mode():
 async def test_backfill_ontology_default_xrefs_mode_is_none():
     """When the config omits `xrefs`, the default `"none"` mode reaches
     the helper — preserves pre-L7-xrefs behaviour."""
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.ensure_ontology_imported = AsyncMock(return_value=(False, True))
     config = _config_with_ontologies("mesh")  # no xrefs flag set -> default "none"
 
@@ -3025,7 +3027,7 @@ def _cross_doc_xrefs_enabled_config(
 
 async def test_backfill_cross_doc_xrefs_no_op_when_layer_disabled():
     """L10 layer off -> immediate return, no client calls."""
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     config = _entities_enabled_config()  # cross_doc_xrefs is off
 
     with patch(
@@ -3042,7 +3044,7 @@ async def test_backfill_cross_doc_xrefs_happy_path_returns_count():
     """recompute returns int -> ok=True, n=that int. Threshold from
     the [cross_doc_xrefs] config block flows through as the positional
     arg to the delegate."""
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.recompute_cross_doc_xrefs_edges = AsyncMock(return_value=7)
     config = _cross_doc_xrefs_enabled_config(threshold=3)
 
@@ -3061,7 +3063,7 @@ async def test_backfill_cross_doc_xrefs_happy_path_returns_count():
 async def test_backfill_cross_doc_xrefs_zero_edges_is_success():
     """No other doc met threshold -> ok=True, n=0 (distinct from
     cross_doc_xrefs_ok=False which means Cypher failure)."""
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.recompute_cross_doc_xrefs_edges = AsyncMock(return_value=0)
     config = _cross_doc_xrefs_enabled_config()
 
@@ -3076,7 +3078,7 @@ async def test_backfill_cross_doc_xrefs_zero_edges_is_success():
 
 async def test_backfill_cross_doc_xrefs_exception_means_failure():
     """recompute raising -> ok=False, n=0 (orchestrator catches)."""
-    kg_mock = MagicMock()
+    kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.recompute_cross_doc_xrefs_edges = AsyncMock(side_effect=RuntimeError("boom"))
     config = _cross_doc_xrefs_enabled_config()
 

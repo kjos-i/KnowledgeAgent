@@ -377,7 +377,7 @@ async def backfill_chunks(
 
     entities_result: dict[str, Any] = {}
     if chunks_ok:
-        entities_result = backfill_entities(doc_id, config)
+        entities_result = await backfill_entities(doc_id, config)
 
     return {"chunks_ok": chunks_ok, "entities": entities_result}
 
@@ -472,15 +472,15 @@ async def backfill_entities(
     triples_result: dict[str, Any] = {}
     cross_doc_result: dict[str, Any] = {}
     if entities_ok:
-        ontology_results = backfill_ontology(doc_id, config)
+        ontology_results = await backfill_ontology(doc_id, config)
         # L8 depends on L6a entities only, so re-running entities
         # invalidates this doc's existing triples - rebuild them too.
         # No-op when layers.triples is off.
-        triples_result = backfill_triples(doc_id, config)
+        triples_result = await backfill_triples(doc_id, config)
         # L9 depends on L6a entities (not canonicals), so re-running
         # entities invalidates the doc's :RELATED_TO edges - rebuild.
         # No-op when layers.cross_doc is off.
-        cross_doc_result = backfill_cross_doc(doc_id, config)
+        cross_doc_result = await backfill_cross_doc(doc_id, config)
 
     return {
         "entities_ok": entities_ok,
