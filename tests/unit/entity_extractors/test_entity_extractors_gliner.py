@@ -15,7 +15,7 @@ The fake model exposes `predict_entities(text, labels, threshold)`
 returning a hand-rolled list of dicts matching GLiNER's real shape.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 
 from knowledge_agent.entity_extractors import gliner
 from knowledge_agent.entity_extractors.base import Mention
@@ -76,17 +76,17 @@ def _fake_model_returning(predictions: list[dict]):
     return mock
 
 
-def test_extract_returns_empty_when_model_predicts_nothing():
+async def test_extract_returns_empty_when_model_predicts_nothing():
     """No predictions → empty list, not error."""
     fake_model = _fake_model_returning([])
     with patch(
         "knowledge_agent.entity_extractors.gliner._get_model",
         return_value=fake_model,
     ):
-        assert gliner.extract("some text", ["PERSON"]) == []
+        assert await gliner.extract("some text", ["PERSON"]) == []
 
 
-def test_extract_maps_each_prediction_to_mention():
+async def test_extract_maps_each_prediction_to_mention():
     """Every dict GLiNER returns becomes a Mention with offset +
     confidence populated from GLiNER's start / score fields."""
     predictions = [
@@ -100,7 +100,7 @@ def test_extract_maps_each_prediction_to_mention():
         "knowledge_agent.entity_extractors.gliner._get_model",
         return_value=fake_model,
     ):
-        result = gliner.extract("text", ["PERSON", "ORGANIZATION"])
+        result = await gliner.extract("text", ["PERSON", "ORGANIZATION"])
 
     assert result == [
         Mention(
@@ -114,7 +114,7 @@ def test_extract_maps_each_prediction_to_mention():
     ]
 
 
-def test_extract_preserves_offset_from_start_field():
+async def test_extract_preserves_offset_from_start_field():
     """Mention.offset comes from GLiNER's `start` (char position in
     chunk text), NOT a different field."""
     predictions = [
@@ -126,12 +126,12 @@ def test_extract_preserves_offset_from_start_field():
         "knowledge_agent.entity_extractors.gliner._get_model",
         return_value=fake_model,
     ):
-        result = gliner.extract("text", ["LOCATION"])
+        result = await gliner.extract("text", ["LOCATION"])
 
     assert result[0].offset == 42
 
 
-def test_extract_preserves_confidence_from_score_field():
+async def test_extract_preserves_confidence_from_score_field():
     """GLiNER exposes per-mention scores — surface them on Mention.
     Unlike SciSpaCy + LLM which both leave confidence=None."""
     predictions = [
@@ -143,7 +143,7 @@ def test_extract_preserves_confidence_from_score_field():
         "knowledge_agent.entity_extractors.gliner._get_model",
         return_value=fake_model,
     ):
-        result = gliner.extract("text", ["PERSON"])
+        result = await gliner.extract("text", ["PERSON"])
 
     assert result[0].confidence == 0.73
 
@@ -151,7 +151,7 @@ def test_extract_preserves_confidence_from_score_field():
 # ---- entity_types semantics ----
 
 
-def test_extract_passes_non_empty_entity_types_verbatim():
+async def test_extract_passes_non_empty_entity_types_verbatim():
     """Non-empty entity_types flows into GLiNER's labels arg as-is.
     GLiNER is zero-shot so whatever the user puts in corpus.toml is
     what GLiNER predicts against."""
@@ -160,7 +160,7 @@ def test_extract_passes_non_empty_entity_types_verbatim():
         "knowledge_agent.entity_extractors.gliner._get_model",
         return_value=fake_model,
     ):
-        gliner.extract("text", ["GENE", "PROTEIN", "DISEASE"])
+        await gliner.extract("text", ["GENE", "PROTEIN", "DISEASE"])
 
     # Confirm the model was called with the labels we passed.
     args, kwargs = fake_model.predict_entities.call_args
@@ -168,7 +168,7 @@ def test_extract_passes_non_empty_entity_types_verbatim():
     assert args[1] == ["GENE", "PROTEIN", "DISEASE"]
 
 
-def test_extract_uses_default_labels_when_entity_types_empty():
+async def test_extract_uses_default_labels_when_entity_types_empty():
     """Empty entity_types → DEFAULT_LABELS passed to GLiNER. GLiNER
     requires non-empty labels; without this fallback the call would
     raise."""
@@ -177,13 +177,13 @@ def test_extract_uses_default_labels_when_entity_types_empty():
         "knowledge_agent.entity_extractors.gliner._get_model",
         return_value=fake_model,
     ):
-        gliner.extract("text", [])
+        await gliner.extract("text", [])
 
     args, kwargs = fake_model.predict_entities.call_args
     assert args[1] == list(gliner.DEFAULT_LABELS)
 
 
-def test_extract_passes_threshold_to_model():
+async def test_extract_passes_threshold_to_model():
     """The score threshold lives as a module constant — confirm it
     actually reaches GLiNER's predict_entities call."""
     fake_model = _fake_model_returning([])
@@ -191,13 +191,13 @@ def test_extract_passes_threshold_to_model():
         "knowledge_agent.entity_extractors.gliner._get_model",
         return_value=fake_model,
     ):
-        gliner.extract("text", ["PERSON"])
+        await gliner.extract("text", ["PERSON"])
 
     args, kwargs = fake_model.predict_entities.call_args
     assert kwargs.get("threshold") == gliner._SCORE_THRESHOLD
 
 
-def test_extract_forwards_text_unchanged_to_model():
+async def test_extract_forwards_text_unchanged_to_model():
     """The chunk text is passed verbatim — no preprocessing.
     GLiNER tokenises internally."""
     fake_model = _fake_model_returning([])
@@ -205,7 +205,7 @@ def test_extract_forwards_text_unchanged_to_model():
         "knowledge_agent.entity_extractors.gliner._get_model",
         return_value=fake_model,
     ):
-        gliner.extract("Mixed-case Text  with  weird whitespace.", ["X"])
+        await gliner.extract("Mixed-case Text  with  weird whitespace.", ["X"])
 
     args, kwargs = fake_model.predict_entities.call_args
     assert args[0] == "Mixed-case Text  with  weird whitespace."
@@ -214,7 +214,7 @@ def test_extract_forwards_text_unchanged_to_model():
 # ---- raw_text preservation ----
 
 
-def test_extract_preserves_original_spelling_in_raw_text():
+async def test_extract_preserves_original_spelling_in_raw_text():
     """raw_text is the verbatim span from the source — do NOT
     lowercase or normalise. Lowercasing happens in entity_writes when
     computing the :Entity node's key for the MERGE."""
@@ -227,7 +227,7 @@ def test_extract_preserves_original_spelling_in_raw_text():
         "knowledge_agent.entity_extractors.gliner._get_model",
         return_value=fake_model,
     ):
-        result = gliner.extract("text", ["TECHNOLOGY"])
+        result = await gliner.extract("text", ["TECHNOLOGY"])
 
     # Original case preserved — NOT crispr-cas9.
     assert result[0].raw_text == "CRISPR-Cas9"

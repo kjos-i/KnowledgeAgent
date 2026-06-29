@@ -6,7 +6,7 @@ acknowledgement that this checkpoint has no .safetensors (pickle
 format only — flagged in provenance).
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 
 from knowledge_agent.entity_extractors import gliner_biomed
 from knowledge_agent.entity_extractors.base import Mention
@@ -64,17 +64,17 @@ def _fake_model_returning(predictions: list[dict]):
     return mock
 
 
-def test_extract_returns_empty_when_model_predicts_nothing():
+async def test_extract_returns_empty_when_model_predicts_nothing():
     """No predictions → empty list, not error."""
     fake_model = _fake_model_returning([])
     with patch(
         "knowledge_agent.entity_extractors.gliner_biomed._get_model",
         return_value=fake_model,
     ):
-        assert gliner_biomed.extract("biomedical text", ["DISEASE"]) == []
+        assert await gliner_biomed.extract("biomedical text", ["DISEASE"]) == []
 
 
-def test_extract_maps_each_prediction_to_mention_with_score_and_offset():
+async def test_extract_maps_each_prediction_to_mention_with_score_and_offset():
     """Every dict GLiNER returns becomes a Mention with offset +
     confidence populated from GLiNER's start / score fields."""
     predictions = [
@@ -88,7 +88,7 @@ def test_extract_maps_each_prediction_to_mention_with_score_and_offset():
         "knowledge_agent.entity_extractors.gliner_biomed._get_model",
         return_value=fake_model,
     ):
-        result = gliner_biomed.extract("text", ["DISEASE", "CHEMICAL"])
+        result = await gliner_biomed.extract("text", ["DISEASE", "CHEMICAL"])
 
     assert result == [
         Mention(
@@ -102,20 +102,20 @@ def test_extract_maps_each_prediction_to_mention_with_score_and_offset():
     ]
 
 
-def test_extract_passes_non_empty_entity_types_verbatim():
+async def test_extract_passes_non_empty_entity_types_verbatim():
     """Non-empty entity_types flows into GLiNER's labels arg as-is."""
     fake_model = _fake_model_returning([])
     with patch(
         "knowledge_agent.entity_extractors.gliner_biomed._get_model",
         return_value=fake_model,
     ):
-        gliner_biomed.extract("text", ["GENE", "PROTEIN"])
+        await gliner_biomed.extract("text", ["GENE", "PROTEIN"])
 
     args, _ = fake_model.predict_entities.call_args
     assert args[1] == ["GENE", "PROTEIN"]
 
 
-def test_extract_uses_biomedical_default_labels_when_entity_types_empty():
+async def test_extract_uses_biomedical_default_labels_when_entity_types_empty():
     """Empty entity_types → DEFAULT_LABELS (biomedical categories)
     passed to GLiNER. GLiNER requires non-empty labels; without this
     fallback the call would raise."""
@@ -124,26 +124,26 @@ def test_extract_uses_biomedical_default_labels_when_entity_types_empty():
         "knowledge_agent.entity_extractors.gliner_biomed._get_model",
         return_value=fake_model,
     ):
-        gliner_biomed.extract("text", [])
+        await gliner_biomed.extract("text", [])
 
     args, _ = fake_model.predict_entities.call_args
     assert args[1] == list(gliner_biomed.DEFAULT_LABELS)
 
 
-def test_extract_passes_threshold_to_model():
+async def test_extract_passes_threshold_to_model():
     """Score threshold module constant reaches GLiNER's call."""
     fake_model = _fake_model_returning([])
     with patch(
         "knowledge_agent.entity_extractors.gliner_biomed._get_model",
         return_value=fake_model,
     ):
-        gliner_biomed.extract("text", ["DISEASE"])
+        await gliner_biomed.extract("text", ["DISEASE"])
 
     _, kwargs = fake_model.predict_entities.call_args
     assert kwargs.get("threshold") == gliner_biomed._SCORE_THRESHOLD
 
 
-def test_extract_preserves_original_spelling_in_raw_text():
+async def test_extract_preserves_original_spelling_in_raw_text():
     """raw_text preserves verbatim span — lowercasing happens in
     entity_writes at the :Entity MERGE step."""
     predictions = [
@@ -155,7 +155,7 @@ def test_extract_preserves_original_spelling_in_raw_text():
         "knowledge_agent.entity_extractors.gliner_biomed._get_model",
         return_value=fake_model,
     ):
-        result = gliner_biomed.extract("text", ["GENE"])
+        result = await gliner_biomed.extract("text", ["GENE"])
 
     # Original case preserved — NOT tp53.
     assert result[0].raw_text == "TP53"

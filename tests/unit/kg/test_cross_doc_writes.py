@@ -275,18 +275,18 @@ def test_recompute_uses_default_threshold_when_not_provided():
 # ---- Client delegate ----
 
 
-def test_client_recompute_cross_doc_edges_delegates_to_module():
+async def test_client_recompute_cross_doc_edges_delegates_to_module():
     driver = _driver_with_count(7)
     client = _client_with_driver(driver)
-    result = client.recompute_cross_doc_edges(DOC_ID)
+    result = await client.recompute_cross_doc_edges(DOC_ID)
     assert result == 7
     # Both queries fired through the delegate.
     assert len(driver.sessions[0].calls) == 2
 
 
-def test_client_recompute_cross_doc_edges_passes_through_threshold():
+async def test_client_recompute_cross_doc_edges_passes_through_threshold():
     driver = _driver_with_count(0)
     client = _client_with_driver(driver)
-    client.recompute_cross_doc_edges(DOC_ID, threshold=5)
+    await client.recompute_cross_doc_edges(DOC_ID, threshold=5)
     _merge, params = driver.sessions[0].calls[1]
     assert params["threshold"] == 5

@@ -10,7 +10,7 @@ For coverage of the OpenAI / Google / HuggingFace dispatch branches
 see `tests/unit/test_embedder_factory.py`.
 """
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, AsyncMock
 
 import pytest
 
@@ -32,13 +32,13 @@ def _voyage_settings():
     )
 
 
-def test_embed_texts_empty_returns_empty_list():
+async def test_embed_texts_empty_returns_empty_list():
     """No API call for empty input — short-circuits BEFORE provider
     validation, so no settings patching is needed."""
-    assert embed_texts([]) == []
+    assert await embed_texts([]) == []
 
 
-def test_embed_texts_returns_vectors_aligned_with_input():
+async def test_embed_texts_returns_vectors_aligned_with_input():
     fake_result = Mock()
     fake_result.embeddings = [[0.1, 0.2], [0.3, 0.4]]
     fake_client = Mock()
@@ -48,12 +48,12 @@ def test_embed_texts_returns_vectors_aligned_with_input():
         patch(_SETTINGS_PATCH, return_value=_voyage_settings()),
         patch(_VOYAGE_CLIENT_PATCH, return_value=fake_client),
     ):
-        result = embed_texts(["text1", "text2"])
+        result = await embed_texts(["text1", "text2"])
 
     assert result == [[0.1, 0.2], [0.3, 0.4]]
 
 
-def test_embed_texts_wraps_each_text_in_singleton_list_for_multimodal_api():
+async def test_embed_texts_wraps_each_text_in_singleton_list_for_multimodal_api():
     fake_result = Mock()
     fake_result.embeddings = [[0.0], [0.0]]
     fake_client = Mock()
@@ -63,14 +63,14 @@ def test_embed_texts_wraps_each_text_in_singleton_list_for_multimodal_api():
         patch(_SETTINGS_PATCH, return_value=_voyage_settings()),
         patch(_VOYAGE_CLIENT_PATCH, return_value=fake_client),
     ):
-        embed_texts(["a", "b"])
+        await embed_texts(["a", "b"])
 
     call = fake_client.multimodal_embed.call_args
     # Multimodal API takes inputs as `list[list[str|Image]]`.
     assert call.kwargs["inputs"] == [["a"], ["b"]]
 
 
-def test_embed_texts_propagates_api_exception():
+async def test_embed_texts_propagates_api_exception():
     """Typed-errors contract: Voyage API failures propagate; the
     orchestrator boundary (pipeline.ingest_document / re_embed) catches
     and records the typed error."""
@@ -82,10 +82,10 @@ def test_embed_texts_propagates_api_exception():
         patch(_VOYAGE_CLIENT_PATCH, return_value=fake_client),
     ):
         with pytest.raises(RuntimeError, match="api down"):
-            embed_texts(["text"])
+            await embed_texts(["text"])
 
 
-def test_embed_texts_default_input_type_is_document():
+async def test_embed_texts_default_input_type_is_document():
     fake_result = Mock()
     fake_result.embeddings = [[0.0]]
     fake_client = Mock()
@@ -95,13 +95,13 @@ def test_embed_texts_default_input_type_is_document():
         patch(_SETTINGS_PATCH, return_value=_voyage_settings()),
         patch(_VOYAGE_CLIENT_PATCH, return_value=fake_client),
     ):
-        embed_texts(["text"])
+        await embed_texts(["text"])
 
     call = fake_client.multimodal_embed.call_args
     assert call.kwargs["input_type"] == "document"
 
 
-def test_embed_texts_passes_query_input_type_through():
+async def test_embed_texts_passes_query_input_type_through():
     fake_result = Mock()
     fake_result.embeddings = [[0.0]]
     fake_client = Mock()
@@ -111,7 +111,7 @@ def test_embed_texts_passes_query_input_type_through():
         patch(_SETTINGS_PATCH, return_value=_voyage_settings()),
         patch(_VOYAGE_CLIENT_PATCH, return_value=fake_client),
     ):
-        embed_texts(["text"], input_type="query")
+        await embed_texts(["text"], input_type="query")
 
     call = fake_client.multimodal_embed.call_args
     assert call.kwargs["input_type"] == "query"

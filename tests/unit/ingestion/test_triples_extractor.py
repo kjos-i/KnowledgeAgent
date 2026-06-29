@@ -15,7 +15,7 @@ test_entity_extractors_llm.py. We verify:
     unexpected.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 
 from knowledge_agent.ingestion import triples_extractor
 from knowledge_agent.ingestion.triples_extractor import (
@@ -34,7 +34,7 @@ def _mock_llm_returning(structured_output):
     by `llm_factory.with_retry` tests in isolation.
     """
     mock_structured = MagicMock()
-    mock_structured.invoke = MagicMock(return_value=structured_output)
+    mock_structured.ainvoke = AsyncMock(return_value=structured_output)
     mock_structured.with_retry = MagicMock(return_value=mock_structured)
     mock_llm = MagicMock()
     mock_llm.with_structured_output = MagicMock(return_value=mock_structured)
@@ -57,7 +57,7 @@ def _patch_llm_and_settings(mock_llm):
 # ---- Fast-path: empty vocab ----
 
 
-def test_extract_empty_vocab_returns_empty_without_llm_call():
+async def test_extract_empty_vocab_returns_empty_without_llm_call():
     """No L6a entities = no possible triples. Don't waste an LLM call."""
     mock_llm = _mock_llm_returning(_LLMTriples(triples=[]))
     mock_structured = mock_llm.with_structured_output.return_value
@@ -65,10 +65,10 @@ def test_extract_empty_vocab_returns_empty_without_llm_call():
         "knowledge_agent.ingestion.triples_extractor._get_llm",
         return_value=mock_llm,
     ):
-        result = triples_extractor.extract("some text", [])
+        result = await triples_extractor.extract("some text", [])
 
     assert result == []
-    mock_structured.invoke.assert_not_called()
+    mock_structured.ainvoke.assert_not_called()
 
 
 # ---- Prompt construction ----
@@ -102,7 +102,7 @@ def test_build_system_prompt_handles_no_vocab_gracefully():
 # ---- End-to-end extract() with mocked LLM ----
 
 
-def test_extract_maps_valid_triple_to_extracted_triple():
+async def test_extract_maps_valid_triple_to_extracted_triple():
     output = _LLMTriples(
         triples=[
             _LLMTriple(
@@ -118,7 +118,7 @@ def test_extract_maps_valid_triple_to_extracted_triple():
     with a, b as mock_settings:
         mock_settings.return_value.triples_extractor_model = "claude-haiku"
         mock_settings.return_value.triples_extractor_temperature = 0.0
-        result = triples_extractor.extract(
+        result = await triples_extractor.extract(
             "BRCA1 inhibits TP53 expression.",
             [("brca1", "GENE"), ("tp53", "GENE")],
         )
@@ -135,7 +135,7 @@ def test_extract_maps_valid_triple_to_extracted_triple():
     ]
 
 
-def test_extract_drops_triple_with_subject_not_in_vocab():
+async def test_extract_drops_triple_with_subject_not_in_vocab():
     """LLM hallucinated an entity - filter at extractor boundary."""
     output = _LLMTriples(
         triples=[
@@ -152,14 +152,14 @@ def test_extract_drops_triple_with_subject_not_in_vocab():
     with a, b as mock_settings:
         mock_settings.return_value.triples_extractor_model = "claude-haiku"
         mock_settings.return_value.triples_extractor_temperature = 0.0
-        result = triples_extractor.extract(
+        result = await triples_extractor.extract(
             "text", [("brca1", "GENE"), ("tp53", "GENE")]
         )
 
     assert result == []
 
 
-def test_extract_drops_triple_with_object_not_in_vocab():
+async def test_extract_drops_triple_with_object_not_in_vocab():
     output = _LLMTriples(
         triples=[
             _LLMTriple(
@@ -175,12 +175,12 @@ def test_extract_drops_triple_with_object_not_in_vocab():
     with a, b as mock_settings:
         mock_settings.return_value.triples_extractor_model = "claude-haiku"
         mock_settings.return_value.triples_extractor_temperature = 0.0
-        result = triples_extractor.extract("text", [("brca1", "GENE")])
+        result = await triples_extractor.extract("text", [("brca1", "GENE")])
 
     assert result == []
 
 
-def test_extract_drops_triple_with_unknown_predicate():
+async def test_extract_drops_triple_with_unknown_predicate():
     """LLM ignored the constrained vocabulary - filter."""
     output = _LLMTriples(
         triples=[
@@ -197,14 +197,14 @@ def test_extract_drops_triple_with_unknown_predicate():
     with a, b as mock_settings:
         mock_settings.return_value.triples_extractor_model = "claude-haiku"
         mock_settings.return_value.triples_extractor_temperature = 0.0
-        result = triples_extractor.extract(
+        result = await triples_extractor.extract(
             "text", [("brca1", "GENE"), ("tp53", "GENE")]
         )
 
     assert result == []
 
 
-def test_extract_fills_entity_types_from_vocab_lookup():
+async def test_extract_fills_entity_types_from_vocab_lookup():
     """LLM returns only keys; the extractor fills types from the vocab."""
     output = _LLMTriples(
         triples=[
@@ -221,7 +221,7 @@ def test_extract_fills_entity_types_from_vocab_lookup():
     with a, b as mock_settings:
         mock_settings.return_value.triples_extractor_model = "claude-haiku"
         mock_settings.return_value.triples_extractor_temperature = 0.0
-        result = triples_extractor.extract(
+        result = await triples_extractor.extract(
             "Aspirin treats headache.",
             [("aspirin", "CHEMICAL"), ("headache", "DISEASE")],
         )
@@ -230,7 +230,7 @@ def test_extract_fills_entity_types_from_vocab_lookup():
     assert result[0].object_entity_type == "DISEASE"
 
 
-def test_extract_uses_settings_model_and_temperature():
+async def test_extract_uses_settings_model_and_temperature():
     output = _LLMTriples(triples=[])
     mock_llm = _mock_llm_returning(output)
     with (
@@ -244,48 +244,49 @@ def test_extract_uses_settings_model_and_temperature():
     ):
         mock_settings.return_value.triples_extractor_model = "test-model"
         mock_settings.return_value.triples_extractor_temperature = 0.4
-        triples_extractor.extract("text", [("a", "GENE"), ("b", "GENE")])
+        await triples_extractor.extract("text", [("a", "GENE"), ("b", "GENE")])
 
     mock_get_llm.assert_called_once_with("test-model", 0.4)
 
 
-def test_extract_binds_llmtriples_as_structured_output_schema():
+async def test_extract_binds_llmtriples_as_structured_output_schema():
     output = _LLMTriples(triples=[])
     mock_llm = _mock_llm_returning(output)
     a, b = _patch_llm_and_settings(mock_llm)
     with a, b as mock_settings:
         mock_settings.return_value.triples_extractor_model = "claude-haiku"
         mock_settings.return_value.triples_extractor_temperature = 0.0
-        triples_extractor.extract("text", [("a", "GENE"), ("b", "GENE")])
+        await triples_extractor.extract("text", [("a", "GENE"), ("b", "GENE")])
 
     mock_llm.with_structured_output.assert_called_once_with(_LLMTriples)
 
 
-def test_extract_defensive_fallback_on_non_llmtriples_result():
+async def test_extract_defensive_fallback_on_non_llmtriples_result():
     """If structured output drifts (e.g. returns a dict), fail closed."""
     mock_structured = MagicMock()
-    mock_structured.invoke = MagicMock(return_value={"triples": []})
+    mock_structured.ainvoke = AsyncMock(return_value={"triples": []})
+    mock_structured.with_retry = MagicMock(return_value=mock_structured)
     mock_llm = MagicMock()
     mock_llm.with_structured_output = MagicMock(return_value=mock_structured)
     a, b = _patch_llm_and_settings(mock_llm)
     with a, b as mock_settings:
         mock_settings.return_value.triples_extractor_model = "claude-haiku"
         mock_settings.return_value.triples_extractor_temperature = 0.0
-        result = triples_extractor.extract(
+        result = await triples_extractor.extract(
             "text", [("a", "GENE"), ("b", "GENE")]
         )
 
     assert result == []
 
 
-def test_extract_returns_empty_when_llm_returns_no_triples():
+async def test_extract_returns_empty_when_llm_returns_no_triples():
     output = _LLMTriples(triples=[])
     mock_llm = _mock_llm_returning(output)
     a, b = _patch_llm_and_settings(mock_llm)
     with a, b as mock_settings:
         mock_settings.return_value.triples_extractor_model = "claude-haiku"
         mock_settings.return_value.triples_extractor_temperature = 0.0
-        result = triples_extractor.extract(
+        result = await triples_extractor.extract(
             "Plain text with no relations.",
             [("brca1", "GENE"), ("tp53", "GENE")],
         )

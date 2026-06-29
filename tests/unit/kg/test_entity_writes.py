@@ -295,11 +295,11 @@ def test_delete_entities_propagates_cypher_exception():
 # ---- Neo4jClient delegate methods ----
 
 
-def test_client_write_entities_delegates_to_module():
+async def test_client_write_entities_delegates_to_module():
     """Client.write_entities is a 1-line wrapper. Verify it calls through."""
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    result = client.write_entities(
+    result = await client.write_entities(
         DOC_ID, [("c0", [Mention("BRCA1", "GENE")])]
     )
     assert result is None
@@ -308,10 +308,10 @@ def test_client_write_entities_delegates_to_module():
     assert len(driver.sessions[0].calls) == 1
 
 
-def test_client_delete_entities_by_doc_id_delegates_to_module():
+async def test_client_delete_entities_by_doc_id_delegates_to_module():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    result = client.delete_entities_by_doc_id(DOC_ID)
+    result = await client.delete_entities_by_doc_id(DOC_ID)
     assert result is None
     # Underlying delete runs its two queries.
     assert len(driver.sessions[0].calls) == 2

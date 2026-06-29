@@ -362,26 +362,26 @@ def test_delete_imported_propagates_driver_exception():
 # ---- Neo4jClient delegate methods ----
 
 
-def test_client_is_eco_imported_delegates_to_module():
+async def test_client_is_eco_imported_delegates_to_module():
     driver = RecordingDriver(
         canned_results_per_session=[
             [_RecordingResult(rows=[{"present": True}])]
         ]
     )
     client = _client_with_driver(driver)
-    assert client.is_eco_imported() is True
+    assert await client.is_eco_imported() is True
 
 
-def test_client_delete_eco_delegates_to_module():
+async def test_client_delete_eco_delegates_to_module():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    assert client.delete_eco() is None
+    assert await client.delete_eco() is None
     cypher, _ = driver.sessions[0].calls[0]
     assert ":ECOTerm" in cypher
     assert "DETACH DELETE" in cypher
 
 
-def test_client_import_eco_delegates_to_module():
+async def test_client_import_eco_delegates_to_module():
     driver = RecordingDriver(
         canned_results_per_session=[
             [_RecordingResult(rows=[{"present": True}])]
@@ -391,5 +391,5 @@ def test_client_import_eco_delegates_to_module():
     with patch(
         "knowledge_agent.kg.ontology_writes.ensure_cached"
     ) as mock_cache:
-        assert client.import_eco(force=False) is False
+        assert await client.import_eco(force=False) is False
     mock_cache.assert_not_called()

@@ -6,7 +6,7 @@ via LangChain wrappers. All four are exercised under patches so
 no real API calls are made.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 
 import pytest
 
@@ -51,15 +51,15 @@ def _clear_factory_cache():
 # ---- lazy validation ----
 
 
-def test_empty_texts_returns_empty_no_validation_no_api_call():
-    """`embed_texts([])` must short-circuit BEFORE validation so
+async def test_empty_texts_returns_empty_no_validation_no_api_call():
+    """`await embed_texts([])` must short-circuit BEFORE validation so
     callers that haven't set up a provider yet (test bootstrap) still
     get the empty-input no-op behaviour."""
     # No patching of get_settings — the function should never call it.
-    assert embed_texts([]) == []
+    assert await embed_texts([]) == []
 
 
-def test_voyage_missing_api_key_raises_config_error():
+async def test_voyage_missing_api_key_raises_config_error():
     settings = _FakeSettings(
         embedding_provider="voyage", voyage_api_key=""
     )
@@ -68,10 +68,10 @@ def test_voyage_missing_api_key_raises_config_error():
         return_value=settings,
     ):
         with pytest.raises(ConfigError, match="VOYAGE_API_KEY"):
-            embed_texts(["hello"])
+            await embed_texts(["hello"])
 
 
-def test_openai_missing_api_key_raises_config_error():
+async def test_openai_missing_api_key_raises_config_error():
     settings = _FakeSettings(
         embedding_provider="openai", openai_api_key=None
     )
@@ -80,10 +80,10 @@ def test_openai_missing_api_key_raises_config_error():
         return_value=settings,
     ):
         with pytest.raises(ConfigError, match="OPENAI_API_KEY"):
-            embed_texts(["hello"])
+            await embed_texts(["hello"])
 
 
-def test_google_missing_api_key_raises_config_error():
+async def test_google_missing_api_key_raises_config_error():
     settings = _FakeSettings(
         embedding_provider="google", google_api_key=None
     )
@@ -92,13 +92,13 @@ def test_google_missing_api_key_raises_config_error():
         return_value=settings,
     ):
         with pytest.raises(ConfigError, match="GOOGLE_API_KEY"):
-            embed_texts(["hello"])
+            await embed_texts(["hello"])
 
 
 # ---- dispatch: voyage (native client path) ----
 
 
-def test_voyage_dispatch_calls_multimodal_embed():
+async def test_voyage_dispatch_calls_multimodal_embed():
     settings = _FakeSettings(
         embedding_provider="voyage", voyage_api_key="pa-stub"
     )
@@ -116,7 +116,7 @@ def test_voyage_dispatch_calls_multimodal_embed():
             return_value=fake_client,
         ),
     ):
-        result = embed_texts(["one", "two"], input_type="document")
+        result = await embed_texts(["one", "two"], input_type="document")
     assert result == [[0.1, 0.2], [0.3, 0.4]]
     fake_client.multimodal_embed.assert_called_once()
     call_kwargs = fake_client.multimodal_embed.call_args.kwargs
@@ -129,13 +129,13 @@ def test_voyage_dispatch_calls_multimodal_embed():
 # ---- dispatch: langchain providers ----
 
 
-def test_openai_dispatch_uses_embed_documents_for_document_input():
+async def test_openai_dispatch_uses_embed_documents_for_document_input():
     settings = _FakeSettings(
         embedding_provider="openai",
         openai_api_key="sk-openai",
     )
     fake_embedder = MagicMock()
-    fake_embedder.embed_documents.return_value = [[0.1, 0.2]]
+    fake_embedder.aembed_documents = AsyncMock(return_value=[[0.1, 0.2]])
     with (
         patch(
             "knowledge_agent.embedder_factory.get_settings",
@@ -146,19 +146,19 @@ def test_openai_dispatch_uses_embed_documents_for_document_input():
             return_value=fake_embedder,
         ),
     ):
-        result = embed_texts(["hello"], input_type="document")
+        result = await embed_texts(["hello"], input_type="document")
     assert result == [[0.1, 0.2]]
-    fake_embedder.embed_documents.assert_called_once_with(["hello"])
-    fake_embedder.embed_query.assert_not_called()
+    fake_embedder.aembed_documents.assert_called_once_with(["hello"])
+    fake_embedder.aembed_query.assert_not_called()
 
 
-def test_google_dispatch_uses_embed_query_for_query_input():
+async def test_google_dispatch_uses_embed_query_for_query_input():
     settings = _FakeSettings(
         embedding_provider="google",
         google_api_key="goog-key",
     )
     fake_embedder = MagicMock()
-    fake_embedder.embed_query.side_effect = [[0.9, 0.8]]
+    fake_embedder.aembed_query = AsyncMock(side_effect=[[0.9, 0.8]])
     with (
         patch(
             "knowledge_agent.embedder_factory.get_settings",
@@ -169,16 +169,16 @@ def test_google_dispatch_uses_embed_query_for_query_input():
             return_value=fake_embedder,
         ),
     ):
-        result = embed_texts(["what is X?"], input_type="query")
+        result = await embed_texts(["what is X?"], input_type="query")
     assert result == [[0.9, 0.8]]
-    fake_embedder.embed_query.assert_called_once_with("what is X?")
-    fake_embedder.embed_documents.assert_not_called()
+    fake_embedder.aembed_query.assert_called_once_with("what is X?")
+    fake_embedder.aembed_documents.assert_not_called()
 
 
-def test_huggingface_dispatch_no_api_key_needed():
+async def test_huggingface_dispatch_no_api_key_needed():
     settings = _FakeSettings(embedding_provider="huggingface")
     fake_embedder = MagicMock()
-    fake_embedder.embed_documents.return_value = [[0.5, 0.5]]
+    fake_embedder.aembed_documents = AsyncMock(return_value=[[0.5, 0.5]])
     with (
         patch(
             "knowledge_agent.embedder_factory.get_settings",
@@ -190,5 +190,5 @@ def test_huggingface_dispatch_no_api_key_needed():
         ),
     ):
         # No api key on settings — HF runs locally.
-        result = embed_texts(["x"], input_type="document")
+        result = await embed_texts(["x"], input_type="document")
     assert result == [[0.5, 0.5]]

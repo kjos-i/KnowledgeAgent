@@ -184,68 +184,68 @@ def test_conn_lazy_attribute_starts_none():
     assert client._conn is None
 
 
-def test_close_resets_conn_to_none():
+async def test_close_resets_conn_to_none():
     conn = RecordingConnection()
     client = _client_with_conn(_configured_settings(), conn)
-    client.close()
+    await client.close()
     assert client._conn is None
 
 
-def test_close_is_safe_when_conn_never_created():
+async def test_close_is_safe_when_conn_never_created():
     client = LanceClient(settings=_configured_settings())
-    client.close()  # must not raise
+    await client.close()  # must not raise
 
 
 # ---- ensure_schema ----
 
 
-def test_ensure_schema_creates_table_when_missing():
+async def test_ensure_schema_creates_table_when_missing():
     conn = RecordingConnection()
     client = _client_with_conn(_configured_settings(), conn)
     # Success: returns None (typed-errors contract).
-    assert client.ensure_schema() is None
+    assert await client.ensure_schema() is None
     assert CHUNKS_TABLE in conn.tables
 
 
-def test_ensure_schema_no_op_when_table_exists():
+async def test_ensure_schema_no_op_when_table_exists():
     """Existing table is left untouched - no recreate, no error."""
     pre_existing = RecordingTable()
     conn = RecordingConnection(tables={CHUNKS_TABLE: pre_existing})
     client = _client_with_conn(_configured_settings(), conn)
-    assert client.ensure_schema() is None
+    assert await client.ensure_schema() is None
     # Same instance - the table was not recreated.
     assert conn.tables[CHUNKS_TABLE] is pre_existing
 
 
-def test_ensure_schema_propagates_lance_exception():
+async def test_ensure_schema_propagates_lance_exception():
     conn = RecordingConnection(raise_on_create=RuntimeError("boom"))
     client = _client_with_conn(_configured_settings(), conn)
     with pytest.raises(RuntimeError, match="boom"):
-        client.ensure_schema()
+        await client.ensure_schema()
 
 
 # ---- drop_chunks_table ----
 
 
-def test_drop_chunks_table_removes_existing_table():
+async def test_drop_chunks_table_removes_existing_table():
     """Schema-reset path: existing table is dropped so the next
     ensure_schema can recreate it with the current schema."""
     conn = RecordingConnection(tables={CHUNKS_TABLE: RecordingTable()})
     client = _client_with_conn(_configured_settings(), conn)
-    assert client.drop_chunks_table() is None
+    assert await client.drop_chunks_table() is None
     assert CHUNKS_TABLE not in conn.tables
 
 
-def test_drop_chunks_table_no_op_when_table_absent():
+async def test_drop_chunks_table_no_op_when_table_absent():
     """Idempotent: dropping a non-existent table is success, not error.
     Lets smoke scripts call drop unconditionally without worrying about
     state."""
     conn = RecordingConnection()  # no tables
     client = _client_with_conn(_configured_settings(), conn)
-    assert client.drop_chunks_table() is None
+    assert await client.drop_chunks_table() is None
 
 
-def test_drop_chunks_table_propagates_lance_exception():
+async def test_drop_chunks_table_propagates_lance_exception():
     """LanceDB error propagates - typed-errors contract; smoke
     scripts can wrap if they want fail-soft semantics."""
     conn = RecordingConnection(
@@ -254,85 +254,85 @@ def test_drop_chunks_table_propagates_lance_exception():
     )
     client = _client_with_conn(_configured_settings(), conn)
     with pytest.raises(RuntimeError, match="boom"):
-        client.drop_chunks_table()
+        await client.drop_chunks_table()
 
 
 # ---- write_chunks ----
 
 
-def test_write_chunks_empty_is_noop_without_opening_table():
+async def test_write_chunks_empty_is_noop_without_opening_table():
     """Empty input is a no-op; no need to open the table."""
     conn = RecordingConnection()
     client = _client_with_conn(_configured_settings(), conn)
-    assert client.write_chunks([]) is None
+    assert await client.write_chunks([]) is None
     # No side effect on the connection.
     assert CHUNKS_TABLE not in conn.tables
 
 
-def test_write_chunks_appends_rows_to_table():
+async def test_write_chunks_appends_rows_to_table():
     table = RecordingTable()
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
     chunks = [{"chunk_id": "a"}, {"chunk_id": "b"}]
-    assert client.write_chunks(chunks) is None
+    assert await client.write_chunks(chunks) is None
     # The batch was passed through to table.add().
     assert table.added == [chunks]
 
 
-def test_write_chunks_propagates_lance_exception():
+async def test_write_chunks_propagates_lance_exception():
     table = RecordingTable(raise_on_add=RuntimeError("boom"))
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
     with pytest.raises(RuntimeError, match="boom"):
-        client.write_chunks([{"chunk_id": "a"}])
+        await client.write_chunks([{"chunk_id": "a"}])
 
 
 # ---- update_doc_metadata ----
 
 
-def test_update_doc_metadata_passes_doc_id_filter_and_values():
+async def test_update_doc_metadata_passes_doc_id_filter_and_values():
     """Update wires the doc_id filter + values dict through to LanceDB's API."""
     table = RecordingTable()
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
 
     fields = {"title": "New Title", "year": 2026, "doi": "10.1/abc"}
-    assert client.update_doc_metadata("abc-123", fields) is None
+    assert await client.update_doc_metadata("abc-123", fields) is None
     assert table.updates == [("doc_id = 'abc-123'", fields)]
 
 
-def test_update_doc_metadata_empty_doc_id_raises():
+async def test_update_doc_metadata_empty_doc_id_raises():
     """Empty doc_id is a programming error; raise ValueError."""
     table = RecordingTable()
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
     with pytest.raises(ValueError, match="no doc_id"):
-        client.update_doc_metadata("", {"title": "x"})
+        await client.update_doc_metadata("", {"title": "x"})
     assert table.updates == []
 
 
-def test_update_doc_metadata_empty_fields_raises():
+async def test_update_doc_metadata_empty_fields_raises():
     """Empty fields dict is a programming error - patching nothing is a bug."""
     table = RecordingTable()
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
     with pytest.raises(ValueError, match="no fields"):
-        client.update_doc_metadata("abc-123", {})
+        await client.update_doc_metadata("abc-123", {})
     assert table.updates == []
 
 
-def test_update_doc_metadata_propagates_lance_exception():
+async def test_update_doc_metadata_propagates_lance_exception():
     table = RecordingTable(raise_on_update=RuntimeError("boom"))
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
     with pytest.raises(RuntimeError, match="boom"):
-        client.update_doc_metadata("abc-123", {"title": "x"})
+        await client.update_doc_metadata("abc-123", {"title": "x"})
 
 
 # ---- list_indexed_docs ----
 
 
-def test_list_indexed_docs_aggregates_unique_doc_ids():
+async def test_list_indexed_docs_aggregates_unique_doc_ids():
     """Multiple chunk rows per doc -> one summary entry per doc_id."""
     qb = _RecordingQueryBuilder(
         rows_to_return=[
@@ -345,7 +345,7 @@ def test_list_indexed_docs_aggregates_unique_doc_ids():
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
 
-    docs = client.list_indexed_docs()
+    docs = await client.list_indexed_docs()
     by_id = {d["doc_id"]: d for d in docs}
     assert by_id["d1"]["n_chunks"] == 2
     assert by_id["d1"]["title"] == "T1"
@@ -354,7 +354,7 @@ def test_list_indexed_docs_aggregates_unique_doc_ids():
     assert by_id["d2"]["metadata_status"] == "manual"
 
 
-def test_list_indexed_docs_projects_only_doc_level_columns():
+async def test_list_indexed_docs_projects_only_doc_level_columns():
     """Heavy embedding + text columns are NOT loaded - only the 4 we need
     are pushed down via the search builder's `select()` call."""
     qb = _RecordingQueryBuilder(rows_to_return=[])
@@ -362,7 +362,7 @@ def test_list_indexed_docs_projects_only_doc_level_columns():
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
 
-    client.list_indexed_docs()
+    await client.list_indexed_docs()
     assert qb.last_columns == [
         "doc_id", "source_path", "title", "metadata_status",
     ]
@@ -371,27 +371,27 @@ def test_list_indexed_docs_projects_only_doc_level_columns():
     assert qb.last_limit is not None and qb.last_limit >= 1_000_000
 
 
-def test_list_indexed_docs_empty_table_returns_empty_list():
+async def test_list_indexed_docs_empty_table_returns_empty_list():
     qb = _RecordingQueryBuilder(rows_to_return=[])
     table = RecordingTable(query_builder=qb)
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
-    assert client.list_indexed_docs() == []
+    assert await client.list_indexed_docs() == []
 
 
-def test_list_indexed_docs_propagates_lance_exception():
+async def test_list_indexed_docs_propagates_lance_exception():
     qb = _RecordingQueryBuilder(raise_on_to_arrow=RuntimeError("boom"))
     table = RecordingTable(query_builder=qb)
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
     with pytest.raises(RuntimeError, match="boom"):
-        client.list_indexed_docs()
+        await client.list_indexed_docs()
 
 
 # ---- get_chunks_by_doc_id ----
 
 
-def test_get_chunks_by_doc_id_returns_rows_sorted_by_chunk_index():
+async def test_get_chunks_by_doc_id_returns_rows_sorted_by_chunk_index():
     """Rows from lancedb can come back in any order; the method must sort."""
     qb = _RecordingQueryBuilder(
         rows_to_return=[
@@ -404,41 +404,41 @@ def test_get_chunks_by_doc_id_returns_rows_sorted_by_chunk_index():
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
 
-    rows = client.get_chunks_by_doc_id("doc1")
+    rows = await client.get_chunks_by_doc_id("doc1")
     assert [r["chunk_index"] for r in rows] == [0, 1, 2]
     assert [r["chunk_id"] for r in rows] == ["doc1#0", "doc1#1", "doc1#2"]
 
 
-def test_get_chunks_by_doc_id_passes_doc_id_in_filter():
+async def test_get_chunks_by_doc_id_passes_doc_id_in_filter():
     """The where() clause must constrain to the requested doc_id."""
     qb = _RecordingQueryBuilder(rows_to_return=[])
     table = RecordingTable(query_builder=qb)
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
 
-    client.get_chunks_by_doc_id("abc-123")
+    await client.get_chunks_by_doc_id("abc-123")
     assert qb.last_filter == "doc_id = 'abc-123'"
 
 
-def test_get_chunks_by_doc_id_empty_input_raises():
+async def test_get_chunks_by_doc_id_empty_input_raises():
     """Empty doc_id is a programming error; raise ValueError."""
     conn = RecordingConnection(tables={CHUNKS_TABLE: RecordingTable()})
     client = _client_with_conn(_configured_settings(), conn)
     with pytest.raises(ValueError, match="no doc_id"):
-        client.get_chunks_by_doc_id("")
+        await client.get_chunks_by_doc_id("")
 
 
-def test_get_chunks_by_doc_id_no_match_returns_empty_list():
+async def test_get_chunks_by_doc_id_no_match_returns_empty_list():
     """Doc not in LanceDB -> empty list, distinguishable from error
     paths (which raise under typed-errors)."""
     qb = _RecordingQueryBuilder(rows_to_return=[])
     table = RecordingTable(query_builder=qb)
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
-    assert client.get_chunks_by_doc_id("missing-doc") == []
+    assert await client.get_chunks_by_doc_id("missing-doc") == []
 
 
-def test_get_chunks_by_doc_id_propagates_lance_exception():
+async def test_get_chunks_by_doc_id_propagates_lance_exception():
     """Search builder error propagates so the caller's orchestrator
     boundary catches; the prior None-sentinel path is gone."""
     qb = _RecordingQueryBuilder(raise_on_to_arrow=RuntimeError("boom"))
@@ -446,13 +446,13 @@ def test_get_chunks_by_doc_id_propagates_lance_exception():
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
     with pytest.raises(RuntimeError, match="boom"):
-        client.get_chunks_by_doc_id("doc1")
+        await client.get_chunks_by_doc_id("doc1")
 
 
 # ---- missing-table behavior (one test per read/delete/update/list method) ----
 
 
-def test_get_chunks_by_doc_id_missing_table_returns_empty_quietly():
+async def test_get_chunks_by_doc_id_missing_table_returns_empty_quietly():
     """No chunks table -> [] (same as no rows). No warning, no error.
 
     Fresh corpus or post-`drop_chunks_table` state must not log
@@ -460,38 +460,38 @@ def test_get_chunks_by_doc_id_missing_table_returns_empty_quietly():
     has nothing to find."""
     conn = RecordingConnection(tables={})
     client = _client_with_conn(_configured_settings(), conn)
-    assert client.get_chunks_by_doc_id("doc1") == []
+    assert await client.get_chunks_by_doc_id("doc1") == []
 
 
-def test_delete_chunks_by_doc_id_missing_table_is_noop_success():
+async def test_delete_chunks_by_doc_id_missing_table_is_noop_success():
     """No chunks table -> returns None (nothing to delete is success)."""
     conn = RecordingConnection(tables={})
     client = _client_with_conn(_configured_settings(), conn)
-    assert client.delete_chunks_by_doc_id("doc1") is None
+    assert await client.delete_chunks_by_doc_id("doc1") is None
 
 
-def test_delete_chunks_by_doc_id_empty_doc_id_raises():
+async def test_delete_chunks_by_doc_id_empty_doc_id_raises():
     """Empty doc_id is a programming error; raise ValueError."""
     conn = RecordingConnection(tables={CHUNKS_TABLE: RecordingTable()})
     client = _client_with_conn(_configured_settings(), conn)
     with pytest.raises(ValueError, match="no doc_id"):
-        client.delete_chunks_by_doc_id("")
+        await client.delete_chunks_by_doc_id("")
 
 
-def test_list_indexed_docs_missing_table_returns_empty_quietly():
+async def test_list_indexed_docs_missing_table_returns_empty_quietly():
     """No chunks table -> empty list. No warning."""
     conn = RecordingConnection(tables={})
     client = _client_with_conn(_configured_settings(), conn)
-    assert client.list_indexed_docs() == []
+    assert await client.list_indexed_docs() == []
 
 
-def test_update_doc_metadata_missing_table_raises():
+async def test_update_doc_metadata_missing_table_raises():
     """No chunks table -> RuntimeError. Updating a non-existent row IS
     a real caller mistake (vs. delete, where 'nothing to delete' is fine)."""
     conn = RecordingConnection(tables={})
     client = _client_with_conn(_configured_settings(), conn)
     with pytest.raises(RuntimeError, match="table doesn't exist"):
-        client.update_doc_metadata("doc1", {"title": "x"})
+        await client.update_doc_metadata("doc1", {"title": "x"})
 
 
 # ---- search methods (hybrid / fts / vector / retrieve) ----
@@ -518,7 +518,7 @@ def _chunk_row(chunk_id: str, text: str) -> dict[str, Any]:
     }
 
 
-def test_fts_search_returns_chunks_on_success():
+async def test_fts_search_returns_chunks_on_success():
     """Happy path: stub lance returns 2 rows; fts_search maps each to
     a `RetrievedChunk` carrying the `_score` field as the `score`."""
     rows = [
@@ -530,7 +530,7 @@ def test_fts_search_returns_chunks_on_success():
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
 
-    hits = client.fts_search("alpha beta", top_k=5)
+    hits = await client.fts_search("alpha beta", top_k=5)
 
     assert [h.chunk_id for h in hits] == ["c1", "c2"]
     assert hits[0].score == 12.5
@@ -540,7 +540,7 @@ def test_fts_search_returns_chunks_on_success():
     assert qb.last_limit == 5
 
 
-def test_fts_search_propagates_lance_exception():
+async def test_fts_search_propagates_lance_exception():
     """Lance failure -> raises (typed-errors contract). The agent's
     `lancedb_retriever_node` boundary catches and populates
     `AgentState.lancedb_retrieval_error`."""
@@ -549,10 +549,10 @@ def test_fts_search_propagates_lance_exception():
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
     with pytest.raises(RuntimeError, match="boom"):
-        client.fts_search("alpha", top_k=5)
+        await client.fts_search("alpha", top_k=5)
 
 
-def test_vector_search_returns_empty_when_voyage_returns_none(monkeypatch):
+async def test_vector_search_returns_empty_when_voyage_returns_none(monkeypatch):
     """Empty / failed Voyage embedding -> early return [] WITHOUT
     touching lance. Documented success no-op for the empty-query path
     (separate from the lance-failure path which raises)."""
@@ -561,10 +561,10 @@ def test_vector_search_returns_empty_when_voyage_returns_none(monkeypatch):
     )
     conn = RecordingConnection(tables={CHUNKS_TABLE: RecordingTable()})
     client = _client_with_conn(_configured_settings(), conn)
-    assert client.vector_search("query", top_k=5) == []
+    assert await client.vector_search("query", top_k=5) == []
 
 
-def test_vector_search_propagates_lance_exception(monkeypatch):
+async def test_vector_search_propagates_lance_exception(monkeypatch):
     """Lance failure during vector search -> raises (typed-errors
     contract). Voyage succeeds first; the failure surfaces from the
     lance query builder."""
@@ -576,10 +576,10 @@ def test_vector_search_propagates_lance_exception(monkeypatch):
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
     with pytest.raises(RuntimeError, match="lance boom"):
-        client.vector_search("query", top_k=5)
+        await client.vector_search("query", top_k=5)
 
 
-def test_hybrid_search_returns_chunks_on_success(monkeypatch):
+async def test_hybrid_search_returns_chunks_on_success(monkeypatch):
     """Happy path: hybrid mode wires both the query vector AND the
     text into the search builder, and maps rows to `RetrievedChunk`
     with the `_relevance_score` field as `score`."""
@@ -594,7 +594,7 @@ def test_hybrid_search_returns_chunks_on_success(monkeypatch):
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
     client = _client_with_conn(_configured_settings(), conn)
 
-    hits = client.hybrid_search("alpha query", top_k=3)
+    hits = await client.hybrid_search("alpha query", top_k=3)
 
     assert len(hits) == 1
     assert hits[0].score == 0.91
@@ -604,7 +604,7 @@ def test_hybrid_search_returns_chunks_on_success(monkeypatch):
     assert table.last_search_kwargs.get("query_type") == "hybrid"
 
 
-def test_retrieve_dispatches_to_mode_specific_method(monkeypatch):
+async def test_retrieve_dispatches_to_mode_specific_method(monkeypatch):
     """`retrieve(mode=...)` is a pure dispatcher: each mode value
     routes to the matching `*_search` method. Patch the three and
     assert exactly one fires per call."""
@@ -628,12 +628,12 @@ def test_retrieve_dispatches_to_mode_specific_method(monkeypatch):
 
     client = LanceClient(settings=_configured_settings())
 
-    client.retrieve("q", mode="hybrid")
-    client.retrieve("q", mode="fts")
-    client.retrieve("q", mode="vector")
+    await client.retrieve("q", mode="hybrid")
+    await client.retrieve("q", mode="fts")
+    await client.retrieve("q", mode="vector")
     # Unknown mode falls back to hybrid (per the warn-then-default
     # branch in `retrieve()`).
-    client.retrieve("q", mode="bogus")  # type: ignore[arg-type]
+    await client.retrieve("q", mode="bogus")  # type: ignore[arg-type]
 
     assert calls == ["hybrid", "fts", "vector", "hybrid"]
 

@@ -365,28 +365,28 @@ def test_get_entities_by_chunk_propagates_cypher_exception():
 # ---- Client delegate methods ----
 
 
-def test_client_write_triples_delegates_to_module():
+async def test_client_write_triples_delegates_to_module():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    result = client.write_triples(DOC_ID, [("c0", [_t()])])
+    result = await client.write_triples(DOC_ID, [("c0", [_t()])])
     assert result is None
     assert len(driver.sessions[0].calls) == 1
 
 
-def test_client_delete_triples_by_doc_id_delegates_to_module():
+async def test_client_delete_triples_by_doc_id_delegates_to_module():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    result = client.delete_triples_by_doc_id(DOC_ID)
+    result = await client.delete_triples_by_doc_id(DOC_ID)
     assert result is None
     assert len(driver.sessions[0].calls) == 1
 
 
-def test_client_get_entities_by_chunk_delegates_to_module():
+async def test_client_get_entities_by_chunk_delegates_to_module():
     driver = RecordingDriver(
         data_returns=[
             [{"chunk_id": "c0", "key": "brca1", "entity_type": "GENE"}]
         ]
     )
     client = _client_with_driver(driver)
-    result = client.get_entities_by_chunk(DOC_ID)
+    result = await client.get_entities_by_chunk(DOC_ID)
     assert result == {"c0": [("brca1", "GENE")]}

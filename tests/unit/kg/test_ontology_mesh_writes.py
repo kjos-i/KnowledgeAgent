@@ -485,27 +485,27 @@ def test_extract_descriptors_skips_unlabelled_descriptors():
 # ---- Neo4jClient delegate methods ----
 
 
-def test_client_is_mesh_imported_delegates_to_module():
+async def test_client_is_mesh_imported_delegates_to_module():
     driver = RecordingDriver(
         canned_results_per_session=[
             [_RecordingResult(rows=[{"present": True}])]
         ]
     )
     client = _client_with_driver(driver)
-    assert client.is_mesh_imported() is True
+    assert await client.is_mesh_imported() is True
 
 
-def test_client_delete_mesh_delegates_to_module():
+async def test_client_delete_mesh_delegates_to_module():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    assert client.delete_mesh() is None
+    assert await client.delete_mesh() is None
     assert len(driver.sessions) == 1
     cypher, _ = driver.sessions[0].calls[0]
     assert ":MeSHTerm" in cypher
     assert "DETACH DELETE" in cypher
 
 
-def test_client_import_mesh_delegates_to_module():
+async def test_client_import_mesh_delegates_to_module():
     """Smoke check the delegate path: client.import_mesh runs the
     short-circuit branch when MeSH is already imported."""
     driver = RecordingDriver(
@@ -517,7 +517,7 @@ def test_client_import_mesh_delegates_to_module():
     with patch(
         "knowledge_agent.kg.ontology_mesh_writes.ensure_cached"
     ) as mock_cache:
-        assert client.import_mesh(force=False) is False
+        assert await client.import_mesh(force=False) is False
     mock_cache.assert_not_called()
 
 

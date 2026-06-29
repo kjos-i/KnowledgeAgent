@@ -152,7 +152,7 @@ def test_registry_chebi_points_at_chebiterm_label():
 # ---- count_ontology_terms ----
 
 
-def test_count_ontology_terms_unknown_ontology_raises():
+async def test_count_ontology_terms_unknown_ontology_raises():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     with pytest.raises(ValueError, match="unknown ontology"):
@@ -161,7 +161,7 @@ def test_count_ontology_terms_unknown_ontology_raises():
     assert driver.sessions == []
 
 
-def test_count_ontology_terms_runs_count_cypher_against_term_label():
+async def test_count_ontology_terms_runs_count_cypher_against_term_label():
     driver = RecordingDriver(
         canned_results_per_session=[[_RecordingResult(rows=[{"n": 30142}])]]
     )
@@ -172,7 +172,7 @@ def test_count_ontology_terms_runs_count_cypher_against_term_label():
     assert "count(n)" in query
 
 
-def test_count_ontology_terms_propagates_cypher_exception():
+async def test_count_ontology_terms_propagates_cypher_exception():
     """Driver failure propagates; orchestrator boundary catches."""
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(driver)
@@ -183,7 +183,7 @@ def test_count_ontology_terms_propagates_cypher_exception():
 # ---- count_canonical_links ----
 
 
-def test_count_canonical_links_unknown_ontology_raises():
+async def test_count_canonical_links_unknown_ontology_raises():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     with pytest.raises(ValueError, match="unknown ontology"):
@@ -191,7 +191,7 @@ def test_count_canonical_links_unknown_ontology_raises():
     assert driver.sessions == []
 
 
-def test_count_canonical_links_runs_count_cypher_against_canonical_to():
+async def test_count_canonical_links_runs_count_cypher_against_canonical_to():
     driver = RecordingDriver(
         canned_results_per_session=[[_RecordingResult(rows=[{"n": 18}])]]
     )
@@ -203,7 +203,7 @@ def test_count_canonical_links_runs_count_cypher_against_canonical_to():
     assert "count(r)" in query
 
 
-def test_count_canonical_links_propagates_cypher_exception():
+async def test_count_canonical_links_propagates_cypher_exception():
     """Driver failure propagates; orchestrator boundary catches."""
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(driver)
@@ -577,7 +577,7 @@ def test_link_entities_happy_path_writes_canonical_to_edges():
 # ---- ensure_ontology_imported ----
 
 
-def test_ensure_ontology_imported_unknown_raises():
+async def test_ensure_ontology_imported_unknown_raises():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     try:
@@ -587,7 +587,7 @@ def test_ensure_ontology_imported_unknown_raises():
         assert "not_real" in str(e)
 
 
-def test_ensure_ontology_imported_returns_already_imported_when_present():
+async def test_ensure_ontology_imported_returns_already_imported_when_present():
     """When the is_imported check says yes, returns (True, True) without
     triggering the (expensive) import function."""
     with (
@@ -611,7 +611,7 @@ def test_ensure_ontology_imported_returns_already_imported_when_present():
     mock_import.assert_not_called()
 
 
-def test_ensure_ontology_imported_triggers_import_when_absent():
+async def test_ensure_ontology_imported_triggers_import_when_absent():
     """When is_imported returns False, the import function fires; the
     return value is `was_already_imported` (False because the import
     just ran). Failures from the import_fn propagate under the

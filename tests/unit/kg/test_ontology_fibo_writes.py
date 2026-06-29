@@ -469,27 +469,27 @@ def test_fibo_id_extractor_falls_through_for_non_fibo_uris():
 # ---- Neo4jClient delegates ----
 
 
-def test_client_is_fibo_imported_delegates_to_module():
+async def test_client_is_fibo_imported_delegates_to_module():
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
-    assert _client_with_driver(driver).is_fibo_imported() is True
+    assert await _client_with_driver(driver).is_fibo_imported() is True
 
 
-def test_client_delete_fibo_delegates_to_module():
+async def test_client_delete_fibo_delegates_to_module():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    assert client.delete_fibo() is None
+    assert await client.delete_fibo() is None
     cypher, _ = driver.sessions[0].calls[0]
     assert ":FIBOTerm" in cypher
     assert "DETACH DELETE" in cypher
 
 
-def test_client_import_fibo_delegates_to_module():
+async def test_client_import_fibo_delegates_to_module():
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
     client = _client_with_driver(driver)
     with (
         patch.object(ontology_fibo_writes, "_walk_and_cache_fibo") as mock_walk,
     ):
-        assert client.import_fibo(force=False) is False
+        assert await client.import_fibo(force=False) is False
     mock_walk.assert_not_called()
 
 

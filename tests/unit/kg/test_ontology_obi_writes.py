@@ -257,23 +257,23 @@ def test_read_and_extract_uses_rdflib_not_pronto():
     assert kwargs.get("format") == "xml"
 
 
-def test_client_is_obi_imported_delegates_to_module():
+async def test_client_is_obi_imported_delegates_to_module():
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
-    assert _client_with_driver(driver).is_obi_imported() is True
+    assert await _client_with_driver(driver).is_obi_imported() is True
 
 
-def test_client_delete_obi_delegates_to_module():
+async def test_client_delete_obi_delegates_to_module():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    assert client.delete_obi() is None
+    assert await client.delete_obi() is None
     cypher, _ = driver.sessions[0].calls[0]
     assert ":OBITerm" in cypher
     assert "DETACH DELETE" in cypher
 
 
-def test_client_import_obi_delegates_to_module():
+async def test_client_import_obi_delegates_to_module():
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
     client = _client_with_driver(driver)
     with patch("knowledge_agent.kg.ontology_writes.ensure_cached") as mc:
-        assert client.import_obi(force=False) is False
+        assert await client.import_obi(force=False) is False
     mc.assert_not_called()

@@ -225,23 +225,23 @@ def test_delete_imported_propagates_driver_exception():
         ontology_envo_writes.delete_imported(_client_with_driver(driver))
 
 
-def test_client_is_imported_delegates_to_module():
+async def test_client_is_imported_delegates_to_module():
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
-    assert _client_with_driver(driver).is_envo_imported() is True
+    assert await _client_with_driver(driver).is_envo_imported() is True
 
 
-def test_client_delete_delegates_to_module():
+async def test_client_delete_delegates_to_module():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    assert client.delete_envo() is None
+    assert await client.delete_envo() is None
     cypher, _ = driver.sessions[0].calls[0]
     assert ":ENVOTerm" in cypher
     assert "DETACH DELETE" in cypher
 
 
-def test_client_import_delegates_to_module():
+async def test_client_import_delegates_to_module():
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
     client = _client_with_driver(driver)
     with patch("knowledge_agent.kg.ontology_writes.ensure_cached") as mc:
-        assert client.import_envo(force=False) is False
+        assert await client.import_envo(force=False) is False
     mc.assert_not_called()

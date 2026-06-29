@@ -256,23 +256,23 @@ def test_read_and_extract_uses_rdflib_not_pronto():
     assert kwargs.get("format") == "xml"
 
 
-def test_client_is_imported_delegates_to_module():
+async def test_client_is_imported_delegates_to_module():
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
-    assert _client_with_driver(driver).is_efo_imported() is True
+    assert await _client_with_driver(driver).is_efo_imported() is True
 
 
-def test_client_delete_delegates_to_module():
+async def test_client_delete_delegates_to_module():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    assert client.delete_efo() is None
+    assert await client.delete_efo() is None
     cypher, _ = driver.sessions[0].calls[0]
     assert ":EFOTerm" in cypher
     assert "DETACH DELETE" in cypher
 
 
-def test_client_import_delegates_to_module():
+async def test_client_import_delegates_to_module():
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
     client = _client_with_driver(driver)
     with patch("knowledge_agent.kg.ontology_writes.ensure_cached") as mc:
-        assert client.import_efo(force=False) is False
+        assert await client.import_efo(force=False) is False
     mc.assert_not_called()

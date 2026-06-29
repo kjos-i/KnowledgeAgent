@@ -356,17 +356,17 @@ def test_global_returns_zero_when_single_returns_no_row():
 # ---- Client delegate ----
 
 
-def test_client_recompute_cross_doc_xrefs_edges_delegates_to_module():
+async def test_client_recompute_cross_doc_xrefs_edges_delegates_to_module():
     driver = _driver_with_per_doc_count(7)
     client = _client_with_driver(driver)
-    result = client.recompute_cross_doc_xrefs_edges(DOC_ID)
+    result = await client.recompute_cross_doc_xrefs_edges(DOC_ID)
     assert result == 7
     assert len(driver.sessions[0].calls) == 2
 
 
-def test_client_recompute_cross_doc_xrefs_edges_passes_through_threshold():
+async def test_client_recompute_cross_doc_xrefs_edges_passes_through_threshold():
     driver = _driver_with_per_doc_count(0)
     client = _client_with_driver(driver)
-    client.recompute_cross_doc_xrefs_edges(DOC_ID, threshold=5)
+    await client.recompute_cross_doc_xrefs_edges(DOC_ID, threshold=5)
     _merge, params = driver.sessions[0].calls[1]
     assert params["threshold"] == 5
