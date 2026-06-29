@@ -70,30 +70,7 @@ many names, the rest are summarised as `'et al.'`."""
 # ---------------------------------------------------------------------------
 
 
-async def alookup_known_doi(doc_id: str, doi: str) -> dict[str, Any]:
-    """Async sibling of `lookup_known_doi`. Same contract, awaitable.
-
-    Thin `asyncio.to_thread` wrapper added in the 2026-06-29 async
-    refactor. Native async lands when kg/client + search/client
-    migrate to AsyncDriver / AsyncConnection (Days 5-6).
-    """
-    return await asyncio.to_thread(lookup_known_doi, doc_id, doi)
-
-
-async def aresolve_openalex(
-    doc_id: str, *, skip_manual: bool = False
-) -> dict[str, Any]:
-    """Async sibling of `resolve_openalex`. Same contract, awaitable.
-
-    Thin `asyncio.to_thread` wrapper. Forwards `skip_manual` as a
-    kwarg through `asyncio.to_thread`.
-    """
-    return await asyncio.to_thread(
-        resolve_openalex, doc_id, skip_manual=skip_manual
-    )
-
-
-def lookup_known_doi(doc_id: str, doi: str) -> dict[str, Any]:
+async def lookup_known_doi(doc_id: str, doi: str) -> dict[str, Any]:
     """Hit OpenAlex with a user-supplied DOI; NO chunk-extraction fallback.
 
     Per-doc partial op. Variant of `resolve_openalex` used when the caller
@@ -126,7 +103,7 @@ def lookup_known_doi(doc_id: str, doi: str) -> dict[str, Any]:
 
     search_client = get_search_client()
     try:
-        chunk_rows = search_client.get_chunks_by_doc_id(doc_id)
+        chunk_rows = await search_client.get_chunks_by_doc_id(doc_id)
     except Exception as exc:
         logger.warning(
             "lookup_known_doi (%s): LanceDB read failed: %r", doc_id, exc,
@@ -147,7 +124,7 @@ def lookup_known_doi(doc_id: str, doi: str) -> dict[str, Any]:
     sub_label = chunk_rows[0].get("sub_label")
 
     try:
-        work = resolve_doi(doi)
+        work = await asyncio.to_thread(resolve_doi, doi)
     except Exception as exc:
         logger.warning(
             "lookup_known_doi (%s): resolve_doi %r failed: %r", doc_id, doi, exc
@@ -166,11 +143,11 @@ def lookup_known_doi(doc_id: str, doi: str) -> dict[str, Any]:
             "kg_l1_l4_ok": False, "new_status": None,
         }
 
-    applied = _apply_resolved_work(doc_id, work, sub_label)
+    applied = await _apply_resolved_work(doc_id, work, sub_label)
     return {"work_resolved": True, **applied}
 
 
-def resolve_openalex(
+async def resolve_openalex(
     doc_id: str, *, skip_manual: bool = False
 ) -> dict[str, Any]:
     """Retry OpenAlex resolution for one doc; patch LanceDB + KG L1-L4.
@@ -210,7 +187,7 @@ def resolve_openalex(
     """
     search_client = get_search_client()
     try:
-        chunk_rows = search_client.get_chunks_by_doc_id(doc_id)
+        chunk_rows = await search_client.get_chunks_by_doc_id(doc_id)
     except Exception as exc:
         logger.warning(
             "resolve_openalex (%s): LanceDB read failed: %r", doc_id, exc,
@@ -253,7 +230,7 @@ def resolve_openalex(
     work: dict[str, Any] | None = None
     if stored_doi:
         try:
-            work = resolve_doi(stored_doi)
+            work = await asyncio.to_thread(resolve_doi, stored_doi)
         except Exception as exc:
             logger.warning(
                 "resolve_openalex (%s): stored-DOI %r lookup failed: %r; "
@@ -270,7 +247,7 @@ def resolve_openalex(
             )
             for r in chunk_rows
         ]
-        work = resolve_metadata(chunks)
+        work = await asyncio.to_thread(resolve_metadata, chunks)
 
     if work is None:
         logger.info(
@@ -283,7 +260,7 @@ def resolve_openalex(
             "new_status": None,
         }
 
-    applied = _apply_resolved_work(doc_id, work, sub_label)
+    applied = await _apply_resolved_work(doc_id, work, sub_label)
     return {"skipped": False, "work_resolved": True, **applied}
 
 
@@ -292,7 +269,7 @@ def resolve_openalex(
 # ---------------------------------------------------------------------------
 
 
-def _apply_resolved_work(
+async def _apply_resolved_work(
     doc_id: str, work: dict[str, Any], sub_label: str | None
 ) -> dict[str, Any]:
     """Apply a freshly-resolved OpenAlex work to LanceDB + KG L1-L4.
@@ -314,7 +291,7 @@ def _apply_resolved_work(
     new_fields = _doc_metadata_fields_from_work(work)
     new_fields["metadata_status"] = "enriched"
     try:
-        search_client.update_doc_metadata(doc_id, new_fields)
+        await search_client.update_doc_metadata(doc_id, new_fields)
         metadata_patched = True
     except Exception as exc:
         logger.warning(
@@ -332,12 +309,12 @@ def _apply_resolved_work(
         # errors under the typed-errors contract); if any step fails,
         # the whole stage is False.
         try:
-            kg_client.ensure_constraints()
-            kg_client.delete_doc_l1_l4_edges(doc_id)
-            kg_client.write_citations(doc_id, work)
-            kg_client.write_authorships(doc_id, work)
-            kg_client.write_venue(doc_id, work)
-            kg_client.write_topics(doc_id, work)
+            await kg_client.ensure_constraints()
+            await kg_client.delete_doc_l1_l4_edges(doc_id)
+            await kg_client.write_citations(doc_id, work)
+            await kg_client.write_authorships(doc_id, work)
+            await kg_client.write_venue(doc_id, work)
+            await kg_client.write_topics(doc_id, work)
             kg_l1_l4_ok = True
         except Exception as exc:
             logger.warning(
