@@ -23,6 +23,7 @@ LanceDB rows first, then rewrites. KG writes use MERGE patterns that are
 inherently idempotent.
 """
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -1278,3 +1279,98 @@ def _build_lance_rows(
 # to `metadata_resolution.py` 2026-06-29. Re-imported at top of file so
 # `_build_lance_rows` and any test patches still find them at the
 # original `pipeline.X` path.
+
+
+# =====================================================================
+# Async siblings (added 2026-06-29 in the async refactor).
+#
+# Each public sync function above has a thin `a*` async wrapper that
+# delegates to the sync implementation via `asyncio.to_thread`. This
+# gives async callers (the future async bulk_ops, the agent read path,
+# any GUI event handler that wants to await ingest) a Runnable API
+# surface NOW, before the KG / Lance drivers themselves go fully async.
+#
+# When kg/client.py and search/client.py become native async (Days
+# 5-6 of the async refactor), `aingest_document` will be rewritten in
+# place with native `await` calls + an `asyncio.Semaphore`-bounded
+# per-chunk fan-out for the actual 5-10x wall-clock win. The function
+# signatures stay identical so callers don't change shape across the
+# migration.
+#
+# After Day 8 the sync versions disappear and these `a*` wrappers are
+# renamed to the plain names (one search-and-replace turn).
+# =====================================================================
+
+
+async def adelete_doc(doc_id: str) -> bool:
+    """Async sibling of `delete_doc`. Same contract, awaitable."""
+    return await asyncio.to_thread(delete_doc, doc_id)
+
+
+async def are_embed(doc_id: str) -> dict[str, Any]:
+    """Async sibling of `re_embed`. Same contract, awaitable."""
+    return await asyncio.to_thread(re_embed, doc_id)
+
+
+async def abackfill_chunks(
+    doc_id: str, config: CorpusConfig
+) -> dict[str, Any]:
+    """Async sibling of `backfill_chunks`. Same contract, awaitable."""
+    return await asyncio.to_thread(backfill_chunks, doc_id, config)
+
+
+async def abackfill_entities(
+    doc_id: str, config: CorpusConfig
+) -> dict[str, Any]:
+    """Async sibling of `backfill_entities`. Same contract, awaitable."""
+    return await asyncio.to_thread(backfill_entities, doc_id, config)
+
+
+async def abackfill_ontology(
+    doc_id: str, config: CorpusConfig
+) -> dict[str, dict[str, Any]]:
+    """Async sibling of `backfill_ontology`. Same contract, awaitable."""
+    return await asyncio.to_thread(backfill_ontology, doc_id, config)
+
+
+async def abackfill_triples(
+    doc_id: str, config: CorpusConfig
+) -> dict[str, Any]:
+    """Async sibling of `backfill_triples`. Same contract, awaitable."""
+    return await asyncio.to_thread(backfill_triples, doc_id, config)
+
+
+async def abackfill_cross_doc(
+    doc_id: str, config: CorpusConfig
+) -> dict[str, Any]:
+    """Async sibling of `backfill_cross_doc`. Same contract, awaitable."""
+    return await asyncio.to_thread(backfill_cross_doc, doc_id, config)
+
+
+async def abackfill_cross_doc_xrefs(
+    doc_id: str, config: CorpusConfig
+) -> dict[str, Any]:
+    """Async sibling of `backfill_cross_doc_xrefs`. Same contract, awaitable."""
+    return await asyncio.to_thread(
+        backfill_cross_doc_xrefs, doc_id, config
+    )
+
+
+async def aingest_document(
+    path: Path,
+    config: CorpusConfig,
+    main_label: str,
+    sub_label: str | None = None,
+) -> IngestResult:
+    """Async sibling of `ingest_document`. Same contract, awaitable.
+
+    The headline performance win (per-chunk parallel fan-out) lands in
+    Day 7 when this function is rewritten with native await + a
+    semaphore-bounded asyncio.gather. Today's implementation runs the
+    entire sync pipeline in a worker thread — single-doc latency is
+    unchanged, but concurrent multi-doc ingest (bulk_ops) gets thread-
+    level parallelism (up to ~32 default thread-pool workers).
+    """
+    return await asyncio.to_thread(
+        ingest_document, path, config, main_label, sub_label
+    )
