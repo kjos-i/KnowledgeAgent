@@ -556,8 +556,10 @@ async def test_vector_search_returns_empty_when_voyage_returns_none(monkeypatch)
     """Empty / failed Voyage embedding -> early return [] WITHOUT
     touching lance. Documented success no-op for the empty-query path
     (separate from the lance-failure path which raises)."""
+    async def _fake_embed(_text: str) -> None:
+        return None
     monkeypatch.setattr(
-        "knowledge_agent.search.client._embed_query", lambda _: None
+        "knowledge_agent.search.client._embed_query", _fake_embed
     )
     conn = RecordingConnection(tables={CHUNKS_TABLE: RecordingTable()})
     client = _client_with_conn(_configured_settings(), conn)
@@ -568,8 +570,10 @@ async def test_vector_search_propagates_lance_exception(monkeypatch):
     """Lance failure during vector search -> raises (typed-errors
     contract). Voyage succeeds first; the failure surfaces from the
     lance query builder."""
+    async def _fake_embed(_text: str) -> list[float]:
+        return [0.1] * 1024
     monkeypatch.setattr(
-        "knowledge_agent.search.client._embed_query", lambda _: [0.1] * 1024
+        "knowledge_agent.search.client._embed_query", _fake_embed
     )
     qb = _RecordingQueryBuilder(raise_on_to_arrow=RuntimeError("lance boom"))
     table = RecordingTable(query_builder=qb)
@@ -583,8 +587,10 @@ async def test_hybrid_search_returns_chunks_on_success(monkeypatch):
     """Happy path: hybrid mode wires both the query vector AND the
     text into the search builder, and maps rows to `RetrievedChunk`
     with the `_relevance_score` field as `score`."""
+    async def _fake_embed(_text: str) -> list[float]:
+        return [0.5] * 1024
     monkeypatch.setattr(
-        "knowledge_agent.search.client._embed_query", lambda _: [0.5] * 1024
+        "knowledge_agent.search.client._embed_query", _fake_embed
     )
     rows = [
         {**_chunk_row("c1", "alpha"), "_relevance_score": 0.91},
@@ -610,15 +616,15 @@ async def test_retrieve_dispatches_to_mode_specific_method(monkeypatch):
     assert exactly one fires per call."""
     calls: list[str] = []
 
-    def fake_hybrid(self, *a, **kw):
+    async def fake_hybrid(self, *a, **kw):
         calls.append("hybrid")
         return []
 
-    def fake_fts(self, *a, **kw):
+    async def fake_fts(self, *a, **kw):
         calls.append("fts")
         return []
 
-    def fake_vector(self, *a, **kw):
+    async def fake_vector(self, *a, **kw):
         calls.append("vector")
         return []
 

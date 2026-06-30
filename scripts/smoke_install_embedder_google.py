@@ -17,6 +17,7 @@ Run from the project root:
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -43,7 +44,7 @@ from knowledge_agent.embedder_lifecycle import (  # noqa: E402
 PROVIDER = "google"
 
 
-def main() -> None:
+async def main() -> None:
     if not get_settings().google_api_key:
         print(
             "GOOGLE_API_KEY is not set in .env. Add it before running "
@@ -72,7 +73,7 @@ def main() -> None:
     settings.embedding_provider = PROVIDER  # type: ignore[misc]
     embedder_factory.clear_cache()
 
-    vectors = embedder_factory.embed_texts(
+    vectors = await embedder_factory.embed_texts(
         ["smoke test embedding for google"], input_type="document"
     )
     assert len(vectors) == 1, "expected one vector for one text"
@@ -93,4 +94,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

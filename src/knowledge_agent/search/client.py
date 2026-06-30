@@ -393,7 +393,7 @@ class LanceClient:
         """
         mode = mode or self._settings.lancedb_search_mode
         if mode == "hybrid":
-            return self.hybrid_search(
+            return await self.hybrid_search(
                 query, top_k, filters=filters, use_mmr=use_mmr,
             )
         if mode == "fts":
@@ -401,15 +401,15 @@ class LanceClient:
                 logger.warning(
                     "LanceDB: use_mmr=True ignored in fts mode (no vectors)"
                 )
-            return self.fts_search(query, top_k, filters=filters)
+            return await self.fts_search(query, top_k, filters=filters)
         if mode == "vector":
-            return self.vector_search(
+            return await self.vector_search(
                 query, top_k, filters=filters, use_mmr=use_mmr,
             )
         logger.warning(
             "LanceDB: unknown retrieval mode %r; falling back to hybrid", mode
         )
-        return self.hybrid_search(
+        return await self.hybrid_search(
             query, top_k, filters=filters, use_mmr=use_mmr,
         )
 
@@ -436,7 +436,7 @@ class LanceClient:
         """
         settings = self._settings
         top_k = top_k or settings.top_k
-        query_vector = _embed_query(query)
+        query_vector = await _embed_query(query)
         if query_vector is None:
             return []
         table = self.conn.open_table(CHUNKS_TABLE)
@@ -504,7 +504,7 @@ class LanceClient:
         """
         settings = self._settings
         top_k = top_k or settings.top_k
-        query_vector = _embed_query(query)
+        query_vector = await _embed_query(query)
         if query_vector is None:
             return []
         table = self.conn.open_table(CHUNKS_TABLE)
@@ -538,7 +538,7 @@ def get_search_client() -> LanceClient:
 # =========================================================================
 
 
-def _embed_query(text: str) -> list[float] | None:
+async def _embed_query(text: str) -> list[float] | None:
     """Embed a query string with `input_type='query'` via the ingest embedder.
 
     Returns the single 1024-dim vector, or None on Voyage failure / empty
@@ -549,7 +549,7 @@ def _embed_query(text: str) -> list[float] | None:
     share a latent space with the indexed chunks.
     """
     try:
-        embeddings = embed_texts([text], input_type="query")
+        embeddings = await embed_texts([text], input_type="query")
     except Exception as exc:
         logger.warning("LanceDB: _embed_query Voyage call failed: %r", exc)
         return None

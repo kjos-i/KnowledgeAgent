@@ -2,7 +2,7 @@
 
 Same shape as `smoke_install_llm_openai.py` but for the embedding
 side. Installs the `embed-openai` extra, then calls
-`embedder_factory.embed_texts(["..."])` to confirm dispatch +
+`await embedder_factory.embed_texts(["..."])` to confirm dispatch +
 key validation work end-to-end.
 
 NOTE on dimensions: OpenAI's `text-embedding-3-small` produces
@@ -22,6 +22,7 @@ Run from the project root:
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -48,7 +49,7 @@ from knowledge_agent.embedder_lifecycle import (  # noqa: E402
 PROVIDER = "openai"
 
 
-def main() -> None:
+async def main() -> None:
     if not get_settings().openai_api_key:
         print(
             "OPENAI_API_KEY is not set in .env. Add it before running "
@@ -77,7 +78,7 @@ def main() -> None:
     settings.embedding_provider = PROVIDER  # type: ignore[misc]
     embedder_factory.clear_cache()
 
-    vectors = embedder_factory.embed_texts(
+    vectors = await embedder_factory.embed_texts(
         ["smoke test embedding for openai"], input_type="document"
     )
     assert len(vectors) == 1, "expected one vector for one text"
@@ -98,4 +99,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

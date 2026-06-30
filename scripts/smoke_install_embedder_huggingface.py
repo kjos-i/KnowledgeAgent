@@ -19,6 +19,7 @@ Run from the project root:
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -51,7 +52,7 @@ PROVIDER = "huggingface"
 SMOKE_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
-def main() -> None:
+async def main() -> None:
     header("STEP 1: install sentence-transformers + torch libs")
     plan = install_embedder_provider_plan(PROVIDER)
     print_plan(f"install_embedder_provider_plan({PROVIDER!r})", plan)
@@ -99,7 +100,7 @@ def main() -> None:
     settings.hf_embedding_model = SMOKE_MODEL  # type: ignore[misc]
     embedder_factory.clear_cache()
 
-    vectors = embedder_factory.embed_texts(
+    vectors = await embedder_factory.embed_texts(
         ["smoke test embedding for huggingface"], input_type="document"
     )
     assert len(vectors) == 1, "expected one vector for one text"
@@ -130,4 +131,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
