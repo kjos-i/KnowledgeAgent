@@ -84,8 +84,7 @@ class ExtractedTriple:
     evidence_span: str
 
 
-def get_entities_by_chunk(
-    client, doc_id: str
+async def get_entities_by_chunk(client, doc_id: str
 ) -> dict[str, list[tuple[str, str]]]:
     """Return `{chunk_id: [(entity_key, entity_type), ...], ...}` for a doc.
 
@@ -103,21 +102,22 @@ def get_entities_by_chunk(
     if not doc_id:
         raise ValueError("KG: get_entities_by_chunk called with no doc_id")
     out: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    with client.driver.session() as session:
-        records = session.run(
+    async with client.driver.session() as session:
+        result = await session.run(
             f"MATCH (c:{CHUNK_LABEL} {{doc_id: $doc_id}})"
             f"-[:{MENTIONS_REL}]->(e:{ENTITY_LABEL}) "
             f"RETURN c.chunk_id AS chunk_id, "
             f"       e.key AS key, "
             f"       e.entity_type AS entity_type",
             doc_id=doc_id,
-        ).data()
+        )
+        records = await result.data()
     for row in records:
         out[row["chunk_id"]].append((row["key"], row["entity_type"]))
     return dict(out)
 
 
-def delete_triples_by_doc_id(client, doc_id: str) -> None:
+async def delete_triples_by_doc_id(client, doc_id: str) -> None:
     """Drop L8 edges whose `doc_id` property matches.
 
     One Cypher MATCH/DELETE that unions all 15 predicate types via the
@@ -140,8 +140,8 @@ def delete_triples_by_doc_id(client, doc_id: str) -> None:
     # schema.TRIPLE_PREDICATE_RELS so a new predicate added there is
     # picked up here automatically.
     rel_union = "|".join(TRIPLE_PREDICATE_RELS)
-    with client.driver.session() as session:
-        session.run(
+    async with client.driver.session() as session:
+        await session.run(
             f"MATCH ()-[r:{rel_union}]->() "
             f"WHERE r.doc_id = $doc_id "
             f"DELETE r",
@@ -150,8 +150,7 @@ def delete_triples_by_doc_id(client, doc_id: str) -> None:
     logger.info("KG: deleted L8 triples for doc %s", doc_id)
 
 
-def write_triples(
-    client,
+async def write_triples(client,
     doc_id: str,
     chunk_triples: list[tuple[str, list[ExtractedTriple]]],
 ) -> None:
@@ -234,7 +233,7 @@ def write_triples(
         return
 
     total = sum(len(v) for v in rows_by_pred.values())
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         for predicate, rows in rows_by_pred.items():
             # Predicate is interpolated as a literal here ONLY
             # because it's been validated against the closed
@@ -252,7 +251,7 @@ def write_triples(
                 f"  {{chunk_id: row.chunk_id, doc_id: row.doc_id, "
                 f"   evidence_span: row.evidence_span}}]->(o)"
             )
-            session.run(cypher, rows=rows)
+            await session.run(cypher, rows=rows)
     logger.info(
         "KG: wrote %d L8 triples (%d predicates) for doc %s",
         total, len(rows_by_pred), doc_id,

@@ -33,15 +33,15 @@ class RecordingSession:
     calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     raise_on_run: Exception | None = None
 
-    def run(self, query: str, **params: Any) -> None:
+    async def run(self, query: str, **params: Any) -> None:
         if self.raise_on_run is not None:
             raise self.raise_on_run
         self.calls.append((query, params))
 
-    def __enter__(self) -> "RecordingSession":
+    async def __aenter__(self) -> "RecordingSession":
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: Any) -> None:
         pass
 
 
@@ -56,7 +56,7 @@ class RecordingDriver:
         self.sessions.append(sess)
         return sess
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self.closed = True
 
 
@@ -83,28 +83,28 @@ DOC_ID = "test-doc-l6a"
 # ---- write_entities: input validation + exception propagation ----
 
 
-def test_write_entities_empty_doc_id_raises():
+async def test_write_entities_empty_doc_id_raises():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     with pytest.raises(ValueError, match="no doc_id"):
-        entity_writes.write_entities(client, "", [])
+        await entity_writes.write_entities(client, "", [])
     # No session opened either - we bailed before touching the driver.
     assert driver.sessions == []
 
 
-def test_write_entities_empty_chunk_mentions_is_noop():
+async def test_write_entities_empty_chunk_mentions_is_noop():
     """No chunks to process -> no Cypher sent; success no-op (None)."""
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    assert entity_writes.write_entities(client, DOC_ID, []) is None
+    assert await entity_writes.write_entities(client, DOC_ID, []) is None
     assert driver.sessions == []
 
 
-def test_write_entities_all_chunks_empty_is_noop():
+async def test_write_entities_all_chunks_empty_is_noop():
     """Each chunk yielded zero mentions -> no Cypher sent; success no-op."""
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    result = entity_writes.write_entities(
+    result = await entity_writes.write_entities(
         client,
         DOC_ID,
         [("c0", []), ("c1", []), ("c2", [])],
@@ -113,13 +113,13 @@ def test_write_entities_all_chunks_empty_is_noop():
     assert driver.sessions == []
 
 
-def test_write_entities_propagates_cypher_exception():
-    """session.run() raises -> propagate; orchestrator boundary catches
+async def test_write_entities_propagates_cypher_exception():
+    """await session.run() raises -> propagate; orchestrator boundary catches
     and stores on `IngestResult.kg_entities_error`."""
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(driver)
     with pytest.raises(RuntimeError, match="boom"):
-        entity_writes.write_entities(
+        await entity_writes.write_entities(
             client,
             DOC_ID,
             [("c0", [Mention(raw_text="BRCA1", entity_type="GENE")])],
@@ -129,16 +129,16 @@ def test_write_entities_propagates_cypher_exception():
 # ---- write_entities: Cypher shape ----
 
 
-def _run_write(mentions_per_chunk: list[tuple[str, list[Mention]]]) -> RecordingDriver:
+async def _run_write(mentions_per_chunk: list[tuple[str, list[Mention]]]) -> RecordingDriver:
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    assert entity_writes.write_entities(client, DOC_ID, mentions_per_chunk) is None
+    assert await entity_writes.write_entities(client, DOC_ID, mentions_per_chunk) is None
     return driver
 
 
-def test_write_entities_sends_one_session_one_call():
+async def test_write_entities_sends_one_session_one_call():
     """All mentions batched into a single UNWIND - one round trip."""
-    driver = _run_write(
+    driver = await _run_write(
         [
             ("c0", [Mention("BRCA1", "GENE"), Mention("p53", "GENE")]),
             ("c1", [Mention("aspirin", "CHEMICAL")]),
@@ -148,8 +148,8 @@ def test_write_entities_sends_one_session_one_call():
     assert len(driver.sessions[0].calls) == 1
 
 
-def test_write_entities_cypher_includes_entity_label_and_mentions_rel():
-    driver = _run_write(
+async def test_write_entities_cypher_includes_entity_label_and_mentions_rel():
+    driver = await _run_write(
         [("c0", [Mention(raw_text="BRCA1", entity_type="GENE")])]
     )
     cypher, _params = driver.sessions[0].calls[0]
@@ -162,9 +162,9 @@ def test_write_entities_cypher_includes_entity_label_and_mentions_rel():
     assert "canonicalised = false" in cypher
 
 
-def test_write_entities_lowercases_raw_text_into_key():
+async def test_write_entities_lowercases_raw_text_into_key():
     """raw_text 'BRCA1' (capital) becomes key 'brca1' in the merge param."""
-    driver = _run_write(
+    driver = await _run_write(
         [("c0", [Mention(raw_text="BRCA1", entity_type="GENE")])]
     )
     _cypher, params = driver.sessions[0].calls[0]
@@ -173,10 +173,10 @@ def test_write_entities_lowercases_raw_text_into_key():
     assert rows[0]["entity_type"] == "GENE"
 
 
-def test_write_entities_collapses_case_variants_to_same_key():
+async def test_write_entities_collapses_case_variants_to_same_key():
     """'BRCA1', 'Brca1', 'brca1' all reduce to key 'brca1'. Different
     entity_types still produce different rows (composite key)."""
-    driver = _run_write(
+    driver = await _run_write(
         [
             ("c0", [Mention("BRCA1", "GENE"), Mention("Brca1", "GENE")]),
             ("c1", [Mention("brca1", "GENE")]),
@@ -187,10 +187,10 @@ def test_write_entities_collapses_case_variants_to_same_key():
     assert [r["key"] for r in rows] == ["brca1", "brca1", "brca1"]
 
 
-def test_write_entities_preserves_offset_and_confidence_in_rows():
+async def test_write_entities_preserves_offset_and_confidence_in_rows():
     """NER mentions carry offset + confidence onto the :MENTIONS edge
     via ON CREATE SET. Verify the row payload includes them verbatim."""
-    driver = _run_write(
+    driver = await _run_write(
         [
             (
                 "c0",
@@ -211,10 +211,10 @@ def test_write_entities_preserves_offset_and_confidence_in_rows():
     assert rows[0]["confidence"] == 0.95
 
 
-def test_write_entities_llm_mentions_carry_none_offset_and_confidence():
+async def test_write_entities_llm_mentions_carry_none_offset_and_confidence():
     """LLM mentions have offset=None, confidence=None - rows carry None
     through so the Cypher sets them to null on the edge."""
-    driver = _run_write(
+    driver = await _run_write(
         [("c0", [Mention(raw_text="brca1", entity_type="GENE")])]
     )
     _cypher, params = driver.sessions[0].calls[0]
@@ -223,10 +223,10 @@ def test_write_entities_llm_mentions_carry_none_offset_and_confidence():
     assert rows[0]["confidence"] is None
 
 
-def test_write_entities_uses_chunk_id_to_link_mentions_edge():
+async def test_write_entities_uses_chunk_id_to_link_mentions_edge():
     """The chunk_id in each row binds the :MENTIONS edge to the right
     chunk via MATCH (c:Chunk {chunk_id: row.chunk_id})."""
-    driver = _run_write(
+    driver = await _run_write(
         [
             ("alpha", [Mention("BRCA1", "GENE")]),
             ("beta", [Mention("TP53", "GENE")]),
@@ -242,28 +242,28 @@ def test_write_entities_uses_chunk_id_to_link_mentions_edge():
 # ---- delete_entities_by_doc_id ----
 
 
-def test_delete_entities_empty_doc_id_raises():
+async def test_delete_entities_empty_doc_id_raises():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     with pytest.raises(ValueError, match="no doc_id"):
-        entity_writes.delete_entities_by_doc_id(client, "")
+        await entity_writes.delete_entities_by_doc_id(client, "")
     assert driver.sessions == []
 
 
-def test_delete_entities_runs_two_queries():
+async def test_delete_entities_runs_two_queries():
     """First: delete MENTIONS edges from this doc's chunks.
     Second: GC orphan :Entity nodes globally."""
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    assert entity_writes.delete_entities_by_doc_id(client, DOC_ID) is None
+    assert await entity_writes.delete_entities_by_doc_id(client, DOC_ID) is None
     assert len(driver.sessions) == 1
     assert len(driver.sessions[0].calls) == 2
 
 
-def test_delete_entities_first_query_drops_mentions_for_this_doc():
+async def test_delete_entities_first_query_drops_mentions_for_this_doc():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    entity_writes.delete_entities_by_doc_id(client, DOC_ID)
+    await entity_writes.delete_entities_by_doc_id(client, DOC_ID)
     cypher, params = driver.sessions[0].calls[0]
     assert ":MENTIONS" in cypher
     assert "DELETE m" in cypher
@@ -271,10 +271,10 @@ def test_delete_entities_first_query_drops_mentions_for_this_doc():
     assert params == {"doc_id": DOC_ID}
 
 
-def test_delete_entities_second_query_gcs_orphans():
+async def test_delete_entities_second_query_gcs_orphans():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    entity_writes.delete_entities_by_doc_id(client, DOC_ID)
+    await entity_writes.delete_entities_by_doc_id(client, DOC_ID)
     cypher, params = driver.sessions[0].calls[1]
     assert ":Entity" in cypher
     assert "NOT ()" in cypher  # WHERE-NOT orphan pattern
@@ -284,12 +284,12 @@ def test_delete_entities_second_query_gcs_orphans():
     assert params == {}
 
 
-def test_delete_entities_propagates_cypher_exception():
+async def test_delete_entities_propagates_cypher_exception():
     """Driver failure propagates; orchestrator boundary catches."""
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(driver)
     with pytest.raises(RuntimeError, match="boom"):
-        entity_writes.delete_entities_by_doc_id(client, DOC_ID)
+        await entity_writes.delete_entities_by_doc_id(client, DOC_ID)
 
 
 # ---- Neo4jClient delegate methods ----

@@ -104,8 +104,7 @@ DEFAULT_SHARED_COUNT_THRESHOLD = 2
 _XREF_REL_PIPE = "|".join(ONTOLOGY_XREF_RELS)
 
 
-def recompute_cross_doc_xrefs_edges(
-    client,
+async def recompute_cross_doc_xrefs_edges(client,
     doc_id: str,
     threshold: int = DEFAULT_SHARED_COUNT_THRESHOLD,
 ) -> int:
@@ -152,9 +151,9 @@ def recompute_cross_doc_xrefs_edges(
             f"KG: recompute_cross_doc_xrefs_edges threshold must be >= 1, "
             f"got {threshold}"
         )
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         # Step 1: wipe existing L10 edges incident to this doc.
-        session.run(
+        await session.run(
             f"MATCH (d:{DOCUMENT_LABEL}|{ARTIFACT_LABEL} "
             f"  {{doc_id: $doc_id}})-[r:{RELATED_BY_XREF_REL}]-() "
             f"DELETE r",
@@ -164,7 +163,7 @@ def recompute_cross_doc_xrefs_edges(
         # this -> chunk -> entity -> canonical -> ontology_term
         # on both sides; equivalence joins the two terms either
         # via identity (t1 = t2) or via an xref edge.
-        result = session.run(
+        result = await session.run(
             f"MATCH (this:{DOCUMENT_LABEL}|{ARTIFACT_LABEL} "
             f"  {{doc_id: $doc_id}})"
             f"<-[:{PART_OF_REL}]-(:{CHUNK_LABEL})"
@@ -189,7 +188,7 @@ def recompute_cross_doc_xrefs_edges(
             doc_id=doc_id,
             threshold=threshold,
         )
-        row = result.single()
+        row = await result.single()
         n = int(row["n"]) if row else 0
     logger.info(
         "KG: recomputed L10 :RELATED_BY_XREF edges for doc %s -> %d edges "
@@ -199,8 +198,7 @@ def recompute_cross_doc_xrefs_edges(
     return n
 
 
-def recompute_cross_doc_xrefs_global(
-    client,
+async def recompute_cross_doc_xrefs_global(client,
     threshold: int = DEFAULT_SHARED_COUNT_THRESHOLD,
 ) -> int:
     """Graph-wide rebuild of `:RELATED_BY_XREF` edges.
@@ -240,14 +238,14 @@ def recompute_cross_doc_xrefs_global(
             f"KG: recompute_cross_doc_xrefs_global threshold must be >= 1, "
             f"got {threshold}"
         )
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         # Step 1: wipe all L10 edges. One MATCH across both
         # focal labels via the type predicate.
-        session.run(
+        await session.run(
             f"MATCH ()-[r:{RELATED_BY_XREF_REL}]-() DELETE r"
         )
         # Step 2: recompute over all doc pairs.
-        result = session.run(
+        result = await session.run(
             f"MATCH (this:{DOCUMENT_LABEL}|{ARTIFACT_LABEL})"
             f"<-[:{PART_OF_REL}]-(:{CHUNK_LABEL})"
             f"-[:{MENTIONS_REL}]->(:{ENTITY_LABEL})"
@@ -270,7 +268,7 @@ def recompute_cross_doc_xrefs_global(
             f"RETURN count(r) AS n",
             threshold=threshold,
         )
-        row = result.single()
+        row = await result.single()
         n = int(row["n"]) if row else 0
     logger.info(
         "KG: recomputed L10 :RELATED_BY_XREF graph-wide -> %d edges "

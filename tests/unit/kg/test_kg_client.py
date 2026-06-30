@@ -26,8 +26,18 @@ class RecordingRecord:
 
     _data: dict[str, Any] = field(default_factory=dict)
 
-    def data(self) -> dict[str, Any]:
+    async def data(self) -> dict[str, Any]:
         return self._data
+
+
+@dataclass
+class _AsyncResultStub:
+    """Stand-in for neo4j.AsyncResult with `.data()` returning a list."""
+
+    rows: list[dict[str, Any]] = field(default_factory=list)
+
+    async def data(self) -> list[dict[str, Any]]:
+        return self.rows
 
 
 @dataclass
@@ -38,11 +48,11 @@ class RecordingTransaction:
     records: list[RecordingRecord] = field(default_factory=list)
     raise_on_run: Exception | None = None
 
-    def run(self, query: str, **params: Any) -> list[RecordingRecord]:
+    async def run(self, query: str, **params: Any) -> _AsyncResultStub:
         if self.raise_on_run is not None:
             raise self.raise_on_run
         self.calls.append((query, params))
-        return self.records
+        return _AsyncResultStub(rows=[r._data for r in self.records])
 
 
 @dataclass
@@ -55,7 +65,7 @@ class RecordingSession:
     # builds an empty one on demand.
     read_transaction: RecordingTransaction | None = None
 
-    def run(self, query: str, **params: Any) -> None:
+    async def run(self, query: str, **params: Any) -> None:
         if self.raise_on_run is not None:
             raise self.raise_on_run
         self.calls.append((query, params))
@@ -65,10 +75,10 @@ class RecordingSession:
             self.read_transaction = RecordingTransaction()
         return fn(self.read_transaction)
 
-    def __enter__(self) -> "RecordingSession":
+    async def __aenter__(self) -> "RecordingSession":
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: Any) -> None:
         pass
 
 
@@ -91,7 +101,7 @@ class RecordingDriver:
         self.sessions.append(sess)
         return sess
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self.closed = True
 
 

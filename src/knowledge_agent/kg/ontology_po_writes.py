@@ -99,21 +99,20 @@ _PO_PROVENANCE = OntologyProvenance(
 # ---------------------------------------------------------------------------
 
 
-def is_imported(client) -> bool:
+async def is_imported(client) -> bool:
     """True when at least one `:POTerm` node exists in Neo4j."""
-    return is_ontology_imported(
+    return await is_ontology_imported(
         client, term_label=PO_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
     )
 
 
-def import_po(
-    client,
+async def import_po(client,
     *,
     force: bool = False,
     xrefs_mode: str = "none",
 ) -> bool:
     """Download + parse + write the PO ontology to Neo4j. Idempotent."""
-    return import_ontology_data(
+    return await import_ontology_data(
         client,
         ontology_name=_ONTOLOGY_NAME,
         url=PO_DOWNLOAD_URL,
@@ -126,21 +125,20 @@ def import_po(
     )
 
 
-def delete_imported(client) -> None:
+async def delete_imported(client) -> None:
     """DETACH DELETE every :POTerm node + its :PO_IS_A edges."""
-    delete_ontology_terms(
+    await delete_ontology_terms(
         client, term_label=PO_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
     )
 
 
-def write_terms(
-    client,
+async def write_terms(client,
     terms: list[OntologyTerm],
     *,
     xrefs_mode: str = "none",
 ) -> None:
     """Write `:OntologyTerm:POTerm` nodes + `:PO_IS_A` edges."""
-    write_ontology_terms(
+    await write_ontology_terms(
         client, terms,
         term_label=PO_TERM_LABEL,
         hierarchy_rel=PO_IS_A_REL,

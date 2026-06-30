@@ -243,7 +243,7 @@ async def import_ontology_plan(
         )
     entry = ONTOLOGY_REGISTRY[ontology_name]
     kg_client = get_kg_client()
-    already_imported = entry["is_imported_fn"](kg_client)
+    already_imported = await entry["is_imported_fn"](kg_client)
     # Pre-compute the cross-link surface at plan-build time so the
     # rendered summary stays deterministic (no surprise registry
     # reads between dialog show + execute).
@@ -282,7 +282,7 @@ async def import_ontology_execute(
     kg_client = get_kg_client()
     import_error: ErrorDetail | None = None
     try:
-        entry["import_fn"](kg_client, xrefs_mode=plan.xrefs_mode)
+        await entry["import_fn"](kg_client, xrefs_mode=plan.xrefs_mode)
         import_ok = True
     except Exception as exc:
         logger.warning(
@@ -392,7 +392,7 @@ async def link_ontology_plan(
         )
     entry = ONTOLOGY_REGISTRY[ontology_name]
     kg_client = get_kg_client()
-    is_imported = entry["is_imported_fn"](kg_client)
+    is_imported = await entry["is_imported_fn"](kg_client)
     return LinkOntologyPlan(
         ontology_name=ontology_name,
         is_imported=is_imported,
@@ -518,7 +518,7 @@ async def delete_ontology_plan(ontology_name: str) -> DeleteOntologyPlan:
         )
     entry = ONTOLOGY_REGISTRY[ontology_name]
     kg_client = get_kg_client()
-    is_imported = entry["is_imported_fn"](kg_client)
+    is_imported = await entry["is_imported_fn"](kg_client)
     if not is_imported:
         return DeleteOntologyPlan(
             ontology_name=ontology_name,
@@ -559,7 +559,7 @@ async def delete_ontology_execute(
     kg_client = get_kg_client()
     delete_error: ErrorDetail | None = None
     try:
-        entry["delete_fn"](kg_client)
+        await entry["delete_fn"](kg_client)
         delete_ok = True
     except Exception as exc:
         logger.warning(
@@ -689,7 +689,7 @@ async def install_xrefs_plan(client, new_xrefs_mode: str) -> InstallXrefsPlan:
         # returned True; we infer "imported" by counting any term
         # node via the same dangling probe (which returns 0 when
         # imported but no dangling, and None on Cypher error).
-        dangling = count_dangling_xrefs(client, term_label)
+        dangling = await count_dangling_xrefs(client, term_label)
         if dangling is None:
             # Cypher error for this sub-label — skip; the plan still
             # builds with the data we got from the other 17.
@@ -704,7 +704,7 @@ async def install_xrefs_plan(client, new_xrefs_mode: str) -> InstallXrefsPlan:
         if entry is not None and entry["is_imported_fn"](client):
             n_imported += 1
 
-    n_edges = count_xref_edges(client, None)
+    n_edges = await count_xref_edges(client, None)
     n_edges_safe = n_edges if n_edges is not None else 0
 
     return InstallXrefsPlan(
@@ -827,8 +827,8 @@ async def install_cross_doc_xrefs_plan(
     is filled with 0 — the plan still builds and the dialog shows
     the partial picture.
     """
-    n_docs = _count_focal_nodes(client)
-    n_l10 = _count_l10_edges(client)
+    n_docs = await _count_focal_nodes(client)
+    n_l10 = await _count_l10_edges(client)
     return InstallCrossDocXrefsPlan(
         enabling=enabling,
         n_docs=n_docs if n_docs is not None else 0,
@@ -838,25 +838,25 @@ async def install_cross_doc_xrefs_plan(
     )
 
 
-def _count_focal_nodes(client) -> int | None:
+async def _count_focal_nodes(client) -> int | None:
     """Count `:Document` + `:Artifact` nodes in the KG.
 
     Used by `install_cross_doc_xrefs_plan` to surface the L10 rebuild
     cost. Returns the int count, or None on Cypher error (logged).
     """
     try:
-        with client.driver.session() as session:
-            result = session.run(
+        async with client.driver.session() as session:
+            result = await session.run(
                 "MATCH (d:Document|Artifact) RETURN count(d) AS n"
             )
-            row = result.single()
+            row = await result.single()
             return int(row["n"]) if row else 0
     except Exception as exc:
         logger.warning("_count_focal_nodes failed: %r", exc)
         return None
 
 
-def _count_l10_edges(client) -> int | None:
+async def _count_l10_edges(client) -> int | None:
     """Count `:RELATED_BY_XREF` edges in the KG.
 
     Used by `install_cross_doc_xrefs_plan` to surface "this many L10
@@ -864,12 +864,12 @@ def _count_l10_edges(client) -> int | None:
     error (logged).
     """
     try:
-        with client.driver.session() as session:
-            result = session.run(
+        async with client.driver.session() as session:
+            result = await session.run(
                 "MATCH ()-[r:RELATED_BY_XREF]-() "
                 "RETURN count(r) AS n"
             )
-            row = result.single()
+            row = await result.single()
             return int(row["n"]) if row else 0
     except Exception as exc:
         logger.warning("_count_l10_edges failed: %r", exc)

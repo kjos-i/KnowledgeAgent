@@ -251,7 +251,7 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
 # ---------------------------------------------------------------------------
 
 
-def count_ontology_terms(client, ontology_name: str) -> int:
+async def count_ontology_terms(client, ontology_name: str) -> int:
     """Count the term nodes of a given ontology (`:MeSHTerm` or `:GOTerm`).
 
     Used by `ontology_lifecycle.delete_ontology_plan` to show the user
@@ -270,14 +270,14 @@ def count_ontology_terms(client, ontology_name: str) -> int:
             f"count_ontology_terms: unknown ontology {ontology_name!r}"
         )
     term_label = entry["term_label"]
-    with client.driver.session() as session:
-        result = session.run(
+    async with client.driver.session() as session:
+        result = await session.run(
             f"MATCH (n:{term_label}) RETURN count(n) AS n"
         )
-        return int(result.single()["n"])
+        return int((await result.single())["n"])
 
 
-def count_canonical_links(client, ontology_name: str) -> int:
+async def count_canonical_links(client, ontology_name: str) -> int:
     """Count `:CANONICAL_TO` edges pointing at terms of a given ontology.
 
     Used by `ontology_lifecycle.delete_ontology_plan` so the user sees
@@ -293,16 +293,15 @@ def count_canonical_links(client, ontology_name: str) -> int:
             f"count_canonical_links: unknown ontology {ontology_name!r}"
         )
     term_label = entry["term_label"]
-    with client.driver.session() as session:
-        result = session.run(
+    async with client.driver.session() as session:
+        result = await session.run(
             f"MATCH ()-[r:{CANONICAL_TO_REL}]->(:{term_label}) "
             f"RETURN count(r) AS n"
         )
-        return int(result.single()["n"])
+        return int((await result.single())["n"])
 
 
-def ensure_ontology_imported(
-    client,
+async def ensure_ontology_imported(client,
     ontology_name: str,
     *,
     xrefs_mode: str = "none",
@@ -343,13 +342,13 @@ def ensure_ontology_imported(
             f"Known ontologies: {sorted(ONTOLOGY_REGISTRY)}."
         )
     entry = ONTOLOGY_REGISTRY[ontology_name]
-    if entry["is_imported_fn"](client):
+    if await entry["is_imported_fn"](client):
         return True
     # import_fn returns True on newly imported, False on no-op. The
     # no-op branch is unreachable here since we already confirmed
     # not-imported above; either way the answer is "not already
     # imported" so the caller should run the global linking pass.
-    entry["import_fn"](client, xrefs_mode=xrefs_mode)
+    await entry["import_fn"](client, xrefs_mode=xrefs_mode)
     return False
 
 
@@ -358,8 +357,7 @@ def ensure_ontology_imported(
 # ---------------------------------------------------------------------------
 
 
-def link_entities(
-    client,
+async def link_entities(client,
     ontology_name: str,
     matching_strategy: Literal["exact", "fuzzy"],
     *,
@@ -392,7 +390,7 @@ def link_entities(
     entry = ONTOLOGY_REGISTRY[ontology_name]
     term_label = entry["term_label"]
 
-    index = _build_term_index(client, term_label)
+    index = await _build_term_index(client, term_label)
     if not index:
         logger.info(
             "L7 linking (%s): no terms in Neo4j; skipping pass",
@@ -400,7 +398,7 @@ def link_entities(
         )
         return 0
 
-    entities = _fetch_entities_to_link(client, term_label, doc_id)
+    entities = await _fetch_entities_to_link(client, term_label, doc_id)
     if not entities:
         logger.info(
             "L7 linking (%s): no entities to link%s",
@@ -432,7 +430,7 @@ def link_entities(
         )
         return 0
 
-    written = _write_canonical_links(client, edges, term_label)
+    written = await _write_canonical_links(client, edges, term_label)
     logger.info(
         "L7 linking (%s): wrote %d :CANONICAL_TO edges across %d entities",
         ontology_name, written, len(entities),
@@ -445,7 +443,7 @@ def link_entities(
 # ---------------------------------------------------------------------------
 
 
-def _build_term_index(client, term_label: str) -> dict[str, list[str]]:
+async def _build_term_index(client, term_label: str) -> dict[str, list[str]]:
     """Load all terms for one ontology into an in-memory lookup index.
 
     The index maps `lowercased_text -> list[term_id]`. Each term
@@ -457,12 +455,13 @@ def _build_term_index(client, term_label: str) -> dict[str, list[str]]:
     Returns an empty dict when the ontology has no terms loaded.
     Cypher / driver failures propagate to the orchestrator boundary.
     """
-    with client.driver.session() as session:
-        records = session.run(
+    async with client.driver.session() as session:
+        result = await session.run(
             f"MATCH (t:{term_label}) "
             f"RETURN t.id AS id, t.label AS label, "
             f"       t.synonyms AS synonyms"
-        ).data()
+        )
+        records = await result.data()
 
     index: dict[str, list[str]] = {}
     for row in records:
@@ -485,8 +484,7 @@ def _build_term_index(client, term_label: str) -> dict[str, list[str]]:
     return index
 
 
-def _fetch_entities_to_link(
-    client, term_label: str, doc_id: str | None
+async def _fetch_entities_to_link(client, term_label: str, doc_id: str | None
 ) -> list[dict[str, str]]:
     """Return [{key, entity_type}, ...] for entities the pass should
     try to link.
@@ -515,8 +513,9 @@ def _fetch_entities_to_link(
             f"RETURN e.key AS key, e.entity_type AS entity_type"
         )
         params = {}
-    with client.driver.session() as session:
-        return session.run(cypher, **params).data()
+    async with client.driver.session() as session:
+        result = await session.run(cypher, **params)
+        return await result.data()
 
 
 def _match_entity_key(
@@ -598,8 +597,7 @@ def _fuzzy_variants(key: str) -> list[tuple[str, float]]:
 # ---------------------------------------------------------------------------
 
 
-def _write_canonical_links(
-    client, rows: list[dict[str, Any]], term_label: str
+async def _write_canonical_links(client, rows: list[dict[str, Any]], term_label: str
 ) -> int:
     """Batch-write :CANONICAL_TO edges via UNWIND + MERGE.
 
@@ -619,8 +617,8 @@ def _write_canonical_links(
     """
     if not rows:
         return 0
-    with client.driver.session() as session:
-        session.run(
+    async with client.driver.session() as session:
+        await session.run(
             f"UNWIND $rows AS row "
             f"MATCH (e:{ENTITY_LABEL} "
             f"  {{key: row.entity_key, entity_type: row.entity_type}}) "

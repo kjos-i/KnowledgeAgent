@@ -66,9 +66,9 @@ async def test_import_ontology_plan_marks_already_imported_when_kg_has_it():
     fake_registry = {
         "mesh": {
             "term_label": "MeSHTerm",
-            "is_imported_fn": lambda client: True,
-            "import_fn": lambda client, **kw: True,
-            "delete_fn": lambda client: True,
+            "is_imported_fn": AsyncMock(return_value=True),
+            "import_fn": AsyncMock(return_value=True),
+            "delete_fn": AsyncMock(return_value=True),
             "download_size_mb": 115,
         },
     }
@@ -89,9 +89,9 @@ async def test_import_ontology_plan_marks_not_imported_when_kg_has_none():
     fake_registry = {
         "go": {
             "term_label": "GOTerm",
-            "is_imported_fn": lambda client: False,
-            "import_fn": lambda client, **kw: True,
-            "delete_fn": lambda client: True,
+            "is_imported_fn": AsyncMock(return_value=False),
+            "import_fn": AsyncMock(return_value=True),
+            "delete_fn": AsyncMock(return_value=True),
             "download_size_mb": 200,
         },
     }
@@ -114,7 +114,7 @@ async def test_import_ontology_execute_no_op_when_already_imported():
     plan = ImportOntologyPlan(
         ontology_name="mesh", already_imported=True, download_size_mb=115,
     )
-    import_fn = MagicMock(return_value=True)
+    import_fn = AsyncMock(return_value=True)
     fake_registry = {
         "mesh": {"import_fn": import_fn, "download_size_mb": 115}
     }
@@ -134,7 +134,7 @@ async def test_import_ontology_execute_runs_import_fn_when_not_imported():
     plan = ImportOntologyPlan(
         ontology_name="mesh", already_imported=False, download_size_mb=115,
     )
-    import_fn = MagicMock(return_value=True)
+    import_fn = AsyncMock(return_value=True)
     fake_registry = {"mesh": {"import_fn": import_fn, "download_size_mb": 115}}
     with (
         patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
@@ -188,7 +188,7 @@ async def test_import_ontology_execute_returns_result_dataclass():
     with (
         patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client"),
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              {"mesh": {"import_fn": lambda c, **kw: True,
+              {"mesh": {"import_fn": AsyncMock(return_value=True),
                         "download_size_mb": 115}}),
     ):
         result = await import_ontology_execute(plan)
@@ -246,7 +246,7 @@ async def test_link_ontology_plan_raises_on_unknown_ontology():
 async def test_link_ontology_plan_raises_on_bad_matching_strategy():
     fake_registry = {
         "mesh": {
-            "is_imported_fn": lambda client: True,
+            "is_imported_fn": AsyncMock(return_value=True),
         },
     }
     with patch(
@@ -261,7 +261,7 @@ async def test_link_ontology_plan_marks_is_imported_true_when_terms_present():
     kg_mock = MagicMock()
     fake_registry = {
         "mesh": {
-            "is_imported_fn": lambda client: True,
+            "is_imported_fn": AsyncMock(return_value=True),
         },
     }
     with (
@@ -279,7 +279,7 @@ async def test_link_ontology_plan_marks_is_imported_false_when_no_terms():
     kg_mock = MagicMock()
     fake_registry = {
         "mesh": {
-            "is_imported_fn": lambda client: False,
+            "is_imported_fn": AsyncMock(return_value=False),
         },
     }
     with (
@@ -296,7 +296,7 @@ async def test_link_ontology_plan_marks_is_imported_false_when_no_terms():
 async def test_link_ontology_plan_defaults_to_global_scope_and_exact_matching():
     kg_mock = MagicMock()
     fake_registry = {
-        "mesh": {"is_imported_fn": lambda client: True},
+        "mesh": {"is_imported_fn": AsyncMock(return_value=True),},
     }
     with (
         patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
@@ -313,7 +313,7 @@ async def test_link_ontology_plan_defaults_to_global_scope_and_exact_matching():
 async def test_link_ontology_plan_accepts_doc_id_scope_and_fuzzy_matching():
     kg_mock = MagicMock()
     fake_registry = {
-        "go": {"is_imported_fn": lambda client: True},
+        "go": {"is_imported_fn": AsyncMock(return_value=True),},
     }
     with (
         patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
@@ -490,7 +490,7 @@ async def test_delete_ontology_plan_skips_counts_when_not_imported():
     kg_mock = MagicMock()
     fake_registry = {
         "mesh": {
-            "is_imported_fn": lambda client: False,
+            "is_imported_fn": AsyncMock(return_value=False),
             "download_size_mb": 115,
         },
     }
@@ -515,7 +515,7 @@ async def test_delete_ontology_plan_populates_counts_when_imported():
     kg_mock.count_canonical_links = AsyncMock(return_value=18)
     fake_registry = {
         "mesh": {
-            "is_imported_fn": lambda client: True,
+            "is_imported_fn": AsyncMock(return_value=True),
             "download_size_mb": 115,
         },
     }
@@ -539,7 +539,7 @@ async def test_delete_ontology_plan_propagates_count_failure():
     kg_mock.count_ontology_terms = AsyncMock(side_effect=RuntimeError("cypher boom"))
     fake_registry = {
         "mesh": {
-            "is_imported_fn": lambda client: True,
+            "is_imported_fn": AsyncMock(return_value=True),
             "download_size_mb": 115,
         },
     }
@@ -561,7 +561,7 @@ async def test_delete_ontology_execute_no_op_when_not_imported():
         ontology_name="mesh", is_imported=False,
         n_terms=0, n_canonical_links=0,
     )
-    delete_fn = MagicMock(return_value=True)
+    delete_fn = AsyncMock(return_value=True)
     fake_registry = {"mesh": {"delete_fn": delete_fn}}
     with (
         patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client"),
@@ -580,7 +580,7 @@ async def test_delete_ontology_execute_runs_delete_fn_when_imported():
         ontology_name="mesh", is_imported=True,
         n_terms=100, n_canonical_links=5,
     )
-    delete_fn = MagicMock(return_value=True)
+    delete_fn = AsyncMock(return_value=True)
     fake_registry = {"mesh": {"delete_fn": delete_fn}}
     with (
         patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
@@ -631,7 +631,7 @@ async def test_delete_ontology_execute_returns_result_dataclass():
     with (
         patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client"),
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              {"mesh": {"delete_fn": lambda c: True}}),
+              {"mesh": {"delete_fn": AsyncMock(return_value=True),}}),
     ):
         result = await delete_ontology_execute(plan)
     assert isinstance(result, DeleteOntologyResult)
@@ -688,9 +688,9 @@ async def test_import_ontology_plan_threads_xrefs_mode_into_dataclass():
     fake_registry = {
         "mesh": {
             "term_label": "MeSHTerm",
-            "is_imported_fn": lambda client: False,
-            "import_fn": lambda client, **kw: True,
-            "delete_fn": lambda client: True,
+            "is_imported_fn": AsyncMock(return_value=False),
+            "import_fn": AsyncMock(return_value=True),
+            "delete_fn": AsyncMock(return_value=True),
             "download_size_mb": 115,
         },
     }
@@ -715,7 +715,7 @@ async def test_import_ontology_execute_passes_xrefs_mode_to_import_fn():
     )
     captured: dict = {}
 
-    def fake_import_fn(client, **kwargs):
+    async def fake_import_fn(client, **kwargs):
         captured.update(kwargs)
         return True
 
@@ -812,8 +812,8 @@ async def test_install_xrefs_plan_factory_aggregates_counts_across_18():
     fake_registry_entry = {
         "term_label": "MeSHTerm",
         "is_imported_fn": fake_is_imported_fn,
-        "import_fn": lambda c, **kw: True,
-        "delete_fn": lambda c: True,
+        "import_fn": AsyncMock(return_value=True),
+        "delete_fn": AsyncMock(return_value=True),
         "download_size_mb": 115,
     }
     # Registry must map for every term_label so the factory's
@@ -922,7 +922,7 @@ def test_install_cross_doc_xrefs_plan_summary_disabling():
 
 async def test_install_cross_doc_xrefs_plan_factory_reads_live_counts():
     """The factory queries `:Document|:Artifact` count and the L10
-    edge count via session.run(); both come back as the plan's
+    edge count via await session.run(); both come back as the plan's
     `n_docs` / `n_existing_l10_edges`."""
     sessions_made = []
 
@@ -934,20 +934,20 @@ async def test_install_cross_doc_xrefs_plan_factory_reads_live_counts():
                 {"n": 19},   # count of L10 edges
             ])
 
-        def run(self, query, **params):
+        async def run(self, query, **params):
             self.calls.append(query)
             row = next(self._iter)
             class _R:
                 def __init__(self, r):
                     self._r = r
-                def single(self):
+                async def single(self):
                     return self._r
             return _R(row)
 
-        def __enter__(self):
+        async def __aenter__(self):
             return self
 
-        def __exit__(self, *a):
+        async def __aexit__(self, *a):
             pass
 
     class FakeDriver:
@@ -1175,9 +1175,9 @@ async def test_import_ontology_plan_factory_reads_provenance_from_registry():
     fake_registry = {
         "mesh": {
             "term_label": "MeSHTerm",
-            "is_imported_fn": lambda c: False,
-            "import_fn": lambda c, **kw: True,
-            "delete_fn": lambda c: True,
+            "is_imported_fn": AsyncMock(return_value=False),
+            "import_fn": AsyncMock(return_value=True),
+            "delete_fn": AsyncMock(return_value=True),
             "download_size_mb": 115,
             "provenance": p,
         },
@@ -1200,9 +1200,9 @@ async def test_import_ontology_plan_factory_handles_registry_without_provenance(
     fake_registry = {
         "go": {
             "term_label": "GOTerm",
-            "is_imported_fn": lambda c: False,
-            "import_fn": lambda c, **kw: True,
-            "delete_fn": lambda c: True,
+            "is_imported_fn": AsyncMock(return_value=False),
+            "import_fn": AsyncMock(return_value=True),
+            "delete_fn": AsyncMock(return_value=True),
             "download_size_mb": 200,
             # NO "provenance" key
         },
@@ -1328,8 +1328,10 @@ async def test_mesh_pilot_factory_produces_rich_summary():
         ONTOLOGY_REGISTRY,
     )
     # Preserve original, swap in a stub, restore after.
+    async def _not_imported(_c):
+        return False
     original_entry = dict(ONTOLOGY_REGISTRY["mesh"])
-    ONTOLOGY_REGISTRY["mesh"]["is_imported_fn"] = lambda c: False
+    ONTOLOGY_REGISTRY["mesh"]["is_imported_fn"] = _not_imported
     try:
         with patch(
             "knowledge_agent.kg.ontology_lifecycle.get_kg_client",
@@ -1486,7 +1488,7 @@ async def test_import_plan_rich_summary_surfaces_extractor_candidates():
         ),
         patch.dict(
             ONTOLOGY_REGISTRY["mesh"],
-            {"is_imported_fn": lambda client: False},
+            {"is_imported_fn": AsyncMock(return_value=False),},
         ),
     ):
         plan = await import_ontology_plan("mesh")
@@ -1508,7 +1510,7 @@ async def test_import_plan_rich_summary_handles_empty_extractor_candidates():
         ),
         patch.dict(
             ONTOLOGY_REGISTRY["eco"],
-            {"is_imported_fn": lambda client: False},
+            {"is_imported_fn": AsyncMock(return_value=False),},
         ),
     ):
         plan = await import_ontology_plan("eco")
@@ -1591,7 +1593,7 @@ async def test_import_ontology_plan_threads_extractor_candidates():
         ),
         patch.dict(
             ONTOLOGY_REGISTRY["mondo"],
-            {"is_imported_fn": lambda client: False},
+            {"is_imported_fn": AsyncMock(return_value=False),},
         ),
     ):
         plan = await import_ontology_plan("mondo")

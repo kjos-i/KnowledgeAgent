@@ -120,17 +120,16 @@ _NCBITAXON_PROVENANCE = OntologyProvenance(
 # ---------------------------------------------------------------------------
 
 
-def is_imported(client) -> bool:
+async def is_imported(client) -> bool:
     """True when at least one `:NCBITaxonTerm` node exists in Neo4j."""
-    return is_ontology_imported(
+    return await is_ontology_imported(
         client,
         term_label=NCBITAXON_TERM_LABEL,
         ontology_name=_ONTOLOGY_NAME,
     )
 
 
-def import_ncbitaxon(
-    client,
+async def import_ncbitaxon(client,
     *,
     force: bool = False,
     xrefs_mode: str = "none",
@@ -139,7 +138,7 @@ def import_ncbitaxon(
 
     See module docstring for the memory caveat at parse time.
     """
-    return import_ontology_data(
+    return await import_ontology_data(
         client,
         ontology_name=_ONTOLOGY_NAME,
         url=NCBITAXON_DOWNLOAD_URL,
@@ -152,23 +151,22 @@ def import_ncbitaxon(
     )
 
 
-def delete_imported(client) -> None:
+async def delete_imported(client) -> None:
     """DETACH DELETE every :NCBITaxonTerm node + its :NCBITAXON_IS_A edges."""
-    delete_ontology_terms(
+    await delete_ontology_terms(
         client,
         term_label=NCBITAXON_TERM_LABEL,
         ontology_name=_ONTOLOGY_NAME,
     )
 
 
-def write_terms(
-    client,
+async def write_terms(client,
     terms: list[OntologyTerm],
     *,
     xrefs_mode: str = "none",
 ) -> None:
     """Write `:OntologyTerm:NCBITaxonTerm` nodes + `:NCBITAXON_IS_A` edges."""
-    write_ontology_terms(
+    await write_ontology_terms(
         client, terms,
         term_label=NCBITAXON_TERM_LABEL,
         hierarchy_rel=NCBITAXON_IS_A_REL,

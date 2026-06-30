@@ -143,15 +143,14 @@ _SKIP_PATH_PREFIXES: tuple[str, ...] = ("etc/", ".github/")
 # ---------------------------------------------------------------------------
 
 
-def is_imported(client) -> bool:
+async def is_imported(client) -> bool:
     """True when at least one `:FIBOTerm` node exists in Neo4j."""
-    return is_ontology_imported(
+    return await is_ontology_imported(
         client, term_label=FIBO_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
     )
 
 
-def import_fibo(
-    client,
+async def import_fibo(client,
     *,
     force: bool = False,
     xrefs_mode: str = "none",
@@ -168,7 +167,7 @@ def import_fibo(
     module files, then loads them into one rdflib graph for term
     extraction. Subsequent imports re-use the local cache.
     """
-    if not force and is_imported(client):
+    if not force and await is_imported(client):
         logger.info(
             "%s: already imported; use force=True to re-import",
             _ONTOLOGY_NAME,
@@ -180,7 +179,7 @@ def import_fibo(
             "%s: force=True - dropping existing data before re-import",
             _ONTOLOGY_NAME,
         )
-        delete_imported(client)
+        await delete_imported(client)
 
     cache_dir = _walk_and_cache_fibo()
     terms = _read_and_extract(cache_dir)
@@ -190,25 +189,24 @@ def import_fibo(
             f"{_ONTOLOGY_NAME}: extracted 0 terms - unexpected, aborting write"
         )
 
-    write_terms(client, terms)
+    await write_terms(client, terms)
     return True
 
 
-def delete_imported(client) -> None:
+async def delete_imported(client) -> None:
     """DETACH DELETE every :FIBOTerm node + its :FIBO_IS_A edges."""
-    delete_ontology_terms(
+    await delete_ontology_terms(
         client, term_label=FIBO_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
     )
 
 
-def write_terms(
-    client,
+async def write_terms(client,
     terms: list[OntologyTerm],
     *,
     xrefs_mode: str = "none",
 ) -> None:
     """Write `:OntologyTerm:FIBOTerm` nodes + `:FIBO_IS_A` edges."""
-    write_ontology_terms(
+    await write_ontology_terms(
         client, terms,
         term_label=FIBO_TERM_LABEL,
         hierarchy_rel=FIBO_IS_A_REL,

@@ -43,7 +43,7 @@ from knowledge_agent.kg.schema import (
 logger = logging.getLogger(__name__)
 
 
-def delete_entities_by_doc_id(client, doc_id: str) -> None:
+async def delete_entities_by_doc_id(client, doc_id: str) -> None:
     """Drop `:MENTIONS` edges from this doc's chunks + GC orphan `:Entity`.
 
     Steps:
@@ -69,13 +69,13 @@ def delete_entities_by_doc_id(client, doc_id: str) -> None:
     """
     if not doc_id:
         raise ValueError("KG: delete_entities_by_doc_id called with no doc_id")
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         # 1. Drop MENTIONS edges sourced from this doc's chunks.
         # DELETE m removes only the relationship, not the chunk or
         # entity at either end - chunks may still belong to this
         # doc (if write_chunks hasn't been called yet on re-ingest)
         # and entities may still be referenced by other docs.
-        session.run(
+        await session.run(
             f"MATCH (c:{CHUNK_LABEL} {{doc_id: $doc_id}})"
             f"-[m:{MENTIONS_REL}]->() "
             f"DELETE m",
@@ -87,7 +87,7 @@ def delete_entities_by_doc_id(client, doc_id: str) -> None:
         # guarantees no incoming MENTIONS - if a future edge type
         # is added without updating this WHERE, DELETE will error
         # so the bug surfaces rather than silently masks.
-        session.run(
+        await session.run(
             f"MATCH (e:{ENTITY_LABEL}) "
             f"WHERE NOT ()-[:{MENTIONS_REL}]->(e) "
             f"DELETE e"
@@ -95,8 +95,7 @@ def delete_entities_by_doc_id(client, doc_id: str) -> None:
     logger.info("KG: deleted entity mentions for doc %s + GC'd orphans", doc_id)
 
 
-def write_entities(
-    client,
+async def write_entities(client,
     doc_id: str,
     chunk_mentions: list[tuple[str, list[Mention]]],
 ) -> None:
@@ -170,8 +169,8 @@ def write_entities(
         )
         return
 
-    with client.driver.session() as session:
-        session.run(
+    async with client.driver.session() as session:
+        await session.run(
             f"UNWIND $rows AS row "
             f"MERGE (e:{ENTITY_LABEL} "
             f"  {{key: row.key, entity_type: row.entity_type}}) "

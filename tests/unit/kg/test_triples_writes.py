@@ -37,7 +37,7 @@ class _RunResult:
 
     rows: list[dict[str, Any]] = field(default_factory=list)
 
-    def data(self) -> list[dict[str, Any]]:
+    async def data(self) -> list[dict[str, Any]]:
         return self.rows
 
 
@@ -49,7 +49,7 @@ class RecordingSession:
     # call; queries that don't need data() ignore this.
     data_returns: list[list[dict[str, Any]]] = field(default_factory=list)
 
-    def run(self, query: str, **params: Any) -> _RunResult:
+    async def run(self, query: str, **params: Any) -> _RunResult:
         if self.raise_on_run is not None:
             raise self.raise_on_run
         self.calls.append((query, params))
@@ -57,10 +57,10 @@ class RecordingSession:
             return _RunResult(rows=self.data_returns.pop(0))
         return _RunResult(rows=[])
 
-    def __enter__(self) -> "RecordingSession":
+    async def __aenter__(self) -> "RecordingSession":
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: Any) -> None:
         pass
 
 
@@ -79,7 +79,7 @@ class RecordingDriver:
         self.sessions.append(sess)
         return sess
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self.closed = True
 
 
@@ -146,19 +146,19 @@ def test_extracted_triple_is_frozen_dataclass():
 # ---- delete_triples_by_doc_id ----
 
 
-def test_delete_triples_empty_doc_id_raises():
+async def test_delete_triples_empty_doc_id_raises():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     with pytest.raises(ValueError, match="no doc_id"):
-        triples_writes.delete_triples_by_doc_id(client, "")
+        await triples_writes.delete_triples_by_doc_id(client, "")
     assert driver.sessions == []
 
 
-def test_delete_triples_runs_single_cypher_for_all_predicates():
+async def test_delete_triples_runs_single_cypher_for_all_predicates():
     """Pipe-joined predicate union -> one DELETE query, not 15."""
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    assert triples_writes.delete_triples_by_doc_id(client, DOC_ID) is None
+    assert await triples_writes.delete_triples_by_doc_id(client, DOC_ID) is None
     assert len(driver.sessions[0].calls) == 1
     cypher, params = driver.sessions[0].calls[0]
     # All 15 predicates appear in the rel union.
@@ -170,36 +170,36 @@ def test_delete_triples_runs_single_cypher_for_all_predicates():
     assert params == {"doc_id": DOC_ID}
 
 
-def test_delete_triples_propagates_cypher_exception():
+async def test_delete_triples_propagates_cypher_exception():
     """Driver failure propagates; orchestrator boundary catches."""
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(driver)
     with pytest.raises(RuntimeError, match="boom"):
-        triples_writes.delete_triples_by_doc_id(client, DOC_ID)
+        await triples_writes.delete_triples_by_doc_id(client, DOC_ID)
 
 
 # ---- write_triples: fail-soft + empty paths ----
 
 
-def test_write_triples_empty_doc_id_raises():
+async def test_write_triples_empty_doc_id_raises():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     with pytest.raises(ValueError, match="no doc_id"):
-        triples_writes.write_triples(client, "", [])
+        await triples_writes.write_triples(client, "", [])
     assert driver.sessions == []
 
 
-def test_write_triples_empty_chunk_triples_is_noop():
+async def test_write_triples_empty_chunk_triples_is_noop():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    assert triples_writes.write_triples(client, DOC_ID, []) is None
+    assert await triples_writes.write_triples(client, DOC_ID, []) is None
     assert driver.sessions == []
 
 
-def test_write_triples_all_chunks_empty_is_noop():
+async def test_write_triples_all_chunks_empty_is_noop():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    result = triples_writes.write_triples(
+    result = await triples_writes.write_triples(
         client,
         DOC_ID,
         [("c0", []), ("c1", []), ("c2", [])],
@@ -208,41 +208,41 @@ def test_write_triples_all_chunks_empty_is_noop():
     assert driver.sessions == []
 
 
-def test_write_triples_only_invalid_predicates_is_noop():
+async def test_write_triples_only_invalid_predicates_is_noop():
     """Every triple has a bogus predicate -> all dropped, no Cypher."""
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     bad = _t(predicate="BOGUS_VERB")
-    result = triples_writes.write_triples(
+    result = await triples_writes.write_triples(
         client, DOC_ID, [("c0", [bad])]
     )
     assert result is None
     assert driver.sessions == []
 
 
-def test_write_triples_propagates_cypher_exception():
+async def test_write_triples_propagates_cypher_exception():
     """Driver failure propagates; orchestrator boundary catches."""
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(driver)
     with pytest.raises(RuntimeError, match="boom"):
-        triples_writes.write_triples(client, DOC_ID, [("c0", [_t()])])
+        await triples_writes.write_triples(client, DOC_ID, [("c0", [_t()])])
 
 
 # ---- write_triples: Cypher shape + batching ----
 
 
-def _run_write(
+async def _run_write(
     chunk_triples: list[tuple[str, list[ExtractedTriple]]],
 ) -> RecordingDriver:
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    assert triples_writes.write_triples(client, DOC_ID, chunk_triples) is None
+    assert await triples_writes.write_triples(client, DOC_ID, chunk_triples) is None
     return driver
 
 
-def test_write_triples_one_predicate_one_cypher():
+async def test_write_triples_one_predicate_one_cypher():
     """All rows share a predicate -> single UNWIND."""
-    driver = _run_write(
+    driver = await _run_write(
         [
             ("c0", [_t(), _t(subject="palb2")]),
             ("c1", [_t(subject="atm")]),
@@ -252,9 +252,9 @@ def test_write_triples_one_predicate_one_cypher():
     assert len(driver.sessions[0].calls) == 1
 
 
-def test_write_triples_multiple_predicates_get_separate_cypher_calls():
+async def test_write_triples_multiple_predicates_get_separate_cypher_calls():
     """One Cypher per predicate type (Neo4j can't param a rel type)."""
-    driver = _run_write(
+    driver = await _run_write(
         [
             (
                 "c0",
@@ -274,18 +274,18 @@ def test_write_triples_multiple_predicates_get_separate_cypher_calls():
     assert any(":BINDS_TO" in c for c in cyphers)
 
 
-def test_write_triples_cypher_uses_create_not_merge():
+async def test_write_triples_cypher_uses_create_not_merge():
     """One edge per chunk assertion - CREATE matches the policy.
     MERGE would dedupe identical triples and lose the per-chunk
     provenance count."""
-    driver = _run_write([("c0", [_t()])])
+    driver = await _run_write([("c0", [_t()])])
     cypher, _ = driver.sessions[0].calls[0]
     assert "CREATE" in cypher
     assert "MERGE (s)" not in cypher  # not merging on the edge
 
 
-def test_write_triples_edge_carries_chunk_id_doc_id_evidence_span():
-    driver = _run_write([("c0", [_t()])])
+async def test_write_triples_edge_carries_chunk_id_doc_id_evidence_span():
+    driver = await _run_write([("c0", [_t()])])
     cypher, params = driver.sessions[0].calls[0]
     assert "chunk_id: row.chunk_id" in cypher
     assert "doc_id: row.doc_id" in cypher
@@ -296,9 +296,9 @@ def test_write_triples_edge_carries_chunk_id_doc_id_evidence_span():
     assert "BRCA1 inhibits" in row["evidence_span"]
 
 
-def test_write_triples_matches_entities_by_composite_key():
+async def test_write_triples_matches_entities_by_composite_key():
     """Subject + object MATCH on (key, entity_type) composite NODE KEY."""
-    driver = _run_write([("c0", [_t()])])
+    driver = await _run_write([("c0", [_t()])])
     cypher, params = driver.sessions[0].calls[0]
     assert "key: row.subject_key" in cypher
     assert "entity_type: row.subject_entity_type" in cypher
@@ -311,11 +311,11 @@ def test_write_triples_matches_entities_by_composite_key():
     assert row["object_entity_type"] == "GENE"
 
 
-def test_write_triples_drops_unknown_predicate_but_keeps_valid_ones():
+async def test_write_triples_drops_unknown_predicate_but_keeps_valid_ones():
     """Unknown predicates filtered out per-row; valid triples still write."""
     valid = _t(predicate="INHIBITS")
     invalid = _t(predicate="BOGUS_VERB", obj="other")
-    driver = _run_write([("c0", [valid, invalid])])
+    driver = await _run_write([("c0", [valid, invalid])])
     # Only one Cypher fired (for the valid predicate), with one row.
     assert len(driver.sessions[0].calls) == 1
     cypher, params = driver.sessions[0].calls[0]
@@ -327,15 +327,15 @@ def test_write_triples_drops_unknown_predicate_but_keeps_valid_ones():
 # ---- get_entities_by_chunk ----
 
 
-def test_get_entities_by_chunk_empty_doc_id_raises():
+async def test_get_entities_by_chunk_empty_doc_id_raises():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     with pytest.raises(ValueError, match="no doc_id"):
-        triples_writes.get_entities_by_chunk(client, "")
+        await triples_writes.get_entities_by_chunk(client, "")
     assert driver.sessions == []
 
 
-def test_get_entities_by_chunk_groups_rows_by_chunk_id():
+async def test_get_entities_by_chunk_groups_rows_by_chunk_id():
     """3 rows for 2 chunks -> 2-key dict with the right vocab per chunk."""
     driver = RecordingDriver(
         data_returns=[
@@ -347,19 +347,19 @@ def test_get_entities_by_chunk_groups_rows_by_chunk_id():
         ]
     )
     client = _client_with_driver(driver)
-    result = triples_writes.get_entities_by_chunk(client, DOC_ID)
+    result = await triples_writes.get_entities_by_chunk(client, DOC_ID)
     assert set(result) == {"c0", "c1"}
     assert ("brca1", "GENE") in result["c0"]
     assert ("tp53", "GENE") in result["c0"]
     assert result["c1"] == [("aspirin", "CHEMICAL")]
 
 
-def test_get_entities_by_chunk_propagates_cypher_exception():
+async def test_get_entities_by_chunk_propagates_cypher_exception():
     """Driver failure propagates; orchestrator boundary catches."""
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(driver)
     with pytest.raises(RuntimeError, match="boom"):
-        triples_writes.get_entities_by_chunk(client, DOC_ID)
+        await triples_writes.get_entities_by_chunk(client, DOC_ID)
 
 
 # ---- Client delegate methods ----

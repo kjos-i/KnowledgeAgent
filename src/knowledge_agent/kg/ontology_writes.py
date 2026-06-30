@@ -72,7 +72,7 @@ def _validate_xrefs_mode(value: str) -> None:
         )
 
 
-def is_ontology_imported(client, *, term_label: str, ontology_name: str) -> bool:
+async def is_ontology_imported(client, *, term_label: str, ontology_name: str) -> bool:
     """True when at least one node with `term_label` exists in Neo4j.
 
     Generic for any per-ontology module routing through this family. The
@@ -83,16 +83,15 @@ def is_ontology_imported(client, *, term_label: str, ontology_name: str) -> bool
     `ensure_ontology_imported` is the orchestrator boundary that catches
     per-ontology so one bad lookup doesn't kill the walk.
     """
-    with client.driver.session() as session:
-        result = session.run(
+    async with client.driver.session() as session:
+        result = await session.run(
             f"MATCH (t:{term_label}) RETURN count(t) > 0 AS present"
         )
-        row = result.single()
+        row = await result.single()
         return bool(row and row["present"])
 
 
-def delete_ontology_terms(
-    client, *, term_label: str, ontology_name: str,
+async def delete_ontology_terms(client, *, term_label: str, ontology_name: str,
 ) -> None:
     """DETACH DELETE every node carrying `term_label` plus its edges.
 
@@ -101,8 +100,8 @@ def delete_ontology_terms(
 
     Cypher failures propagate to the caller (typed-errors contract).
     """
-    with client.driver.session() as session:
-        session.run(
+    async with client.driver.session() as session:
+        await session.run(
             f"MATCH (t:{term_label}) DETACH DELETE t"
         )
     logger.info(
@@ -110,8 +109,7 @@ def delete_ontology_terms(
     )
 
 
-def write_ontology_terms(
-    client,
+async def write_ontology_terms(client,
     terms: list[OntologyTerm],
     *,
     term_label: str,
@@ -190,8 +188,8 @@ def write_ontology_terms(
     xref_rel = _xref_rel_from_term_label(term_label)
     n_resolved_edges = 0
 
-    with client.driver.session() as session:
-        session.run(
+    async with client.driver.session() as session:
+        await session.run(
             f"UNWIND $rows AS row "
             f"MERGE (t:OntologyTerm:{term_label} "
             f"  {{id: row.id}}) "
@@ -201,7 +199,7 @@ def write_ontology_terms(
             rows=node_rows,
         )
         if hierarchy_rows:
-            session.run(
+            await session.run(
                 f"UNWIND $rows AS row "
                 f"MATCH (c:{term_label} {{id: row.child}}) "
                 f"MATCH (p:{term_label} {{id: row.parent}}) "
@@ -212,7 +210,7 @@ def write_ontology_terms(
             # Pass 3a: store the verbatim xref list on each source
             # term as `dangling_xrefs`. Always done when the layer
             # is active in any mode.
-            session.run(
+            await session.run(
                 f"UNWIND $rows AS row "
                 f"MATCH (s:{term_label} {{id: row.source_id}}) "
                 f"SET s.dangling_xrefs = row.xrefs",
@@ -227,7 +225,7 @@ def write_ontology_terms(
                 # returns the count of edges actually written so we
                 # can log it (resolved count differs from xref_rows
                 # count whenever some xrefs don't resolve yet).
-                result = session.run(
+                result = await session.run(
                     f"UNWIND $rows AS row "
                     f"MATCH (s:{term_label} {{id: row.source_id}}) "
                     f"UNWIND row.xrefs AS xref_id "
@@ -236,7 +234,7 @@ def write_ontology_terms(
                     f"RETURN count(r) AS n",
                     rows=xref_rows,
                 )
-                row = result.single()
+                row = await result.single()
                 n_resolved_edges = int(row["n"]) if row else 0
 
     logger.info(
@@ -253,8 +251,7 @@ def write_ontology_terms(
         )
 
 
-def import_ontology_data(
-    client,
+async def import_ontology_data(client,
     *,
     ontology_name: str,
     url: str,
@@ -298,7 +295,7 @@ def import_ontology_data(
     propagate from `ensure_cached` / `read_and_extract`).
     """
     _validate_xrefs_mode(xrefs_mode)
-    if not force and is_ontology_imported(
+    if not force and await is_ontology_imported(
         client, term_label=term_label, ontology_name=ontology_name,
     ):
         logger.info(
@@ -312,7 +309,7 @@ def import_ontology_data(
             "%s: force=True - dropping existing data before re-import",
             ontology_name,
         )
-        delete_ontology_terms(
+        await delete_ontology_terms(
             client, term_label=term_label, ontology_name=ontology_name,
         )
 
@@ -330,7 +327,7 @@ def import_ontology_data(
             f"{ontology_name}: extracted 0 terms - unexpected, aborting write"
         )
 
-    write_ontology_terms(
+    await write_ontology_terms(
         client, terms,
         term_label=term_label,
         hierarchy_rel=hierarchy_rel,

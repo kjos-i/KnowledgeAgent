@@ -68,8 +68,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_SHARED_COUNT_THRESHOLD = 2
 
 
-def recompute_cross_doc_edges(
-    client,
+async def recompute_cross_doc_edges(client,
     doc_id: str,
     threshold: int = DEFAULT_SHARED_COUNT_THRESHOLD,
 ) -> int:
@@ -119,11 +118,11 @@ def recompute_cross_doc_edges(
             f"KG: recompute_cross_doc_edges threshold must be >= 1, "
             f"got {threshold}"
         )
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         # Step 1: wipe existing edges incident to this doc. The
         # undirected `[r:RELATED_TO]-` pattern catches edges
         # written in either direction.
-        session.run(
+        await session.run(
             f"MATCH (d:{DOCUMENT_LABEL}|{ARTIFACT_LABEL} "
             f"  {{doc_id: $doc_id}})-[r:{RELATED_TO_REL}]-() "
             f"DELETE r",
@@ -133,7 +132,7 @@ def recompute_cross_doc_edges(
         # focal -> chunk -> entity <- chunk -> other_focal,
         # collects distinct entity keys per (this, other), filters
         # by threshold, and writes one edge per surviving pair.
-        result = session.run(
+        result = await session.run(
             f"MATCH (d:{DOCUMENT_LABEL}|{ARTIFACT_LABEL} "
             f"  {{doc_id: $doc_id}})"
             f"<-[:{PART_OF_REL}]-(:{CHUNK_LABEL})"
@@ -151,7 +150,7 @@ def recompute_cross_doc_edges(
             doc_id=doc_id,
             threshold=threshold,
         )
-        row = result.single()
+        row = await result.single()
         # Cypher RETURN count(r) always emits exactly one row;
         # `row is None` here implies driver-level corruption.
         n = int(row["n"]) if row else 0

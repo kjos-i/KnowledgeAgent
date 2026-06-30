@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 
 from knowledge_agent.config import Settings
 from knowledge_agent.kg import ontology_fibo_writes
@@ -31,7 +31,7 @@ from knowledge_agent.kg.ontology_helpers import OntologyTerm
 class _RecordingResult:
     rows: list[dict[str, Any]] = field(default_factory=list)
 
-    def single(self) -> dict[str, Any] | None:
+    async def single(self) -> dict[str, Any] | None:
         return self.rows[0] if self.rows else None
 
 
@@ -41,7 +41,7 @@ class RecordingSession:
     raise_on_run: Exception | None = None
     canned_results: list[_RecordingResult] = field(default_factory=list)
 
-    def run(self, query: str, **params: Any):
+    async def run(self, query: str, **params: Any):
         if self.raise_on_run is not None:
             raise self.raise_on_run
         self.calls.append((query, params))
@@ -50,10 +50,10 @@ class RecordingSession:
             return self.canned_results[idx]
         return _RecordingResult()
 
-    def __enter__(self) -> "RecordingSession":
+    async def __aenter__(self) -> "RecordingSession":
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: Any) -> None:
         pass
 
 
@@ -74,7 +74,7 @@ class RecordingDriver:
         self.sessions.append(sess)
         return sess
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self.closed = True
 
 
@@ -114,26 +114,26 @@ def test_domain_tags_declared():
 # ---- is_imported ----
 
 
-def test_is_imported_true_when_query_returns_present():
+async def test_is_imported_true_when_query_returns_present():
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
-    assert ontology_fibo_writes.is_imported(_client_with_driver(driver)) is True
+    assert await ontology_fibo_writes.is_imported(_client_with_driver(driver)) is True
 
 
-def test_is_imported_false_when_query_returns_no_nodes():
+async def test_is_imported_false_when_query_returns_no_nodes():
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]])
-    assert ontology_fibo_writes.is_imported(_client_with_driver(driver)) is False
+    assert await ontology_fibo_writes.is_imported(_client_with_driver(driver)) is False
 
 
-def test_is_imported_propagates_driver_exception():
+async def test_is_imported_propagates_driver_exception():
     driver = RecordingDriver(raise_on_run=RuntimeError("conn lost"))
     with pytest.raises(RuntimeError, match="conn lost"):
-        ontology_fibo_writes.is_imported(_client_with_driver(driver))
+        await ontology_fibo_writes.is_imported(_client_with_driver(driver))
 
 
-def test_is_imported_query_uses_fiboterm_label():
+async def test_is_imported_query_uses_fiboterm_label():
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
     client = _client_with_driver(driver)
-    ontology_fibo_writes.is_imported(client)
+    await ontology_fibo_writes.is_imported(client)
     cypher, _ = driver.sessions[0].calls[0]
     assert ":FIBOTerm" in cypher
 
@@ -141,37 +141,37 @@ def test_is_imported_query_uses_fiboterm_label():
 # ---- write_terms ----
 
 
-def test_write_terms_empty_input_returns_true_no_io():
+async def test_write_terms_empty_input_returns_true_no_io():
     driver = RecordingDriver()
-    assert ontology_fibo_writes.write_terms(_client_with_driver(driver), []) is None
+    assert await ontology_fibo_writes.write_terms(_client_with_driver(driver), []) is None
     assert driver.sessions == []
 
 
-def test_write_terms_one_round_trip_when_no_hierarchy():
+async def test_write_terms_one_round_trip_when_no_hierarchy():
     driver = RecordingDriver()
     terms = [_term("FIBO:FinancialInstrument", "financial instrument")]
-    assert ontology_fibo_writes.write_terms(_client_with_driver(driver), terms) is None
+    assert await ontology_fibo_writes.write_terms(_client_with_driver(driver), terms) is None
     assert len(driver.sessions[0].calls) == 1
 
 
-def test_write_terms_two_round_trips_when_hierarchy_present():
+async def test_write_terms_two_round_trips_when_hierarchy_present():
     driver = RecordingDriver()
     terms = [
         _term("FIBO:FinancialInstrument", "financial instrument"),
         _term("FIBO:Security", "security",
               parents=("FIBO:FinancialInstrument",)),
     ]
-    assert ontology_fibo_writes.write_terms(_client_with_driver(driver), terms) is None
+    assert await ontology_fibo_writes.write_terms(_client_with_driver(driver), terms) is None
     assert len(driver.sessions[0].calls) == 2
 
 
-def test_write_terms_node_query_uses_multilabel_and_id_carries_prefix():
+async def test_write_terms_node_query_uses_multilabel_and_id_carries_prefix():
     driver = RecordingDriver()
     terms = [
         _term("FIBO:Money", "money",
               synonyms=("currency", "legal tender")),
     ]
-    ontology_fibo_writes.write_terms(_client_with_driver(driver), terms)
+    await ontology_fibo_writes.write_terms(_client_with_driver(driver), terms)
     cypher, params = driver.sessions[0].calls[0]
     assert ":OntologyTerm" in cypher
     assert ":FIBOTerm" in cypher
@@ -183,14 +183,14 @@ def test_write_terms_node_query_uses_multilabel_and_id_carries_prefix():
     }]
 
 
-def test_write_terms_edge_query_uses_fibo_is_a_rel():
+async def test_write_terms_edge_query_uses_fibo_is_a_rel():
     driver = RecordingDriver()
     terms = [
         _term("FIBO:FinancialInstrument", "financial instrument"),
         _term("FIBO:Security", "security",
               parents=("FIBO:FinancialInstrument",)),
     ]
-    ontology_fibo_writes.write_terms(_client_with_driver(driver), terms)
+    await ontology_fibo_writes.write_terms(_client_with_driver(driver), terms)
     cypher, params = driver.sessions[0].calls[1]
     assert ":FIBO_IS_A" in cypher
     assert params["rows"] == [
@@ -198,10 +198,10 @@ def test_write_terms_edge_query_uses_fibo_is_a_rel():
     ]
 
 
-def test_write_terms_propagates_driver_exception():
+async def test_write_terms_propagates_driver_exception():
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     with pytest.raises(RuntimeError, match="boom"):
-        ontology_fibo_writes.write_terms(
+        await ontology_fibo_writes.write_terms(
             _client_with_driver(driver),
             [_term("FIBO:FinancialInstrument", "financial instrument")])
 
@@ -209,20 +209,20 @@ def test_write_terms_propagates_driver_exception():
 # ---- import_fibo ----
 
 
-def test_import_fibo_short_circuits_when_already_imported():
+async def test_import_fibo_short_circuits_when_already_imported():
     """force=False and FIBO already imported -> no walker / parse / write."""
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
     with (
         patch.object(ontology_fibo_writes, "_walk_and_cache_fibo") as mock_walk,
         patch.object(ontology_fibo_writes, "_read_and_extract") as mock_extract,
     ):
-        result = ontology_fibo_writes.import_fibo(_client_with_driver(driver), force=False)
+        result = await ontology_fibo_writes.import_fibo(_client_with_driver(driver), force=False)
     assert result is False  # no-op: typed-errors contract
     mock_walk.assert_not_called()
     mock_extract.assert_not_called()
 
 
-def test_import_fibo_force_drops_then_reimports():
+async def test_import_fibo_force_drops_then_reimports():
     driver = RecordingDriver()
     fake_terms = [_term("FIBO:Money", "money")]
     with (
@@ -231,7 +231,7 @@ def test_import_fibo_force_drops_then_reimports():
         patch.object(ontology_fibo_writes, "_read_and_extract",
                      return_value=fake_terms),
     ):
-        result = ontology_fibo_writes.import_fibo(_client_with_driver(driver), force=True)
+        result = await ontology_fibo_writes.import_fibo(_client_with_driver(driver), force=True)
     assert result is True
     # First session = delete_imported; second = write_terms.
     assert len(driver.sessions) == 2
@@ -240,7 +240,7 @@ def test_import_fibo_force_drops_then_reimports():
     assert "DETACH DELETE" in delete_cypher
 
 
-def test_import_fibo_aborts_on_zero_terms():
+async def test_import_fibo_aborts_on_zero_terms():
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]])
     with (
         patch.object(ontology_fibo_writes, "_walk_and_cache_fibo",
@@ -248,10 +248,10 @@ def test_import_fibo_aborts_on_zero_terms():
         patch.object(ontology_fibo_writes, "_read_and_extract", return_value=[]),
     ):
         with pytest.raises(RuntimeError, match="extracted 0 terms"):
-            ontology_fibo_writes.import_fibo(_client_with_driver(driver), force=False)
+            await ontology_fibo_writes.import_fibo(_client_with_driver(driver), force=False)
 
 
-def test_import_fibo_propagates_walker_exception():
+async def test_import_fibo_propagates_walker_exception():
     """Walker network failure propagates under the typed-errors
     contract; orchestrator boundary catches per-ontology."""
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]])
@@ -260,34 +260,34 @@ def test_import_fibo_propagates_walker_exception():
         side_effect=RuntimeError("network down"),
     ):
         with pytest.raises(RuntimeError, match="network down"):
-            ontology_fibo_writes.import_fibo(_client_with_driver(driver), force=False)
+            await ontology_fibo_writes.import_fibo(_client_with_driver(driver), force=False)
 
 
-def test_import_fibo_propagates_when_force_delete_fails():
+async def test_import_fibo_propagates_when_force_delete_fails():
     """force=True + delete_imported failure propagates; walker is not
     reached because the delete raises first."""
     driver = RecordingDriver(raise_on_run=RuntimeError("delete boom"))
     with patch.object(ontology_fibo_writes, "_walk_and_cache_fibo") as mock_walk:
         with pytest.raises(RuntimeError, match="delete boom"):
-            ontology_fibo_writes.import_fibo(_client_with_driver(driver), force=True)
+            await ontology_fibo_writes.import_fibo(_client_with_driver(driver), force=True)
     mock_walk.assert_not_called()
 
 
 # ---- delete_imported ----
 
 
-def test_delete_imported_runs_one_detach_delete_query():
+async def test_delete_imported_runs_one_detach_delete_query():
     driver = RecordingDriver()
-    assert ontology_fibo_writes.delete_imported(_client_with_driver(driver)) is None
+    assert await ontology_fibo_writes.delete_imported(_client_with_driver(driver)) is None
     cypher, _ = driver.sessions[0].calls[0]
     assert ":FIBOTerm" in cypher
     assert "DETACH DELETE" in cypher
 
 
-def test_delete_imported_propagates_driver_exception():
+async def test_delete_imported_propagates_driver_exception():
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     with pytest.raises(RuntimeError, match="boom"):
-        ontology_fibo_writes.delete_imported(_client_with_driver(driver))
+        await ontology_fibo_writes.delete_imported(_client_with_driver(driver))
 
 
 # ---- Walker: _list_fibo_rdf_paths ----

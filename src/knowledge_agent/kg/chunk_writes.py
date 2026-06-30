@@ -31,7 +31,7 @@ from knowledge_agent.kg.schema import (
 logger = logging.getLogger(__name__)
 
 
-def delete_chunks_by_doc_id(client, doc_id: str) -> None:
+async def delete_chunks_by_doc_id(client, doc_id: str) -> None:
     """Wipe every :Chunk node for `doc_id`. Idempotent.
 
     Used by the ingestion pipeline before `write_chunks` so a re-chunk
@@ -46,8 +46,8 @@ def delete_chunks_by_doc_id(client, doc_id: str) -> None:
     """
     if not doc_id:
         raise ValueError("KG: delete_chunks_by_doc_id called with no doc_id")
-    with client.driver.session() as session:
-        session.run(
+    async with client.driver.session() as session:
+        await session.run(
             f"MATCH (c:{CHUNK_LABEL} {{doc_id: $doc_id}}) "
             f"DETACH DELETE c",
             doc_id=doc_id,
@@ -55,8 +55,7 @@ def delete_chunks_by_doc_id(client, doc_id: str) -> None:
     logger.info("KG: deleted chunks for doc %s", doc_id)
 
 
-def write_chunks(
-    client,
+async def write_chunks(client,
     doc_id: str,
     chunks: list[Any],
     main_label: str,
@@ -128,8 +127,8 @@ def write_chunks(
         f"ON CREATE SET {', '.join(on_create_clauses)} "
     )
 
-    with client.driver.session() as session:
-        session.run(
+    async with client.driver.session() as session:
+        await session.run(
             focal_merge
             + "WITH d "
             + "UNWIND $chunks AS ch "

@@ -1269,7 +1269,7 @@ async def backfill_xrefs_plan(config: CorpusConfig) -> BackfillXrefsPlan:
     total_dangling = 0
     for term_label in ONTOLOGY_SUB_LABELS:
         try:
-            total_dangling += ontology_xrefs.count_dangling_xrefs(
+            total_dangling += await ontology_xrefs.count_dangling_xrefs(
                 kg_client, term_label,
             )
         except Exception as exc:
@@ -1306,11 +1306,10 @@ async def backfill_xrefs_execute(
     """Perform the backfill promised by `plan`.
 
     Two-phase:
-      1. Always: `ontology_xrefs.backfill_resolved_xrefs(client)` —
-         the per-ontology resolve + strip passes (sync Cypher helper
-         wrapped via `asyncio.to_thread`).
+      1. Always: `await ontology_xrefs.backfill_resolved_xrefs(client)` —
+         the per-ontology resolve + strip passes.
       2. Conditional on `plan.will_recompute_l10`:
-         `cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(
+         `await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(
          client, plan.l10_threshold)`.
 
     `xrefs_mode == "none"` short-circuits to a skipped result. The
@@ -1328,9 +1327,7 @@ async def backfill_xrefs_execute(
 
     kg_client = get_kg_client()
     try:
-        per_ontology = await asyncio.to_thread(
-            ontology_xrefs.backfill_resolved_xrefs, kg_client,
-        )
+        per_ontology = await ontology_xrefs.backfill_resolved_xrefs(kg_client)
     except Exception as exc:
         logger.warning(
             "backfill_xrefs_execute: backfill_resolved_xrefs failed: %r", exc,
@@ -1340,8 +1337,7 @@ async def backfill_xrefs_execute(
     n_l10 = None
     if plan.will_recompute_l10:
         try:
-            n_l10 = await asyncio.to_thread(
-                cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global,
+            n_l10 = await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(
                 kg_client, plan.l10_threshold,
             )
         except Exception as exc:
@@ -1471,7 +1467,7 @@ async def recompute_cross_doc_xrefs_execute(
 
     kg_client = get_kg_client()
     try:
-        n = cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(
+        n = await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(
             kg_client, plan.threshold,
         )
     except Exception as exc:
@@ -1561,7 +1557,7 @@ async def clear_xref_edges_plan(ontology_name: str) -> ClearXrefEdgesPlan:
 
     kg_client = get_kg_client()
     try:
-        n_edges = ontology_xrefs.count_xref_edges(kg_client, term_label)
+        n_edges = await ontology_xrefs.count_xref_edges(kg_client, term_label)
     except Exception as exc:
         logger.warning(
             "clear_xref_edges_plan: count_xref_edges(%s) failed: %r",
@@ -1569,7 +1565,7 @@ async def clear_xref_edges_plan(ontology_name: str) -> ClearXrefEdgesPlan:
         )
         n_edges = 0
     try:
-        n_dangling = ontology_xrefs.count_dangling_xrefs(
+        n_dangling = await ontology_xrefs.count_dangling_xrefs(
             kg_client, term_label,
         )
     except Exception as exc:
@@ -1592,8 +1588,7 @@ async def clear_xref_edges_execute(
     """Perform the wipe promised by `plan`."""
     kg_client = get_kg_client()
     try:
-        n = await asyncio.to_thread(
-            ontology_xrefs.clear_xref_edges_for_ontology,
+        n = await ontology_xrefs.clear_xref_edges_for_ontology(
             kg_client, plan.term_label,
         )
     except Exception as exc:

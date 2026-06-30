@@ -112,21 +112,20 @@ _CHEBI_PROVENANCE = OntologyProvenance(
 # ---------------------------------------------------------------------------
 
 
-def is_imported(client) -> bool:
+async def is_imported(client) -> bool:
     """True when at least one `:ChEBITerm` node exists in Neo4j."""
-    return is_ontology_imported(
+    return await is_ontology_imported(
         client, term_label=CHEBI_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
     )
 
 
-def import_chebi(
-    client,
+async def import_chebi(client,
     *,
     force: bool = False,
     xrefs_mode: str = "none",
 ) -> bool:
     """Download + parse + write the ChEBI ontology to Neo4j. Idempotent."""
-    return import_ontology_data(
+    return await import_ontology_data(
         client,
         ontology_name=_ONTOLOGY_NAME,
         url=CHEBI_DOWNLOAD_URL,
@@ -139,21 +138,20 @@ def import_chebi(
     )
 
 
-def delete_imported(client) -> None:
+async def delete_imported(client) -> None:
     """DETACH DELETE every :ChEBITerm node + its :CHEBI_IS_A edges."""
-    delete_ontology_terms(
+    await delete_ontology_terms(
         client, term_label=CHEBI_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
     )
 
 
-def write_terms(
-    client,
+async def write_terms(client,
     terms: list[OntologyTerm],
     *,
     xrefs_mode: str = "none",
 ) -> None:
     """Write `:OntologyTerm:ChEBITerm` nodes + `:CHEBI_IS_A` edges."""
-    write_ontology_terms(
+    await write_ontology_terms(
         client, terms,
         term_label=CHEBI_TERM_LABEL,
         hierarchy_rel=CHEBI_IS_A_REL,

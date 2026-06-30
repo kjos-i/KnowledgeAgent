@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import pytest
 
@@ -30,10 +30,10 @@ from knowledge_agent.kg.client import Neo4jClient
 class _RecordingResult:
     rows: list[dict[str, Any]] = field(default_factory=list)
 
-    def single(self) -> dict[str, Any] | None:
+    async def single(self) -> dict[str, Any] | None:
         return self.rows[0] if self.rows else None
 
-    def data(self) -> list[dict[str, Any]]:
+    async def data(self) -> list[dict[str, Any]]:
         return self.rows
 
 
@@ -43,7 +43,7 @@ class RecordingSession:
     raise_on_run: Exception | None = None
     canned_results: list[_RecordingResult] = field(default_factory=list)
 
-    def run(self, query: str, **params: Any):
+    async def run(self, query: str, **params: Any):
         if self.raise_on_run is not None:
             raise self.raise_on_run
         self.calls.append((query, params))
@@ -52,10 +52,10 @@ class RecordingSession:
             return self.canned_results[idx]
         return _RecordingResult()
 
-    def __enter__(self) -> "RecordingSession":
+    async def __aenter__(self) -> "RecordingSession":
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: Any) -> None:
         pass
 
 
@@ -80,7 +80,7 @@ class RecordingDriver:
         self.sessions.append(sess)
         return sess
 
-    def close(self) -> None:
+    async def close(self) -> None:
         pass
 
 
@@ -156,7 +156,7 @@ async def test_count_ontology_terms_unknown_ontology_raises():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     with pytest.raises(ValueError, match="unknown ontology"):
-        ontology_linking.count_ontology_terms(client, "nope")
+        await ontology_linking.count_ontology_terms(client, "nope")
     # No Cypher should have run.
     assert driver.sessions == []
 
@@ -166,7 +166,7 @@ async def test_count_ontology_terms_runs_count_cypher_against_term_label():
         canned_results_per_session=[[_RecordingResult(rows=[{"n": 30142}])]]
     )
     client = _client_with_driver(driver)
-    assert ontology_linking.count_ontology_terms(client, "mesh") == 30142
+    assert await ontology_linking.count_ontology_terms(client, "mesh") == 30142
     query, _ = driver.sessions[0].calls[0]
     assert "MATCH (n:MeSHTerm)" in query
     assert "count(n)" in query
@@ -177,7 +177,7 @@ async def test_count_ontology_terms_propagates_cypher_exception():
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(driver)
     with pytest.raises(RuntimeError, match="boom"):
-        ontology_linking.count_ontology_terms(client, "mesh")
+        await ontology_linking.count_ontology_terms(client, "mesh")
 
 
 # ---- count_canonical_links ----
@@ -187,7 +187,7 @@ async def test_count_canonical_links_unknown_ontology_raises():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     with pytest.raises(ValueError, match="unknown ontology"):
-        ontology_linking.count_canonical_links(client, "nope")
+        await ontology_linking.count_canonical_links(client, "nope")
     assert driver.sessions == []
 
 
@@ -196,7 +196,7 @@ async def test_count_canonical_links_runs_count_cypher_against_canonical_to():
         canned_results_per_session=[[_RecordingResult(rows=[{"n": 18}])]]
     )
     client = _client_with_driver(driver)
-    assert ontology_linking.count_canonical_links(client, "mesh") == 18
+    assert await ontology_linking.count_canonical_links(client, "mesh") == 18
     query, _ = driver.sessions[0].calls[0]
     assert "[r:CANONICAL_TO]->" in query
     assert "(:MeSHTerm)" in query
@@ -208,7 +208,7 @@ async def test_count_canonical_links_propagates_cypher_exception():
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(driver)
     with pytest.raises(RuntimeError, match="boom"):
-        ontology_linking.count_canonical_links(client, "mesh")
+        await ontology_linking.count_canonical_links(client, "mesh")
 
 
 # ---- _match_entity_key + _fuzzy_variants ----
@@ -311,7 +311,7 @@ def test_fuzzy_variants_no_duplicates():
 # ---- _build_term_index ----
 
 
-def test_build_term_index_maps_labels_and_synonyms_to_ids():
+async def test_build_term_index_maps_labels_and_synonyms_to_ids():
     """Cypher returns one row per term; the index gets one entry per
     label + one per synonym, all keyed by lowercased text."""
     rows = [
@@ -330,7 +330,7 @@ def test_build_term_index_maps_labels_and_synonyms_to_ids():
         canned_results_per_session=[[_RecordingResult(rows=rows)]]
     )
     client = _client_with_driver(driver)
-    index = ontology_linking._build_term_index(client, "MeSHTerm")
+    index = await ontology_linking._build_term_index(client, "MeSHTerm")
 
     # Primary labels lowercased.
     assert index["diabetes mellitus"] == ["MESH:D003920"]
@@ -341,7 +341,7 @@ def test_build_term_index_maps_labels_and_synonyms_to_ids():
     assert index["type 2 diabetes"] == ["MESH:D003924"]
 
 
-def test_build_term_index_handles_shared_synonyms_with_list():
+async def test_build_term_index_handles_shared_synonyms_with_list():
     """When two terms share the same synonym text, both IDs land in the
     same list - the matcher returns both."""
     rows = [
@@ -356,22 +356,22 @@ def test_build_term_index_handles_shared_synonyms_with_list():
         canned_results_per_session=[[_RecordingResult(rows=rows)]]
     )
     client = _client_with_driver(driver)
-    index = ontology_linking._build_term_index(client, "MeSHTerm")
+    index = await ontology_linking._build_term_index(client, "MeSHTerm")
     assert sorted(index["stress"]) == ["X:1", "X:2"]
 
 
-def test_build_term_index_propagates_cypher_exception():
+async def test_build_term_index_propagates_cypher_exception():
     """Driver failure propagates; orchestrator boundary catches."""
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(driver)
     with pytest.raises(RuntimeError, match="boom"):
-        ontology_linking._build_term_index(client, "MeSHTerm")
+        await ontology_linking._build_term_index(client, "MeSHTerm")
 
 
 # ---- _fetch_entities_to_link ----
 
 
-def test_fetch_entities_with_doc_id_uses_chunk_match():
+async def test_fetch_entities_with_doc_id_uses_chunk_match():
     """Per-doc fetch filters via MATCH (chunk {doc_id})."""
     driver = RecordingDriver(
         canned_results_per_session=[
@@ -379,7 +379,7 @@ def test_fetch_entities_with_doc_id_uses_chunk_match():
         ]
     )
     client = _client_with_driver(driver)
-    rows = ontology_linking._fetch_entities_to_link(
+    rows = await ontology_linking._fetch_entities_to_link(
         client, "MeSHTerm", "doc-abc"
     )
     assert rows == [{"key": "brca1", "entity_type": "GENE"}]
@@ -389,7 +389,7 @@ def test_fetch_entities_with_doc_id_uses_chunk_match():
     assert params == {"doc_id": "doc-abc"}
 
 
-def test_fetch_entities_global_uses_unlinked_filter():
+async def test_fetch_entities_global_uses_unlinked_filter():
     """Global fetch returns only entities NOT yet linked to the given
     ontology - check Cypher uses the WHERE NOT EXISTS pattern with
     the right term label."""
@@ -397,7 +397,7 @@ def test_fetch_entities_global_uses_unlinked_filter():
         canned_results_per_session=[[_RecordingResult(rows=[])]]
     )
     client = _client_with_driver(driver)
-    ontology_linking._fetch_entities_to_link(client, "MeSHTerm", None)
+    await ontology_linking._fetch_entities_to_link(client, "MeSHTerm", None)
     cypher, params = driver.sessions[0].calls[0]
     assert "WHERE NOT EXISTS" in cypher
     assert ":MeSHTerm" in cypher
@@ -408,15 +408,15 @@ def test_fetch_entities_global_uses_unlinked_filter():
 # ---- _write_canonical_links ----
 
 
-def test_write_canonical_links_empty_returns_zero():
+async def test_write_canonical_links_empty_returns_zero():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    n = ontology_linking._write_canonical_links(client, [], "MeSHTerm")
+    n = await ontology_linking._write_canonical_links(client, [], "MeSHTerm")
     assert n == 0
     assert driver.sessions == []
 
 
-def test_write_canonical_links_writes_rows_and_returns_count():
+async def test_write_canonical_links_writes_rows_and_returns_count():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     rows = [
@@ -435,7 +435,7 @@ def test_write_canonical_links_writes_rows_and_returns_count():
             "confidence": 0.9,
         },
     ]
-    n = ontology_linking._write_canonical_links(client, rows, "MeSHTerm")
+    n = await ontology_linking._write_canonical_links(client, rows, "MeSHTerm")
     assert n == 2
     cypher, params = driver.sessions[0].calls[0]
     assert ":CANONICAL_TO" in cypher
@@ -444,12 +444,12 @@ def test_write_canonical_links_writes_rows_and_returns_count():
     assert params["rows"] == rows
 
 
-def test_write_canonical_links_propagates_cypher_exception():
+async def test_write_canonical_links_propagates_cypher_exception():
     """Driver failure propagates; orchestrator boundary catches."""
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(driver)
     with pytest.raises(RuntimeError, match="boom"):
-        ontology_linking._write_canonical_links(
+        await ontology_linking._write_canonical_links(
             client,
             [
                 {
@@ -465,17 +465,17 @@ def test_write_canonical_links_propagates_cypher_exception():
 #      session canned results) ----
 
 
-def test_link_entities_unknown_ontology_raises():
+async def test_link_entities_unknown_ontology_raises():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     try:
-        ontology_linking.link_entities(client, "not_a_thing", "exact")
+        await ontology_linking.link_entities(client, "not_a_thing", "exact")
         assert False, "expected ValueError"
     except ValueError as e:
         assert "not_a_thing" in str(e)
 
 
-def test_link_entities_returns_zero_when_no_terms_in_index():
+async def test_link_entities_returns_zero_when_no_terms_in_index():
     """If the ontology index has no terms (the ontology hasn't been
     imported yet, or the ontology has no data), return 0 without
     fetching entities. Each Cypher call opens its own session, so we
@@ -486,13 +486,13 @@ def test_link_entities_returns_zero_when_no_terms_in_index():
         ]
     )
     client = _client_with_driver(driver)
-    n = ontology_linking.link_entities(client, "mesh", "exact")
+    n = await ontology_linking.link_entities(client, "mesh", "exact")
     assert n == 0
     # One session opened (for the index build); no entity fetch ran.
     assert len(driver.sessions) == 1
 
 
-def test_link_entities_returns_zero_when_no_entities_to_link():
+async def test_link_entities_returns_zero_when_no_entities_to_link():
     """Index has terms but the entity fetch returns nothing -> 0."""
     driver = RecordingDriver(
         canned_results_per_session=[
@@ -513,13 +513,13 @@ def test_link_entities_returns_zero_when_no_entities_to_link():
         ]
     )
     client = _client_with_driver(driver)
-    n = ontology_linking.link_entities(
+    n = await ontology_linking.link_entities(
         client, "mesh", "exact", doc_id="doc-1"
     )
     assert n == 0
 
 
-def test_link_entities_happy_path_writes_canonical_to_edges():
+async def test_link_entities_happy_path_writes_canonical_to_edges():
     """End-to-end: index built, entities fetched, matches found, edges
     written. Each helper opens its OWN driver session, so the canned
     results are distributed across three sessions."""
@@ -561,7 +561,7 @@ def test_link_entities_happy_path_writes_canonical_to_edges():
         ]
     )
     client = _client_with_driver(driver)
-    n = ontology_linking.link_entities(
+    n = await ontology_linking.link_entities(
         client, "mesh", "exact", doc_id="doc-1"
     )
     # Two entities matched (the third didn't); two edges written.
@@ -581,7 +581,7 @@ async def test_ensure_ontology_imported_unknown_raises():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     try:
-        ontology_linking.ensure_ontology_imported(client, "not_real")
+        await ontology_linking.ensure_ontology_imported(client, "not_real")
         assert False
     except ValueError as e:
         assert "not_real" in str(e)
@@ -605,7 +605,7 @@ async def test_ensure_ontology_imported_returns_already_imported_when_present():
         importlib.reload(ontology_linking)
         driver = RecordingDriver()
         client = _client_with_driver(driver)
-        was = ontology_linking.ensure_ontology_imported(client, "mesh")
+        was = await ontology_linking.ensure_ontology_imported(client, "mesh")
 
     assert was is True
     mock_import.assert_not_called()
@@ -632,6 +632,6 @@ async def test_ensure_ontology_imported_triggers_import_when_absent():
         importlib.reload(ontology_linking)
         driver = RecordingDriver()
         client = _client_with_driver(driver)
-        was = ontology_linking.ensure_ontology_imported(client, "mesh")
+        was = await ontology_linking.ensure_ontology_imported(client, "mesh")
 
     assert was is False

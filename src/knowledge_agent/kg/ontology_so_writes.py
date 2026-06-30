@@ -98,21 +98,20 @@ _SO_PROVENANCE = OntologyProvenance(
 # ---------------------------------------------------------------------------
 
 
-def is_imported(client) -> bool:
+async def is_imported(client) -> bool:
     """True when at least one `:SOTerm` node exists in Neo4j."""
-    return is_ontology_imported(
+    return await is_ontology_imported(
         client, term_label=SO_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
     )
 
 
-def import_so(
-    client,
+async def import_so(client,
     *,
     force: bool = False,
     xrefs_mode: str = "none",
 ) -> bool:
     """Download + parse + write the SO ontology to Neo4j. Idempotent."""
-    return import_ontology_data(
+    return await import_ontology_data(
         client,
         ontology_name=_ONTOLOGY_NAME,
         url=SO_DOWNLOAD_URL,
@@ -125,21 +124,20 @@ def import_so(
     )
 
 
-def delete_imported(client) -> None:
+async def delete_imported(client) -> None:
     """DETACH DELETE every :SOTerm node + its :SO_IS_A edges."""
-    delete_ontology_terms(
+    await delete_ontology_terms(
         client, term_label=SO_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
     )
 
 
-def write_terms(
-    client,
+async def write_terms(client,
     terms: list[OntologyTerm],
     *,
     xrefs_mode: str = "none",
 ) -> None:
     """Write `:OntologyTerm:SOTerm` nodes + `:SO_IS_A` edges."""
-    write_ontology_terms(
+    await write_ontology_terms(
         client, terms,
         term_label=SO_TERM_LABEL,
         hierarchy_rel=SO_IS_A_REL,

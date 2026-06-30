@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 from knowledge_agent.config import Settings
 from knowledge_agent.kg import ontology_eco_writes
@@ -30,7 +30,7 @@ from knowledge_agent.kg.ontology_helpers import OntologyTerm
 class _RecordingResult:
     rows: list[dict[str, Any]] = field(default_factory=list)
 
-    def single(self) -> dict[str, Any] | None:
+    async def single(self) -> dict[str, Any] | None:
         return self.rows[0] if self.rows else None
 
 
@@ -40,7 +40,7 @@ class RecordingSession:
     raise_on_run: Exception | None = None
     canned_results: list[_RecordingResult] = field(default_factory=list)
 
-    def run(self, query: str, **params: Any):
+    async def run(self, query: str, **params: Any):
         if self.raise_on_run is not None:
             raise self.raise_on_run
         self.calls.append((query, params))
@@ -49,10 +49,10 @@ class RecordingSession:
             return self.canned_results[idx]
         return _RecordingResult()
 
-    def __enter__(self) -> "RecordingSession":
+    async def __aenter__(self) -> "RecordingSession":
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: Any) -> None:
         pass
 
 
@@ -78,7 +78,7 @@ class RecordingDriver:
         self.sessions.append(sess)
         return sess
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self.closed = True
 
 
@@ -122,41 +122,41 @@ def test_domain_tags_declared():
 # ---- is_imported ----
 
 
-def test_is_imported_true_when_query_returns_present():
+async def test_is_imported_true_when_query_returns_present():
     driver = RecordingDriver(
         canned_results_per_session=[
             [_RecordingResult(rows=[{"present": True}])]
         ]
     )
     client = _client_with_driver(driver)
-    assert ontology_eco_writes.is_imported(client) is True
+    assert await ontology_eco_writes.is_imported(client) is True
 
 
-def test_is_imported_false_when_query_returns_no_nodes():
+async def test_is_imported_false_when_query_returns_no_nodes():
     driver = RecordingDriver(
         canned_results_per_session=[
             [_RecordingResult(rows=[{"present": False}])]
         ]
     )
     client = _client_with_driver(driver)
-    assert ontology_eco_writes.is_imported(client) is False
+    assert await ontology_eco_writes.is_imported(client) is False
 
 
-def test_is_imported_propagates_driver_exception():
+async def test_is_imported_propagates_driver_exception():
     driver = RecordingDriver(raise_on_run=RuntimeError("connection lost"))
     client = _client_with_driver(driver)
     with pytest.raises(RuntimeError, match="connection lost"):
-        ontology_eco_writes.is_imported(client)
+        await ontology_eco_writes.is_imported(client)
 
 
-def test_is_imported_query_uses_ecoterm_label():
+async def test_is_imported_query_uses_ecoterm_label():
     driver = RecordingDriver(
         canned_results_per_session=[
             [_RecordingResult(rows=[{"present": True}])]
         ]
     )
     client = _client_with_driver(driver)
-    ontology_eco_writes.is_imported(client)
+    await ontology_eco_writes.is_imported(client)
     cypher, _ = driver.sessions[0].calls[0]
     assert ":ECOTerm" in cypher
 
@@ -164,22 +164,22 @@ def test_is_imported_query_uses_ecoterm_label():
 # ---- write_terms ----
 
 
-def test_write_terms_empty_input_returns_true_no_io():
+async def test_write_terms_empty_input_returns_true_no_io():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    assert ontology_eco_writes.write_terms(client, []) is None
+    assert await ontology_eco_writes.write_terms(client, []) is None
     assert driver.sessions == []
 
 
-def test_write_terms_one_round_trip_when_no_hierarchy():
+async def test_write_terms_one_round_trip_when_no_hierarchy():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     terms = [_term("ECO:0000000", "evidence")]
-    assert ontology_eco_writes.write_terms(client, terms) is None
+    assert await ontology_eco_writes.write_terms(client, terms) is None
     assert len(driver.sessions[0].calls) == 1
 
 
-def test_write_terms_two_round_trips_when_hierarchy_present():
+async def test_write_terms_two_round_trips_when_hierarchy_present():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     terms = [
@@ -190,11 +190,11 @@ def test_write_terms_two_round_trips_when_hierarchy_present():
             parents=("ECO:0000000",),
         ),
     ]
-    assert ontology_eco_writes.write_terms(client, terms) is None
+    assert await ontology_eco_writes.write_terms(client, terms) is None
     assert len(driver.sessions[0].calls) == 2
 
 
-def test_write_terms_node_query_uses_multilabel_and_id_carries_prefix():
+async def test_write_terms_node_query_uses_multilabel_and_id_carries_prefix():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     terms = [
@@ -204,7 +204,7 @@ def test_write_terms_node_query_uses_multilabel_and_id_carries_prefix():
             synonyms=("experimental data", "wet-lab evidence"),
         ),
     ]
-    ontology_eco_writes.write_terms(client, terms)
+    await ontology_eco_writes.write_terms(client, terms)
     cypher, params = driver.sessions[0].calls[0]
 
     # Multi-label: both :OntologyTerm and :ECOTerm.
@@ -227,7 +227,7 @@ def test_write_terms_node_query_uses_multilabel_and_id_carries_prefix():
     ]
 
 
-def test_write_terms_edge_query_uses_eco_is_a_rel():
+async def test_write_terms_edge_query_uses_eco_is_a_rel():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     terms = [
@@ -238,7 +238,7 @@ def test_write_terms_edge_query_uses_eco_is_a_rel():
             parents=("ECO:0000000",),
         ),
     ]
-    ontology_eco_writes.write_terms(client, terms)
+    await ontology_eco_writes.write_terms(client, terms)
     cypher, params = driver.sessions[0].calls[1]
 
     # ECO uses :ECO_IS_A, not :MESH_BROADER or :GO_IS_A.
@@ -250,11 +250,11 @@ def test_write_terms_edge_query_uses_eco_is_a_rel():
     ]
 
 
-def test_write_terms_propagates_driver_exception():
+async def test_write_terms_propagates_driver_exception():
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(driver)
     with pytest.raises(RuntimeError, match="boom"):
-        ontology_eco_writes.write_terms(
+        await ontology_eco_writes.write_terms(
             client, [_term("ECO:0000000", "evidence")]
         )
 
@@ -262,7 +262,7 @@ def test_write_terms_propagates_driver_exception():
 # ---- import_eco ----
 
 
-def test_import_eco_short_circuits_when_already_imported():
+async def test_import_eco_short_circuits_when_already_imported():
     """force=False and ECO already imported -> no download/parse/write."""
     driver = RecordingDriver(
         canned_results_per_session=[
@@ -273,13 +273,13 @@ def test_import_eco_short_circuits_when_already_imported():
     with patch(
         "knowledge_agent.kg.ontology_writes.ensure_cached"
     ) as mock_cache:
-        result = ontology_eco_writes.import_eco(client, force=False)
+        result = await ontology_eco_writes.import_eco(client, force=False)
 
     assert result is False  # no-op: typed-errors contract
     mock_cache.assert_not_called()
 
 
-def test_import_eco_force_drops_then_reimports():
+async def test_import_eco_force_drops_then_reimports():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     fake_terms = [_term("ECO:0000000", "evidence")]
@@ -293,7 +293,7 @@ def test_import_eco_force_drops_then_reimports():
             return_value=fake_terms,
         ),
     ):
-        result = ontology_eco_writes.import_eco(client, force=True)
+        result = await ontology_eco_writes.import_eco(client, force=True)
 
     assert result is True
     # First session = delete_imported. Second = write_terms.
@@ -303,7 +303,7 @@ def test_import_eco_force_drops_then_reimports():
     assert "DETACH DELETE" in delete_cypher
 
 
-def test_import_eco_aborts_on_zero_terms():
+async def test_import_eco_aborts_on_zero_terms():
     driver = RecordingDriver(
         canned_results_per_session=[
             [_RecordingResult(rows=[{"present": False}])]
@@ -321,10 +321,10 @@ def test_import_eco_aborts_on_zero_terms():
         ),
     ):
         with pytest.raises(RuntimeError, match="extracted 0 terms"):
-            ontology_eco_writes.import_eco(client, force=False)
+            await ontology_eco_writes.import_eco(client, force=False)
 
 
-def test_import_eco_propagates_download_exception():
+async def test_import_eco_propagates_download_exception():
     driver = RecordingDriver(
         canned_results_per_session=[
             [_RecordingResult(rows=[{"present": False}])]
@@ -336,27 +336,27 @@ def test_import_eco_propagates_download_exception():
         side_effect=RuntimeError("network down"),
     ):
         with pytest.raises(RuntimeError, match="network down"):
-            ontology_eco_writes.import_eco(client, force=False)
+            await ontology_eco_writes.import_eco(client, force=False)
 
 
 # ---- delete_imported ----
 
 
-def test_delete_imported_runs_one_detach_delete_query():
+async def test_delete_imported_runs_one_detach_delete_query():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    assert ontology_eco_writes.delete_imported(client) is None
+    assert await ontology_eco_writes.delete_imported(client) is None
     assert len(driver.sessions[0].calls) == 1
     cypher, _ = driver.sessions[0].calls[0]
     assert ":ECOTerm" in cypher
     assert "DETACH DELETE" in cypher
 
 
-def test_delete_imported_propagates_driver_exception():
+async def test_delete_imported_propagates_driver_exception():
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(driver)
     with pytest.raises(RuntimeError, match="boom"):
-        ontology_eco_writes.delete_imported(client)
+        await ontology_eco_writes.delete_imported(client)
 
 
 # ---- Neo4jClient delegate methods ----

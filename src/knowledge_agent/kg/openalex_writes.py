@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # ---- citations (L1) ----
 
 
-def write_citations(client, doc_id: str, work: dict[str, Any]) -> None:
+async def write_citations(client, doc_id: str, work: dict[str, Any]) -> None:
     """Write the focal :Document + its referenced works + :CITES edges.
 
     From a locally-generated `doc_id` (SHA-256 of the file bytes) and one
@@ -79,7 +79,7 @@ def write_citations(client, doc_id: str, work: dict[str, Any]) -> None:
         if ref_id:
             references.append(ref_id)
 
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         # 1. Focal document.
         #    - When openalex_id is known: MERGE by openalex_id so any
         #      pre-existing shadow with the same openalex_id is found
@@ -99,7 +99,7 @@ def write_citations(client, doc_id: str, work: dict[str, Any]) -> None:
             if doi:
                 set_clauses.append("d.doi = $doi")
                 params["doi"] = doi
-            session.run(
+            await session.run(
                 f"MERGE (d:{DOCUMENT_LABEL} {{openalex_id: $openalex_id}}) "
                 f"SET {', '.join(set_clauses)}",
                 **params,
@@ -113,7 +113,7 @@ def write_citations(client, doc_id: str, work: dict[str, Any]) -> None:
             if doi:
                 set_clauses.append("d.doi = $doi")
                 params["doi"] = doi
-            session.run(
+            await session.run(
                 f"MERGE (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) "
                 f"SET {', '.join(set_clauses)}",
                 **params,
@@ -129,7 +129,7 @@ def write_citations(client, doc_id: str, work: dict[str, Any]) -> None:
         #    existing corpus document to shadow when it's cited from
         #    this paper. Shadows come from referenced_works, so they
         #    get the :Paper subtype label too.
-        session.run(
+        await session.run(
             f"UNWIND $cited_ids AS cid "
             f"MERGE (c:{DOCUMENT_LABEL} {{openalex_id: cid}}) "
             f"ON CREATE SET c:{PAPER_LABEL}, c.in_corpus = false",
@@ -138,7 +138,7 @@ def write_citations(client, doc_id: str, work: dict[str, Any]) -> None:
 
         # 3. Citation edges. Focal matched by doc_id (just SET above),
         #    shadows by openalex_id.
-        session.run(
+        await session.run(
             f"MATCH (p:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) "
             f"UNWIND $cited_ids AS cid "
             f"MATCH (c:{DOCUMENT_LABEL} {{openalex_id: cid}}) "
@@ -154,7 +154,7 @@ def write_citations(client, doc_id: str, work: dict[str, Any]) -> None:
 # ---- authorships (L2) ----
 
 
-def write_authorships(client, doc_id: str, work: dict[str, Any]) -> None:
+async def write_authorships(client, doc_id: str, work: dict[str, Any]) -> None:
     """Write :Author nodes + :AUTHORED edges from one OpenAlex work.
 
     From `work["authorships"]`:
@@ -201,11 +201,11 @@ def write_authorships(client, doc_id: str, work: dict[str, Any]) -> None:
         )
         return
 
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         # 1. Author nodes - MERGE + SET display_name so a later
         #    OpenAlex correction (e.g. expanded full name) wins on
         #    subsequent ingests.
-        session.run(
+        await session.run(
             f"UNWIND $authorships AS a "
             f"MERGE (au:{AUTHOR_LABEL} {{openalex_id: a.openalex_id}}) "
             f"SET au.display_name = a.display_name",
@@ -214,7 +214,7 @@ def write_authorships(client, doc_id: str, work: dict[str, Any]) -> None:
         # 2. AUTHORED edges. The focal :Document must already exist
         #    (write_citations runs before this); MATCH on a missing
         #    doc would silently produce zero edges.
-        session.run(
+        await session.run(
             f"MATCH (p:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) "
             f"UNWIND $authorships AS a "
             f"MATCH (au:{AUTHOR_LABEL} {{openalex_id: a.openalex_id}}) "
@@ -233,7 +233,7 @@ def write_authorships(client, doc_id: str, work: dict[str, Any]) -> None:
 # ---- venue (L3) ----
 
 
-def write_venue(client, doc_id: str, work: dict[str, Any]) -> None:
+async def write_venue(client, doc_id: str, work: dict[str, Any]) -> None:
     """Write the :Venue node + :PUBLISHED_IN edge from one OpenAlex work.
 
     From `work["primary_location"]["source"]`:
@@ -269,8 +269,8 @@ def write_venue(client, doc_id: str, work: dict[str, Any]) -> None:
         "venue_type": source.get("type"),
         "issn": source.get("issn_l"),
     }
-    with client.driver.session() as session:
-        session.run(
+    async with client.driver.session() as session:
+        await session.run(
             f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) "
             f"MERGE (v:{VENUE_LABEL} {{openalex_id: $openalex_id}}) "
             f"SET v.name = $name, v.type = $venue_type, "
@@ -286,7 +286,7 @@ def write_venue(client, doc_id: str, work: dict[str, Any]) -> None:
 # ---- topics (L4) ----
 
 
-def write_topics(client, doc_id: str, work: dict[str, Any]) -> None:
+async def write_topics(client, doc_id: str, work: dict[str, Any]) -> None:
     """Write :Topic nodes + :ABOUT_TOPIC edges from one OpenAlex work.
 
     From `work["topics"]`:
@@ -327,17 +327,17 @@ def write_topics(client, doc_id: str, work: dict[str, Any]) -> None:
         logger.info("KG: write_topics found no topics for %s", doc_id)
         return
 
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         # 1. Topic nodes - MERGE + SET display_name so an OpenAlex
         #    relabel wins on the next ingest.
-        session.run(
+        await session.run(
             f"UNWIND $topics AS t "
             f"MERGE (n:{TOPIC_LABEL} {{openalex_id: t.openalex_id}}) "
             f"SET n.display_name = t.display_name",
             topics=topics,
         )
         # 2. ABOUT_TOPIC edges with score (per-paper relevance).
-        session.run(
+        await session.run(
             f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) "
             f"UNWIND $topics AS t "
             f"MATCH (n:{TOPIC_LABEL} {{openalex_id: t.openalex_id}}) "
@@ -354,7 +354,7 @@ def write_topics(client, doc_id: str, work: dict[str, Any]) -> None:
 # ---- delete (per-doc wipe + GC orphans across L1-L4) ----
 
 
-def delete_doc(client, doc_id: str) -> None:
+async def delete_doc(client, doc_id: str) -> None:
     """Wipe a paper's L1-L4 KG data: focal :Document + edges + GC orphans.
 
     Steps:
@@ -380,9 +380,9 @@ def delete_doc(client, doc_id: str) -> None:
     if not doc_id:
         raise ValueError("KG: delete_doc called with no doc_id")
 
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         # 1. Wipe focal + its edges in one shot.
-        session.run(
+        await session.run(
             f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) "
             f"DETACH DELETE d",
             doc_id=doc_id,
@@ -393,20 +393,20 @@ def delete_doc(client, doc_id: str) -> None:
         # guarantees no edges - if a new edge type is added later
         # without updating the WHERE, DELETE will error so the bug
         # surfaces instead of being silently masked.
-        session.run(
+        await session.run(
             f"MATCH (a:{AUTHOR_LABEL}) "
             f"WHERE NOT (a)-[:{AUTHORED_REL}]->() DELETE a"
         )
-        session.run(
+        await session.run(
             f"MATCH (t:{TOPIC_LABEL}) "
             f"WHERE NOT ()-[:{ABOUT_TOPIC_REL}]->(t) DELETE t"
         )
-        session.run(
+        await session.run(
             f"MATCH (v:{VENUE_LABEL}) "
             f"WHERE NOT ()-[:{PUBLISHED_IN_REL}]->(v) DELETE v"
         )
         # Shadow documents: in_corpus=false AND nothing cites them.
-        session.run(
+        await session.run(
             f"MATCH (d:{DOCUMENT_LABEL}) "
             f"WHERE d.in_corpus = false AND NOT ()-[:{CITES_REL}]->(d) "
             f"DELETE d"
@@ -414,7 +414,7 @@ def delete_doc(client, doc_id: str) -> None:
     logger.info("KG: delete_doc cleared %s + GC'd orphans", doc_id)
 
 
-def delete_doc_l1_l4_edges(client, doc_id: str) -> None:
+async def delete_doc_l1_l4_edges(client, doc_id: str) -> None:
     """Wipe L1-L4 edges for `doc_id` while keeping the focal `:Document`
     and other layers intact.
 
@@ -445,30 +445,30 @@ def delete_doc_l1_l4_edges(client, doc_id: str) -> None:
     if not doc_id:
         raise ValueError("KG: delete_doc_l1_l4_edges called with no doc_id")
 
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         # 1. Outgoing :CITES from this doc.
-        session.run(
+        await session.run(
             f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}})"
             f"-[r:{CITES_REL}]->() "
             f"DELETE r",
             doc_id=doc_id,
         )
         # 2. Incoming :AUTHORED to this doc.
-        session.run(
+        await session.run(
             f"MATCH ()-[r:{AUTHORED_REL}]->"
             f"(d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) "
             f"DELETE r",
             doc_id=doc_id,
         )
         # 3. Outgoing :PUBLISHED_IN from this doc.
-        session.run(
+        await session.run(
             f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}})"
             f"-[r:{PUBLISHED_IN_REL}]->() "
             f"DELETE r",
             doc_id=doc_id,
         )
         # 4. Outgoing :ABOUT_TOPIC from this doc.
-        session.run(
+        await session.run(
             f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}})"
             f"-[r:{ABOUT_TOPIC_REL}]->() "
             f"DELETE r",
@@ -476,22 +476,22 @@ def delete_doc_l1_l4_edges(client, doc_id: str) -> None:
         )
         # 5. GC orphans across the L1-L4 reference vocab. Same WHERE-NOT
         # pattern as `delete_doc` so the post-state guarantee matches.
-        session.run(
+        await session.run(
             f"MATCH (a:{AUTHOR_LABEL}) "
             f"WHERE NOT (a)-[:{AUTHORED_REL}]->() DELETE a"
         )
-        session.run(
+        await session.run(
             f"MATCH (t:{TOPIC_LABEL}) "
             f"WHERE NOT ()-[:{ABOUT_TOPIC_REL}]->(t) DELETE t"
         )
-        session.run(
+        await session.run(
             f"MATCH (v:{VENUE_LABEL}) "
             f"WHERE NOT ()-[:{PUBLISHED_IN_REL}]->(v) DELETE v"
         )
         # Shadow docs: in_corpus=false AND nothing cites them.
         # The :CITES edges from this doc were removed in step 1, so any
         # shadow doc that was ONLY cited from here is now collectable.
-        session.run(
+        await session.run(
             f"MATCH (d:{DOCUMENT_LABEL}) "
             f"WHERE d.in_corpus = false AND NOT ()-[:{CITES_REL}]->(d) "
             f"DELETE d"

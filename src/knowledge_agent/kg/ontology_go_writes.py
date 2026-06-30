@@ -113,15 +113,14 @@ _GO_PROVENANCE = OntologyProvenance(
 # ---------------------------------------------------------------------------
 
 
-def is_imported(client) -> bool:
+async def is_imported(client) -> bool:
     """True when at least one `:GOTerm` node exists in Neo4j."""
-    return is_ontology_imported(
+    return await is_ontology_imported(
         client, term_label=GO_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
     )
 
 
-def import_go(
-    client,
+async def import_go(client,
     *,
     force: bool = False,
     xrefs_mode: str = "none",
@@ -133,7 +132,7 @@ def import_go(
     data first then runs the full import. Download / parse / write
     failures propagate to the caller under the typed-errors contract.
     """
-    return import_ontology_data(
+    return await import_ontology_data(
         client,
         ontology_name=_ONTOLOGY_NAME,
         url=GO_DOWNLOAD_URL,
@@ -146,18 +145,17 @@ def import_go(
     )
 
 
-def delete_imported(client) -> None:
+async def delete_imported(client) -> None:
     """DETACH DELETE every :GOTerm node + its :GO_IS_A edges.
 
-    Idempotent. Used by `import_go(force=True)` and by maintenance flows.
+    Idempotent. Used by `await import_go(force=True)` and by maintenance flows.
     """
-    delete_ontology_terms(
+    await delete_ontology_terms(
         client, term_label=GO_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
     )
 
 
-def write_terms(
-    client,
+async def write_terms(client,
     terms: list[OntologyTerm],
     *,
     xrefs_mode: str = "none",
@@ -167,7 +165,7 @@ def write_terms(
     Public for testability + direct write paths (some tests construct
     OntologyTerm lists and call write_terms directly).
     """
-    write_ontology_terms(
+    await write_ontology_terms(
         client, terms,
         term_label=GO_TERM_LABEL,
         hierarchy_rel=GO_IS_A_REL,

@@ -38,10 +38,10 @@ class _RunResult:
     rows: list[dict[str, Any]] = field(default_factory=list)
     single_value: dict[str, Any] | None = None
 
-    def data(self) -> list[dict[str, Any]]:
+    async def data(self) -> list[dict[str, Any]]:
         return self.rows
 
-    def single(self) -> dict[str, Any] | None:
+    async def single(self) -> dict[str, Any] | None:
         if self.single_value is not None:
             return self.single_value
         if self.rows:
@@ -57,7 +57,7 @@ class RecordingSession:
     # treated as "no row available" (.single() returns None).
     single_returns: list[dict[str, Any] | None] = field(default_factory=list)
 
-    def run(self, query: str, **params: Any) -> _RunResult:
+    async def run(self, query: str, **params: Any) -> _RunResult:
         if self.raise_on_run is not None:
             raise self.raise_on_run
         self.calls.append((query, params))
@@ -66,10 +66,10 @@ class RecordingSession:
             return _RunResult(single_value=sv)
         return _RunResult()
 
-    def __enter__(self) -> "RecordingSession":
+    async def __aenter__(self) -> "RecordingSession":
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: Any) -> None:
         pass
 
 
@@ -88,7 +88,7 @@ class RecordingDriver:
         self.sessions.append(sess)
         return sess
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self.closed = True
 
 
@@ -122,39 +122,39 @@ def _driver_with_count(n: int) -> RecordingDriver:
 # ---- Fail-soft paths ----
 
 
-def test_recompute_empty_doc_id_raises():
+async def test_recompute_empty_doc_id_raises():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     with pytest.raises(ValueError, match="no doc_id"):
-        cross_doc_writes.recompute_cross_doc_edges(client, "")
+        await cross_doc_writes.recompute_cross_doc_edges(client, "")
     assert driver.sessions == []
 
 
-def test_recompute_threshold_zero_raises():
+async def test_recompute_threshold_zero_raises():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     with pytest.raises(ValueError, match=">= 1"):
-        cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID, threshold=0)
+        await cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID, threshold=0)
     assert driver.sessions == []
 
 
-def test_recompute_threshold_negative_raises():
+async def test_recompute_threshold_negative_raises():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     with pytest.raises(ValueError, match=">= 1"):
-        cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID, threshold=-1)
+        await cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID, threshold=-1)
     assert driver.sessions == []
 
 
-def test_recompute_propagates_cypher_exception():
+async def test_recompute_propagates_cypher_exception():
     """Driver failure propagates; orchestrator boundary catches."""
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(driver)
     with pytest.raises(RuntimeError, match="boom"):
-        cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
+        await cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
 
 
-def test_recompute_returns_zero_when_single_returns_no_row():
+async def test_recompute_returns_zero_when_single_returns_no_row():
     """RETURN count(r) always emits one row in practice. The defensive
     fallback path returns 0 (not None) since we know nothing was
     written; the typed-errors contract reserves raising for real
@@ -162,18 +162,18 @@ def test_recompute_returns_zero_when_single_returns_no_row():
     driver = RecordingDriver(single_returns=[None, None])
     client = _client_with_driver(driver)
     assert (
-        cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID) == 0
+        await cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID) == 0
     )
 
 
 # ---- Two-step Cypher ----
 
 
-def test_recompute_runs_two_queries_delete_then_merge():
+async def test_recompute_runs_two_queries_delete_then_merge():
     """First call: DELETE. Second call: MATCH ... MERGE ... RETURN."""
     driver = _driver_with_count(3)
     client = _client_with_driver(driver)
-    result = cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
+    result = await cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
     assert result == 3
     assert len(driver.sessions[0].calls) == 2
     delete_cypher, _ = driver.sessions[0].calls[0]
@@ -183,24 +183,24 @@ def test_recompute_runs_two_queries_delete_then_merge():
     assert "RETURN count(r)" in merge_cypher
 
 
-def test_recompute_zero_edges_is_valid_outcome():
+async def test_recompute_zero_edges_is_valid_outcome():
     """No other doc met the threshold -> count=0, ok=True (not None)."""
     driver = _driver_with_count(0)
     client = _client_with_driver(driver)
-    result = cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
+    result = await cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
     assert result == 0
 
 
 # ---- Cypher shape ----
 
 
-def test_recompute_delete_query_uses_undirected_pattern():
+async def test_recompute_delete_query_uses_undirected_pattern():
     """Wipe is undirected so it catches edges written in either
     direction (MERGE on an undirected pattern stores in arbitrary
     direction)."""
     driver = _driver_with_count(0)
     client = _client_with_driver(driver)
-    cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
+    await cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
     delete_cypher, params = driver.sessions[0].calls[0]
     # Undirected: the right-hand side has no `>` after the bracket.
     assert ":RELATED_TO]-(" in delete_cypher
@@ -210,32 +210,32 @@ def test_recompute_delete_query_uses_undirected_pattern():
     assert params == {"doc_id": DOC_ID}
 
 
-def test_recompute_merge_query_carries_label_disjunction_on_both_sides():
+async def test_recompute_merge_query_carries_label_disjunction_on_both_sides():
     """Both focal AND `other` use :Document|:Artifact - cross-type
     linking ('dataset relates to paper') participates."""
     driver = _driver_with_count(0)
     client = _client_with_driver(driver)
-    cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
+    await cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
     merge_cypher, _ = driver.sessions[0].calls[1]
     # Disjunction appears at LEAST twice (focal + other).
     assert merge_cypher.count("Document|Artifact") >= 2
 
 
-def test_recompute_merge_query_filters_self_edges():
+async def test_recompute_merge_query_filters_self_edges():
     """`other.doc_id <> $doc_id` keeps the focal from linking to
     itself via the symmetric MENTIONS pattern."""
     driver = _driver_with_count(0)
     client = _client_with_driver(driver)
-    cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
+    await cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
     merge_cypher, params = driver.sessions[0].calls[1]
     assert "other.doc_id <> $doc_id" in merge_cypher
     assert params["doc_id"] == DOC_ID
 
 
-def test_recompute_merge_query_uses_threshold_param():
+async def test_recompute_merge_query_uses_threshold_param():
     driver = _driver_with_count(5)
     client = _client_with_driver(driver)
-    cross_doc_writes.recompute_cross_doc_edges(
+    await cross_doc_writes.recompute_cross_doc_edges(
         client, DOC_ID, threshold=4
     )
     merge_cypher, params = driver.sessions[0].calls[1]
@@ -243,30 +243,30 @@ def test_recompute_merge_query_uses_threshold_param():
     assert params["threshold"] == 4
 
 
-def test_recompute_merge_query_sets_shared_entities_count_and_timestamp():
+async def test_recompute_merge_query_sets_shared_entities_count_and_timestamp():
     driver = _driver_with_count(2)
     client = _client_with_driver(driver)
-    cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
+    await cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
     merge_cypher, _ = driver.sessions[0].calls[1]
     assert "r.shared_entities = shared" in merge_cypher
     assert "r.shared_count = size(shared)" in merge_cypher
     assert "r.computed_at = datetime()" in merge_cypher
 
 
-def test_recompute_merge_query_uses_undirected_merge():
+async def test_recompute_merge_query_uses_undirected_merge():
     """`MERGE (d)-[r:RELATED_TO]-(other)` (no `>`) matches in either
     direction, so the edge is genuinely undirected."""
     driver = _driver_with_count(0)
     client = _client_with_driver(driver)
-    cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
+    await cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
     merge_cypher, _ = driver.sessions[0].calls[1]
     assert "MERGE (d)-[r:RELATED_TO]-(other)" in merge_cypher
 
 
-def test_recompute_uses_default_threshold_when_not_provided():
+async def test_recompute_uses_default_threshold_when_not_provided():
     driver = _driver_with_count(0)
     client = _client_with_driver(driver)
-    cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
+    await cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID)
     _merge_cypher, params = driver.sessions[0].calls[1]
     assert params["threshold"] == cross_doc_writes.DEFAULT_SHARED_COUNT_THRESHOLD
     assert params["threshold"] == 2  # belt + suspenders on the constant value

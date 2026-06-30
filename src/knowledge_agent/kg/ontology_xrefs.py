@@ -70,8 +70,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def backfill_resolved_xrefs(
-    client,
+async def backfill_resolved_xrefs(client,
 ) -> dict[str, dict[str, int]]:
     """Walk every shipped ontology, resolve dangling xrefs into edges.
 
@@ -115,13 +114,13 @@ def backfill_resolved_xrefs(
     the orchestrator boundary catches them.
     """
     results: dict[str, dict[str, int]] = {}
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         for term_label in ONTOLOGY_SUB_LABELS:
             xref_rel = _xref_rel_from_term_label(term_label)
-            attempted = _backfill_one_ontology(
+            attempted = await _backfill_one_ontology(
                 session, term_label=term_label, xref_rel=xref_rel,
             )
-            cleaned = _strip_resolved_entries(
+            cleaned = await _strip_resolved_entries(
                 session, term_label=term_label, xref_rel=xref_rel,
             )
             if attempted is None or cleaned is None:
@@ -146,7 +145,7 @@ def backfill_resolved_xrefs(
     return results
 
 
-def _backfill_one_ontology(
+async def _backfill_one_ontology(
     session, *, term_label: str, xref_rel: str,
 ) -> int | None:
     """Resolve dangling xrefs for one ontology sub-label.
@@ -161,7 +160,7 @@ def _backfill_one_ontology(
     Returns None on Cypher failure (logged).
     """
     try:
-        result = session.run(
+        result = await session.run(
             f"MATCH (s:{term_label}) "
             f"WHERE s.dangling_xrefs IS NOT NULL "
             f"  AND size(s.dangling_xrefs) > 0 "
@@ -170,7 +169,7 @@ def _backfill_one_ontology(
             f"MERGE (s)-[r:{xref_rel}]->(t) "
             f"RETURN count(r) AS n"
         )
-        row = result.single()
+        row = await result.single()
         return int(row["n"]) if row else 0
     except Exception as exc:
         logger.warning(
@@ -180,7 +179,7 @@ def _backfill_one_ontology(
         return None
 
 
-def _strip_resolved_entries(
+async def _strip_resolved_entries(
     session, *, term_label: str, xref_rel: str,
 ) -> int | None:
     """Remove already-resolved entries from `dangling_xrefs`.
@@ -201,7 +200,7 @@ def _strip_resolved_entries(
     ontology.
     """
     try:
-        result = session.run(
+        result = await session.run(
             f"MATCH (s:{term_label}) "
             f"WHERE s.dangling_xrefs IS NOT NULL "
             f"OPTIONAL MATCH (s)-[:{xref_rel}]->"
@@ -212,7 +211,7 @@ def _strip_resolved_entries(
             f"  [x IN s.dangling_xrefs WHERE NOT x IN resolved] "
             f"RETURN count(s) AS n"
         )
-        row = result.single()
+        row = await result.single()
         return int(row["n"]) if row else 0
     except Exception as exc:
         logger.warning(
@@ -227,8 +226,7 @@ def _strip_resolved_entries(
 # ---------------------------------------------------------------------------
 
 
-def clear_xref_edges_for_ontology(
-    client, term_label: str,
+async def clear_xref_edges_for_ontology(client, term_label: str,
 ) -> int:
     """Delete every outgoing xref edge from one ontology + clear the
     `dangling_xrefs` property on its terms.
@@ -260,22 +258,22 @@ def clear_xref_edges_for_ontology(
         )
 
     xref_rel = _xref_rel_from_term_label(term_label)
-    with client.driver.session() as session:
-        edge_result = session.run(
+    async with client.driver.session() as session:
+        edge_result = await session.run(
             f"MATCH (s:{term_label})-[r:{xref_rel}]->() "
             f"DELETE r "
             f"RETURN count(r) AS n"
         )
-        edge_row = edge_result.single()
+        edge_row = await edge_result.single()
         n_edges = int(edge_row["n"]) if edge_row else 0
 
-        prop_result = session.run(
+        prop_result = await session.run(
             f"MATCH (s:{term_label}) "
             f"WHERE s.dangling_xrefs IS NOT NULL "
             f"REMOVE s.dangling_xrefs "
             f"RETURN count(s) AS n"
         )
-        prop_row = prop_result.single()
+        prop_row = await prop_result.single()
         n_props = int(prop_row["n"]) if prop_row else 0
 
     logger.info(
@@ -291,8 +289,7 @@ def clear_xref_edges_for_ontology(
 # ---------------------------------------------------------------------------
 
 
-def count_dangling_xrefs(
-    client, term_label: str,
+async def count_dangling_xrefs(client, term_label: str,
 ) -> int:
     """Source nodes with a non-empty `dangling_xrefs` list.
 
@@ -306,19 +303,18 @@ def count_dangling_xrefs(
         raise ValueError(
             f"count_dangling_xrefs: unknown term_label {term_label!r}"
         )
-    with client.driver.session() as session:
-        result = session.run(
+    async with client.driver.session() as session:
+        result = await session.run(
             f"MATCH (s:{term_label}) "
             f"WHERE s.dangling_xrefs IS NOT NULL "
             f"  AND size(s.dangling_xrefs) > 0 "
             f"RETURN count(s) AS n"
         )
-        row = result.single()
+        row = await result.single()
         return int(row["n"]) if row else 0
 
 
-def count_xref_edges(
-    client, term_label: str | None = None,
+async def count_xref_edges(client, term_label: str | None = None,
 ) -> int:
     """Live xref-edge count.
 
@@ -331,15 +327,15 @@ def count_xref_edges(
     failures propagate.
     """
     if term_label is None:
-        with client.driver.session() as session:
+        async with client.driver.session() as session:
             # Union the 18 typed-edge MATCHes. Pipe syntax inside
             # the relationship pattern keeps it to one query.
             pipe = "|".join(ONTOLOGY_XREF_RELS)
-            result = session.run(
+            result = await session.run(
                 f"MATCH ()-[r:{pipe}]->() "
                 f"RETURN count(r) AS n"
             )
-            row = result.single()
+            row = await result.single()
             return int(row["n"]) if row else 0
 
     if term_label not in ONTOLOGY_SUB_LABELS:
@@ -347,10 +343,10 @@ def count_xref_edges(
             f"count_xref_edges: unknown term_label {term_label!r}"
         )
     xref_rel = _xref_rel_from_term_label(term_label)
-    with client.driver.session() as session:
-        result = session.run(
+    async with client.driver.session() as session:
+        result = await session.run(
             f"MATCH (s:{term_label})-[r:{xref_rel}]->() "
             f"RETURN count(r) AS n"
         )
-        row = result.single()
+        row = await result.single()
         return int(row["n"]) if row else 0

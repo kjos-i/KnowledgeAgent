@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 
 import pytest
 
@@ -740,7 +740,7 @@ from typing import Any  # noqa: E402
 class _StubResult:
     rows: list[dict[str, Any]] = field(default_factory=list)
 
-    def single(self) -> dict[str, Any] | None:
+    async def single(self) -> dict[str, Any] | None:
         return self.rows[0] if self.rows else None
 
 
@@ -749,17 +749,17 @@ class _StubSession:
     calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     canned_results: list[_StubResult] = field(default_factory=list)
 
-    def run(self, query: str, **params: Any):
+    async def run(self, query: str, **params: Any):
         self.calls.append((query, params))
         idx = len(self.calls) - 1
         if idx < len(self.canned_results):
             return self.canned_results[idx]
         return _StubResult()
 
-    def __enter__(self) -> "_StubSession":
+    async def __aenter__(self) -> "_StubSession":
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: Any) -> None:
         pass
 
 
@@ -789,7 +789,7 @@ def _term_with_xrefs(
     )
 
 
-def test_write_ontology_terms_default_xrefs_mode_is_none_no_extra_pass():
+async def test_write_ontology_terms_default_xrefs_mode_is_none_no_extra_pass():
     """Default `xrefs_mode="none"`: only the 2 mandatory passes
     (nodes + hierarchy edges) run. No `dangling_xrefs` writes."""
     client = _StubClient()
@@ -797,7 +797,7 @@ def test_write_ontology_terms_default_xrefs_mode_is_none_no_extra_pass():
         _term_with_xrefs("X:1"),
         _term_with_xrefs("X:2", parents=("X:1",), xrefs=("Y:42",)),
     ]
-    ok = write_ontology_terms(
+    ok = await write_ontology_terms(
         client, terms,
         term_label="XTerm",
         hierarchy_rel="X_IS_A",
@@ -808,7 +808,7 @@ def test_write_ontology_terms_default_xrefs_mode_is_none_no_extra_pass():
     assert len(client.driver.session_obj.calls) == 2
 
 
-def test_write_ontology_terms_collect_only_writes_dangling_xrefs_no_edges():
+async def test_write_ontology_terms_collect_only_writes_dangling_xrefs_no_edges():
     """`xrefs_mode="collect_only"`: 3rd pass stores dangling_xrefs but
     no resolved edges are written (no MERGE-edge pass)."""
     client = _StubClient()
@@ -816,7 +816,7 @@ def test_write_ontology_terms_collect_only_writes_dangling_xrefs_no_edges():
         _term_with_xrefs("X:1", xrefs=("Y:42", "Z:99")),
         _term_with_xrefs("X:2"),  # no xrefs - row filtered out
     ]
-    ok = write_ontology_terms(
+    ok = await write_ontology_terms(
         client, terms,
         term_label="XTerm",
         hierarchy_rel="X_IS_A",
@@ -836,7 +836,7 @@ def test_write_ontology_terms_collect_only_writes_dangling_xrefs_no_edges():
     ]
 
 
-def test_write_ontology_terms_use_mode_writes_dangling_and_resolved_edges():
+async def test_write_ontology_terms_use_mode_writes_dangling_and_resolved_edges():
     """`xrefs_mode="use"`: both the 3a dangling_xrefs pass AND the 3b
     resolved-edge MERGE pass run. Resolved-edge Cypher uses the
     derived `<X>_XREF` type."""
@@ -850,7 +850,7 @@ def test_write_ontology_terms_use_mode_writes_dangling_and_resolved_edges():
         _StubResult(rows=[{"n": 2}]),  # resolved-edges pass
     ]
     terms = [_term_with_xrefs("X:1", xrefs=("Y:42", "Z:99"))]
-    ok = write_ontology_terms(
+    ok = await write_ontology_terms(
         client, terms,
         term_label="XTerm",
         hierarchy_rel="X_IS_A",
@@ -869,12 +869,12 @@ def test_write_ontology_terms_use_mode_writes_dangling_and_resolved_edges():
     ]
 
 
-def test_write_ontology_terms_use_mode_no_xrefs_skips_pass_3():
+async def test_write_ontology_terms_use_mode_no_xrefs_skips_pass_3():
     """`xrefs_mode="use"` with terms that have NO xrefs: pass 3 is
     skipped entirely (no `dangling_xrefs`, no resolved-edges)."""
     client = _StubClient()
     terms = [_term_with_xrefs("X:1"), _term_with_xrefs("X:2")]
-    ok = write_ontology_terms(
+    ok = await write_ontology_terms(
         client, terms,
         term_label="XTerm",
         hierarchy_rel="X_IS_A",
@@ -886,12 +886,12 @@ def test_write_ontology_terms_use_mode_no_xrefs_skips_pass_3():
     assert len(client.driver.session_obj.calls) == 1
 
 
-def test_write_ontology_terms_rejects_unknown_xrefs_mode():
+async def test_write_ontology_terms_rejects_unknown_xrefs_mode():
     """The boundary check rejects unrecognised modes before any
     Cypher runs."""
     client = _StubClient()
     with pytest.raises(ValueError, match="xrefs_mode must be"):
-        write_ontology_terms(
+        await write_ontology_terms(
             client, [_term_with_xrefs("X:1")],
             term_label="XTerm",
             hierarchy_rel="X_IS_A",
@@ -902,7 +902,7 @@ def test_write_ontology_terms_rejects_unknown_xrefs_mode():
     assert client.driver.session_obj.calls == []
 
 
-def test_write_ontology_terms_use_mode_resolved_query_uses_correct_xref_rel():
+async def test_write_ontology_terms_use_mode_resolved_query_uses_correct_xref_rel():
     """Confirms the resolved-edges Cypher uses the derived xref edge
     type matching `_xref_rel_from_term_label(term_label)`. Verifies
     real ontology sub-labels (not just synthetic XTerm)."""
@@ -912,7 +912,7 @@ def test_write_ontology_terms_use_mode_resolved_query_uses_correct_xref_rel():
         _StubResult(rows=[{"n": 1}]),
     ]
     terms = [_term_with_xrefs("MESH:D003920", xrefs=("DOID:9352",))]
-    write_ontology_terms(
+    await write_ontology_terms(
         client, terms,
         term_label="MeSHTerm",
         hierarchy_rel="MESH_BROADER",

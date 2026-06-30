@@ -159,7 +159,7 @@ _DESCRIPTOR_TYPES: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 
 
-def is_imported(client) -> bool:
+async def is_imported(client) -> bool:
     """True when MeSH data is already present in Neo4j.
 
     Checks for the existence of at least one `:MeSHTerm` node. Cheap
@@ -167,16 +167,15 @@ def is_imported(client) -> bool:
     (typed-errors contract); `ensure_ontology_imported` is the
     orchestrator boundary that catches per-ontology.
     """
-    with client.driver.session() as session:
-        result = session.run(
+    async with client.driver.session() as session:
+        result = await session.run(
             f"MATCH (t:{MESH_TERM_LABEL}) RETURN count(t) > 0 AS present"
         )
-        row = result.single()
+        row = await result.single()
         return bool(row and row["present"])
 
 
-def import_mesh(
-    client,
+async def import_mesh(client,
     *,
     force: bool = False,
     xrefs_mode: str = "none",
@@ -194,13 +193,13 @@ def import_mesh(
     Download / parse / write failures and the "extracted 0 terms"
     edge case propagate to the caller under the typed-errors contract.
     """
-    if not force and is_imported(client):
+    if not force and await is_imported(client):
         logger.info("MeSH: already imported; use force=True to re-import")
         return False
 
     if force:
         logger.info("MeSH: force=True - dropping existing data before re-import")
-        delete_imported(client)
+        await delete_imported(client)
 
     logger.info("MeSH: downloading %s", MESH_DOWNLOAD_URL)
     path = ensure_cached(MESH_DOWNLOAD_URL, MESH_CACHE_FILENAME)
@@ -211,24 +210,24 @@ def import_mesh(
             "MeSH: extracted 0 terms - unexpected, aborting write"
         )
 
-    write_terms(client, terms, xrefs_mode=xrefs_mode)
+    await write_terms(client, terms, xrefs_mode=xrefs_mode)
     return True
 
 
-def delete_imported(client) -> None:
+async def delete_imported(client) -> None:
     """Drop all MeSH data: every :MeSHTerm node + its :MESH_BROADER edges.
 
     Idempotent; safe to call when MeSH was never imported (no-op).
-    Used by `import_mesh(force=True)` and by maintenance flows that want
+    Used by `await import_mesh(force=True)` and by maintenance flows that want
     to start fresh after a yearly MeSH release.
 
     Cypher failures propagate to the caller (typed-errors contract).
     """
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         # DETACH DELETE handles all incoming + outgoing edges
         # (MESH_BROADER between MeSHTerms, future CANONICAL_TO
         # from :Entity nodes).
-        session.run(
+        await session.run(
             f"MATCH (t:{MESH_TERM_LABEL}) DETACH DELETE t"
         )
     logger.info("MeSH: deleted all :MeSHTerm nodes + edges")
@@ -239,8 +238,7 @@ def delete_imported(client) -> None:
 # ---------------------------------------------------------------------------
 
 
-def write_terms(
-    client,
+async def write_terms(client,
     terms: list[OntologyTerm],
     *,
     xrefs_mode: str = "none",
@@ -260,7 +258,7 @@ def write_terms(
     Public for testability + direct write paths (some tests construct
     OntologyTerm lists and call this directly).
     """
-    write_ontology_terms(
+    await write_ontology_terms(
         client, terms,
         term_label=MESH_TERM_LABEL,
         hierarchy_rel=MESH_BROADER_REL,

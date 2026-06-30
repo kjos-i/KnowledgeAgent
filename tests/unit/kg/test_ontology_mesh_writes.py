@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 from knowledge_agent.config import Settings
 from knowledge_agent.kg import ontology_mesh_writes
@@ -36,7 +36,7 @@ class _RecordingResult:
 
     rows: list[dict[str, Any]] = field(default_factory=list)
 
-    def single(self) -> dict[str, Any] | None:
+    async def single(self) -> dict[str, Any] | None:
         return self.rows[0] if self.rows else None
 
 
@@ -47,7 +47,7 @@ class RecordingSession:
     # canned responses for .run() — keyed by the call index (0, 1, 2, ...).
     canned_results: list[_RecordingResult] = field(default_factory=list)
 
-    def run(self, query: str, **params: Any):
+    async def run(self, query: str, **params: Any):
         if self.raise_on_run is not None:
             raise self.raise_on_run
         self.calls.append((query, params))
@@ -56,10 +56,10 @@ class RecordingSession:
             return self.canned_results[idx]
         return _RecordingResult()
 
-    def __enter__(self) -> "RecordingSession":
+    async def __aenter__(self) -> "RecordingSession":
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: Any) -> None:
         pass
 
 
@@ -85,7 +85,7 @@ class RecordingDriver:
         self.sessions.append(sess)
         return sess
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self.closed = True
 
 
@@ -121,7 +121,7 @@ def test_domain_tags_declared():
 # ---- is_imported ----
 
 
-def test_is_imported_true_when_query_returns_present():
+async def test_is_imported_true_when_query_returns_present():
     """is_imported returns True when the COUNT query says nodes exist."""
     driver = RecordingDriver(
         canned_results_per_session=[
@@ -129,27 +129,27 @@ def test_is_imported_true_when_query_returns_present():
         ]
     )
     client = _client_with_driver(driver)
-    assert ontology_mesh_writes.is_imported(client) is True
+    assert await ontology_mesh_writes.is_imported(client) is True
 
 
-def test_is_imported_false_when_query_returns_no_nodes():
+async def test_is_imported_false_when_query_returns_no_nodes():
     driver = RecordingDriver(
         canned_results_per_session=[
             [_RecordingResult(rows=[{"present": False}])]
         ]
     )
     client = _client_with_driver(driver)
-    assert ontology_mesh_writes.is_imported(client) is False
+    assert await ontology_mesh_writes.is_imported(client) is False
 
 
-def test_is_imported_propagates_driver_exception():
+async def test_is_imported_propagates_driver_exception():
     """Driver error during the count query propagates under the
     typed-errors contract; ensure_ontology_imported (the orchestrator
     boundary) catches per-ontology."""
     driver = RecordingDriver(raise_on_run=RuntimeError("connection lost"))
     client = _client_with_driver(driver)
     with pytest.raises(RuntimeError, match="connection lost"):
-        ontology_mesh_writes.is_imported(client)
+        await ontology_mesh_writes.is_imported(client)
 
 
 # ---- write_terms ----
@@ -165,25 +165,25 @@ def _term(id_: str, label: str, synonyms=(), parents=()) -> OntologyTerm:
     )
 
 
-def test_write_terms_empty_input_returns_true_no_io():
+async def test_write_terms_empty_input_returns_true_no_io():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    assert ontology_mesh_writes.write_terms(client, []) is None
+    assert await ontology_mesh_writes.write_terms(client, []) is None
     assert driver.sessions == []
 
 
-def test_write_terms_one_round_trip_when_no_hierarchy():
+async def test_write_terms_one_round_trip_when_no_hierarchy():
     """No parent edges -> only the node-MERGE query runs (one call)."""
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     terms = [_term("MESH:D003920", "Diabetes Mellitus")]
-    assert ontology_mesh_writes.write_terms(client, terms) is None
+    assert await ontology_mesh_writes.write_terms(client, terms) is None
     assert len(driver.sessions) == 1
     # Just the node MERGE; no second query for edges.
     assert len(driver.sessions[0].calls) == 1
 
 
-def test_write_terms_two_round_trips_when_hierarchy_present():
+async def test_write_terms_two_round_trips_when_hierarchy_present():
     """Parents set -> a second UNWIND/MATCH/MERGE for the edges runs."""
     driver = RecordingDriver()
     client = _client_with_driver(driver)
@@ -195,13 +195,13 @@ def test_write_terms_two_round_trips_when_hierarchy_present():
             parents=("MESH:D003920",),
         ),
     ]
-    assert ontology_mesh_writes.write_terms(client, terms) is None
+    assert await ontology_mesh_writes.write_terms(client, terms) is None
     assert len(driver.sessions) == 1
     # Two queries: node MERGE + edge MERGE.
     assert len(driver.sessions[0].calls) == 2
 
 
-def test_write_terms_node_query_carries_label_synonyms_definition():
+async def test_write_terms_node_query_carries_label_synonyms_definition():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     terms = [
@@ -211,7 +211,7 @@ def test_write_terms_node_query_carries_label_synonyms_definition():
             synonyms=("diabetes", "dm"),
         ),
     ]
-    ontology_mesh_writes.write_terms(client, terms)
+    await ontology_mesh_writes.write_terms(client, terms)
     cypher, params = driver.sessions[0].calls[0]
 
     assert ":OntologyTerm" in cypher
@@ -231,7 +231,7 @@ def test_write_terms_node_query_carries_label_synonyms_definition():
     ]
 
 
-def test_write_terms_edge_query_uses_mesh_broader_rel_and_id_match():
+async def test_write_terms_edge_query_uses_mesh_broader_rel_and_id_match():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     terms = [
@@ -242,7 +242,7 @@ def test_write_terms_edge_query_uses_mesh_broader_rel_and_id_match():
             parents=("MESH:D003920",),
         ),
     ]
-    ontology_mesh_writes.write_terms(client, terms)
+    await ontology_mesh_writes.write_terms(client, terms)
     cypher, params = driver.sessions[0].calls[1]
 
     assert ":MESH_BROADER" in cypher
@@ -253,11 +253,11 @@ def test_write_terms_edge_query_uses_mesh_broader_rel_and_id_match():
     ]
 
 
-def test_write_terms_propagates_driver_exception():
+async def test_write_terms_propagates_driver_exception():
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(driver)
     with pytest.raises(RuntimeError, match="boom"):
-        ontology_mesh_writes.write_terms(
+        await ontology_mesh_writes.write_terms(
             client, [_term("MESH:D003920", "Diabetes Mellitus")]
         )
 
@@ -265,7 +265,7 @@ def test_write_terms_propagates_driver_exception():
 # ---- import_mesh ----
 
 
-def test_import_mesh_short_circuits_when_already_imported():
+async def test_import_mesh_short_circuits_when_already_imported():
     """When MeSH is already in Neo4j and force=False, import skips
     the heavy download + parse + write."""
     driver = RecordingDriver(
@@ -278,14 +278,14 @@ def test_import_mesh_short_circuits_when_already_imported():
     with patch(
         "knowledge_agent.kg.ontology_mesh_writes.ensure_cached"
     ) as mock_cache:
-        result = ontology_mesh_writes.import_mesh(client, force=False)
+        result = await ontology_mesh_writes.import_mesh(client, force=False)
 
     assert result is False  # no-op: typed-errors contract
     # ensure_cached must NOT have been called - we short-circuited.
     mock_cache.assert_not_called()
 
 
-def test_import_mesh_force_drops_then_reimports():
+async def test_import_mesh_force_drops_then_reimports():
     """force=True: skip the is_imported check, drop existing data,
     download, parse, write."""
     driver = RecordingDriver()
@@ -301,7 +301,7 @@ def test_import_mesh_force_drops_then_reimports():
             return_value=fake_terms,
         ),
     ):
-        result = ontology_mesh_writes.import_mesh(client, force=True)
+        result = await ontology_mesh_writes.import_mesh(client, force=True)
 
     assert result is True
     # First session = delete_imported (one DETACH DELETE).
@@ -312,7 +312,7 @@ def test_import_mesh_force_drops_then_reimports():
     assert ":MeSHTerm" in delete_cypher
 
 
-def test_import_mesh_aborts_on_zero_terms():
+async def test_import_mesh_aborts_on_zero_terms():
     """When extraction returns 0 terms (file parsed but nothing
     matched), don't write - raise so the caller knows something went
     wrong (typed-errors contract; orchestrator catches per-ontology)."""
@@ -334,10 +334,10 @@ def test_import_mesh_aborts_on_zero_terms():
         ),
     ):
         with pytest.raises(RuntimeError, match="extracted 0 terms"):
-            ontology_mesh_writes.import_mesh(client, force=False)
+            await ontology_mesh_writes.import_mesh(client, force=False)
 
 
-def test_import_mesh_propagates_download_exception():
+async def test_import_mesh_propagates_download_exception():
     """Network failure -> log + return False, don't raise."""
     driver = RecordingDriver(
         canned_results_per_session=[
@@ -350,16 +350,16 @@ def test_import_mesh_propagates_download_exception():
         side_effect=RuntimeError("network down"),
     ):
         with pytest.raises(RuntimeError, match="network down"):
-            ontology_mesh_writes.import_mesh(client, force=False)
+            await ontology_mesh_writes.import_mesh(client, force=False)
 
 
 # ---- delete_imported ----
 
 
-def test_delete_imported_runs_one_detach_delete_query():
+async def test_delete_imported_runs_one_detach_delete_query():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    assert ontology_mesh_writes.delete_imported(client) is None
+    assert await ontology_mesh_writes.delete_imported(client) is None
     assert len(driver.sessions) == 1
     assert len(driver.sessions[0].calls) == 1
     cypher, _ = driver.sessions[0].calls[0]
@@ -367,11 +367,11 @@ def test_delete_imported_runs_one_detach_delete_query():
     assert "DETACH DELETE" in cypher
 
 
-def test_delete_imported_propagates_driver_exception():
+async def test_delete_imported_propagates_driver_exception():
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(driver)
     with pytest.raises(RuntimeError, match="boom"):
-        ontology_mesh_writes.delete_imported(client)
+        await ontology_mesh_writes.delete_imported(client)
 
 
 # ---- MeSH extraction (real rdflib graph using meshv: vocabulary) ----
