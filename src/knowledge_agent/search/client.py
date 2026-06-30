@@ -34,14 +34,13 @@ Cross-store RRF (for the future `parallel_fused` agent mode) lives in the
 agent code, not here.
 """
 
-import asyncio
 import logging
 import math
 from functools import lru_cache
 from typing import Any, Literal
 
 import lancedb
-from lancedb.db import DBConnection
+from lancedb import AsyncConnection
 
 from knowledge_agent.config import Settings, get_settings
 from knowledge_agent.ingestion.embed import embed_texts
@@ -86,16 +85,23 @@ class LanceClient:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
-        self._conn: DBConnection | None = None
+        self._conn: AsyncConnection | None = None
 
     # ---- lifecycle ----
 
-    @property
-    def conn(self) -> DBConnection:
-        """Lazy LanceDB connection (a directory handle, no network)."""
+    async def _ensure_conn(self) -> AsyncConnection:
+        """Lazy native-async LanceDB connection (a directory handle, no network).
+
+        `lancedb.connect_async` returns an `AsyncConnection`; every table
+        op on it is `async def`. The path directory itself is created
+        sync (one mkdir at first connect) — disk-only, no event-loop
+        impact.
+        """
         if self._conn is None:
             self._settings.lancedb_path.mkdir(parents=True, exist_ok=True)
-            self._conn = lancedb.connect(str(self._settings.lancedb_path))
+            self._conn = await lancedb.connect_async(
+                str(self._settings.lancedb_path),
+            )
         return self._conn
 
     async def close(self) -> None:
@@ -121,9 +127,10 @@ class LanceClient:
         orchestrator boundary (`pipeline.ingest_document`) catches and
         reports via `IngestResult.lancedb_error`.
         """
-        if CHUNKS_TABLE in self.conn.table_names():
+        conn = await self._ensure_conn()
+        if CHUNKS_TABLE in await conn.table_names():
             return
-        self.conn.create_table(CHUNKS_TABLE, schema=chunks_schema())
+        await conn.create_table(CHUNKS_TABLE, schema=chunks_schema())
         logger.info("LanceDB: created table %r", CHUNKS_TABLE)
 
     async def drop_chunks_table(self) -> None:
@@ -139,9 +146,10 @@ class LanceClient:
         Returns when the table is gone (dropped or didn't exist). LanceDB
         / disk failures propagate to the caller.
         """
-        if CHUNKS_TABLE not in self.conn.table_names():
+        conn = await self._ensure_conn()
+        if CHUNKS_TABLE not in await conn.table_names():
             return
-        self.conn.drop_table(CHUNKS_TABLE)
+        await conn.drop_table(CHUNKS_TABLE)
         logger.info("LanceDB: dropped table %r", CHUNKS_TABLE)
 
     # ---- writes ----
@@ -157,8 +165,9 @@ class LanceClient:
         """
         if not chunks:
             return
-        table = self.conn.open_table(CHUNKS_TABLE)
-        table.add(chunks)
+        conn = await self._ensure_conn()
+        table = await conn.open_table(CHUNKS_TABLE)
+        await table.add(chunks)
         logger.info("LanceDB: wrote %d chunks", len(chunks))
 
     async def delete_chunks_by_doc_id(self, doc_id: str) -> None:
@@ -177,10 +186,11 @@ class LanceClient:
             raise ValueError(
                 "LanceDB: delete_chunks_by_doc_id called with no doc_id"
             )
-        if CHUNKS_TABLE not in self.conn.table_names():
+        conn = await self._ensure_conn()
+        if CHUNKS_TABLE not in await conn.table_names():
             return
-        table = self.conn.open_table(CHUNKS_TABLE)
-        table.delete(f"doc_id = '{doc_id}'")
+        table = await conn.open_table(CHUNKS_TABLE)
+        await table.delete(f"doc_id = '{doc_id}'")
 
     async def update_doc_metadata(
         self, doc_id: str, fields: dict[str, Any]
@@ -216,12 +226,13 @@ class LanceClient:
             raise ValueError(
                 "LanceDB: update_doc_metadata called with no fields"
             )
-        if CHUNKS_TABLE not in self.conn.table_names():
+        conn = await self._ensure_conn()
+        if CHUNKS_TABLE not in await conn.table_names():
             raise RuntimeError(
                 "LanceDB: update_doc_metadata: chunks table doesn't exist"
             )
-        table = self.conn.open_table(CHUNKS_TABLE)
-        table.update(where=f"doc_id = '{doc_id}'", values=fields)
+        table = await conn.open_table(CHUNKS_TABLE)
+        await table.update(where=f"doc_id = '{doc_id}'", values=fields)
 
     async def list_indexed_docs(self) -> list[dict[str, Any]]:
         """One entry per unique `doc_id` with doc-level metadata + count.
@@ -241,18 +252,18 @@ class LanceClient:
         corpus / post-clear state) OR has no rows. LanceDB / disk read
         errors propagate to the caller.
         """
-        if CHUNKS_TABLE not in self.conn.table_names():
+        conn = await self._ensure_conn()
+        if CHUNKS_TABLE not in await conn.table_names():
             return []
-        table = self.conn.open_table(CHUNKS_TABLE)
-        rows = (
-            table.search()
+        table = await conn.open_table(CHUNKS_TABLE)
+        query = (
+            table.query()
             .select(
                 ["doc_id", "source_path", "title", "metadata_status"]
             )
             .limit(_LANCEDB_SCAN_LIMIT)
-            .to_arrow()
-            .to_pylist()
         )
+        rows = await query.to_list()
 
         seen: dict[str, dict[str, Any]] = {}
         counts: dict[str, int] = {}
@@ -296,16 +307,16 @@ class LanceClient:
             raise ValueError(
                 "LanceDB: get_chunks_by_doc_id called with no doc_id"
             )
-        if CHUNKS_TABLE not in self.conn.table_names():
+        conn = await self._ensure_conn()
+        if CHUNKS_TABLE not in await conn.table_names():
             return []
-        table = self.conn.open_table(CHUNKS_TABLE)
-        rows = (
-            table.search()
+        table = await conn.open_table(CHUNKS_TABLE)
+        query = (
+            table.query()
             .where(f"doc_id = '{doc_id}'")
             .limit(_LANCEDB_SCAN_LIMIT)
-            .to_arrow()
-            .to_pylist()
         )
+        rows = await query.to_list()
         rows.sort(key=lambda r: r["chunk_index"])
         return rows
 
@@ -332,8 +343,9 @@ class LanceClient:
         Real LanceDB / disk failures (table missing, optimize crash)
         propagate to the caller.
         """
-        table = self.conn.open_table(CHUNKS_TABLE)
-        row_count = table.count_rows()
+        conn = await self._ensure_conn()
+        table = await conn.open_table(CHUNKS_TABLE)
+        row_count = await table.count_rows()
         threshold = self._settings.min_rows_for_vector_index
 
         # ---- Vector index (gated by row count threshold).
@@ -345,9 +357,8 @@ class LanceClient:
             )
         else:
             try:
-                table.create_index(
-                    metric="cosine",
-                    vector_column_name="embedding",
+                await table.create_index(
+                    column="embedding",
                 )
                 logger.info(
                     "LanceDB: created vector index (%d rows)", row_count
@@ -363,7 +374,10 @@ class LanceClient:
 
         # ---- FTS index (always attempted, no threshold).
         try:
-            table.create_fts_index("text")
+            await table.create_index(
+                column="text",
+                config=lancedb.index.FTS(),
+            )
             logger.info("LanceDB: created FTS index (%d rows)", row_count)
         except Exception as exc:
             # Same idempotent-already-exists swallow as the vector index.
@@ -371,7 +385,7 @@ class LanceClient:
 
         # ---- Fold new rows into existing indexes. Failures here
         # (disk full, lock contention) are real and must propagate.
-        table.optimize()
+        await table.optimize()
 
     # ---- search ----
 
@@ -439,23 +453,24 @@ class LanceClient:
         query_vector = await _embed_query(query)
         if query_vector is None:
             return []
-        table = self.conn.open_table(CHUNKS_TABLE)
+        conn = await self._ensure_conn()
+        table = await conn.open_table(CHUNKS_TABLE)
         pool_size = (
             top_k * settings.mmr_candidate_multiplier
             if use_mmr
             else top_k
         )
         search = (
-            table.search(query_type="hybrid")
-            .vector(query_vector)
-            .text(query)
+            table.query()
+            .nearest_to(query_vector)
+            .nearest_to_text(query)
             .limit(pool_size)
         )
         if filters:
             where = _filters_to_sql(filters)
             if where:
                 search = search.where(where)
-        rows = search.to_arrow().to_pylist()
+        rows = await search.to_list()
         if use_mmr:
             return _mmr_rerank_rows(
                 rows, query_vector, top_k, settings.mmr_lambda, "hybrid",
@@ -478,13 +493,14 @@ class LanceClient:
         """
         settings = self._settings
         top_k = top_k or settings.top_k
-        table = self.conn.open_table(CHUNKS_TABLE)
-        search = table.search(query, query_type="fts").limit(top_k)
+        conn = await self._ensure_conn()
+        table = await conn.open_table(CHUNKS_TABLE)
+        search = table.query().nearest_to_text(query).limit(top_k)
         if filters:
             where = _filters_to_sql(filters)
             if where:
                 search = search.where(where)
-        rows = search.to_arrow().to_pylist()
+        rows = await search.to_list()
         return [_row_to_chunk(r, "fts") for r in rows]
 
     async def vector_search(
@@ -507,18 +523,19 @@ class LanceClient:
         query_vector = await _embed_query(query)
         if query_vector is None:
             return []
-        table = self.conn.open_table(CHUNKS_TABLE)
+        conn = await self._ensure_conn()
+        table = await conn.open_table(CHUNKS_TABLE)
         pool_size = (
             top_k * settings.mmr_candidate_multiplier
             if use_mmr
             else top_k
         )
-        search = table.search(query_vector).limit(pool_size)
+        search = table.query().nearest_to(query_vector).limit(pool_size)
         if filters:
             where = _filters_to_sql(filters)
             if where:
                 search = search.where(where)
-        rows = search.to_arrow().to_pylist()
+        rows = await search.to_list()
         if use_mmr:
             return _mmr_rerank_rows(
                 rows, query_vector, top_k, settings.mmr_lambda, "vector",

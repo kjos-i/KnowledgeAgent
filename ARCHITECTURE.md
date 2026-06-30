@@ -238,13 +238,11 @@ Per-corpus settings (which layers are on, which extractor, which ontologies) liv
 
 Shipped 2026-06-30. The entire I/O surface is `async def` end to end — no sync wrapper layer.
 
-- **All `Neo4jClient` + `LanceClient` methods are `async def`.** Each method dispatches blocking work via `asyncio.to_thread` (the official Neo4j Python driver is sync; LanceDB is local on-disk and embedded). No sync siblings, no `a*`-prefixed aliases.
+- **All `Neo4jClient` + `LanceClient` methods are `async def` on the native async drivers.** Neo4j uses `AsyncGraphDatabase` + `AsyncSession`; LanceDB uses `lancedb.connect_async` + `AsyncTable` / `AsyncQuery`. Every Cypher round-trip and every Lance read/write stays on the event loop — no `asyncio.to_thread` thread-pool dispatch in the hot path.
 - **`pipeline.ingest_document` and `bulk_ops.*` are `async def`.** Per-chunk extraction in L6a and L8 fans out via `asyncio.gather` bounded by `asyncio.Semaphore(settings.pipeline_max_concurrent_chunks)` — this is the wall-clock win.
 - **Embedder calls (`embed_texts`) are `async def`.** Voyage uses `asyncio.to_thread` over its sync SDK; OpenAI / Google / HuggingFace use LangChain's native `.aembed_documents()` / `.aembed_query()`.
 - **LLM calls (`init_chat_model` runnables) use `.ainvoke()`** with an `InMemoryRateLimiter` wired into the factory and `.with_retry()` for `RunnableRetry` backoff.
-- **Two sync escape hatches remain:**
-  - `kg/ontology_*_writes.py` and `kg/cross_doc_xrefs_writes.py` use `with client.driver.session() as session:` directly — they're sync helpers wrapped at the orchestrator boundary via `asyncio.to_thread`. Cypher streaming patterns make this cleaner than threading async sessions through every helper.
-  - Smoke scripts and the GUI are sync entry points; both wrap `asyncio.run(main())` at the boundary.
+- **Only sync escape hatch:** entry points (smoke scripts, the GUI's main loop) wrap `asyncio.run(main())` at the boundary. Inside the library everything is native async.
 - **Pytest config:** `asyncio_mode = "auto"` (pytest-asyncio). Every `async def test_*` runs transparently — no `@pytest.mark.asyncio` decorators in the suite.
 
 The performance shape: a single PDF with ~50 chunks at L6a goes from `O(50 * t_extract)` sequential to `O(50/8 * t_extract)` parallel — ~5-8× wall-clock improvement on extraction-bound workloads. KG writes still bottleneck at the Neo4j driver pool (`settings.neo4j_max_connection_pool_size`, default 100).

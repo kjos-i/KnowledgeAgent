@@ -62,18 +62,18 @@ class _RecordingQueryBuilder:
         self.last_limit = n
         return self
 
-    def vector(self, qv: list[float]) -> "_RecordingQueryBuilder":
+    def nearest_to(self, qv: list[float]) -> "_RecordingQueryBuilder":
         self.last_vector = list(qv)
         return self
 
-    def text(self, t: str) -> "_RecordingQueryBuilder":
+    def nearest_to_text(self, t: str) -> "_RecordingQueryBuilder":
         self.last_text = t
         return self
 
-    def to_arrow(self) -> _RecordingArrowTable:
+    async def to_list(self) -> list[dict[str, Any]]:
         if self.raise_on_to_arrow is not None:
             raise self.raise_on_to_arrow
-        return _RecordingArrowTable(rows=list(self.rows_to_return))
+        return list(self.rows_to_return)
 
 
 @dataclass
@@ -96,22 +96,27 @@ class RecordingTable:
     last_search_args: tuple[Any, ...] = ()
     last_search_kwargs: dict[str, Any] = field(default_factory=dict)
 
-    def add(self, rows: Any) -> None:
+    async def add(self, rows: Any) -> None:
         if self.raise_on_add is not None:
             raise self.raise_on_add
         self.added.append(rows)
 
-    def delete(self, where: str) -> None:
+    async def delete(self, where: str) -> None:
         if self.raise_on_delete is not None:
             raise self.raise_on_delete
         self.deleted_filters.append(where)
 
-    def update(self, where: str, values: dict[str, Any]) -> None:
+    async def update(self, where: str, values: dict[str, Any]) -> None:
         if self.raise_on_update is not None:
             raise self.raise_on_update
         self.updates.append((where, values))
 
-    def search(
+    def query(self) -> _RecordingQueryBuilder:
+        if self.query_builder is None:
+            self.query_builder = _RecordingQueryBuilder()
+        return self.query_builder
+
+    async def search(
         self, *args: Any, **kwargs: Any
     ) -> _RecordingQueryBuilder:
         self.last_search_args = args
@@ -119,6 +124,15 @@ class RecordingTable:
         if self.query_builder is None:
             self.query_builder = _RecordingQueryBuilder()
         return self.query_builder
+
+    async def count_rows(self) -> int:
+        return 0
+
+    async def create_index(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    async def optimize(self) -> None:
+        pass
 
 
 @dataclass
@@ -130,10 +144,10 @@ class RecordingConnection:
     raise_on_open: Exception | None = None
     raise_on_drop: Exception | None = None
 
-    def table_names(self) -> list[str]:
+    async def table_names(self) -> list[str]:
         return list(self.tables.keys())
 
-    def create_table(
+    async def create_table(
         self, name: str, schema: Any = None, **_kwargs: Any
     ) -> RecordingTable:
         if self.raise_on_create is not None:
@@ -142,12 +156,12 @@ class RecordingConnection:
         self.tables[name] = table
         return table
 
-    def open_table(self, name: str) -> RecordingTable:
+    async def open_table(self, name: str) -> RecordingTable:
         if self.raise_on_open is not None:
             raise self.raise_on_open
         return self.tables[name]
 
-    def drop_table(self, name: str) -> None:
+    async def drop_table(self, name: str) -> None:
         if self.raise_on_drop is not None:
             raise self.raise_on_drop
         del self.tables[name]
@@ -534,9 +548,10 @@ async def test_fts_search_returns_chunks_on_success():
 
     assert [h.chunk_id for h in hits] == ["c1", "c2"]
     assert hits[0].score == 12.5
-    # `search()` invoked with `query_type="fts"` (mode-distinguishing
-    # arg passed by `fts_search`).
-    assert table.last_search_kwargs.get("query_type") == "fts"
+    # FTS mode wires the text query through nearest_to_text — no
+    # vector set, only text.
+    assert qb.last_text == "alpha beta"
+    assert qb.last_vector is None
     assert qb.last_limit == 5
 
 
@@ -604,10 +619,10 @@ async def test_hybrid_search_returns_chunks_on_success(monkeypatch):
 
     assert len(hits) == 1
     assert hits[0].score == 0.91
-    # Hybrid uses BOTH the vector AND the text on the builder.
+    # Hybrid mode chains BOTH nearest_to(vector) AND nearest_to_text(text)
+    # on the builder.
     assert qb.last_vector == [0.5] * 1024
     assert qb.last_text == "alpha query"
-    assert table.last_search_kwargs.get("query_type") == "hybrid"
 
 
 async def test_retrieve_dispatches_to_mode_specific_method(monkeypatch):
