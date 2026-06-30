@@ -67,7 +67,7 @@ ALPHA_UNIQUE = [("glut4", "protein")]
 BETA_UNIQUE = [("hba1c", "biomarker")]
 
 
-def test_recompute_writes_related_to_edge_when_threshold_met(
+async def test_recompute_writes_related_to_edge_when_threshold_met(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """Two docs sharing 3 distinct entities meet `threshold=2`; the
@@ -76,7 +76,7 @@ def test_recompute_writes_related_to_edge_when_threshold_met(
     _seed_doc(kg_client, DOC_ALPHA, SHARED_ENTITIES + ALPHA_UNIQUE)
     _seed_doc(kg_client, DOC_BETA, SHARED_ENTITIES + BETA_UNIQUE)
 
-    n = kg_client.recompute_cross_doc_edges(DOC_ALPHA, 2)
+    n = await kg_client.recompute_cross_doc_edges(DOC_ALPHA, 2)
     assert n == 1
 
     with kg_client.driver.session() as session:
@@ -91,18 +91,18 @@ def test_recompute_writes_related_to_edge_when_threshold_met(
     assert set(row["keys"]) == {k for k, _ in SHARED_ENTITIES}
 
 
-def test_recompute_writes_no_edge_below_threshold(
+async def test_recompute_writes_no_edge_below_threshold(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """Two docs sharing 3 entities + threshold=5 → no edge."""
     _seed_doc(kg_client, DOC_ALPHA, SHARED_ENTITIES + ALPHA_UNIQUE)
     _seed_doc(kg_client, DOC_BETA, SHARED_ENTITIES + BETA_UNIQUE)
 
-    n = kg_client.recompute_cross_doc_edges(DOC_ALPHA, 5)
+    n = await kg_client.recompute_cross_doc_edges(DOC_ALPHA, 5)
     assert n == 0
 
 
-def test_recompute_wipes_previous_edges_incident_to_doc(
+async def test_recompute_wipes_previous_edges_incident_to_doc(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """Recompute is wipe-and-rewrite per doc — a second call with the
@@ -110,8 +110,8 @@ def test_recompute_wipes_previous_edges_incident_to_doc(
     _seed_doc(kg_client, DOC_ALPHA, SHARED_ENTITIES + ALPHA_UNIQUE)
     _seed_doc(kg_client, DOC_BETA, SHARED_ENTITIES + BETA_UNIQUE)
 
-    kg_client.recompute_cross_doc_edges(DOC_ALPHA, 2)
-    n_second = kg_client.recompute_cross_doc_edges(DOC_ALPHA, 2)
+    await kg_client.recompute_cross_doc_edges(DOC_ALPHA, 2)
+    n_second = await kg_client.recompute_cross_doc_edges(DOC_ALPHA, 2)
     assert n_second == 1
 
     with kg_client.driver.session() as session:
@@ -123,7 +123,7 @@ def test_recompute_wipes_previous_edges_incident_to_doc(
     assert n_edges == 1
 
 
-def test_recompute_handles_multi_doc_neighbourhood(
+async def test_recompute_handles_multi_doc_neighbourhood(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """When alpha shares enough entities with TWO other docs (beta
@@ -133,7 +133,7 @@ def test_recompute_handles_multi_doc_neighbourhood(
     _seed_doc(kg_client, DOC_BETA, SHARED_ENTITIES)
     _seed_doc(kg_client, DOC_GAMMA, SHARED_ENTITIES)
 
-    n = kg_client.recompute_cross_doc_edges(DOC_ALPHA, 2)
+    n = await kg_client.recompute_cross_doc_edges(DOC_ALPHA, 2)
     assert n == 2
 
     with kg_client.driver.session() as session:
@@ -145,12 +145,12 @@ def test_recompute_handles_multi_doc_neighbourhood(
     assert {r["doc_id"] for r in neighbours} == {DOC_BETA, DOC_GAMMA}
 
 
-def test_recompute_no_edge_for_single_doc(
+async def test_recompute_no_edge_for_single_doc(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """With only one doc present, recompute returns 0 — there's
     nothing to relate to."""
     _seed_doc(kg_client, DOC_ALPHA, SHARED_ENTITIES + ALPHA_UNIQUE)
 
-    n = kg_client.recompute_cross_doc_edges(DOC_ALPHA, 2)
+    n = await kg_client.recompute_cross_doc_edges(DOC_ALPHA, 2)
     assert n == 0

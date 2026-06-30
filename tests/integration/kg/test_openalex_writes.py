@@ -102,12 +102,12 @@ pytestmark = pytest.mark.integration
 # ---------------------------------------------------------------------------
 
 
-def test_write_citations_creates_focal_and_cited_documents(
+async def test_write_citations_creates_focal_and_cited_documents(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """L1 produces the focal :Document:Paper + N cited shadow
     :Document:Paper nodes + N :CITES edges."""
-    ok = kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    ok = await kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
     assert ok is None  # success: returns None (typed-errors contract)
 
     with kg_client.driver.session() as session:
@@ -132,13 +132,13 @@ def test_write_citations_creates_focal_and_cited_documents(
         }
 
 
-def test_write_citations_is_idempotent(
+async def test_write_citations_is_idempotent(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """Re-running write_citations on the same doc must NOT duplicate
     nodes or edges — the MERGE pattern protects this."""
-    kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
-    kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
 
     with kg_client.driver.session() as session:
         n_cites = session.run(
@@ -154,13 +154,13 @@ def test_write_citations_is_idempotent(
 # ---------------------------------------------------------------------------
 
 
-def test_write_authorships_creates_authors_with_position_and_corresponding(
+async def test_write_authorships_creates_authors_with_position_and_corresponding(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """L2 produces 3 :Author nodes + 3 :AUTHORED edges with
     `position` and `is_corresponding` properties matching the work."""
-    kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
-    ok = kg_client.write_authorships(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    ok = await kg_client.write_authorships(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
     assert ok is None  # success: returns None (typed-errors contract)
 
     with kg_client.driver.session() as session:
@@ -179,12 +179,12 @@ def test_write_authorships_creates_authors_with_position_and_corresponding(
     assert by_position["last"]["corresp"] is False
 
 
-def test_write_authorships_is_idempotent(
+async def test_write_authorships_is_idempotent(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
-    kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
-    kg_client.write_authorships(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
-    kg_client.write_authorships(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await kg_client.write_authorships(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await kg_client.write_authorships(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
 
     with kg_client.driver.session() as session:
         n_authored = session.run(
@@ -200,12 +200,12 @@ def test_write_authorships_is_idempotent(
 # ---------------------------------------------------------------------------
 
 
-def test_write_venue_creates_venue_and_published_in_edge(
+async def test_write_venue_creates_venue_and_published_in_edge(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """L3 produces 1 :Venue + 1 :PUBLISHED_IN edge."""
-    kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
-    ok = kg_client.write_venue(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    ok = await kg_client.write_venue(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
     assert ok is None  # success: returns None (typed-errors contract)
 
     with kg_client.driver.session() as session:
@@ -224,13 +224,13 @@ def test_write_venue_creates_venue_and_published_in_edge(
 # ---------------------------------------------------------------------------
 
 
-def test_write_topics_creates_topics_with_score(
+async def test_write_topics_creates_topics_with_score(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """L4 produces 2 :Topic + 2 :ABOUT_TOPIC edges, each with a
     `score` property matching the work."""
-    kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
-    ok = kg_client.write_topics(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    ok = await kg_client.write_topics(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
     assert ok is None  # success: returns None (typed-errors contract)
 
     with kg_client.driver.session() as session:
@@ -253,17 +253,17 @@ def test_write_topics_creates_topics_with_score(
 # ---------------------------------------------------------------------------
 
 
-def test_delete_doc_wipes_full_l1_l4_with_orphan_gc(
+async def test_delete_doc_wipes_full_l1_l4_with_orphan_gc(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """delete_doc removes the focal :Document AND garbage-collects
     :Author / :Venue / :Topic that no longer have inbound edges."""
-    kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
-    kg_client.write_authorships(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
-    kg_client.write_venue(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
-    kg_client.write_topics(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await kg_client.write_authorships(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await kg_client.write_venue(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await kg_client.write_topics(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
 
-    ok = kg_client.delete_doc(SYNTHETIC_DOC_ID)
+    ok = await kg_client.delete_doc(SYNTHETIC_DOC_ID)
     assert ok is None  # success: returns None (typed-errors contract)
 
     with kg_client.driver.session() as session:
@@ -294,7 +294,7 @@ def test_delete_doc_wipes_full_l1_l4_with_orphan_gc(
         assert n_topics == 0
 
 
-def test_delete_doc_l1_l4_edges_preserves_focal_and_chunks(
+async def test_delete_doc_l1_l4_edges_preserves_focal_and_chunks(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """The surgical edges-only delete drops L1-L4 edges + L1-L4
@@ -305,9 +305,9 @@ def test_delete_doc_l1_l4_edges_preserves_focal_and_chunks(
     orphaning chunks.
     """
     # Seed L1-L4.
-    kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
-    kg_client.write_authorships(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
-    kg_client.write_venue(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await kg_client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await kg_client.write_authorships(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await kg_client.write_venue(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
     # Seed a chunk so the test verifies it survives.
     with kg_client.driver.session() as session:
         session.run(
@@ -320,7 +320,7 @@ def test_delete_doc_l1_l4_edges_preserves_focal_and_chunks(
             chunk_id=f"{SYNTHETIC_DOC_ID}#0",
         )
 
-    ok = kg_client.delete_doc_l1_l4_edges(SYNTHETIC_DOC_ID)
+    ok = await kg_client.delete_doc_l1_l4_edges(SYNTHETIC_DOC_ID)
     assert ok is None  # success: returns None (typed-errors contract)
 
     with kg_client.driver.session() as session:

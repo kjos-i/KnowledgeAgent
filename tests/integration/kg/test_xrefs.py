@@ -162,7 +162,7 @@ def test_count_dangling_xrefs_counts_source_nodes(
     assert n_dangling == 2
 
 
-def test_clear_xref_edges_for_ontology_drops_only_target(
+async def test_clear_xref_edges_for_ontology_drops_only_target(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """`clear_xref_edges_for_ontology(client, term_label)` drops
@@ -181,7 +181,7 @@ def test_clear_xref_edges_for_ontology_drops_only_target(
     assert ontology_xrefs.count_xref_edges(kg_client, MONDO_TERM_LABEL) == 1
     assert ontology_xrefs.count_xref_edges(kg_client, HPO_TERM_LABEL) == 1
 
-    n_cleared = ontology_xrefs.clear_xref_edges_for_ontology(
+    n_cleared = await ontology_xrefs.clear_xref_edges_for_ontology(
         kg_client, MONDO_TERM_LABEL
     )
     # n_cleared = edges deleted + dangling_xrefs props removed

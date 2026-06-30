@@ -51,12 +51,12 @@ SYNTHETIC_CHUNKS = [
 ]
 
 
-def test_write_chunks_creates_focal_and_chunks_with_part_of_edges(
+async def test_write_chunks_creates_focal_and_chunks_with_part_of_edges(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """write_chunks MERGEs the focal :Document:Paper + N :Chunk nodes
     + N :PART_OF edges to the focal."""
-    ok = kg_client.write_chunks(
+    ok = await kg_client.write_chunks(
         SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper"
     )
     assert ok is None  # success: returns None (typed-errors contract)
@@ -89,15 +89,15 @@ def test_write_chunks_creates_focal_and_chunks_with_part_of_edges(
     assert chunks[2]["ctype"] == "figure"
 
 
-def test_write_chunks_is_idempotent(
+async def test_write_chunks_is_idempotent(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """Re-writing the same chunks doesn't duplicate nodes — MERGE on
     chunk_id protects this."""
-    kg_client.write_chunks(
+    await kg_client.write_chunks(
         SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper"
     )
-    kg_client.write_chunks(
+    await kg_client.write_chunks(
         SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper"
     )
 
@@ -115,13 +115,13 @@ def test_write_chunks_is_idempotent(
     assert n_part_of == 3
 
 
-def test_write_chunks_with_empty_list_is_noop(
+async def test_write_chunks_with_empty_list_is_noop(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """An empty chunks list is a documented no-op: returns True, no
     focal created, no chunks created. The caller already wrote (or
     will write) the focal via a separate path."""
-    ok = kg_client.write_chunks(SYNTHETIC_DOC_ID, [], "Document", "Paper")
+    ok = await kg_client.write_chunks(SYNTHETIC_DOC_ID, [], "Document", "Paper")
     assert ok is None  # success: returns None (typed-errors contract)
 
     with kg_client.driver.session() as session:
@@ -138,20 +138,20 @@ def test_write_chunks_with_empty_list_is_noop(
     assert n_chunks == 0
 
 
-def test_delete_chunks_wipes_only_target_doc(
+async def test_delete_chunks_wipes_only_target_doc(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """delete_chunks_by_doc_id removes :Chunk nodes ONLY for the
     requested doc. Other docs' chunks survive."""
     other_doc = "integ-doc-chunks-other"
-    kg_client.write_chunks(
+    await kg_client.write_chunks(
         SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper"
     )
-    kg_client.write_chunks(
+    await kg_client.write_chunks(
         other_doc, SYNTHETIC_CHUNKS, "Document", "Paper"
     )
 
-    ok = kg_client.delete_chunks_by_doc_id(SYNTHETIC_DOC_ID)
+    ok = await kg_client.delete_chunks_by_doc_id(SYNTHETIC_DOC_ID)
     assert ok is None  # success: returns None (typed-errors contract)
 
     with kg_client.driver.session() as session:
@@ -167,7 +167,7 @@ def test_delete_chunks_wipes_only_target_doc(
     assert n_other == 3
 
 
-def test_write_chunks_preserves_existing_focal_labels(
+async def test_write_chunks_preserves_existing_focal_labels(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """When a previous write (e.g. write_citations) created the focal
@@ -179,9 +179,9 @@ def test_write_chunks_preserves_existing_focal_labels(
         "doi": "https://doi.org/10.9990/x",
         "referenced_works": [],
     }
-    kg_client.write_citations(SYNTHETIC_DOC_ID, work)
+    await kg_client.write_citations(SYNTHETIC_DOC_ID, work)
     # Then: write_chunks should not clobber the :Paper label.
-    kg_client.write_chunks(
+    await kg_client.write_chunks(
         SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper"
     )
 

@@ -44,7 +44,7 @@ pytestmark = pytest.mark.integration
 # ---------------------------------------------------------------------------
 
 
-def test_embed_texts_propagates_voyage_exception(
+async def test_embed_texts_propagates_voyage_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Voyage client raises → `embed_texts` propagates the exception
@@ -66,7 +66,7 @@ def test_embed_texts_propagates_voyage_exception(
         embed.embed_texts(["any text"])
 
 
-def test_embed_texts_propagates_voyage_http_error(
+async def test_embed_texts_propagates_voyage_http_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A network-level exception (e.g. timeout) from the Voyage
@@ -86,7 +86,7 @@ def test_embed_texts_propagates_voyage_http_error(
         embed.embed_texts(["any text"])
 
 
-def test_embed_texts_empty_input_does_not_call_voyage(
+async def test_embed_texts_empty_input_does_not_call_voyage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Defensive: an empty input list short-circuits BEFORE calling
@@ -189,7 +189,7 @@ def test_resolve_doi_propagates_invalid_json(
 # ---------------------------------------------------------------------------
 
 
-def test_kg_chunk_write_propagates_when_session_raises(
+async def test_kg_chunk_write_propagates_when_session_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If the Neo4j driver's session.run raises (connection drop,
@@ -221,12 +221,12 @@ def test_kg_chunk_write_propagates_when_session_raises(
         content_type = "text"
 
     with pytest.raises(RuntimeError, match="simulated Neo4j connection drop"):
-        chunk_writes.write_chunks(
+        await chunk_writes.write_chunks(
             _FakeClient(), "doc-1", [_Chunk()], "Document", "Paper",
         )
 
 
-def test_kg_delete_chunks_propagates_when_session_raises() -> None:
+async def test_kg_delete_chunks_propagates_when_session_raises() -> None:
     """delete_chunks_by_doc_id propagates the exception on driver
     failure; the orchestrator boundary catches."""
     from knowledge_agent.kg import chunk_writes
@@ -249,10 +249,10 @@ def test_kg_delete_chunks_propagates_when_session_raises() -> None:
         driver = _FakeDriver()
 
     with pytest.raises(RuntimeError, match="simulated drop"):
-        chunk_writes.delete_chunks_by_doc_id(_FakeClient(), "doc-1")
+        await chunk_writes.delete_chunks_by_doc_id(_FakeClient(), "doc-1")
 
 
-def test_kg_writes_reject_empty_doc_id_with_value_error() -> None:
+async def test_kg_writes_reject_empty_doc_id_with_value_error() -> None:
     """Invalid input (empty doc_id) raises ValueError — catches caller
     bugs at the leaf with a clear message instead of failing silently
     or returning False."""
@@ -262,9 +262,9 @@ def test_kg_writes_reject_empty_doc_id_with_value_error() -> None:
         driver = None  # never reached — empty doc_id short-circuits
 
     with pytest.raises(ValueError, match="no doc_id"):
-        chunk_writes.delete_chunks_by_doc_id(_FakeClient(), "")
+        await chunk_writes.delete_chunks_by_doc_id(_FakeClient(), "")
     with pytest.raises(ValueError, match="no doc_id"):
-        chunk_writes.write_chunks(
+        await chunk_writes.write_chunks(
             _FakeClient(), "", [], "Document", "Paper",
         )
 
@@ -275,7 +275,7 @@ def test_kg_writes_reject_empty_doc_id_with_value_error() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_read_query_raises_on_cypher_error(
+async def test_read_query_raises_on_cypher_error(
     kg_client: Any, ensure_constraints: None,
 ) -> None:
     """`read_query` deliberately does NOT fail-soft (per its
@@ -285,7 +285,7 @@ def test_read_query_raises_on_cypher_error(
     from neo4j.exceptions import Neo4jError
 
     with pytest.raises(Neo4jError):
-        kg_client.read_query("THIS IS NOT VALID CYPHER")
+        await kg_client.read_query("THIS IS NOT VALID CYPHER")
 
 
 # ---------------------------------------------------------------------------
@@ -294,7 +294,7 @@ def test_read_query_raises_on_cypher_error(
 # ---------------------------------------------------------------------------
 
 
-def test_lance_write_chunks_raises_when_table_missing(
+async def test_lance_write_chunks_raises_when_table_missing(
     lance_client: Any, clean_lance: None,
 ) -> None:
     """If the chunks table doesn't exist (no ensure_schema yet),
@@ -307,7 +307,7 @@ def test_lance_write_chunks_raises_when_table_missing(
     """
     # clean_lance dropped the table; we deliberately skip ensure_schema.
     with pytest.raises(Exception):
-        lance_client.write_chunks([{
+        await lance_client.write_chunks([{
             "chunk_id": "x#0", "doc_id": "x", "chunk_index": 0,
             "section": None, "page": None,
             "char_start": 0, "char_end": 0,
@@ -324,13 +324,13 @@ def test_lance_write_chunks_raises_when_table_missing(
         }])
 
 
-def test_lance_get_chunks_by_doc_id_on_missing_table_returns_empty(
+async def test_lance_get_chunks_by_doc_id_on_missing_table_returns_empty(
     lance_client: Any, clean_lance: None,
 ) -> None:
     """`get_chunks_by_doc_id` on a missing table returns an empty list
     (not a raise). Sync/backfill workflows rely on this when the corpus
     is brand-new."""
-    rows = lance_client.get_chunks_by_doc_id("does-not-exist")
+    rows = await lance_client.get_chunks_by_doc_id("does-not-exist")
     assert rows == []
 
 
@@ -377,7 +377,7 @@ def test_resolve_metadata_returns_none_when_all_candidates_404(
 # ---------------------------------------------------------------------------
 
 
-def test_ingest_document_rejects_unsupported_extension(tmp_path: Any) -> None:
+async def test_ingest_document_rejects_unsupported_extension(tmp_path: Any) -> None:
     """ingest_document validates extension BEFORE side effects
     (parse, embed, write). Catches misuse before any cost is paid."""
     from knowledge_agent.ingestion.pipeline import ingest_document
@@ -392,10 +392,10 @@ def test_ingest_document_rejects_unsupported_extension(tmp_path: Any) -> None:
         layers=LayerFlags(openalex_papers=False, chunks=True),
     )
     with pytest.raises(ValueError, match="No parser available"):
-        ingest_document(bogus, config, "Document", None)
+        await ingest_document(bogus, config, "Document", None)
 
 
-def test_ingest_document_rejects_invalid_main_label(tmp_path: Any) -> None:
+async def test_ingest_document_rejects_invalid_main_label(tmp_path: Any) -> None:
     """Validates main_label up front. Same rationale as the extension
     check — fail before parsing."""
     from knowledge_agent.ingestion.pipeline import ingest_document
@@ -410,4 +410,4 @@ def test_ingest_document_rejects_invalid_main_label(tmp_path: Any) -> None:
         layers=LayerFlags(openalex_papers=False, chunks=True),
     )
     with pytest.raises(ValueError, match="main_label"):
-        ingest_document(fake, config, "NotALabel", "Paper")
+        await ingest_document(fake, config, "NotALabel", "Paper")

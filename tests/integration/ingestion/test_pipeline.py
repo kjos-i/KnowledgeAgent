@@ -68,13 +68,15 @@ def clean_both_stores(
     separately because their teardown order matters (drop lance
     before clear KG is fine; we do KG first then lance for symmetry).
     """
+    import asyncio
+
     with kg_client.driver.session() as session:
         session.run("MATCH (n) DETACH DELETE n")
-    lance_client.drop_chunks_table()
+    asyncio.run(lance_client.drop_chunks_table())
     return None
 
 
-def test_ingest_document_full_l1_l5_path(
+async def test_ingest_document_full_l1_l5_path(
     kg_client: Any, lance_client: Any, clean_both_stores: None,
     sample_pdf: Path,
 ) -> None:
@@ -82,7 +84,7 @@ def test_ingest_document_full_l1_l5_path(
     IngestResult with all expected `_ok` flags True + non-zero counts
     on both stores."""
     config = _minimal_corpus_config()
-    result = ingest_document(sample_pdf, config, "Document", "Paper")
+    result = await ingest_document(sample_pdf, config, "Document", "Paper")
 
     # The doc was parsed.
     assert result.n_chunks > 0
@@ -109,18 +111,18 @@ def test_ingest_document_full_l1_l5_path(
     assert result.kg_cross_doc_xrefs_ok is False
 
 
-def test_ingest_document_writes_chunks_to_both_stores(
+async def test_ingest_document_writes_chunks_to_both_stores(
     kg_client: Any, lance_client: Any, clean_both_stores: None,
     sample_pdf: Path,
 ) -> None:
     """After ingest, the same n_chunks land in BOTH LanceDB (chunk
     rows) and Neo4j (L5 :Chunk nodes). Catches per-store drift."""
     config = _minimal_corpus_config()
-    result = ingest_document(sample_pdf, config, "Document", "Paper")
+    result = await ingest_document(sample_pdf, config, "Document", "Paper")
     doc_id = result.doc_id
 
     # LanceDB side.
-    lance_rows = lance_client.get_chunks_by_doc_id(doc_id)
+    lance_rows = await lance_client.get_chunks_by_doc_id(doc_id)
     assert lance_rows is not None
     assert len(lance_rows) == result.n_chunks
 
@@ -133,7 +135,7 @@ def test_ingest_document_writes_chunks_to_both_stores(
     assert n_kg_chunks == result.n_chunks
 
 
-def test_ingest_document_is_idempotent_on_doc_id(
+async def test_ingest_document_is_idempotent_on_doc_id(
     kg_client: Any, lance_client: Any, clean_both_stores: None,
     sample_pdf: Path,
 ) -> None:
@@ -141,15 +143,15 @@ def test_ingest_document_is_idempotent_on_doc_id(
     doc delete step at the start of `ingest_document` ensures fresh
     write."""
     config = _minimal_corpus_config()
-    first = ingest_document(sample_pdf, config, "Document", "Paper")
-    second = ingest_document(sample_pdf, config, "Document", "Paper")
+    first = await ingest_document(sample_pdf, config, "Document", "Paper")
+    second = await ingest_document(sample_pdf, config, "Document", "Paper")
     doc_id = first.doc_id
 
     assert second.doc_id == doc_id  # same content → same id
     assert second.n_chunks == first.n_chunks
 
     # LanceDB: row count matches n_chunks (not 2x).
-    lance_rows = lance_client.get_chunks_by_doc_id(doc_id)
+    lance_rows = await lance_client.get_chunks_by_doc_id(doc_id)
     assert lance_rows is not None
     assert len(lance_rows) == first.n_chunks
 
@@ -162,18 +164,18 @@ def test_ingest_document_is_idempotent_on_doc_id(
     assert n_kg == first.n_chunks
 
 
-def test_delete_doc_wipes_both_stores(
+async def test_delete_doc_wipes_both_stores(
     kg_client: Any, lance_client: Any, clean_both_stores: None,
     sample_pdf: Path,
 ) -> None:
     """The pipeline's top-level `delete_doc` removes the document
     from BOTH stores (LanceDB chunks + Neo4j L1-L5 + orphan GC)."""
     config = _minimal_corpus_config()
-    result = ingest_document(sample_pdf, config, "Document", "Paper")
+    result = await ingest_document(sample_pdf, config, "Document", "Paper")
     doc_id = result.doc_id
 
     # Pre-condition: data present in both stores.
-    assert lance_client.get_chunks_by_doc_id(doc_id)
+    assert await lance_client.get_chunks_by_doc_id(doc_id)
     with kg_client.driver.session() as session:
         n_pre = session.run(
             "MATCH (d:Document {doc_id: $doc_id}) RETURN count(d) AS n",
@@ -181,11 +183,11 @@ def test_delete_doc_wipes_both_stores(
         ).single()["n"]
     assert n_pre == 1
 
-    ok = delete_doc(doc_id)
+    ok = await delete_doc(doc_id)
     assert ok is True
 
     # Post: both stores empty for this doc.
-    lance_rows = lance_client.get_chunks_by_doc_id(doc_id) or []
+    lance_rows = await lance_client.get_chunks_by_doc_id(doc_id) or []
     assert len(lance_rows) == 0
     with kg_client.driver.session() as session:
         n_post = session.run(

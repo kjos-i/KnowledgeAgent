@@ -158,13 +158,13 @@ def test_import_efo_writes_term_nodes_via_rdflib_owl_path(
 # ---------------------------------------------------------------------------
 
 
-def test_import_mesh_writes_term_nodes_via_streaming_n_triples_path(
+async def test_import_mesh_writes_term_nodes_via_streaming_n_triples_path(
     kg_client: Any, ensure_constraints: None,
 ) -> None:
     """import_mesh exercises the custom streaming N-Triples sink
     (~600 MB download). Asserts > 0 :MeSHTerm nodes after import."""
     ontology_mesh_writes.delete_imported(kg_client)
-    ok = ontology_mesh_writes.import_mesh(kg_client, force=True)
+    ok = await ontology_mesh_writes.import_mesh(kg_client, force=True)
     assert ok is True
 
     assert ontology_mesh_writes.is_imported(kg_client) is True

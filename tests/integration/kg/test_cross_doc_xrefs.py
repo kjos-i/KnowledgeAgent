@@ -73,7 +73,7 @@ def _seed_doc_with_canonical_entities(
     return chunk_id
 
 
-def test_recompute_l10_writes_related_by_xref_when_canonicals_match(
+async def test_recompute_l10_writes_related_by_xref_when_canonicals_match(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """Two docs canonicalising entities to the same :MeSHTerm concepts
@@ -82,7 +82,7 @@ def test_recompute_l10_writes_related_by_xref_when_canonicals_match(
     _seed_doc_with_canonical_entities(kg_client, DOC_ALPHA, shared)
     _seed_doc_with_canonical_entities(kg_client, DOC_BETA, shared)
 
-    n = kg_client.recompute_cross_doc_xrefs_edges(DOC_ALPHA, 2)
+    n = await kg_client.recompute_cross_doc_xrefs_edges(DOC_ALPHA, 2)
     assert n == 1
 
     with kg_client.driver.session() as session:
@@ -97,7 +97,7 @@ def test_recompute_l10_writes_related_by_xref_when_canonicals_match(
     assert set(row["concepts"]) == {"MESH:D008687", "MESH:D003920"}
 
 
-def test_recompute_l10_writes_via_xref_edge_equivalence(
+async def test_recompute_l10_writes_via_xref_edge_equivalence(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """When alpha canonicalises to MeSH:X and beta canonicalises to
@@ -153,7 +153,7 @@ def test_recompute_l10_writes_via_xref_edge_equivalence(
             doc_id=DOC_BETA, chunk_id=beta_chunk,
         )
 
-    n = kg_client.recompute_cross_doc_xrefs_edges(DOC_ALPHA, 2)
+    n = await kg_client.recompute_cross_doc_xrefs_edges(DOC_ALPHA, 2)
     assert n == 1
 
     with kg_client.driver.session() as session:
@@ -167,7 +167,7 @@ def test_recompute_l10_writes_via_xref_edge_equivalence(
     assert row["n"] == 2
 
 
-def test_recompute_l10_writes_no_edge_below_threshold(
+async def test_recompute_l10_writes_no_edge_below_threshold(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """Below the threshold, no edge."""
@@ -175,5 +175,5 @@ def test_recompute_l10_writes_no_edge_below_threshold(
     _seed_doc_with_canonical_entities(kg_client, DOC_ALPHA, shared)
     _seed_doc_with_canonical_entities(kg_client, DOC_BETA, shared)
 
-    n = kg_client.recompute_cross_doc_xrefs_edges(DOC_ALPHA, 2)
+    n = await kg_client.recompute_cross_doc_xrefs_edges(DOC_ALPHA, 2)
     assert n == 0

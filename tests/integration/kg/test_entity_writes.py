@@ -68,7 +68,7 @@ SYNTHETIC_MENTIONS = [
 ]
 
 
-def test_write_entities_creates_entity_nodes_and_mentions_edges(
+async def test_write_entities_creates_entity_nodes_and_mentions_edges(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """write_entities MERGEs distinct (key, type) :Entity nodes + one
@@ -79,7 +79,7 @@ def test_write_entities_creates_entity_nodes_and_mentions_edges(
     AND ONE :MENTIONS edge (the MERGE on (chunk, entity) deduplicates).
     """
     chunk_id = _seed_chunk(kg_client, SYNTHETIC_DOC_ID)
-    ok = kg_client.write_entities(
+    ok = await kg_client.write_entities(
         SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_MENTIONS)]
     )
     assert ok is None  # success: returns None (typed-errors contract)
@@ -107,7 +107,7 @@ def test_write_entities_creates_entity_nodes_and_mentions_edges(
     assert aspirin_offset == 0
 
 
-def test_write_entities_lowercases_keys(
+async def test_write_entities_lowercases_keys(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """Entity keys are stored lowercased — different casings of the
@@ -121,7 +121,7 @@ def test_write_entities_lowercases_keys(
         Mention(raw_text="egfr", entity_type="gene", offset=10),
         Mention(raw_text="Egfr", entity_type="gene", offset=20),
     ]
-    kg_client.write_entities(SYNTHETIC_DOC_ID, [(chunk_id, mentions)])
+    await kg_client.write_entities(SYNTHETIC_DOC_ID, [(chunk_id, mentions)])
 
     with kg_client.driver.session() as session:
         n_entities = session.run(
@@ -136,16 +136,16 @@ def test_write_entities_lowercases_keys(
     assert n_mentions == 1  # MERGE dedupes within the chunk
 
 
-def test_write_entities_is_idempotent(
+async def test_write_entities_is_idempotent(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """Re-running write_entities on the same chunk_mentions does NOT
     duplicate :Entity nodes or :MENTIONS edges."""
     chunk_id = _seed_chunk(kg_client, SYNTHETIC_DOC_ID)
-    kg_client.write_entities(
+    await kg_client.write_entities(
         SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_MENTIONS)]
     )
-    kg_client.write_entities(
+    await kg_client.write_entities(
         SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_MENTIONS)]
     )
 
@@ -164,18 +164,18 @@ def test_write_entities_is_idempotent(
     assert n_mentions == 3
 
 
-def test_delete_entities_by_doc_id_orphan_gcs_entities(
+async def test_delete_entities_by_doc_id_orphan_gcs_entities(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """delete_entities_by_doc_id drops :MENTIONS from this doc's
     chunks AND garbage-collects :Entity nodes that have no remaining
     inbound :MENTIONS edges from any chunk."""
     chunk_id = _seed_chunk(kg_client, SYNTHETIC_DOC_ID)
-    kg_client.write_entities(
+    await kg_client.write_entities(
         SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_MENTIONS)]
     )
 
-    ok = kg_client.delete_entities_by_doc_id(SYNTHETIC_DOC_ID)
+    ok = await kg_client.delete_entities_by_doc_id(SYNTHETIC_DOC_ID)
     assert ok is None  # success: returns None (typed-errors contract)
 
     with kg_client.driver.session() as session:
@@ -192,7 +192,7 @@ def test_delete_entities_by_doc_id_orphan_gcs_entities(
     assert n_mentions == 0
 
 
-def test_delete_entities_preserves_entities_shared_with_other_docs(
+async def test_delete_entities_preserves_entities_shared_with_other_docs(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """When :Entity has remaining inbound :MENTIONS from OTHER docs'
@@ -204,11 +204,11 @@ def test_delete_entities_preserves_entities_shared_with_other_docs(
     shared = [
         Mention(raw_text="aspirin", entity_type="drug", offset=0),
     ]
-    kg_client.write_entities(SYNTHETIC_DOC_ID, [(chunk_a, shared)])
-    kg_client.write_entities(other_doc, [(chunk_b, shared)])
+    await kg_client.write_entities(SYNTHETIC_DOC_ID, [(chunk_a, shared)])
+    await kg_client.write_entities(other_doc, [(chunk_b, shared)])
 
     # Delete only SYNTHETIC_DOC_ID's mentions.
-    kg_client.delete_entities_by_doc_id(SYNTHETIC_DOC_ID)
+    await kg_client.delete_entities_by_doc_id(SYNTHETIC_DOC_ID)
 
     with kg_client.driver.session() as session:
         n_entities = session.run(

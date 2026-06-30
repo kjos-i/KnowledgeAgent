@@ -68,14 +68,20 @@ def kg_client(_test_env_loaded: None) -> Iterator[Any]:
     per file keeps wire overhead low without leaking state across
     test files. Each test still gets the same client instance for the
     duration of its module.
+
+    `close()` is async post-refactor; we drive it via asyncio.run on
+    teardown since the fixture itself is sync (module-scoped fixtures
+    can't be async generators that yield across many tests).
     """
+    import asyncio
+
     from knowledge_agent.kg.client import Neo4jClient
 
     client = Neo4jClient()
     try:
         yield client
     finally:
-        client.close()
+        asyncio.run(client.close())
 
 
 @pytest.fixture(scope="session")
@@ -83,13 +89,18 @@ def ensure_constraints(_test_env_loaded: None) -> None:
     """Install schema constraints once at the start of the integration
     run. Constraints are idempotent (`IF NOT EXISTS`) so re-running
     is a no-op."""
+    import asyncio
+
     from knowledge_agent.kg.client import Neo4jClient
 
-    client = Neo4jClient()
-    try:
-        client.ensure_constraints()
-    finally:
-        client.close()
+    async def _run() -> None:
+        client = Neo4jClient()
+        try:
+            await client.ensure_constraints()
+        finally:
+            await client.close()
+
+    asyncio.run(_run())
 
 
 @pytest.fixture
@@ -121,13 +132,15 @@ def lance_client(_test_env_loaded: None) -> Iterator[Any]:
     """Module-scoped `LanceClient` pointing at the LanceDB path from
     `.env.test`. The connection is a handle to an on-disk directory
     (no process, no port); one per file keeps it cheap."""
+    import asyncio
+
     from knowledge_agent.search.client import LanceClient
 
     client = LanceClient()
     try:
         yield client
     finally:
-        client.close()
+        asyncio.run(client.close())
 
 
 @pytest.fixture
@@ -139,7 +152,9 @@ def clean_lance(lance_client: Any) -> Iterator[None]:
     recreates the table from the current `chunks_schema()` — so each
     test starts from an empty, schema-fresh table.
     """
-    lance_client.drop_chunks_table()
+    import asyncio
+
+    asyncio.run(lance_client.drop_chunks_table())
     yield
 
 

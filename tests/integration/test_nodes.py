@@ -74,14 +74,21 @@ def seeded_corpus(
     function-scope keeps each test isolated — agent behaviour
     should not depend on prior test state.
     """
-    with kg_client.driver.session() as session:
-        session.run("MATCH (n) DETACH DELETE n")
-    lance_client.drop_chunks_table()
+    import asyncio
 
-    config = _minimal_corpus_config()
-    result = ingest_document(sample_pdf, config, "Document", "Paper")
-    assert result.lancedb_ok is True
-    return result.doc_id
+    async def _seed() -> str:
+        with kg_client.driver.session() as session:
+            session.run("MATCH (n) DETACH DELETE n")
+        await lance_client.drop_chunks_table()
+
+        config = _minimal_corpus_config()
+        result = await ingest_document(
+            sample_pdf, config, "Document", "Paper",
+        )
+        assert result.lancedb_ok is True
+        return result.doc_id
+
+    return asyncio.run(_seed())
 
 
 def test_agent_lancedb_only_returns_structured_answer(

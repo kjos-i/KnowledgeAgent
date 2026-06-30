@@ -99,7 +99,7 @@ SYNTHETIC_TRIPLES = [
 ]
 
 
-def test_write_triples_creates_one_edge_per_triple(
+async def test_write_triples_creates_one_edge_per_triple(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """write_triples produces one typed edge per ExtractedTriple,
@@ -108,7 +108,7 @@ def test_write_triples_creates_one_edge_per_triple(
     chunk_id = _seed_chunk_and_entities(
         kg_client, SYNTHETIC_DOC_ID, SYNTHETIC_ENTITIES
     )
-    ok = kg_client.write_triples(
+    ok = await kg_client.write_triples(
         SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_TRIPLES)]
     )
     assert ok is None  # success: returns None (typed-errors contract)
@@ -131,7 +131,7 @@ def test_write_triples_creates_one_edge_per_triple(
         assert r["evidence"]  # non-empty evidence_span per triple
 
 
-def test_write_triples_out_of_vocabulary_predicate_is_skipped(
+async def test_write_triples_out_of_vocabulary_predicate_is_skipped(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """A triple with a predicate not in TRIPLE_PREDICATE_RELS is
@@ -152,7 +152,7 @@ def test_write_triples_out_of_vocabulary_predicate_is_skipped(
         ),
         SYNTHETIC_TRIPLES[1],  # valid
     ]
-    ok = kg_client.write_triples(SYNTHETIC_DOC_ID, [(chunk_id, mixed)])
+    ok = await kg_client.write_triples(SYNTHETIC_DOC_ID, [(chunk_id, mixed)])
     assert ok is None  # success: returns None (typed-errors contract)
 
     rel_union = "|".join(TRIPLE_PREDICATE_RELS)
@@ -165,7 +165,7 @@ def test_write_triples_out_of_vocabulary_predicate_is_skipped(
     assert n_real == 2  # only the two valid triples landed
 
 
-def test_delete_triples_removes_only_target_doc_edges(
+async def test_delete_triples_removes_only_target_doc_edges(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """delete_triples_by_doc_id removes ALL 15-predicate-union edges
@@ -178,10 +178,10 @@ def test_delete_triples_removes_only_target_doc_edges(
     chunk_b = _seed_chunk_and_entities(
         kg_client, other_doc, SYNTHETIC_ENTITIES
     )
-    kg_client.write_triples(SYNTHETIC_DOC_ID, [(chunk_a, SYNTHETIC_TRIPLES)])
-    kg_client.write_triples(other_doc, [(chunk_b, SYNTHETIC_TRIPLES)])
+    await kg_client.write_triples(SYNTHETIC_DOC_ID, [(chunk_a, SYNTHETIC_TRIPLES)])
+    await kg_client.write_triples(other_doc, [(chunk_b, SYNTHETIC_TRIPLES)])
 
-    ok = kg_client.delete_triples_by_doc_id(SYNTHETIC_DOC_ID)
+    ok = await kg_client.delete_triples_by_doc_id(SYNTHETIC_DOC_ID)
     assert ok is None  # success: returns None (typed-errors contract)
 
     rel_union = "|".join(TRIPLE_PREDICATE_RELS)
@@ -200,7 +200,7 @@ def test_delete_triples_removes_only_target_doc_edges(
     assert n_other == 3
 
 
-def test_get_entities_by_chunk_returns_l6a_vocabulary(
+async def test_get_entities_by_chunk_returns_l6a_vocabulary(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """The L8 backfill helper reads back this doc's L6a vocabulary
@@ -210,7 +210,7 @@ def test_get_entities_by_chunk_returns_l6a_vocabulary(
         kg_client, SYNTHETIC_DOC_ID, SYNTHETIC_ENTITIES
     )
 
-    by_chunk = kg_client.get_entities_by_chunk(SYNTHETIC_DOC_ID)
+    by_chunk = await kg_client.get_entities_by_chunk(SYNTHETIC_DOC_ID)
     assert chunk_id in by_chunk
     vocab = {(k, t) for k, t in by_chunk[chunk_id]}
     assert vocab == set(SYNTHETIC_ENTITIES)

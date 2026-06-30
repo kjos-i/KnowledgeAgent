@@ -65,42 +65,42 @@ def _synthetic_chunk(index: int, text: str) -> dict[str, Any]:
     }
 
 
-def test_ensure_schema_creates_table(
+async def test_ensure_schema_creates_table(
     lance_client: Any, clean_lance: None
 ) -> None:
     """ensure_schema creates the chunks table when it doesn't exist."""
     assert CHUNKS_TABLE not in lance_client.conn.table_names()
 
     # success: returns None (typed-errors contract)
-    assert lance_client.ensure_schema() is None
+    assert await lance_client.ensure_schema() is None
     assert CHUNKS_TABLE in lance_client.conn.table_names()
 
 
-def test_ensure_schema_is_idempotent(
+async def test_ensure_schema_is_idempotent(
     lance_client: Any, clean_lance: None
 ) -> None:
     """Two ensure_schema calls succeed; the second is a no-op."""
-    lance_client.ensure_schema()
+    await lance_client.ensure_schema()
     # success: returns None (typed-errors contract)
-    assert lance_client.ensure_schema() is None
+    assert await lance_client.ensure_schema() is None
     assert CHUNKS_TABLE in lance_client.conn.table_names()
 
 
-def test_drop_chunks_table_is_idempotent_on_missing(
+async def test_drop_chunks_table_is_idempotent_on_missing(
     lance_client: Any, clean_lance: None
 ) -> None:
     """drop_chunks_table on a missing table is a no-op."""
     # clean_lance already dropped; second drop is a no-op.
     # success: returns None (typed-errors contract)
-    assert lance_client.drop_chunks_table() is None
+    assert await lance_client.drop_chunks_table() is None
 
 
-def test_write_chunks_appends_rows(
+async def test_write_chunks_appends_rows(
     lance_client: Any, clean_lance: None
 ) -> None:
     """write_chunks adds the rows to the table; row count reflects
     the append."""
-    lance_client.ensure_schema()
+    await lance_client.ensure_schema()
     chunks = [
         _synthetic_chunk(0, "Intro paragraph."),
         _synthetic_chunk(1, "Methods overview."),
@@ -108,30 +108,30 @@ def test_write_chunks_appends_rows(
     ]
 
     # success: returns None (typed-errors contract)
-    assert lance_client.write_chunks(chunks) is None
+    assert await lance_client.write_chunks(chunks) is None
 
     table = lance_client.conn.open_table(CHUNKS_TABLE)
     assert table.count_rows() == 3
 
 
-def test_write_chunks_empty_batch_succeeds_without_append(
+async def test_write_chunks_empty_batch_succeeds_without_append(
     lance_client: Any, clean_lance: None
 ) -> None:
     """Empty chunk list is the documented success no-op."""
-    lance_client.ensure_schema()
+    await lance_client.ensure_schema()
     # success: returns None (typed-errors contract)
-    assert lance_client.write_chunks([]) is None
+    assert await lance_client.write_chunks([]) is None
 
     table = lance_client.conn.open_table(CHUNKS_TABLE)
     assert table.count_rows() == 0
 
 
-def test_get_chunks_by_doc_id_returns_only_matching_rows(
+async def test_get_chunks_by_doc_id_returns_only_matching_rows(
     lance_client: Any, clean_lance: None
 ) -> None:
     """get_chunks_by_doc_id returns rows for ONLY the requested
     doc_id, sorted by chunk_index."""
-    lance_client.ensure_schema()
+    await lance_client.ensure_schema()
     chunks = [
         _synthetic_chunk(0, "Intro."),
         _synthetic_chunk(1, "Methods."),
@@ -141,19 +141,19 @@ def test_get_chunks_by_doc_id_returns_only_matching_rows(
     other["doc_id"] = "integ-doc-lance-OTHER"
     other["chunk_id"] = "integ-doc-lance-OTHER#0"
     chunks.append(other)
-    lance_client.write_chunks(chunks)
+    await lance_client.write_chunks(chunks)
 
-    rows = lance_client.get_chunks_by_doc_id(SYNTHETIC_DOC_ID)
+    rows = await lance_client.get_chunks_by_doc_id(SYNTHETIC_DOC_ID)
     assert len(rows) == 2
     assert all(r["doc_id"] == SYNTHETIC_DOC_ID for r in rows)
 
 
-def test_delete_chunks_by_doc_id_removes_only_target_doc(
+async def test_delete_chunks_by_doc_id_removes_only_target_doc(
     lance_client: Any, clean_lance: None
 ) -> None:
     """delete_chunks_by_doc_id wipes rows for the named doc and
     preserves rows for other docs."""
-    lance_client.ensure_schema()
+    await lance_client.ensure_schema()
     chunks = [
         _synthetic_chunk(0, "Intro."),
         _synthetic_chunk(1, "Methods."),
@@ -162,34 +162,34 @@ def test_delete_chunks_by_doc_id_removes_only_target_doc(
     other["doc_id"] = "integ-doc-lance-OTHER"
     other["chunk_id"] = "integ-doc-lance-OTHER#0"
     chunks.append(other)
-    lance_client.write_chunks(chunks)
+    await lance_client.write_chunks(chunks)
     assert lance_client.conn.open_table(CHUNKS_TABLE).count_rows() == 3
 
     # success: returns None (typed-errors contract)
-    assert lance_client.delete_chunks_by_doc_id(SYNTHETIC_DOC_ID) is None
+    assert await lance_client.delete_chunks_by_doc_id(SYNTHETIC_DOC_ID) is None
 
     table = lance_client.conn.open_table(CHUNKS_TABLE)
     assert table.count_rows() == 1
-    remaining = lance_client.get_chunks_by_doc_id("integ-doc-lance-OTHER")
+    remaining = await lance_client.get_chunks_by_doc_id("integ-doc-lance-OTHER")
     assert len(remaining) == 1
 
 
-def test_delete_chunks_on_missing_table_is_noop_success(
+async def test_delete_chunks_on_missing_table_is_noop_success(
     lance_client: Any, clean_lance: None
 ) -> None:
     """delete_chunks_by_doc_id treats missing-table as no-op success
     (documented contract — fresh corpus / smoke clear)."""
     # No ensure_schema call — table doesn't exist.
     # success: returns None (typed-errors contract)
-    assert lance_client.delete_chunks_by_doc_id(SYNTHETIC_DOC_ID) is None
+    assert await lance_client.delete_chunks_by_doc_id(SYNTHETIC_DOC_ID) is None
 
 
-def test_list_indexed_docs_returns_one_row_per_doc_id(
+async def test_list_indexed_docs_returns_one_row_per_doc_id(
     lance_client: Any, clean_lance: None
 ) -> None:
     """list_indexed_docs aggregates chunks to one entry per distinct
     doc_id, with a chunk count."""
-    lance_client.ensure_schema()
+    await lance_client.ensure_schema()
     # Write 3 chunks for SYNTHETIC_DOC_ID and 2 for OTHER.
     chunks = [
         _synthetic_chunk(0, "A0."),
@@ -201,9 +201,9 @@ def test_list_indexed_docs_returns_one_row_per_doc_id(
         other["doc_id"] = "integ-doc-lance-B"
         other["chunk_id"] = f"integ-doc-lance-B#{i}"
         chunks.append(other)
-    lance_client.write_chunks(chunks)
+    await lance_client.write_chunks(chunks)
 
-    docs = lance_client.list_indexed_docs()
+    docs = await lance_client.list_indexed_docs()
     by_doc_id = {d["doc_id"]: d for d in docs}
     assert SYNTHETIC_DOC_ID in by_doc_id
     assert "integ-doc-lance-B" in by_doc_id
@@ -211,13 +211,13 @@ def test_list_indexed_docs_returns_one_row_per_doc_id(
     assert by_doc_id["integ-doc-lance-B"]["n_chunks"] == 2
 
 
-def test_update_doc_metadata_rewrites_doc_level_fields(
+async def test_update_doc_metadata_rewrites_doc_level_fields(
     lance_client: Any, clean_lance: None
 ) -> None:
     """update_doc_metadata changes the doc-level columns (title /
     year / venue / etc.) on every chunk row for the doc."""
-    lance_client.ensure_schema()
-    lance_client.write_chunks([
+    await lance_client.ensure_schema()
+    await lance_client.write_chunks([
         _synthetic_chunk(0, "Original title chunk."),
         _synthetic_chunk(1, "Same doc, second chunk."),
     ])
@@ -229,28 +229,28 @@ def test_update_doc_metadata_rewrites_doc_level_fields(
         "metadata_status": "enriched",
     }
     # success: returns None (typed-errors contract)
-    assert lance_client.update_doc_metadata(
+    assert await lance_client.update_doc_metadata(
         SYNTHETIC_DOC_ID, new_fields
     ) is None
 
-    rows = lance_client.get_chunks_by_doc_id(SYNTHETIC_DOC_ID)
+    rows = await lance_client.get_chunks_by_doc_id(SYNTHETIC_DOC_ID)
     assert all(r["title"] == "Updated Title" for r in rows)
     assert all(r["year"] == 2027 for r in rows)
     assert all(r["venue"] == "Updated Venue" for r in rows)
 
 
-def test_ensure_indexes_below_threshold_returns_true_without_failure(
+async def test_ensure_indexes_below_threshold_returns_true_without_failure(
     lance_client: Any, clean_lance: None
 ) -> None:
     """ensure_indexes on a small table (< min_rows_for_vector_index)
     successfully short-circuits — FTS is always created; vector index
     waits for the row threshold. Either way the call returns None."""
-    lance_client.ensure_schema()
+    await lance_client.ensure_schema()
     # Write just a few chunks — below the IVF_PQ training threshold.
-    lance_client.write_chunks([
+    await lance_client.write_chunks([
         _synthetic_chunk(0, "Tiny corpus."),
         _synthetic_chunk(1, "Tiny corpus 2."),
     ])
 
     # success: returns None (typed-errors contract)
-    assert lance_client.ensure_indexes() is None
+    assert await lance_client.ensure_indexes() is None
