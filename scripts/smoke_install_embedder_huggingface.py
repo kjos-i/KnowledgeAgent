@@ -65,7 +65,7 @@ async def main() -> None:
             "depending on the CUDA wheel."
         )
         bail_if_not_confirmed("Proceed with pip install?")
-        result = install_embedder_provider_execute(plan)
+        result = await install_embedder_provider_execute(plan)
         print_result("install_embedder_provider_execute", result)
         if not result.install_ok:
             print("\nInstall failed. Pip output above. Aborting.")
@@ -119,7 +119,7 @@ async def main() -> None:
         embedder_factory.clear_cache()
         uplan = uninstall_embedder_provider_plan(PROVIDER)
         print_plan("uninstall_embedder_provider_plan", uplan)
-        uresult = uninstall_embedder_provider_execute(uplan)
+        uresult = await uninstall_embedder_provider_execute(uplan)
         print_result("uninstall_embedder_provider_execute", uresult)
         print(
             "\nNOTE: HF cache files (model weights) remain on disk "

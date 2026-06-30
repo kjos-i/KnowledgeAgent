@@ -806,7 +806,7 @@ async def test_install_xrefs_plan_factory_aggregates_counts_across_18():
         assert term_label is None
         return 17
 
-    def fake_is_imported_fn(client):
+    async def fake_is_imported_fn(client):
         return True  # treat every registry entry as imported
 
     fake_registry_entry = {

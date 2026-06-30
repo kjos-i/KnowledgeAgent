@@ -1,6 +1,6 @@
 """Tests for entity_extractors.extractor_lifecycle - install / cache / uninstall."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -354,7 +354,8 @@ def test_install_plan_summary_with_provenance_surfaces_security_fields():
 
 def test_install_plan_summary_with_trust_remote_code_true_surfaces_it():
     """trust_remote_code=True is the highest-severity disclosure;
-    confirm it lands in the summary text the GUI dialog reads."""
+    confirm it lands as the raw flag AND a prominent SECURITY warning
+    explaining the load-time-code risk."""
     prov = _sample_provenance(trust_remote_code=True)
     plan = InstallExtractorPlan(
         extractor_name="x", display_name="X",
@@ -362,11 +363,16 @@ def test_install_plan_summary_with_trust_remote_code_true_surfaces_it():
         already_installed=False, provenance=prov,
     )
     assert "trust_remote_code=True" in plan.summary
+    # Per the 0d security review, the dialog appends an explicit
+    # SECURITY warning when this flag is True.
+    assert "SECURITY:" in plan.summary
+    assert "load time" in plan.summary.lower()
 
 
 def test_install_plan_summary_with_pickle_format_surfaces_it():
-    """safetensors=False means model loads via pickle - dialog must
-    surface this so user knows about the execution-on-load risk."""
+    """safetensors=False means model loads via pickle — dialog must
+    surface the raw flag AND a prominent SECURITY warning explaining
+    why (arbitrary code execution at load time)."""
     prov = _sample_provenance(safetensors=False)
     plan = InstallExtractorPlan(
         extractor_name="x", display_name="X",
@@ -374,15 +380,21 @@ def test_install_plan_summary_with_pickle_format_surfaces_it():
         already_installed=False, provenance=prov,
     )
     assert "safetensors=False" in plan.summary
+    # The 0d security review (2026-06-30) added an explicit warning
+    # appended via `_provenance.security_warning_text`; tighten the
+    # assertion so a regression that drops it fails here.
+    assert "SECURITY:" in plan.summary
+    assert "pickle" in plan.summary.lower()
 
 
-def test_install_execute_bundled_is_noop_does_not_run_pip():
+@pytest.mark.asyncio
+async def test_install_execute_bundled_is_noop_does_not_run_pip():
     plan = InstallExtractorPlan(
         extractor_name="llm", display_name="LLM",
         bundled=True, pip_extras=None, already_installed=True,
     )
-    with patch(_PIP_PATCH) as pip_mock:
-        result = install_extractor_execute(plan)
+    with patch(_PIP_PATCH, new_callable=AsyncMock) as pip_mock:
+        result = await install_extractor_execute(plan)
 
     pip_mock.assert_not_called()
     assert result.did_install is False
@@ -390,26 +402,30 @@ def test_install_execute_bundled_is_noop_does_not_run_pip():
     assert result.restart_required is False
 
 
-def test_install_execute_already_installed_is_noop():
+@pytest.mark.asyncio
+async def test_install_execute_already_installed_is_noop():
     plan = InstallExtractorPlan(
         extractor_name="hunflair2", display_name="HunFlair2",
         bundled=False, pip_extras="entities-hunflair2", already_installed=True,
     )
-    with patch(_PIP_PATCH) as pip_mock:
-        result = install_extractor_execute(plan)
+    with patch(_PIP_PATCH, new_callable=AsyncMock) as pip_mock:
+        result = await install_extractor_execute(plan)
 
     pip_mock.assert_not_called()
     assert result.did_install is False
 
 
-def test_install_execute_runs_pip_with_distribution_and_extras():
+@pytest.mark.asyncio
+async def test_install_execute_runs_pip_with_distribution_and_extras():
     plan = InstallExtractorPlan(
         extractor_name="hunflair2", display_name="HunFlair2",
         bundled=False, pip_extras="entities-hunflair2",
         already_installed=False,
     )
-    with patch(_PIP_PATCH, return_value=(True, "ok")) as pip_mock:
-        result = install_extractor_execute(
+    with patch(
+        _PIP_PATCH, new_callable=AsyncMock, return_value=(True, "ok"),
+    ) as pip_mock:
+        result = await install_extractor_execute(
             plan, distribution_name="research-literature-agent",
         )
 
@@ -422,14 +438,19 @@ def test_install_execute_runs_pip_with_distribution_and_extras():
     assert result.restart_required is True
 
 
-def test_install_execute_propagates_pip_failure():
+@pytest.mark.asyncio
+async def test_install_execute_propagates_pip_failure():
     plan = InstallExtractorPlan(
         extractor_name="hunflair2", display_name="HunFlair2",
         bundled=False, pip_extras="entities-hunflair2",
         already_installed=False,
     )
-    with patch(_PIP_PATCH, return_value=(False, "ERROR: no permission")):
-        result = install_extractor_execute(plan)
+    with patch(
+        _PIP_PATCH,
+        new_callable=AsyncMock,
+        return_value=(False, "ERROR: no permission"),
+    ):
+        result = await install_extractor_execute(plan)
 
     assert result.did_install is True
     assert result.install_ok is False
@@ -438,12 +459,15 @@ def test_install_execute_propagates_pip_failure():
     assert "ERROR" in result.pip_output
 
 
-def test_install_execute_returns_result_dataclass():
+@pytest.mark.asyncio
+async def test_install_execute_returns_result_dataclass():
     plan = InstallExtractorPlan(
         extractor_name="llm", display_name="LLM",
         bundled=True, pip_extras=None, already_installed=True,
     )
-    assert isinstance(install_extractor_execute(plan), InstallExtractorResult)
+    assert isinstance(
+        await install_extractor_execute(plan), InstallExtractorResult,
+    )
 
 
 # ---- delete_extractor_cache_plan / execute ----
@@ -504,38 +528,43 @@ def test_delete_cache_plan_for_installed_extractor_lists_packages():
     assert "flair-model" in plan.summary
 
 
-def test_delete_cache_execute_noop_when_no_model_packages():
+@pytest.mark.asyncio
+async def test_delete_cache_execute_noop_when_no_model_packages():
     plan = DeleteExtractorCachePlan(
         extractor_name="llm", display_name="LLM",
         model_packages=(), installed=True,
     )
-    with patch(_PIP_PATCH) as pip_mock:
-        result = delete_extractor_cache_execute(plan)
+    with patch(_PIP_PATCH, new_callable=AsyncMock) as pip_mock:
+        result = await delete_extractor_cache_execute(plan)
 
     pip_mock.assert_not_called()
     assert result.did_delete is False
     assert result.delete_ok is True
 
 
-def test_delete_cache_execute_noop_when_not_installed():
+@pytest.mark.asyncio
+async def test_delete_cache_execute_noop_when_not_installed():
     plan = DeleteExtractorCachePlan(
         extractor_name="hunflair2", display_name="HunFlair2",
         model_packages=("flair-model",), installed=False,
     )
-    with patch(_PIP_PATCH) as pip_mock:
-        result = delete_extractor_cache_execute(plan)
+    with patch(_PIP_PATCH, new_callable=AsyncMock) as pip_mock:
+        result = await delete_extractor_cache_execute(plan)
 
     pip_mock.assert_not_called()
     assert result.did_delete is False
 
 
-def test_delete_cache_execute_runs_pip_uninstall_with_y_flag():
+@pytest.mark.asyncio
+async def test_delete_cache_execute_runs_pip_uninstall_with_y_flag():
     plan = DeleteExtractorCachePlan(
         extractor_name="hunflair2", display_name="HunFlair2",
         model_packages=("flair-model",), installed=True,
     )
-    with patch(_PIP_PATCH, return_value=(True, "removed")) as pip_mock:
-        result = delete_extractor_cache_execute(plan)
+    with patch(
+        _PIP_PATCH, new_callable=AsyncMock, return_value=(True, "removed"),
+    ) as pip_mock:
+        result = await delete_extractor_cache_execute(plan)
 
     args, _ = pip_mock.call_args
     # `-y` so pip doesn't try to interactively confirm.
@@ -544,24 +573,30 @@ def test_delete_cache_execute_runs_pip_uninstall_with_y_flag():
     assert result.delete_ok is True
 
 
-def test_delete_cache_execute_propagates_failure():
+@pytest.mark.asyncio
+async def test_delete_cache_execute_propagates_failure():
     plan = DeleteExtractorCachePlan(
         extractor_name="hunflair2", display_name="HunFlair2",
         model_packages=("flair-model",), installed=True,
     )
-    with patch(_PIP_PATCH, return_value=(False, "permission denied")):
-        result = delete_extractor_cache_execute(plan)
+    with patch(
+        _PIP_PATCH,
+        new_callable=AsyncMock,
+        return_value=(False, "permission denied"),
+    ):
+        result = await delete_extractor_cache_execute(plan)
 
     assert result.delete_ok is False
 
 
-def test_delete_cache_execute_returns_result_dataclass():
+@pytest.mark.asyncio
+async def test_delete_cache_execute_returns_result_dataclass():
     plan = DeleteExtractorCachePlan(
         extractor_name="llm", display_name="LLM",
         model_packages=(), installed=True,
     )
     assert isinstance(
-        delete_extractor_cache_execute(plan), DeleteExtractorCacheResult,
+        await delete_extractor_cache_execute(plan), DeleteExtractorCacheResult,
     )
 
 
@@ -625,14 +660,15 @@ def test_uninstall_plan_for_not_installed_extractor():
     assert "not installed" in plan.summary.lower()
 
 
-def test_uninstall_execute_bundled_does_not_run_pip_and_reports_blocked():
+@pytest.mark.asyncio
+async def test_uninstall_execute_bundled_does_not_run_pip_and_reports_blocked():
     plan = UninstallExtractorPlan(
         extractor_name="llm", display_name="LLM",
         bundled=True, pip_extras=None,
         packages_to_remove=(), installed=True,
     )
-    with patch(_PIP_PATCH) as pip_mock:
-        result = uninstall_extractor_execute(plan)
+    with patch(_PIP_PATCH, new_callable=AsyncMock) as pip_mock:
+        result = await uninstall_extractor_execute(plan)
 
     pip_mock.assert_not_called()
     assert result.did_uninstall is False
@@ -641,28 +677,32 @@ def test_uninstall_execute_bundled_does_not_run_pip_and_reports_blocked():
     assert result.uninstall_ok is False
 
 
-def test_uninstall_execute_not_installed_is_noop_success():
+@pytest.mark.asyncio
+async def test_uninstall_execute_not_installed_is_noop_success():
     plan = UninstallExtractorPlan(
         extractor_name="hunflair2", display_name="HunFlair2",
         bundled=False, pip_extras="entities-hunflair2",
         packages_to_remove=("hunflair2", "flair-model"), installed=False,
     )
-    with patch(_PIP_PATCH) as pip_mock:
-        result = uninstall_extractor_execute(plan)
+    with patch(_PIP_PATCH, new_callable=AsyncMock) as pip_mock:
+        result = await uninstall_extractor_execute(plan)
 
     pip_mock.assert_not_called()
     assert result.did_uninstall is False
     assert result.uninstall_ok is True
 
 
-def test_uninstall_execute_runs_pip_uninstall_for_all_packages():
+@pytest.mark.asyncio
+async def test_uninstall_execute_runs_pip_uninstall_for_all_packages():
     plan = UninstallExtractorPlan(
         extractor_name="hunflair2", display_name="HunFlair2",
         bundled=False, pip_extras="entities-hunflair2",
         packages_to_remove=("hunflair2", "flair-model"), installed=True,
     )
-    with patch(_PIP_PATCH, return_value=(True, "ok")) as pip_mock:
-        result = uninstall_extractor_execute(plan)
+    with patch(
+        _PIP_PATCH, new_callable=AsyncMock, return_value=(True, "ok"),
+    ) as pip_mock:
+        result = await uninstall_extractor_execute(plan)
 
     args, _ = pip_mock.call_args
     assert args[0] == [
@@ -673,27 +713,31 @@ def test_uninstall_execute_runs_pip_uninstall_for_all_packages():
     assert result.restart_required is True
 
 
-def test_uninstall_execute_failed_pip_does_not_suggest_restart():
+@pytest.mark.asyncio
+async def test_uninstall_execute_failed_pip_does_not_suggest_restart():
     plan = UninstallExtractorPlan(
         extractor_name="hunflair2", display_name="HunFlair2",
         bundled=False, pip_extras="entities-hunflair2",
         packages_to_remove=("hunflair2", "flair-model"), installed=True,
     )
-    with patch(_PIP_PATCH, return_value=(False, "denied")):
-        result = uninstall_extractor_execute(plan)
+    with patch(
+        _PIP_PATCH, new_callable=AsyncMock, return_value=(False, "denied"),
+    ):
+        result = await uninstall_extractor_execute(plan)
 
     assert result.uninstall_ok is False
     assert result.restart_required is False
 
 
-def test_uninstall_execute_returns_result_dataclass():
+@pytest.mark.asyncio
+async def test_uninstall_execute_returns_result_dataclass():
     plan = UninstallExtractorPlan(
         extractor_name="llm", display_name="LLM",
         bundled=True, pip_extras=None,
         packages_to_remove=(), installed=True,
     )
     assert isinstance(
-        uninstall_extractor_execute(plan), UninstallExtractorResult,
+        await uninstall_extractor_execute(plan), UninstallExtractorResult,
     )
 
 

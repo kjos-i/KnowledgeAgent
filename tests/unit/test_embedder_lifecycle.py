@@ -6,7 +6,7 @@ dimension-change guard which is unique to embedders (the LanceDB
 chunks-table vector field pins its dimension at creation).
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -138,14 +138,17 @@ def test_unknown_provider_raises():
 # ---- install execute ----
 
 
-def test_execute_runs_pip_with_correct_extra():
+@pytest.mark.asyncio
+async def test_execute_runs_pip_with_correct_extra():
     with patch.dict(
         EMBEDDER_PROVIDER_REGISTRY["openai"],
         {"is_installed_fn": lambda: False},
     ):
         plan = install_embedder_provider_plan("openai")
-    with patch(_PIP_PATCH, return_value=(True, "ok")) as pip:
-        result = install_embedder_provider_execute(plan)
+    with patch(
+        _PIP_PATCH, new_callable=AsyncMock, return_value=(True, "ok"),
+    ) as pip:
+        result = await install_embedder_provider_execute(plan)
     args = pip.call_args.args[0]
     assert "[embed-openai]" in args[1]
     assert result.install_ok is True
@@ -170,7 +173,8 @@ def test_uninstall_blocked_when_provider_is_active():
     assert "ACTIVE embedding provider" in plan.summary
 
 
-def test_uninstall_execute_no_op_when_active():
+@pytest.mark.asyncio
+async def test_uninstall_execute_no_op_when_active():
     plan = UninstallEmbedderProviderPlan(
         provider_name="huggingface",
         display_name="HuggingFace (local)",
@@ -179,13 +183,14 @@ def test_uninstall_execute_no_op_when_active():
         bundled=False,
         is_active=True,
     )
-    with patch(_PIP_PATCH) as pip:
-        result = uninstall_embedder_provider_execute(plan)
+    with patch(_PIP_PATCH, new_callable=AsyncMock) as pip:
+        result = await uninstall_embedder_provider_execute(plan)
     pip.assert_not_called()
     assert result.did_uninstall is False
 
 
-def test_uninstall_runs_pip_when_inactive_and_installed():
+@pytest.mark.asyncio
+async def test_uninstall_runs_pip_when_inactive_and_installed():
     plan = UninstallEmbedderProviderPlan(
         provider_name="google",
         display_name="Google",
@@ -194,8 +199,10 @@ def test_uninstall_runs_pip_when_inactive_and_installed():
         bundled=False,
         is_active=False,
     )
-    with patch(_PIP_PATCH, return_value=(True, "ok")) as pip:
-        result = uninstall_embedder_provider_execute(plan)
+    with patch(
+        _PIP_PATCH, new_callable=AsyncMock, return_value=(True, "ok"),
+    ) as pip:
+        result = await uninstall_embedder_provider_execute(plan)
     pip.assert_called_once()
     assert pip.call_args.args[0] == [
         "uninstall", "-y", "langchain-google-genai",

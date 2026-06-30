@@ -15,6 +15,7 @@ Run from the project root:
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -42,7 +43,7 @@ PROVIDER = "google"
 SMOKE_MODEL = "gemini-1.5-flash"
 
 
-def main() -> None:
+async def main() -> None:
     if not get_settings().google_api_key:
         print(
             "GOOGLE_API_KEY is not set in .env. Add it before running "
@@ -50,7 +51,7 @@ def main() -> None:
         )
         sys.exit(1)
 
-    plan = install_llm_provider_plan(PROVIDER)
+    plan = await install_llm_provider_plan(PROVIDER)
     print_plan(f"install_llm_provider_plan({PROVIDER!r})", plan)
 
     if plan.already_installed:
@@ -60,7 +61,7 @@ def main() -> None:
         )
     else:
         bail_if_not_confirmed("Proceed with pip install?")
-        result = install_llm_provider_execute(plan)
+        result = await install_llm_provider_execute(plan)
         print_result("install_llm_provider_execute", result)
         if not result.install_ok:
             print("\nInstall failed. Pip output is above. Aborting smoke.")
@@ -83,11 +84,11 @@ def main() -> None:
         llm_factory.clear_cache()
         uplan = uninstall_llm_provider_plan(PROVIDER)
         print_plan("uninstall_llm_provider_plan", uplan)
-        uresult = uninstall_llm_provider_execute(uplan)
+        uresult = await uninstall_llm_provider_execute(uplan)
         print_result("uninstall_llm_provider_execute", uresult)
     else:
         print("Keeping the adapter installed. Done.")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

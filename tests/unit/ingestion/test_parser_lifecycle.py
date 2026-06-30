@@ -5,7 +5,7 @@ execute tests, patch `PARSER_LIFECYCLE_REGISTRY` + `shutil.which` for
 plan tests with controlled environment states. No real pip is invoked.
 """
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -193,7 +193,8 @@ def test_install_plan_already_installed_but_ffmpeg_missing_still_flags_it():
 # ---- install_parser_extra_execute ----
 
 
-def test_install_execute_already_installed_does_not_run_pip():
+@pytest.mark.asyncio
+async def test_install_execute_already_installed_does_not_run_pip():
     plan = InstallParserExtraPlan(
         extra_name="code",
         display_name="Code Parser",
@@ -202,8 +203,8 @@ def test_install_execute_already_installed_does_not_run_pip():
         system_deps_status={},
         system_deps_hints={},
     )
-    with patch(_PIP_PATCH) as pip_mock:
-        result = install_parser_extra_execute(plan)
+    with patch(_PIP_PATCH, new_callable=AsyncMock) as pip_mock:
+        result = await install_parser_extra_execute(plan)
 
     pip_mock.assert_not_called()
     assert result.did_install is False
@@ -211,7 +212,8 @@ def test_install_execute_already_installed_does_not_run_pip():
     assert result.restart_required is False
 
 
-def test_install_execute_not_installed_calls_pip_with_extras_target():
+@pytest.mark.asyncio
+async def test_install_execute_not_installed_calls_pip_with_extras_target():
     plan = InstallParserExtraPlan(
         extra_name="code",
         display_name="Code Parser",
@@ -220,8 +222,12 @@ def test_install_execute_not_installed_calls_pip_with_extras_target():
         system_deps_status={},
         system_deps_hints={},
     )
-    with patch(_PIP_PATCH, return_value=(True, "Successfully installed")) as pip_mock:
-        result = install_parser_extra_execute(plan)
+    with patch(
+        _PIP_PATCH,
+        new_callable=AsyncMock,
+        return_value=(True, "Successfully installed"),
+    ) as pip_mock:
+        result = await install_parser_extra_execute(plan)
 
     pip_mock.assert_called_once()
     args = pip_mock.call_args[0][0]
@@ -233,14 +239,19 @@ def test_install_execute_not_installed_calls_pip_with_extras_target():
     assert result.restart_required is True
 
 
-def test_install_execute_pip_failure_sets_install_ok_false_and_no_restart():
+@pytest.mark.asyncio
+async def test_install_execute_pip_failure_sets_install_ok_false_and_no_restart():
     plan = InstallParserExtraPlan(
         extra_name="code", display_name="Code Parser",
         pip_extras="parsers-code", already_installed=False,
         system_deps_status={}, system_deps_hints={},
     )
-    with patch(_PIP_PATCH, return_value=(False, "ERROR: could not")):
-        result = install_parser_extra_execute(plan)
+    with patch(
+        _PIP_PATCH,
+        new_callable=AsyncMock,
+        return_value=(False, "ERROR: could not"),
+    ):
+        result = await install_parser_extra_execute(plan)
 
     assert result.did_install is True
     assert result.install_ok is False
@@ -288,25 +299,29 @@ def test_uninstall_plan_installed_mentions_packages_and_restart():
 # ---- uninstall_parser_extra_execute ----
 
 
-def test_uninstall_execute_not_installed_is_noop():
+@pytest.mark.asyncio
+async def test_uninstall_execute_not_installed_is_noop():
     plan = UninstallParserExtraPlan(
         extra_name="code", display_name="Code",
         packages_to_remove=("foo",), installed=False,
     )
-    with patch(_PIP_PATCH) as pip_mock:
-        result = uninstall_parser_extra_execute(plan)
+    with patch(_PIP_PATCH, new_callable=AsyncMock) as pip_mock:
+        result = await uninstall_parser_extra_execute(plan)
     pip_mock.assert_not_called()
     assert result.did_uninstall is False
     assert result.uninstall_ok is True
 
 
-def test_uninstall_execute_installed_calls_pip_uninstall():
+@pytest.mark.asyncio
+async def test_uninstall_execute_installed_calls_pip_uninstall():
     plan = UninstallParserExtraPlan(
         extra_name="code", display_name="Code",
         packages_to_remove=("tree-sitter-language-pack",), installed=True,
     )
-    with patch(_PIP_PATCH, return_value=(True, "Removed")) as pip_mock:
-        result = uninstall_parser_extra_execute(plan)
+    with patch(
+        _PIP_PATCH, new_callable=AsyncMock, return_value=(True, "Removed"),
+    ) as pip_mock:
+        result = await uninstall_parser_extra_execute(plan)
 
     pip_mock.assert_called_once()
     args = pip_mock.call_args[0][0]

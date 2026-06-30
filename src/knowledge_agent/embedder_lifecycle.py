@@ -49,8 +49,8 @@ Dimension reference (read by the lifecycle's switch step):
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import subprocess
 import sys
 from dataclasses import dataclass
 from typing import Any
@@ -367,21 +367,39 @@ EMBEDDER_PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
 # ---- subprocess wrapper (mockable) ----
 
 
-def _run_pip(args: list[str], timeout: float = 1200.0) -> tuple[bool, str]:
-    """Run `python -m pip <args>` and return (success, combined output).
+async def _run_pip(
+    args: list[str], timeout: float = 1200.0
+) -> tuple[bool, str]:
+    """Run `python -m pip <args>` async; return (success, combined output).
 
     Timeout default is 20 minutes — the HF extra pulls torch (large
     compile chain on first install).
+
+    Uses `asyncio.create_subprocess_exec` so the caller's event loop
+    (Flet GUI / CLI / eval harness) stays responsive while pip runs.
+    On timeout the child is killed with `proc.kill()` + reaped via
+    `proc.wait()` so no zombie remains.
     """
     cmd = [sys.executable, "-m", "pip"] + args
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        output = (result.stdout or "") + (result.stderr or "")
-        return result.returncode == 0, output
-    except subprocess.TimeoutExpired as exc:
-        return False, f"pip command timed out after {timeout}s: {exc!r}"
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return False, f"pip command timed out after {timeout}s"
+        output = (
+            (stdout.decode("utf-8", errors="replace") if stdout else "")
+            + (stderr.decode("utf-8", errors="replace") if stderr else "")
+        )
+        return proc.returncode == 0, output
     except Exception as exc:
         return False, f"pip subprocess failed: {exc!r}"
 
@@ -479,7 +497,7 @@ def install_embedder_provider_plan(
     )
 
 
-def install_embedder_provider_execute(
+async def install_embedder_provider_execute(
     plan: InstallEmbedderProviderPlan,
     *,
     distribution_name: str = "knowledge-agent",
@@ -492,7 +510,7 @@ def install_embedder_provider_execute(
             restart_required=False, pip_output="",
         )
     target = f"{distribution_name}[{plan.pip_extras}]"
-    ok, output = _run_pip(["install", target])
+    ok, output = await _run_pip(["install", target])
     return InstallEmbedderProviderResult(
         provider_name=plan.provider_name,
         did_install=True,
@@ -569,7 +587,7 @@ def uninstall_embedder_provider_plan(
     )
 
 
-def uninstall_embedder_provider_execute(
+async def uninstall_embedder_provider_execute(
     plan: UninstallEmbedderProviderPlan,
 ) -> UninstallEmbedderProviderResult:
     """Pip-uninstall the provider's adapter package."""
@@ -579,7 +597,7 @@ def uninstall_embedder_provider_execute(
             did_uninstall=False, uninstall_ok=True,
             restart_required=False, pip_output="",
         )
-    ok, output = _run_pip(
+    ok, output = await _run_pip(
         ["uninstall", "-y", *plan.packages_to_remove]
     )
     return UninstallEmbedderProviderResult(
@@ -614,6 +632,11 @@ class DownloadHFModelPlan:
                 f"Install the HuggingFace libs first "
                 f"(~2-3 GB), then return to this dialog."
             )
+        # Future-proof: today all 4 curated HF entries ship safetensors,
+        # but the warning helper will surface a prominent line if a
+        # future menu entry ever has safetensors=False.
+        from knowledge_agent._provenance import security_warning_text
+
         return (
             f"Download {self.provenance.display_name}: pulls "
             f"~{self.provenance.download_size_mb} MB from "
@@ -624,6 +647,7 @@ class DownloadHFModelPlan:
             f"Source: {self.provenance.source_url} "
             f"(pinned to {self.provenance.pinned_revision[:12]}). "
             f"safetensors={self.provenance.safetensors}."
+            f"{security_warning_text(safetensors=self.provenance.safetensors)}"
         )
 
 

@@ -701,7 +701,7 @@ async def install_xrefs_plan(client, new_xrefs_mode: str) -> InstallXrefsPlan:
         # without nodes). For "imported" the truer probe is the
         # registry entry's `is_imported_fn`, so use that.
         entry = ONTOLOGY_REGISTRY.get(_term_label_to_registry_key(term_label))
-        if entry is not None and entry["is_imported_fn"](client):
+        if entry is not None and await entry["is_imported_fn"](client):
             n_imported += 1
 
     n_edges = await count_xref_edges(client, None)

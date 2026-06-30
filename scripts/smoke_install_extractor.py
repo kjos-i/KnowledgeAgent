@@ -37,6 +37,7 @@ Run from the project root:
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -62,7 +63,7 @@ from knowledge_agent.entity_extractors.extractor_lifecycle import (  # noqa: E40
 EXTRACTOR = "gliner"
 
 
-def main() -> None:
+async def main() -> None:
     header(f"STEP 1: build install plan for {EXTRACTOR!r}")
     plan = install_extractor_plan(EXTRACTOR)
     print_plan(f"install_extractor_plan({EXTRACTOR!r})", plan)
@@ -77,7 +78,7 @@ def main() -> None:
             f"Proceed with pip install of {EXTRACTOR!r} "
             f"(extra {plan.pip_extras!r})?"
         )
-        result = install_extractor_execute(plan)
+        result = await install_extractor_execute(plan)
         print_result("install_extractor_execute", result)
         if not result.install_ok:
             print(
@@ -110,7 +111,7 @@ def main() -> None:
     if confirm_no_default(f"Uninstall {EXTRACTOR!r} now?"):
         uplan = uninstall_extractor_plan(EXTRACTOR)
         print_plan(f"uninstall_extractor_plan({EXTRACTOR!r})", uplan)
-        uresult = uninstall_extractor_execute(uplan)
+        uresult = await uninstall_extractor_execute(uplan)
         print_result("uninstall_extractor_execute", uresult)
         print(
             "\nNOTE: HF cache for this model stays on disk "
@@ -122,4 +123,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

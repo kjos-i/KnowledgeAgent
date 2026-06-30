@@ -27,12 +27,22 @@ _SRC_ROOT = _REPO_ROOT / "src" / "knowledge_agent"
 
 
 _ASYNC_BEARING_MODULES = [
+    _SRC_ROOT / "_http_client.py",
+    _SRC_ROOT / "cli.py",
+    _SRC_ROOT / "health.py",
     _SRC_ROOT / "kg" / "client.py",
     _SRC_ROOT / "search" / "client.py",
+    _SRC_ROOT / "ingestion" / "metadata.py",
     _SRC_ROOT / "ingestion" / "pipeline.py",
     _SRC_ROOT / "ingestion" / "bulk_ops.py",
     _SRC_ROOT / "ingestion" / "metadata_resolution.py",
+    _SRC_ROOT / "ingestion" / "parser_lifecycle.py",
+    _SRC_ROOT / "kg" / "ontology_helpers.py",
+    _SRC_ROOT / "kg" / "ontology_fibo_writes.py",
     _SRC_ROOT / "kg" / "ontology_lifecycle.py",
+    _SRC_ROOT / "entity_extractors" / "extractor_lifecycle.py",
+    _SRC_ROOT / "embedder_lifecycle.py",
+    _SRC_ROOT / "llm_lifecycle.py",
     _SRC_ROOT / "embedder_factory.py",
 ]
 
@@ -60,6 +70,19 @@ def _collect_async_names() -> set[str]:
     return names - _IGNORE_NAMES
 
 
+def _is_asyncio_run_call(node: ast.Call) -> bool:
+    """True iff this Call is `asyncio.run(...)` — the canonical sync→async
+    bridge. Used to exempt the inner call from the sync-calls-async check.
+    """
+    func = node.func
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "run"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "asyncio"
+    )
+
+
 class _SyncCallsFinder(ast.NodeVisitor):
     """Walk a module; record any sync-scope call whose name is async."""
 
@@ -71,6 +94,10 @@ class _SyncCallsFinder(ast.NodeVisitor):
         # legitimate patterns (decorators, dispatcher tables) reference
         # async-named callables at import time.
         self._sync_stack: list[bool] = []
+        # Depth counter: > 0 means we're processing args of an
+        # `asyncio.run(...)` call, where an "unawaited" coroutine is the
+        # whole point (`asyncio.run(coro())` is the sync→async bridge).
+        self._asyncio_run_depth = 0
         self.problems: list[tuple[int, str]] = []
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
@@ -90,7 +117,11 @@ class _SyncCallsFinder(ast.NodeVisitor):
         self._sync_stack.pop()
 
     def visit_Call(self, node: ast.Call) -> None:
-        if self._sync_stack and self._sync_stack[-1]:
+        if (
+            self._sync_stack
+            and self._sync_stack[-1]
+            and self._asyncio_run_depth == 0
+        ):
             name: str | None = None
             if isinstance(node.func, ast.Attribute):
                 name = node.func.attr
@@ -98,7 +129,16 @@ class _SyncCallsFinder(ast.NodeVisitor):
                 name = node.func.id
             if name is not None and name in self._async_names:
                 self.problems.append((node.lineno, name))
-        self.generic_visit(node)
+        # `asyncio.run(<coro_call>)`: descend with the depth flag set so
+        # the inner coroutine-producing call isn't flagged.
+        if _is_asyncio_run_call(node):
+            self._asyncio_run_depth += 1
+            try:
+                self.generic_visit(node)
+            finally:
+                self._asyncio_run_depth -= 1
+        else:
+            self.generic_visit(node)
 
 
 def test_no_sync_function_calls_async_api_without_await() -> None:

@@ -46,11 +46,11 @@ actually ship a frozen distribution.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import platform
 import shutil
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -180,23 +180,41 @@ def _system_dep_hint(
 # ---- subprocess wrapper (mockable) ----
 
 
-def _run_pip(args: list[str], timeout: float = 600.0) -> tuple[bool, str]:
-    """Run `python -m pip <args>` and return (success, combined output).
+async def _run_pip(
+    args: list[str], timeout: float = 600.0
+) -> tuple[bool, str]:
+    """Run `python -m pip <args>` async; return (success, combined output).
 
     `sys.executable` ensures the pip call targets the SAME interpreter
     the app is running under so the new package is visible after a
     restart. Timeout default is generous (10 minutes) because
     `parsers-asr` pulls openai-whisper + numba (large compile chain).
+
+    Uses `asyncio.create_subprocess_exec` so the caller's event loop
+    (Flet GUI / CLI / eval harness) stays responsive while pip runs.
+    On timeout the child is killed with `proc.kill()` + reaped via
+    `proc.wait()` so no zombie remains.
     """
     cmd = [sys.executable, "-m", "pip"] + args
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        output = (result.stdout or "") + (result.stderr or "")
-        return result.returncode == 0, output
-    except subprocess.TimeoutExpired as exc:
-        return False, f"pip command timed out after {timeout}s: {exc!r}"
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return False, f"pip command timed out after {timeout}s"
+        output = (
+            (stdout.decode("utf-8", errors="replace") if stdout else "")
+            + (stderr.decode("utf-8", errors="replace") if stderr else "")
+        )
+        return proc.returncode == 0, output
     except Exception as exc:
         return False, f"pip subprocess failed: {exc!r}"
 
@@ -291,7 +309,7 @@ def install_parser_extra_plan(extra_name: str) -> InstallParserExtraPlan:
     )
 
 
-def install_parser_extra_execute(
+async def install_parser_extra_execute(
     plan: InstallParserExtraPlan,
     *,
     distribution_name: str = "research-literature-agent",
@@ -312,7 +330,7 @@ def install_parser_extra_execute(
         )
 
     target = f"{distribution_name}[{plan.pip_extras}]"
-    ok, output = _run_pip(["install", target])
+    ok, output = await _run_pip(["install", target])
     return InstallParserExtraResult(
         extra_name=plan.extra_name,
         did_install=True,
@@ -373,7 +391,7 @@ def uninstall_parser_extra_plan(extra_name: str) -> UninstallParserExtraPlan:
     )
 
 
-def uninstall_parser_extra_execute(
+async def uninstall_parser_extra_execute(
     plan: UninstallParserExtraPlan,
 ) -> UninstallParserExtraResult:
     """Pip-uninstall the library packages declared for this parser-extra."""
@@ -383,7 +401,7 @@ def uninstall_parser_extra_execute(
             did_uninstall=False, uninstall_ok=True,
             restart_required=False, pip_output="",
         )
-    ok, output = _run_pip(
+    ok, output = await _run_pip(
         ["uninstall", "-y", *plan.packages_to_remove]
     )
     return UninstallParserExtraResult(

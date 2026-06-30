@@ -47,9 +47,9 @@ actually ship a frozen distribution.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
-import subprocess
 import sys
 from dataclasses import dataclass
 from typing import Any
@@ -301,24 +301,30 @@ def _ollama_adapter_is_installed() -> bool:
     return True
 
 
-def _ollama_daemon_is_reachable() -> bool:
+async def _ollama_daemon_is_reachable() -> bool:
     """True iff the Ollama daemon binary is on PATH OR responding at
     `ollama_base_url`.
 
-    Uses `shutil.which` first (fast, no network); falls back to a
-    short HTTP GET on /api/tags (1s timeout). Order: PATH check is
-    cheap + handles the common case where the daemon is installed
-    but not started; HTTP check handles remote daemons + custom
-    base URLs.
+    Uses `shutil.which` first (fast, no network); falls back to an
+    async HTTP GET on /api/tags (1s timeout) through the central
+    `_http_client` (so its retry policy / User-Agent are uniform with
+    every other outbound HTTP call). Order: PATH check is cheap +
+    handles the common case where the daemon is installed but not
+    started; HTTP check handles remote daemons + custom base URLs.
+
+    `max_retries=0` so a missing daemon fails fast — this is a
+    liveness probe, not an API call worth retrying.
     """
     if shutil.which("ollama") is not None:
         return True
     settings = get_settings()
     try:
-        import httpx
+        from knowledge_agent import _http_client
 
-        resp = httpx.get(
-            f"{settings.ollama_base_url}/api/tags", timeout=1.0
+        resp = await _http_client.request(
+            f"{settings.ollama_base_url}/api/tags",
+            timeout=1.0,
+            max_retries=0,
         )
         return resp.status_code == 200
     except Exception:
@@ -404,50 +410,88 @@ LLM_PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
 # ---- subprocess wrapper (mockable) ----
 
 
-def _run_pip(args: list[str], timeout: float = 600.0) -> tuple[bool, str]:
-    """Run `python -m pip <args>` and return (success, combined output).
+async def _run_pip(
+    args: list[str], timeout: float = 600.0
+) -> tuple[bool, str]:
+    """Run `python -m pip <args>` async; return (success, combined output).
 
     Same shape as `parser_lifecycle._run_pip` and
     `extractor_lifecycle._run_pip` — kept duplicated rather than
     extracted to a shared helper to match the existing codebase
     pattern (each lifecycle module is self-contained).
+
+    Uses `asyncio.create_subprocess_exec` so the caller's event loop
+    (Flet GUI / CLI / eval harness) stays responsive while pip runs.
+    On timeout the child is killed with `proc.kill()` + reaped via
+    `proc.wait()` so no zombie remains.
     """
     cmd = [sys.executable, "-m", "pip"] + args
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        output = (result.stdout or "") + (result.stderr or "")
-        return result.returncode == 0, output
-    except subprocess.TimeoutExpired as exc:
-        return False, f"pip command timed out after {timeout}s: {exc!r}"
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return False, f"pip command timed out after {timeout}s"
+        output = (
+            (stdout.decode("utf-8", errors="replace") if stdout else "")
+            + (stderr.decode("utf-8", errors="replace") if stderr else "")
+        )
+        return proc.returncode == 0, output
     except Exception as exc:
         return False, f"pip subprocess failed: {exc!r}"
 
 
-def _run_ollama(args: list[str], timeout: float = 1800.0) -> tuple[bool, str]:
-    """Run `ollama <args>` and return (success, combined output).
+async def _run_ollama(
+    args: list[str], timeout: float = 1800.0
+) -> tuple[bool, str]:
+    """Run `ollama <args>` async; return (success, combined output).
 
     Used for `ollama pull <model>` — large models take time, so the
     default timeout is 30 minutes. The daemon must be running; the
     pull will fail fast with a clear error if it isn't.
+
+    Uses `asyncio.create_subprocess_exec` so the caller's event loop
+    (Flet GUI / CLI / eval harness) stays responsive across the multi-
+    minute pull. On timeout the child is killed + reaped.
+    `FileNotFoundError` from create_subprocess_exec surfaces when the
+    `ollama` binary isn't on PATH — translated to the same friendly
+    message as before.
     """
     cmd = ["ollama"] + args
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        output = (result.stdout or "") + (result.stderr or "")
-        return result.returncode == 0, output
     except FileNotFoundError:
         return False, (
             "`ollama` not found on PATH. Install the daemon from "
             "https://ollama.com/download first."
         )
-    except subprocess.TimeoutExpired as exc:
-        return False, f"ollama command timed out after {timeout}s: {exc!r}"
     except Exception as exc:
         return False, f"ollama subprocess failed: {exc!r}"
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return False, f"ollama command timed out after {timeout}s"
+    output = (
+        (stdout.decode("utf-8", errors="replace") if stdout else "")
+        + (stderr.decode("utf-8", errors="replace") if stderr else "")
+    )
+    return proc.returncode == 0, output
 
 
 # ---- shared helpers ----
@@ -542,13 +586,13 @@ class InstallLLMProviderResult:
     pip_output: str
 
 
-def install_llm_provider_plan(provider: str) -> InstallLLMProviderPlan:
+async def install_llm_provider_plan(provider: str) -> InstallLLMProviderPlan:
     """Build an install plan for the given LLM provider."""
     entry = _registry_entry(provider)
     prov: LLMProviderProvenance = entry["provenance"]
     daemon_reachable: bool | None = None
     if prov.requires_daemon:
-        daemon_reachable = _ollama_daemon_is_reachable()
+        daemon_reachable = await _ollama_daemon_is_reachable()
     return InstallLLMProviderPlan(
         provider_name=provider,
         display_name=entry["display_name"],
@@ -560,7 +604,7 @@ def install_llm_provider_plan(provider: str) -> InstallLLMProviderPlan:
     )
 
 
-def install_llm_provider_execute(
+async def install_llm_provider_execute(
     plan: InstallLLMProviderPlan,
     *,
     distribution_name: str = "knowledge-agent",
@@ -577,7 +621,7 @@ def install_llm_provider_execute(
             restart_required=False, pip_output="",
         )
     target = f"{distribution_name}[{plan.pip_extras}]"
-    ok, output = _run_pip(["install", target])
+    ok, output = await _run_pip(["install", target])
     return InstallLLMProviderResult(
         provider_name=plan.provider_name,
         did_install=True,
@@ -652,7 +696,7 @@ def uninstall_llm_provider_plan(provider: str) -> UninstallLLMProviderPlan:
     )
 
 
-def uninstall_llm_provider_execute(
+async def uninstall_llm_provider_execute(
     plan: UninstallLLMProviderPlan,
 ) -> UninstallLLMProviderResult:
     """Pip-uninstall the provider's adapter package.
@@ -669,7 +713,7 @@ def uninstall_llm_provider_execute(
             did_uninstall=False, uninstall_ok=True,
             restart_required=False, pip_output="",
         )
-    ok, output = _run_pip(
+    ok, output = await _run_pip(
         ["uninstall", "-y", *plan.packages_to_remove]
     )
     return UninstallLLMProviderResult(
@@ -725,7 +769,7 @@ class PullOllamaModelResult:
     ollama_output: str
 
 
-def pull_ollama_model_plan(model_id: str) -> PullOllamaModelPlan:
+async def pull_ollama_model_plan(model_id: str) -> PullOllamaModelPlan:
     """Build a plan for pulling one curated Ollama model.
 
     `model_id` must be a key in `OLLAMA_MODELS` — outside-of-menu
@@ -737,11 +781,11 @@ def pull_ollama_model_plan(model_id: str) -> PullOllamaModelPlan:
     return PullOllamaModelPlan(
         model_id=model_id,
         provenance=prov,
-        daemon_reachable=_ollama_daemon_is_reachable(),
+        daemon_reachable=await _ollama_daemon_is_reachable(),
     )
 
 
-def pull_ollama_model_execute(
+async def pull_ollama_model_execute(
     plan: PullOllamaModelPlan,
 ) -> PullOllamaModelResult:
     """Run `ollama pull <model_id>` against the local daemon."""
@@ -754,7 +798,7 @@ def pull_ollama_model_execute(
                 "https://ollama.com/download and start it first."
             ),
         )
-    ok, output = _run_ollama(["pull", plan.model_id])
+    ok, output = await _run_ollama(["pull", plan.model_id])
     return PullOllamaModelResult(
         model_id=plan.model_id,
         did_pull=True,

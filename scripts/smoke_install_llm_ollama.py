@@ -22,6 +22,7 @@ Run from the project root:
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -53,9 +54,9 @@ from knowledge_agent.llm_lifecycle import (  # noqa: E402
 PROVIDER = "ollama"
 
 
-def main() -> None:
+async def main() -> None:
     header("STEP 1: detect Ollama daemon")
-    daemon_up = _ollama_daemon_is_reachable()
+    daemon_up = await _ollama_daemon_is_reachable()
     print(f"Daemon reachable: {daemon_up}")
     if not daemon_up:
         print(
@@ -66,7 +67,7 @@ def main() -> None:
         sys.exit(1)
 
     header("STEP 2: install langchain-ollama adapter")
-    plan = install_llm_provider_plan(PROVIDER)
+    plan = await install_llm_provider_plan(PROVIDER)
     print_plan(f"install_llm_provider_plan({PROVIDER!r})", plan)
 
     if plan.already_installed:
@@ -75,7 +76,7 @@ def main() -> None:
         )
     else:
         bail_if_not_confirmed("Proceed with pip install?")
-        result = install_llm_provider_execute(plan)
+        result = await install_llm_provider_execute(plan)
         print_result("install_llm_provider_execute", result)
         if not result.install_ok:
             print("\nInstall failed. Pip output above. Aborting.")
@@ -104,7 +105,7 @@ def main() -> None:
         # what `ollama pull` would do — but only execute pull if
         # they confirm (smoke shouldn't auto-pull GB-scale files).
         if chosen_model in OLLAMA_MODELS:
-            pull_plan = pull_ollama_model_plan(chosen_model)
+            pull_plan = await pull_ollama_model_plan(chosen_model)
             print_plan(
                 f"pull_ollama_model_plan({chosen_model!r})", pull_plan,
             )
@@ -112,7 +113,7 @@ def main() -> None:
                 f"Run `ollama pull {chosen_model}` now? "
                 "(skip if already pulled)"
             ):
-                pull_result = pull_ollama_model_execute(pull_plan)
+                pull_result = await pull_ollama_model_execute(pull_plan)
                 print_result("pull_ollama_model_execute", pull_result)
 
         settings = get_settings()
@@ -132,7 +133,7 @@ def main() -> None:
         llm_factory.clear_cache()
         uplan = uninstall_llm_provider_plan(PROVIDER)
         print_plan("uninstall_llm_provider_plan", uplan)
-        uresult = uninstall_llm_provider_execute(uplan)
+        uresult = await uninstall_llm_provider_execute(uplan)
         print_result("uninstall_llm_provider_execute", uresult)
     else:
         print(
@@ -143,4 +144,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

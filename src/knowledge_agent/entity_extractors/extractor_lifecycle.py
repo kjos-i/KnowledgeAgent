@@ -42,8 +42,8 @@ actually ship a frozen distribution.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import subprocess
 import sys
 from dataclasses import dataclass
 from typing import Any
@@ -327,23 +327,41 @@ EXTRACTOR_REGISTRY: dict[str, dict[str, Any]] = {
 # ---- subprocess wrapper (mockable) ----
 
 
-def _run_pip(args: list[str], timeout: float = 600.0) -> tuple[bool, str]:
-    """Run `python -m pip <args>` and return (success, combined output).
+async def _run_pip(
+    args: list[str], timeout: float = 600.0
+) -> tuple[bool, str]:
+    """Run `python -m pip <args>` async; return (success, combined output).
 
     `sys.executable` ensures the pip call targets the SAME interpreter
     the app is running under, so the new package is visible after a
     restart. Timeout default is generous (10 minutes) because heavy
     extractor extras can pull in PyTorch + CUDA wheels.
+
+    Uses `asyncio.create_subprocess_exec` so the caller's event loop
+    (Flet GUI / CLI / eval harness) stays responsive while pip runs.
+    On timeout the child is killed with `proc.kill()` + reaped via
+    `proc.wait()` so no zombie remains.
     """
     cmd = [sys.executable, "-m", "pip"] + args
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        output = (result.stdout or "") + (result.stderr or "")
-        return result.returncode == 0, output
-    except subprocess.TimeoutExpired as exc:
-        return False, f"pip command timed out after {timeout}s: {exc!r}"
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return False, f"pip command timed out after {timeout}s"
+        output = (
+            (stdout.decode("utf-8", errors="replace") if stdout else "")
+            + (stderr.decode("utf-8", errors="replace") if stderr else "")
+        )
+        return proc.returncode == 0, output
     except Exception as exc:
         return False, f"pip subprocess failed: {exc!r}"
 
@@ -425,6 +443,10 @@ class InstallExtractorPlan:
             )
         # Surface provenance facts in the summary so even text-only
         # callers (CLI, smoke tests) see what's about to download.
+        # Security-elevated flags (no-safetensors, trust_remote_code)
+        # get a prominent appended warning via `_provenance`.
+        from knowledge_agent._provenance import security_warning_text
+
         return (
             f"Install {self.display_name}? Will run "
             f"`pip install <this package>[{self.pip_extras}]`. "
@@ -436,6 +458,7 @@ class InstallExtractorPlan:
             f"safetensors={self.provenance.safetensors}, "
             f"trust_remote_code={self.provenance.trust_remote_code}. "
             f"A restart is required after install."
+            f"{security_warning_text(safetensors=self.provenance.safetensors, trust_remote_code=self.provenance.trust_remote_code)}"
             f"{self._coverage_clause()}"
         )
 
@@ -580,7 +603,7 @@ def install_extractor_plan(extractor_name: str) -> InstallExtractorPlan:
     )
 
 
-def install_extractor_execute(
+async def install_extractor_execute(
     plan: InstallExtractorPlan,
     *,
     distribution_name: str = "research-literature-agent",
@@ -606,7 +629,7 @@ def install_extractor_execute(
         )
 
     target = f"{distribution_name}[{plan.pip_extras}]"
-    ok, output = _run_pip(["install", target])
+    ok, output = await _run_pip(["install", target])
     return InstallExtractorResult(
         extractor_name=plan.extractor_name,
         did_install=True,
@@ -677,7 +700,7 @@ def delete_extractor_cache_plan(
     )
 
 
-def delete_extractor_cache_execute(
+async def delete_extractor_cache_execute(
     plan: DeleteExtractorCachePlan,
 ) -> DeleteExtractorCacheResult:
     """Pip-uninstall the model packages declared in `plan.model_packages`."""
@@ -687,7 +710,7 @@ def delete_extractor_cache_execute(
             did_delete=False, delete_ok=True, pip_output="",
         )
 
-    ok, output = _run_pip(
+    ok, output = await _run_pip(
         ["uninstall", "-y", *plan.model_packages]
     )
     return DeleteExtractorCacheResult(
@@ -772,7 +795,7 @@ def uninstall_extractor_plan(extractor_name: str) -> UninstallExtractorPlan:
     )
 
 
-def uninstall_extractor_execute(
+async def uninstall_extractor_execute(
     plan: UninstallExtractorPlan,
 ) -> UninstallExtractorResult:
     """Pip-uninstall the library + model packages in one command.
@@ -795,7 +818,7 @@ def uninstall_extractor_execute(
             restart_required=False, pip_output="",
         )
 
-    ok, output = _run_pip(
+    ok, output = await _run_pip(
         ["uninstall", "-y", *plan.packages_to_remove]
     )
     return UninstallExtractorResult(

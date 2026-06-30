@@ -36,6 +36,13 @@ dependencies = [
 # is opt-in, no provider is privileged as "the default that's always
 # installed". See [[llm-embedder-provider-swap]] for the wizard spec.
 
+[project.scripts]
+# Headless CLI (sprint 0b 2026-06-30). Run `kg --help` for subcommands.
+# `kg ingest <folder>`, `kg query "..."`, `kg health`. Wheel install +
+# `pyproject.toml [project.scripts]` is the canonical way to expose a
+# binary; `python -m knowledge_agent` ALSO works via `__main__.py`.
+kg = "knowledge_agent.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=9.0.3,<10.0.0",
@@ -182,6 +189,15 @@ addopts = [
 # refactor shipped 2026-06-29 made the whole stack coroutine-native;
 # explicit `@pytest.mark.asyncio` on every test would be noise.
 asyncio_mode = "auto"
+# Unawaited coroutines are a class of bug the AST consistency guard
+# (`tests/unit/test_async_consistency.py`) can't catch when the call
+# is indirect — e.g. `entry["is_imported_fn"](client)` through a
+# registry dict. Promote the runtime warning to a hard test failure
+# so the indirect cases surface immediately instead of silently
+# producing truthy-coroutine bugs.
+filterwarnings = [
+    "error::RuntimeWarning:.*was never awaited.*",
+]
 markers = [
     "integration: real-service tests — Neo4j Desktop test instance + LanceDB + Voyage. Opt in via `pytest -m integration`.",
     "e2e: end-to-end tests with the Flet app launched. Opt in via `pytest -m e2e`.",
