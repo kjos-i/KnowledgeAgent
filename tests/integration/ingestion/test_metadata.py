@@ -66,28 +66,28 @@ def test_extract_doi_candidates_returns_empty_for_no_doi_chunks() -> None:
     assert extract_doi_candidates(chunks) == []
 
 
-def test_resolve_doi_returns_work_dict_for_known_doi() -> None:
+async def test_resolve_doi_returns_work_dict_for_known_doi() -> None:
     """A real OpenAlex lookup of a known-good DOI returns the work
     JSON with at least `id`, `doi`, `title` keys."""
-    work = resolve_doi(KNOWN_DOI)
+    work = await resolve_doi(KNOWN_DOI)
     assert work is not None
     assert "id" in work
     assert "doi" in work
     assert work["doi"].lower().endswith(KNOWN_DOI.lower())
 
 
-def test_resolve_doi_returns_none_for_unknown_doi() -> None:
+async def test_resolve_doi_returns_none_for_unknown_doi() -> None:
     """A clearly bogus DOI returns None — the 404 path is fail-soft."""
-    work = resolve_doi("10.99999/this-definitely-does-not-exist-9999")
+    work = await resolve_doi("10.99999/this-definitely-does-not-exist-9999")
     assert work is None
 
 
-def test_resolve_metadata_full_path_on_real_pdf(sample_pdf: Path) -> None:
+async def test_resolve_metadata_full_path_on_real_pdf(sample_pdf: Path) -> None:
     """End-to-end: parse the real PDF, extract DOI candidates, resolve
     the first that hits OpenAlex. Should return a work dict when the
     sample PDF carries a real DOI."""
     chunks = parse_document(sample_pdf)
-    work = resolve_metadata(chunks)
+    work = await resolve_metadata(chunks)
     assert work is not None
     assert "id" in work
     # The work should have a title — a real OpenAlex record.

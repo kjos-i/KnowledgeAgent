@@ -22,8 +22,7 @@ import logging
 import re
 from typing import Any
 
-import httpx
-
+from knowledge_agent import _http_client
 from knowledge_agent.config import get_settings
 from knowledge_agent.ingestion.parse import ParsedChunk
 
@@ -61,8 +60,8 @@ def extract_doi_candidates(
     return candidates
 
 
-def resolve_doi(doi: str, timeout: float = 10.0) -> dict[str, Any] | None:
-    """Resolve a DOI to its OpenAlex work record.
+async def resolve_doi(doi: str, timeout: float = 10.0) -> dict[str, Any] | None:
+    """Resolve a DOI to its OpenAlex work record (async).
 
     Returns the work JSON dict on a 200 response, or `None` on 404
     (legitimate "DOI not in OpenAlex"). Raises on:
@@ -74,7 +73,8 @@ def resolve_doi(doi: str, timeout: float = 10.0) -> dict[str, Any] | None:
     failure doesn't abort the walk of the remaining candidates.
 
     Polite-pool email (`mailto` query param) is added if `openalex_mailto`
-    is set in Settings.
+    is set in Settings. Retry policy (429 / 5xx / network errors with
+    exponential backoff) comes from the central HTTP client.
     """
     settings = get_settings()
     params: dict[str, str] = {}
@@ -82,7 +82,7 @@ def resolve_doi(doi: str, timeout: float = 10.0) -> dict[str, Any] | None:
         params["mailto"] = settings.openalex_mailto
 
     url = f"{OPENALEX_BASE_URL}/works/doi:{doi}"
-    response = httpx.get(url, params=params, timeout=timeout)
+    response = await _http_client.request(url, params=params, timeout=timeout)
 
     if response.status_code == 404:
         logger.info("OpenAlex: DOI not found: %r", doi)
@@ -94,7 +94,7 @@ def resolve_doi(doi: str, timeout: float = 10.0) -> dict[str, Any] | None:
     return response.json()
 
 
-def resolve_metadata(chunks: list[ParsedChunk]) -> dict[str, Any] | None:
+async def resolve_metadata(chunks: list[ParsedChunk]) -> dict[str, Any] | None:
     """Extract DOI candidates from chunks and resolve the first that succeeds.
 
     Returns the OpenAlex work dict on success, or None if no DOI was found
@@ -110,7 +110,7 @@ def resolve_metadata(chunks: list[ParsedChunk]) -> dict[str, Any] | None:
         return None
     for doi in candidates:
         try:
-            work = resolve_doi(doi)
+            work = await resolve_doi(doi)
         except Exception as exc:
             logger.warning(
                 "metadata: resolve_doi failed for %r: %r; trying next candidate",

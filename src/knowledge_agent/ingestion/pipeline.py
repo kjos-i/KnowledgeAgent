@@ -883,7 +883,7 @@ async def ingest_document(
     )
 
     # ---- 3. Metadata resolution (one HTTP call) ----
-    work = await asyncio.to_thread(resolve_metadata, chunks)
+    work = await resolve_metadata(chunks)
     if work is not None:
         metadata_status = "enriched"
     elif extract_doi_candidates(chunks):

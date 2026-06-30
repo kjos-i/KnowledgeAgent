@@ -21,6 +21,7 @@ Automated counterpart (for regression catching, no inspection):
 Run via `pytest -m integration tests/integration/ingestion/`.
 """
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -60,7 +61,7 @@ def _summarize_work(work: dict[str, Any]) -> None:
     print(f"  n referenced_works: {len(refs)}")
 
 
-def main() -> None:
+async def main() -> None:
     pdfs = sorted(TEST_DOCS.glob("*.pdf"))
     if not pdfs:
         print(f"No PDFs found in {TEST_DOCS}")
@@ -82,7 +83,7 @@ def main() -> None:
 
     doi = candidates[0]
     print(f"Resolving {doi!r} against OpenAlex...")
-    work = resolve_doi(doi)
+    work = await resolve_doi(doi)
     if work is None:
         print("  -> None (DOI not in OpenAlex or network error)")
         return
@@ -93,4 +94,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

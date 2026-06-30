@@ -319,7 +319,7 @@ async def import_ontology_data(client,
     # `ensure_ontology_imported`); here we let download / parse failures
     # propagate so the caller can distinguish "network down" from
     # "Cypher problem" from "empty extraction" via the exception type.
-    path = ensure_cached(url, cache_filename)
+    path = await ensure_cached(url, cache_filename)
     terms = read_and_extract(path)
 
     if not terms:

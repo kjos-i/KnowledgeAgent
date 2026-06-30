@@ -202,7 +202,7 @@ async def import_mesh(client,
         await delete_imported(client)
 
     logger.info("MeSH: downloading %s", MESH_DOWNLOAD_URL)
-    path = ensure_cached(MESH_DOWNLOAD_URL, MESH_CACHE_FILENAME)
+    path = await ensure_cached(MESH_DOWNLOAD_URL, MESH_CACHE_FILENAME)
     terms = _read_and_extract(path)
 
     if not terms:

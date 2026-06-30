@@ -117,30 +117,32 @@ async def test_embed_texts_empty_input_does_not_call_voyage(
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_doi_propagates_network_error(
+async def test_resolve_doi_propagates_network_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A connection error during the OpenAlex request propagates under
     typed-errors. `resolve_metadata` (the per-candidate orchestrator)
     catches per-candidate so the walk continues; the pipeline marks
     the doc 'pending' when no candidate succeeds."""
+    from knowledge_agent import _http_client
     from knowledge_agent.ingestion import metadata
 
-    def boom(*_args: Any, **_kwargs: Any) -> Any:
+    async def boom(*_args: Any, **_kwargs: Any) -> Any:
         raise httpx.ConnectError("simulated connection reset")
 
-    monkeypatch.setattr(httpx, "get", boom)
+    monkeypatch.setattr(_http_client, "request", boom)
 
     with pytest.raises(httpx.ConnectError, match="simulated connection reset"):
-        metadata.resolve_doi("10.1234/anything")
+        await metadata.resolve_doi("10.1234/anything")
 
 
-def test_resolve_doi_raises_on_500_response(
+async def test_resolve_doi_raises_on_500_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A non-200, non-404 response from OpenAlex raises under
     typed-errors so the orchestrator can distinguish 'API down' from
     'DOI not found'."""
+    from knowledge_agent import _http_client
     from knowledge_agent.ingestion import metadata
 
     class _FakeResponse:
@@ -149,20 +151,21 @@ def test_resolve_doi_raises_on_500_response(
         def json(self) -> Any:
             raise AssertionError("should not be called on non-200")
 
-    def fake_get(*_args: Any, **_kwargs: Any) -> Any:
+    async def fake_get(*_args: Any, **_kwargs: Any) -> Any:
         return _FakeResponse()
 
-    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(_http_client, "request", fake_get)
 
     with pytest.raises(RuntimeError, match="status 503"):
-        metadata.resolve_doi("10.1234/anything")
+        await metadata.resolve_doi("10.1234/anything")
 
 
-def test_resolve_doi_propagates_invalid_json(
+async def test_resolve_doi_propagates_invalid_json(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A 200 response with malformed JSON propagates as ValueError —
     typed-errors distinguishes 'real OpenAlex bug' from 404 miss."""
+    from knowledge_agent import _http_client
     from knowledge_agent.ingestion import metadata
 
     class _FakeResponse:
@@ -171,13 +174,13 @@ def test_resolve_doi_propagates_invalid_json(
         def json(self) -> Any:
             raise ValueError("malformed JSON from openalex")
 
-    def fake_get(*_args: Any, **_kwargs: Any) -> Any:
+    async def fake_get(*_args: Any, **_kwargs: Any) -> Any:
         return _FakeResponse()
 
-    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(_http_client, "request", fake_get)
 
     with pytest.raises(ValueError, match="malformed JSON from openalex"):
-        metadata.resolve_doi("10.1234/anything")
+        await metadata.resolve_doi("10.1234/anything")
 
 
 # ---------------------------------------------------------------------------
@@ -342,11 +345,12 @@ async def test_lance_get_chunks_by_doc_id_on_missing_table_returns_empty(
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_metadata_returns_none_when_all_candidates_404(
+async def test_resolve_metadata_returns_none_when_all_candidates_404(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If extract_doi_candidates returns several DOIs but EVERY one
     404s at OpenAlex, resolve_metadata returns None."""
+    from knowledge_agent import _http_client
     from knowledge_agent.ingestion import metadata
     from knowledge_agent.ingestion.parsers import base
 
@@ -356,10 +360,10 @@ def test_resolve_metadata_returns_none_when_all_candidates_404(
         def json(self) -> Any:
             return {}
 
-    def fake_get(*_args: Any, **_kwargs: Any) -> Any:
+    async def fake_get(*_args: Any, **_kwargs: Any) -> Any:
         return _FakeResponse()
 
-    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(_http_client, "request", fake_get)
 
     chunks = [
         base.ParsedChunk(
@@ -367,7 +371,7 @@ def test_resolve_metadata_returns_none_when_all_candidates_404(
             text="DOI: 10.1234/fake-a and 10.1234/fake-b",
         ),
     ]
-    result = metadata.resolve_metadata(chunks)
+    result = await metadata.resolve_metadata(chunks)
     assert result is None
 
 

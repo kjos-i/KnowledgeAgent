@@ -1,11 +1,12 @@
 """Tests for ingestion.metadata - DOI extraction + OpenAlex resolution.
 
 DOI extraction is pure (regex on text), tested directly. OpenAlex calls
-are stubbed via unittest.mock.patch on httpx.get.
+go through the central `_http_client` and are stubbed by patching
+`knowledge_agent.ingestion.metadata._http_client.get` with AsyncMock.
 """
 
 from typing import Any
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
@@ -78,6 +79,9 @@ def test_extract_doi_empty_chunks_returns_empty():
 # ---- resolve_doi ----
 
 
+_HTTP_GET_PATCH = "knowledge_agent.ingestion.metadata._http_client.request"
+
+
 def _http_response(status_code: int, json_data: Any = None) -> Mock:
     """Build a minimal httpx-response-like mock."""
     resp = Mock()
@@ -86,107 +90,107 @@ def _http_response(status_code: int, json_data: Any = None) -> Mock:
     return resp
 
 
-def test_resolve_doi_returns_work_on_200():
+async def test_resolve_doi_returns_work_on_200():
     work = {"id": "https://openalex.org/W1", "title": "Test"}
     with patch(
-        "knowledge_agent.ingestion.metadata.httpx.get"
-    ) as mock_get:
-        mock_get.return_value = _http_response(200, work)
-        assert resolve_doi("10.1234/abc") == work
+        _HTTP_GET_PATCH, new_callable=AsyncMock,
+        return_value=_http_response(200, work),
+    ):
+        assert await resolve_doi("10.1234/abc") == work
 
 
-def test_resolve_doi_returns_none_on_404():
+async def test_resolve_doi_returns_none_on_404():
     with patch(
-        "knowledge_agent.ingestion.metadata.httpx.get"
-    ) as mock_get:
-        mock_get.return_value = _http_response(404)
-        assert resolve_doi("10.1234/abc") is None
+        _HTTP_GET_PATCH, new_callable=AsyncMock,
+        return_value=_http_response(404),
+    ):
+        assert await resolve_doi("10.1234/abc") is None
 
 
-def test_resolve_doi_raises_on_5xx():
+async def test_resolve_doi_raises_on_5xx():
     """Non-200, non-404 is a real API failure under typed-errors:
     raise so the orchestrator (resolve_metadata) can catch and try
     the next candidate."""
     with patch(
-        "knowledge_agent.ingestion.metadata.httpx.get"
-    ) as mock_get:
-        mock_get.return_value = _http_response(500)
+        _HTTP_GET_PATCH, new_callable=AsyncMock,
+        return_value=_http_response(500),
+    ):
         with pytest.raises(RuntimeError, match="status 500"):
-            resolve_doi("10.1234/abc")
+            await resolve_doi("10.1234/abc")
 
 
-def test_resolve_doi_propagates_network_error():
+async def test_resolve_doi_propagates_network_error():
     """Network failure (DNS, connection) propagates as the original
     httpx exception so the orchestrator boundary can distinguish."""
     with patch(
-        "knowledge_agent.ingestion.metadata.httpx.get"
-    ) as mock_get:
-        mock_get.side_effect = httpx.ConnectError("boom")
+        _HTTP_GET_PATCH, new_callable=AsyncMock,
+        side_effect=httpx.ConnectError("boom"),
+    ):
         with pytest.raises(httpx.ConnectError, match="boom"):
-            resolve_doi("10.1234/abc")
+            await resolve_doi("10.1234/abc")
 
 
-def test_resolve_doi_propagates_invalid_json():
+async def test_resolve_doi_propagates_invalid_json():
     """Malformed 200 body propagates as ValueError so the boundary
     distinguishes a real OpenAlex bug from a legitimate 404 miss."""
+    resp = Mock()
+    resp.status_code = 200
+    resp.json = Mock(side_effect=ValueError("not json"))
     with patch(
-        "knowledge_agent.ingestion.metadata.httpx.get"
-    ) as mock_get:
-        resp = Mock()
-        resp.status_code = 200
-        resp.json = Mock(side_effect=ValueError("not json"))
-        mock_get.return_value = resp
+        _HTTP_GET_PATCH, new_callable=AsyncMock, return_value=resp,
+    ):
         with pytest.raises(ValueError, match="not json"):
-            resolve_doi("10.1234/abc")
+            await resolve_doi("10.1234/abc")
 
 
-def test_resolve_metadata_skips_candidate_on_api_failure():
+async def test_resolve_metadata_skips_candidate_on_api_failure():
     """resolve_metadata catches resolve_doi raises per-candidate so
     one transient outage doesn't kill the walk of the rest."""
     chunks = [_chunk(0, "10.1234/abc and 10.5678/xyz")]
     work = {"id": "W2"}
     with patch(
-        "knowledge_agent.ingestion.metadata.resolve_doi"
+        "knowledge_agent.ingestion.metadata.resolve_doi",
+        new_callable=AsyncMock,
+        side_effect=[RuntimeError("transient"), work],
     ) as mock_resolve:
-        mock_resolve.side_effect = [RuntimeError("transient"), work]
-        assert resolve_metadata(chunks) == work
+        assert await resolve_metadata(chunks) == work
         assert mock_resolve.call_count == 2
 
 
 # ---- resolve_metadata ----
 
 
-def test_resolve_metadata_returns_none_when_no_candidates():
+async def test_resolve_metadata_returns_none_when_no_candidates():
     chunks = [_chunk(0, "no doi text here")]
-    assert resolve_metadata(chunks) is None
+    assert await resolve_metadata(chunks) is None
 
 
-def test_resolve_metadata_resolves_first_candidate():
+async def test_resolve_metadata_resolves_first_candidate():
     chunks = [_chunk(0, "10.1234/abc")]
     work = {"id": "W1"}
     with patch(
-        "knowledge_agent.ingestion.metadata.resolve_doi"
+        "knowledge_agent.ingestion.metadata.resolve_doi",
+        new_callable=AsyncMock, return_value=work,
     ) as mock_resolve:
-        mock_resolve.return_value = work
-        assert resolve_metadata(chunks) == work
+        assert await resolve_metadata(chunks) == work
         mock_resolve.assert_called_once_with("10.1234/abc")
 
 
-def test_resolve_metadata_tries_next_when_first_fails():
+async def test_resolve_metadata_tries_next_when_first_fails():
     chunks = [_chunk(0, "10.1234/abc and 10.5678/xyz")]
     work = {"id": "W2"}
     with patch(
-        "knowledge_agent.ingestion.metadata.resolve_doi"
+        "knowledge_agent.ingestion.metadata.resolve_doi",
+        new_callable=AsyncMock, side_effect=[None, work],
     ) as mock_resolve:
-        mock_resolve.side_effect = [None, work]
-        assert resolve_metadata(chunks) == work
+        assert await resolve_metadata(chunks) == work
         assert mock_resolve.call_count == 2
 
 
-def test_resolve_metadata_returns_none_when_all_candidates_fail():
+async def test_resolve_metadata_returns_none_when_all_candidates_fail():
     chunks = [_chunk(0, "10.1234/abc")]
     with patch(
-        "knowledge_agent.ingestion.metadata.resolve_doi"
-    ) as mock_resolve:
-        mock_resolve.return_value = None
-        assert resolve_metadata(chunks) is None
+        "knowledge_agent.ingestion.metadata.resolve_doi",
+        new_callable=AsyncMock, return_value=None,
+    ):
+        assert await resolve_metadata(chunks) is None

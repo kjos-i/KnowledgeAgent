@@ -2,8 +2,9 @@
 
 Three concerns covered, with three test families:
   1. `OntologyTerm` dataclass — shape, frozen-ness, hashability.
-  2. Cache + download — `get_cache_dir` + `ensure_cached`, with httpx
-     stream patched to avoid real network calls.
+  2. Cache + download — `get_cache_dir` + `ensure_cached`, with the
+     central `_http_client.stream` async context manager patched to
+     avoid real network calls.
   3. Term extraction — `extract_terms_skos` exercised against a real
      in-memory rdflib graph (small enough to build inline); pronto
      extraction patched via duck-typed mocks since building real
@@ -12,11 +13,37 @@ Three concerns covered, with three test families:
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from unittest.mock import MagicMock, patch, AsyncMock
 
 import pytest
+
+
+def _patch_http_stream(*, chunks: list[bytes] | None = None, raise_mid: bool = False):
+    """Patch `knowledge_agent.kg.ontology_helpers._http_client.stream` with
+    a fake async context manager yielding a response whose `aiter_raw`
+    returns `chunks` (optionally raising mid-iteration to simulate a
+    partial download).
+    """
+    async def _aiter(chunk_size: int = 0):  # noqa: ARG001
+        for c in chunks or []:
+            yield c
+        if raise_mid:
+            raise RuntimeError("connection reset")
+
+    @asynccontextmanager
+    async def _fake_stream(url, **kw):  # noqa: ARG001
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.aiter_raw = _aiter
+        yield resp
+
+    return patch(
+        "knowledge_agent.kg.ontology_helpers._http_client.stream",
+        side_effect=_fake_stream,
+    )
 
 from knowledge_agent.kg.ontology_helpers import (
     OntologyTerm,
@@ -93,7 +120,7 @@ def test_get_cache_dir_creates_directory(tmp_path: Path):
     assert target.is_dir()
 
 
-def test_ensure_cached_returns_existing_file(tmp_path: Path):
+async def test_ensure_cached_returns_existing_file(tmp_path: Path):
     """Cache hit: existing file path is returned, no download attempted."""
     target = tmp_path / "ontology-cache"
     target.mkdir()
@@ -104,109 +131,81 @@ def test_ensure_cached_returns_existing_file(tmp_path: Path):
         patch(
             "knowledge_agent.kg.ontology_helpers.get_settings"
         ) as mock_settings,
-        patch("httpx.stream") as mock_stream,
+        patch(
+            "knowledge_agent.kg.ontology_helpers._http_client.stream"
+        ) as mock_stream,
     ):
         mock_settings.return_value.ontology_cache_dir = target
-        result = ensure_cached("https://example.com/mesh.nt", "mesh.nt")
+        result = await ensure_cached("https://example.com/mesh.nt", "mesh.nt")
 
     assert result == existing
     assert result.read_bytes() == b"existing content"
-    # httpx.stream NOT called - we short-circuited on the cache hit.
+    # stream() NOT called - we short-circuited on the cache hit.
     mock_stream.assert_not_called()
 
 
-def test_ensure_cached_downloads_when_missing(tmp_path: Path):
-    """Cache miss: file is downloaded via httpx.stream and written."""
+async def test_ensure_cached_downloads_when_missing(tmp_path: Path):
+    """Cache miss: file is downloaded via _http_client.stream and written."""
     target = tmp_path / "ontology-cache"
     target.mkdir()
-
-    fake_response = MagicMock()
-    fake_response.raise_for_status = MagicMock()
-    fake_response.iter_raw = MagicMock(
-        return_value=[b"chunk1", b"chunk2", b"chunk3"]
-    )
-    # httpx.stream is a context manager.
-    fake_cm = MagicMock()
-    fake_cm.__enter__ = MagicMock(return_value=fake_response)
-    fake_cm.__exit__ = MagicMock(return_value=None)
 
     with (
         patch(
             "knowledge_agent.kg.ontology_helpers.get_settings"
         ) as mock_settings,
-        patch("httpx.stream", return_value=fake_cm),
+        _patch_http_stream(chunks=[b"chunk1", b"chunk2", b"chunk3"]),
     ):
         mock_settings.return_value.ontology_cache_dir = target
-        result = ensure_cached("https://example.com/go.obo", "go.obo")
+        result = await ensure_cached("https://example.com/go.obo", "go.obo")
 
     assert result == target / "go.obo"
     assert result.exists()
     assert result.read_bytes() == b"chunk1chunk2chunk3"
 
 
-def test_ensure_cached_atomic_writes_via_tmp(tmp_path: Path):
+async def test_ensure_cached_atomic_writes_via_tmp(tmp_path: Path):
     """The download writes to <name>.tmp first then renames. Verifies
     the .tmp file does NOT remain after a successful download."""
     target = tmp_path / "ontology-cache"
     target.mkdir()
 
-    fake_response = MagicMock()
-    fake_response.raise_for_status = MagicMock()
-    fake_response.iter_raw = MagicMock(return_value=[b"hello"])
-    fake_cm = MagicMock()
-    fake_cm.__enter__ = MagicMock(return_value=fake_response)
-    fake_cm.__exit__ = MagicMock(return_value=None)
-
     with (
         patch(
             "knowledge_agent.kg.ontology_helpers.get_settings"
         ) as mock_settings,
-        patch("httpx.stream", return_value=fake_cm),
+        _patch_http_stream(chunks=[b"hello"]),
     ):
         mock_settings.return_value.ontology_cache_dir = target
-        ensure_cached("https://example.com/x.nt", "x.nt")
+        await ensure_cached("https://example.com/x.nt", "x.nt")
 
     assert (target / "x.nt").exists()
     # .tmp must be cleaned up after successful write.
     assert not (target / "x.nt.tmp").exists()
 
 
-def test_ensure_cached_cleans_up_tmp_on_failure(tmp_path: Path):
+async def test_ensure_cached_cleans_up_tmp_on_failure(tmp_path: Path):
     """When the download fails partway, the partial .tmp file is
     removed so a retry starts clean (no half-written file masquerading
     as a valid cache)."""
     target = tmp_path / "ontology-cache"
     target.mkdir()
 
-    fake_response = MagicMock()
-    fake_response.raise_for_status = MagicMock()
-
-    # Make iter_bytes yield one chunk then raise mid-stream.
-    def _iter(chunk_size: int = 0):  # noqa: ARG001
-        yield b"partial"
-        raise RuntimeError("connection reset")
-
-    fake_response.iter_raw = _iter
-    fake_cm = MagicMock()
-    fake_cm.__enter__ = MagicMock(return_value=fake_response)
-    fake_cm.__exit__ = MagicMock(return_value=None)
-
     with (
         patch(
             "knowledge_agent.kg.ontology_helpers.get_settings"
         ) as mock_settings,
-        patch("httpx.stream", return_value=fake_cm),
+        _patch_http_stream(chunks=[b"partial"], raise_mid=True),
         pytest.raises(RuntimeError, match="connection reset"),
     ):
         mock_settings.return_value.ontology_cache_dir = target
-        ensure_cached("https://example.com/x.nt", "x.nt")
+        await ensure_cached("https://example.com/x.nt", "x.nt")
 
     # No final file, no .tmp left behind.
     assert not (target / "x.nt").exists()
     assert not (target / "x.nt.tmp").exists()
 
 
-def test_ensure_cached_force_redownloads(tmp_path: Path):
+async def test_ensure_cached_force_redownloads(tmp_path: Path):
     """`force=True` bypasses the cache hit check and re-downloads,
     overwriting the existing cached file."""
     target = tmp_path / "ontology-cache"
@@ -214,21 +213,14 @@ def test_ensure_cached_force_redownloads(tmp_path: Path):
     existing = target / "mesh.nt"
     existing.write_bytes(b"old content")
 
-    fake_response = MagicMock()
-    fake_response.raise_for_status = MagicMock()
-    fake_response.iter_raw = MagicMock(return_value=[b"new content"])
-    fake_cm = MagicMock()
-    fake_cm.__enter__ = MagicMock(return_value=fake_response)
-    fake_cm.__exit__ = MagicMock(return_value=None)
-
     with (
         patch(
             "knowledge_agent.kg.ontology_helpers.get_settings"
         ) as mock_settings,
-        patch("httpx.stream", return_value=fake_cm),
+        _patch_http_stream(chunks=[b"new content"]),
     ):
         mock_settings.return_value.ontology_cache_dir = target
-        result = ensure_cached(
+        result = await ensure_cached(
             "https://example.com/mesh.nt", "mesh.nt", force=True
         )
 

@@ -42,7 +42,6 @@ The four-value enum lives in `search/schema.py::METADATA_STATUS_VALUES`.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -124,7 +123,7 @@ async def lookup_known_doi(doc_id: str, doi: str) -> dict[str, Any]:
     sub_label = chunk_rows[0].get("sub_label")
 
     try:
-        work = await asyncio.to_thread(resolve_doi, doi)
+        work = await resolve_doi(doi)
     except Exception as exc:
         logger.warning(
             "lookup_known_doi (%s): resolve_doi %r failed: %r", doc_id, doi, exc
@@ -230,7 +229,7 @@ async def resolve_openalex(
     work: dict[str, Any] | None = None
     if stored_doi:
         try:
-            work = await asyncio.to_thread(resolve_doi, stored_doi)
+            work = await resolve_doi(stored_doi)
         except Exception as exc:
             logger.warning(
                 "resolve_openalex (%s): stored-DOI %r lookup failed: %r; "
@@ -247,7 +246,7 @@ async def resolve_openalex(
             )
             for r in chunk_rows
         ]
-        work = await asyncio.to_thread(resolve_metadata, chunks)
+        work = await resolve_metadata(chunks)
 
     if work is None:
         logger.info(

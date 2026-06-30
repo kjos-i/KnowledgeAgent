@@ -427,7 +427,7 @@ async def test_resolve_openalex_skipped_when_manual_and_skip_manual_true():
     with (
         patch("knowledge_agent.ingestion.metadata_resolution.get_search_client",
               return_value=search_mock),
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi") as rd,
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi", new_callable=AsyncMock,) as rd,
     ):
         result = await resolve_openalex("docZ", skip_manual=True)
 
@@ -446,7 +446,7 @@ async def test_resolve_openalex_not_skipped_when_manual_and_skip_manual_false():
     with (
         patch("knowledge_agent.ingestion.metadata_resolution.get_search_client",
               return_value=search_mock),
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi", new_callable=AsyncMock,
               return_value=work),
     ):
         result = await resolve_openalex("docZ", skip_manual=False)
@@ -474,9 +474,9 @@ async def test_resolve_openalex_uses_stored_doi_first():
               return_value=search_mock),
         patch("knowledge_agent.ingestion.metadata_resolution.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi", new_callable=AsyncMock,
               return_value=work) as rd,
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_metadata") as rm,
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_metadata", new_callable=AsyncMock,) as rm,
     ):
         result = await resolve_openalex("docZ")
 
@@ -504,9 +504,9 @@ async def test_resolve_openalex_falls_back_to_chunk_extraction_when_stored_doi_f
               return_value=search_mock),
         patch("knowledge_agent.ingestion.metadata_resolution.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi", new_callable=AsyncMock,
               return_value=None),
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_metadata",
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_metadata", new_callable=AsyncMock,
               return_value=work) as rm,
     ):
         result = await resolve_openalex("docZ")
@@ -527,8 +527,8 @@ async def test_resolve_openalex_uses_extraction_when_no_stored_doi():
               return_value=search_mock),
         patch("knowledge_agent.ingestion.metadata_resolution.get_kg_client",
               return_value=MagicMock()),
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi") as rd,
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_metadata",
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi", new_callable=AsyncMock,) as rd,
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_metadata", new_callable=AsyncMock,
               return_value=work) as rm,
     ):
         await resolve_openalex("docZ")
@@ -547,9 +547,9 @@ async def test_resolve_openalex_no_work_resolved_leaves_state_untouched():
               return_value=search_mock),
         patch("knowledge_agent.ingestion.metadata_resolution.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi", new_callable=AsyncMock,
               return_value=None),
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_metadata",
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_metadata", new_callable=AsyncMock,
               return_value=None),
     ):
         result = await resolve_openalex("docZ")
@@ -581,7 +581,7 @@ async def test_resolve_openalex_paper_path_does_surgical_wipe_then_writes():
               return_value=search_mock),
         patch("knowledge_agent.ingestion.metadata_resolution.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi", new_callable=AsyncMock,
               return_value=work),
     ):
         result = await resolve_openalex("docZ")
@@ -611,7 +611,7 @@ async def test_resolve_openalex_non_paper_patches_lancedb_only_skips_kg_writes()
               return_value=search_mock),
         patch("knowledge_agent.ingestion.metadata_resolution.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi", new_callable=AsyncMock,
               return_value=work),
     ):
         result = await resolve_openalex("docZ")
@@ -642,7 +642,7 @@ async def test_resolve_openalex_patches_with_enriched_status():
               return_value=search_mock),
         patch("knowledge_agent.ingestion.metadata_resolution.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi", new_callable=AsyncMock,
               return_value=work),
     ):
         result = await resolve_openalex("docZ")
@@ -691,9 +691,9 @@ async def test_lookup_known_doi_never_falls_back_to_chunk_extraction():
     with (
         patch("knowledge_agent.ingestion.metadata_resolution.get_search_client",
               return_value=search_mock),
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi", new_callable=AsyncMock,
               return_value=None),
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_metadata") as rm,
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_metadata", new_callable=AsyncMock,) as rm,
     ):
         result = await lookup_known_doi("docZ", "10.1/nonexistent")
 
@@ -723,7 +723,7 @@ async def test_lookup_known_doi_happy_path_patches_lancedb_and_kg():
               return_value=search_mock),
         patch("knowledge_agent.ingestion.metadata_resolution.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi", new_callable=AsyncMock,
               return_value=work) as rd,
     ):
         result = await lookup_known_doi("docZ", "10.1/typed-by-user")
@@ -751,7 +751,7 @@ async def test_lookup_known_doi_non_paper_patches_lancedb_only():
               return_value=search_mock),
         patch("knowledge_agent.ingestion.metadata_resolution.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi", new_callable=AsyncMock,
               return_value=work),
     ):
         result = await lookup_known_doi("docZ", "10.1/note")
@@ -780,7 +780,7 @@ async def test_lookup_known_doi_has_no_skip_manual_concept():
               return_value=search_mock),
         patch("knowledge_agent.ingestion.metadata_resolution.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi",
+        patch("knowledge_agent.ingestion.metadata_resolution.resolve_doi", new_callable=AsyncMock,
               return_value=work),
     ):
         result = await lookup_known_doi("docZ", "10.1/new")
@@ -2097,7 +2097,7 @@ def _make_mock_kg() -> MagicMock:
     return_value="doc-abc",
 )
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
-@patch("knowledge_agent.ingestion.pipeline.resolve_metadata")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
@@ -2145,7 +2145,7 @@ async def test_ingest_document_skips_openalex_writes_when_layer_off(
     return_value="doc-abc",
 )
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
-@patch("knowledge_agent.ingestion.pipeline.resolve_metadata")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
@@ -2191,7 +2191,7 @@ async def test_ingest_document_skips_chunk_writes_when_layer_off(
     return_value="doc-abc",
 )
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
-@patch("knowledge_agent.ingestion.pipeline.resolve_metadata")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
@@ -2232,7 +2232,7 @@ async def test_ingest_document_runs_all_kg_writes_when_both_layers_on(
     return_value="doc-abc",
 )
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
-@patch("knowledge_agent.ingestion.pipeline.resolve_metadata")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
@@ -2279,7 +2279,7 @@ async def test_ingest_document_skips_openalex_writes_when_layer_on_but_work_none
     return_value="doc-abc",
 )
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
-@patch("knowledge_agent.ingestion.pipeline.resolve_metadata")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
@@ -2373,7 +2373,7 @@ def _config_with_entities(
     return_value="doc-abc",
 )
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
-@patch("knowledge_agent.ingestion.pipeline.resolve_metadata")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
@@ -2434,7 +2434,7 @@ async def test_ingest_document_runs_l6a_when_entities_layer_on(
     return_value="doc-abc",
 )
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
-@patch("knowledge_agent.ingestion.pipeline.resolve_metadata")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
@@ -2478,7 +2478,7 @@ async def test_ingest_document_skips_l6a_when_entities_layer_off(
     return_value="doc-abc",
 )
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
-@patch("knowledge_agent.ingestion.pipeline.resolve_metadata")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
@@ -2522,7 +2522,7 @@ async def test_ingest_document_skips_l6a_when_chunks_write_fails(
     return_value="doc-abc",
 )
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
-@patch("knowledge_agent.ingestion.pipeline.resolve_metadata")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
@@ -2614,7 +2614,7 @@ def _config_with_ontology_mesh(matching: str = "exact") -> CorpusConfig:
     return_value="doc-abc",
 )
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
-@patch("knowledge_agent.ingestion.pipeline.resolve_metadata")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
@@ -2656,7 +2656,7 @@ async def test_ingest_document_skips_l7_when_no_ontology_layer_enabled(
     return_value="doc-abc",
 )
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
-@patch("knowledge_agent.ingestion.pipeline.resolve_metadata")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
@@ -2700,7 +2700,7 @@ async def test_ingest_document_l7_skipped_when_entities_failed(
     return_value="doc-abc",
 )
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
-@patch("knowledge_agent.ingestion.pipeline.resolve_metadata")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
@@ -2756,7 +2756,7 @@ async def test_ingest_document_l7_first_import_runs_global_link(
     return_value="doc-abc",
 )
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
-@patch("knowledge_agent.ingestion.pipeline.resolve_metadata")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
@@ -2805,7 +2805,7 @@ async def test_ingest_document_l7_subsequent_ingest_links_only_this_doc(
     return_value="doc-abc",
 )
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
-@patch("knowledge_agent.ingestion.pipeline.resolve_metadata")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
@@ -2852,7 +2852,7 @@ async def test_ingest_document_l7_import_failure_skips_linking_returns_status(
     return_value="doc-abc",
 )
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
-@patch("knowledge_agent.ingestion.pipeline.resolve_metadata")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],

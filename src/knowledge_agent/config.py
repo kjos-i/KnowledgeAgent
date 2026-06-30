@@ -587,6 +587,38 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ----- Central HTTP client (see `_http_client.py`).
+    # Three knobs shared by every outbound HTTP call (OpenAlex, FIBO GitHub
+    # tree API, Ollama daemon probe, ontology downloads). One place to tune,
+    # one User-Agent string to identify ourselves to upstreams.
+    http_default_timeout: float = Field(
+        default=30.0,
+        description=(
+            "Default per-request timeout (seconds) for the central HTTP "
+            "client's `get()`. Individual call sites can override (e.g. "
+            "the Ollama daemon probe uses 1s; ontology downloads use None "
+            "for unbounded streaming)."
+        ),
+    )
+    http_max_retries: int = Field(
+        default=3,
+        description=(
+            "Max retry attempts on retryable HTTP failures (429, 5xx, "
+            "network errors). 0 disables retries. Stream() does NOT retry "
+            "regardless — partial-download replays are unsafe."
+        ),
+    )
+    http_user_agent: str = Field(
+        default="knowledge-agent/0.x",
+        description=(
+            "User-Agent header on every outbound HTTP request. Identifies "
+            "this app to upstream APIs; some (GitHub, OpenAlex) condition "
+            "rate-limit pools on it. Override to add a contact email "
+            "(e.g. 'knowledge-agent/0.x (you@example.com)') if you ship "
+            "this app to others."
+        ),
+    )
+
     # ----- Parsing toggles (docling). Format support is broad by default
     # (PDF, DOCX, HTML, JATS XML, images, etc.); these knobs control OCR
     # and chunker behaviour.

@@ -32,8 +32,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-import httpx
-
+from knowledge_agent import _http_client
 from knowledge_agent.config import get_settings
 
 
@@ -103,7 +102,7 @@ def get_cache_dir() -> Path:
     return cache
 
 
-def ensure_cached(
+async def ensure_cached(
     url: str, filename: str, *, force: bool = False
 ) -> Path:
     """Download `url` into the cache as `filename` if not already present.
@@ -118,8 +117,10 @@ def ensure_cached(
     `force=True` forces a fresh download (overwrites the cached copy).
     Use when re-fetching after a known ontology release update.
 
-    Raises `httpx.HTTPError` on network failure - the caller (per-ontology
-    write module) decides whether to retry or surface the error.
+    Streams via the central HTTP client. NOT retried (see `_http_client`
+    module docstring — partial-download replay would corrupt the cache
+    file). Raises `httpx.HTTPError` on network failure; the caller
+    (per-ontology write module) decides whether to surface the error.
     """
     cache = get_cache_dir()
     dest = cache / filename
@@ -134,16 +135,17 @@ def ensure_cached(
     tmp = dest.with_suffix(dest.suffix + ".tmp")
     logger.info("ontology: downloading %s -> %s", url, dest)
     try:
-        with httpx.stream("GET", url, follow_redirects=True, timeout=None) as response:
+        async with _http_client.stream(url, timeout=None) as response:
             response.raise_for_status()
             with tmp.open("wb") as fh:
-                # iter_raw (NOT iter_bytes) so httpx does NOT auto-decompress
-                # `Content-Encoding: gzip` responses. We want the bytes
-                # exactly as served - matters for sources like NLM's MeSH
-                # which sets Content-Encoding: gzip on already-gzipped
-                # files. With iter_bytes the cached file would be ~18x
-                # larger AND wouldn't match its .gz filename.
-                for chunk in response.iter_raw(chunk_size=65536):
+                # aiter_raw (NOT aiter_bytes) so httpx does NOT auto-
+                # decompress `Content-Encoding: gzip` responses. We want
+                # the bytes exactly as served - matters for sources like
+                # NLM's MeSH which sets Content-Encoding: gzip on
+                # already-gzipped files. With aiter_bytes the cached
+                # file would be ~18x larger AND wouldn't match its .gz
+                # filename.
+                async for chunk in response.aiter_raw(chunk_size=65536):
                     fh.write(chunk)
         tmp.replace(dest)
     except Exception:

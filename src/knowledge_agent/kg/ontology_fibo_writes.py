@@ -47,8 +47,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import httpx
-
+from knowledge_agent import _http_client
 from knowledge_agent.kg.ontology_helpers import (
     OntologyTerm,
     _owl_id_extractor,
@@ -181,7 +180,7 @@ async def import_fibo(client,
         )
         await delete_imported(client)
 
-    cache_dir = _walk_and_cache_fibo()
+    cache_dir = await _walk_and_cache_fibo()
     terms = _read_and_extract(cache_dir)
 
     if not terms:
@@ -220,7 +219,7 @@ async def write_terms(client,
 # ---------------------------------------------------------------------------
 
 
-def _list_fibo_rdf_paths() -> list[str]:
+async def _list_fibo_rdf_paths() -> list[str]:
     """Fetch the FIBO master tree from GitHub, return all `.rdf` file paths.
 
     Filters out paths under `etc/` (test fixtures) and `.github/` (CI
@@ -231,7 +230,7 @@ def _list_fibo_rdf_paths() -> list[str]:
     surfaces as "FIBO download failed".
     """
     logger.info("%s: listing module files via %s", _ONTOLOGY_NAME, FIBO_TREE_API_URL)
-    response = httpx.get(FIBO_TREE_API_URL, timeout=60, follow_redirects=True)
+    response = await _http_client.request(FIBO_TREE_API_URL, timeout=60)
     response.raise_for_status()
     tree = response.json().get("tree", [])
     paths = sorted(
@@ -250,7 +249,7 @@ def _list_fibo_rdf_paths() -> list[str]:
     return paths
 
 
-def _walk_and_cache_fibo(*, paths: list[str] | None = None) -> Path:
+async def _walk_and_cache_fibo(*, paths: list[str] | None = None) -> Path:
     """Ensure every FIBO module file is downloaded into the local cache.
 
     Returns the FIBO subdirectory under the ontology cache - the
@@ -261,14 +260,14 @@ def _walk_and_cache_fibo(*, paths: list[str] | None = None) -> Path:
     API. Production callers pass nothing.
     """
     if paths is None:
-        paths = _list_fibo_rdf_paths()
+        paths = await _list_fibo_rdf_paths()
 
     for repo_path in paths:
         url = f"{FIBO_RAW_BASE_URL}/{repo_path}"
         # ensure_cached creates parent dirs idempotently (patched for
         # this exact multi-file ontology case).
         cache_filename = f"{FIBO_CACHE_SUBDIR}/{repo_path}"
-        ensure_cached(url, cache_filename)
+        await ensure_cached(url, cache_filename)
 
     return get_cache_dir() / FIBO_CACHE_SUBDIR
 

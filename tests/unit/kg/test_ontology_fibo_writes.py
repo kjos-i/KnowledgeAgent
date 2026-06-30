@@ -213,7 +213,10 @@ async def test_import_fibo_short_circuits_when_already_imported():
     """force=False and FIBO already imported -> no walker / parse / write."""
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
     with (
-        patch.object(ontology_fibo_writes, "_walk_and_cache_fibo") as mock_walk,
+        patch.object(
+            ontology_fibo_writes, "_walk_and_cache_fibo",
+            new_callable=AsyncMock,
+        ) as mock_walk,
         patch.object(ontology_fibo_writes, "_read_and_extract") as mock_extract,
     ):
         result = await ontology_fibo_writes.import_fibo(_client_with_driver(driver), force=False)
@@ -226,8 +229,11 @@ async def test_import_fibo_force_drops_then_reimports():
     driver = RecordingDriver()
     fake_terms = [_term("FIBO:Money", "money")]
     with (
-        patch.object(ontology_fibo_writes, "_walk_and_cache_fibo",
-                     return_value=Path("/fake/cache/fibo")),
+        patch.object(
+            ontology_fibo_writes, "_walk_and_cache_fibo",
+            new_callable=AsyncMock,
+            return_value=Path("/fake/cache/fibo"),
+        ),
         patch.object(ontology_fibo_writes, "_read_and_extract",
                      return_value=fake_terms),
     ):
@@ -243,8 +249,11 @@ async def test_import_fibo_force_drops_then_reimports():
 async def test_import_fibo_aborts_on_zero_terms():
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]])
     with (
-        patch.object(ontology_fibo_writes, "_walk_and_cache_fibo",
-                     return_value=Path("/fake/cache/fibo")),
+        patch.object(
+            ontology_fibo_writes, "_walk_and_cache_fibo",
+            new_callable=AsyncMock,
+            return_value=Path("/fake/cache/fibo"),
+        ),
         patch.object(ontology_fibo_writes, "_read_and_extract", return_value=[]),
     ):
         with pytest.raises(RuntimeError, match="extracted 0 terms"):
@@ -257,6 +266,7 @@ async def test_import_fibo_propagates_walker_exception():
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]])
     with patch.object(
         ontology_fibo_writes, "_walk_and_cache_fibo",
+        new_callable=AsyncMock,
         side_effect=RuntimeError("network down"),
     ):
         with pytest.raises(RuntimeError, match="network down"):
@@ -267,7 +277,10 @@ async def test_import_fibo_propagates_when_force_delete_fails():
     """force=True + delete_imported failure propagates; walker is not
     reached because the delete raises first."""
     driver = RecordingDriver(raise_on_run=RuntimeError("delete boom"))
-    with patch.object(ontology_fibo_writes, "_walk_and_cache_fibo") as mock_walk:
+    with patch.object(
+        ontology_fibo_writes, "_walk_and_cache_fibo",
+        new_callable=AsyncMock,
+    ) as mock_walk:
         with pytest.raises(RuntimeError, match="delete boom"):
             await ontology_fibo_writes.import_fibo(_client_with_driver(driver), force=True)
     mock_walk.assert_not_called()
@@ -301,7 +314,10 @@ def _mock_http_response(payload: dict[str, Any], status: int = 200) -> MagicMock
     return response
 
 
-def test_list_paths_filters_only_rdf_blobs():
+_HTTP_PATCH = "knowledge_agent.kg.ontology_fibo_writes._http_client.request"
+
+
+async def test_list_paths_filters_only_rdf_blobs():
     """Walker keeps only `type:blob` + .rdf-suffix paths from the tree."""
     payload = {
         "tree": [
@@ -312,8 +328,11 @@ def test_list_paths_filters_only_rdf_blobs():
             {"path": "AboutFIBOProd.rdf", "type": "blob"},
         ]
     }
-    with patch("httpx.get", return_value=_mock_http_response(payload)):
-        paths = ontology_fibo_writes._list_fibo_rdf_paths()
+    with patch(
+        _HTTP_PATCH, new_callable=AsyncMock,
+        return_value=_mock_http_response(payload),
+    ):
+        paths = await ontology_fibo_writes._list_fibo_rdf_paths()
     assert paths == [
         "AboutFIBOProd.rdf",
         "BE/Corporations/Corporations.rdf",
@@ -321,7 +340,7 @@ def test_list_paths_filters_only_rdf_blobs():
     ]
 
 
-def test_list_paths_skips_etc_and_dotgithub_prefixes():
+async def test_list_paths_skips_etc_and_dotgithub_prefixes():
     """Test fixtures (etc/) + CI config (.github/) are filtered out."""
     payload = {
         "tree": [
@@ -331,13 +350,16 @@ def test_list_paths_skips_etc_and_dotgithub_prefixes():
             {"path": "FBC/FinancialInstruments/Securities.rdf", "type": "blob"},
         ]
     }
-    with patch("httpx.get", return_value=_mock_http_response(payload)):
-        paths = ontology_fibo_writes._list_fibo_rdf_paths()
+    with patch(
+        _HTTP_PATCH, new_callable=AsyncMock,
+        return_value=_mock_http_response(payload),
+    ):
+        paths = await ontology_fibo_writes._list_fibo_rdf_paths()
     # Only the non-etc, non-.github .rdf blob remains.
     assert paths == ["FBC/FinancialInstruments/Securities.rdf"]
 
 
-def test_list_paths_returns_sorted():
+async def test_list_paths_returns_sorted():
     """Determinism: walker order is sorted so caching is reproducible."""
     payload = {
         "tree": [
@@ -346,32 +368,38 @@ def test_list_paths_returns_sorted():
             {"path": "M/Middle.rdf", "type": "blob"},
         ]
     }
-    with patch("httpx.get", return_value=_mock_http_response(payload)):
-        paths = ontology_fibo_writes._list_fibo_rdf_paths()
+    with patch(
+        _HTTP_PATCH, new_callable=AsyncMock,
+        return_value=_mock_http_response(payload),
+    ):
+        paths = await ontology_fibo_writes._list_fibo_rdf_paths()
     assert paths == ["A/First.rdf", "M/Middle.rdf", "Z/Last.rdf"]
 
 
-def test_list_paths_raises_on_http_error():
+async def test_list_paths_raises_on_http_error():
     """Walker bubbles up HTTP failures so import_fibo's try/except catches them."""
     response = MagicMock()
     response.raise_for_status = MagicMock(side_effect=RuntimeError("404"))
-    with patch("httpx.get", return_value=response):
-        try:
-            ontology_fibo_writes._list_fibo_rdf_paths()
-            raise AssertionError("expected RuntimeError")
-        except RuntimeError:
-            pass
+    with patch(_HTTP_PATCH, new_callable=AsyncMock, return_value=response):
+        with pytest.raises(RuntimeError, match="404"):
+            await ontology_fibo_writes._list_fibo_rdf_paths()
 
 
 # ---- Walker: _walk_and_cache_fibo ----
 
 
-def test_walk_and_cache_calls_ensure_cached_per_path(tmp_path):
+async def test_walk_and_cache_calls_ensure_cached_per_path(tmp_path):
     """Walker calls ensure_cached once per discovered module path."""
     paths = ["A/First.rdf", "B/Second.rdf", "C/Third.rdf"]
-    with patch.object(ontology_fibo_writes, "ensure_cached") as mock_cache, \
-         patch.object(ontology_fibo_writes, "get_cache_dir", return_value=tmp_path):
-        ontology_fibo_writes._walk_and_cache_fibo(paths=paths)
+    with (
+        patch.object(
+            ontology_fibo_writes, "ensure_cached", new_callable=AsyncMock,
+        ) as mock_cache,
+        patch.object(
+            ontology_fibo_writes, "get_cache_dir", return_value=tmp_path,
+        ),
+    ):
+        await ontology_fibo_writes._walk_and_cache_fibo(paths=paths)
     assert mock_cache.call_count == 3
     # Each call uses the raw.githubusercontent base + the FIBO cache subdir.
     for call_obj, repo_path in zip(mock_cache.call_args_list, paths, strict=True):
@@ -381,25 +409,35 @@ def test_walk_and_cache_calls_ensure_cached_per_path(tmp_path):
         assert cache_filename == f"fibo/{repo_path}"
 
 
-def test_walk_and_cache_uses_listing_when_paths_omitted(tmp_path):
+async def test_walk_and_cache_uses_listing_when_paths_omitted(tmp_path):
     """Production callers pass no paths -> walker uses _list_fibo_rdf_paths."""
     with (
-        patch.object(ontology_fibo_writes, "_list_fibo_rdf_paths",
-                     return_value=["X/Single.rdf"]) as mock_list,
-        patch.object(ontology_fibo_writes, "ensure_cached"),
-        patch.object(ontology_fibo_writes, "get_cache_dir", return_value=tmp_path),
+        patch.object(
+            ontology_fibo_writes, "_list_fibo_rdf_paths",
+            new_callable=AsyncMock, return_value=["X/Single.rdf"],
+        ) as mock_list,
+        patch.object(
+            ontology_fibo_writes, "ensure_cached", new_callable=AsyncMock,
+        ),
+        patch.object(
+            ontology_fibo_writes, "get_cache_dir", return_value=tmp_path,
+        ),
     ):
-        ontology_fibo_writes._walk_and_cache_fibo()
+        await ontology_fibo_writes._walk_and_cache_fibo()
     mock_list.assert_called_once()
 
 
-def test_walk_and_cache_returns_fibo_subdir(tmp_path):
+async def test_walk_and_cache_returns_fibo_subdir(tmp_path):
     """Returned path is `<cache>/fibo` so _read_and_extract can rglob it."""
     with (
-        patch.object(ontology_fibo_writes, "ensure_cached"),
-        patch.object(ontology_fibo_writes, "get_cache_dir", return_value=tmp_path),
+        patch.object(
+            ontology_fibo_writes, "ensure_cached", new_callable=AsyncMock,
+        ),
+        patch.object(
+            ontology_fibo_writes, "get_cache_dir", return_value=tmp_path,
+        ),
     ):
-        result = ontology_fibo_writes._walk_and_cache_fibo(paths=[])
+        result = await ontology_fibo_writes._walk_and_cache_fibo(paths=[])
     assert result == tmp_path / "fibo"
 
 
@@ -487,7 +525,10 @@ async def test_client_import_fibo_delegates_to_module():
     driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
     client = _client_with_driver(driver)
     with (
-        patch.object(ontology_fibo_writes, "_walk_and_cache_fibo") as mock_walk,
+        patch.object(
+            ontology_fibo_writes, "_walk_and_cache_fibo",
+            new_callable=AsyncMock,
+        ) as mock_walk,
     ):
         assert await client.import_fibo(force=False) is False
     mock_walk.assert_not_called()
