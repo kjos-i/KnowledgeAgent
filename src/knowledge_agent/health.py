@@ -3,7 +3,7 @@
 `system_status() → StatusReport` is the single source of truth for "is
 the app ready to serve requests?". Two renderers:
 
-  - CLI `kg health` (`cli._cmd_health`) — prints the report to stdout.
+  - CLI `ka health` (`cli._cmd_health`) — prints the report to stdout.
   - GUI Settings → Diagnostics panel (sprint 1) — renders chips + retry
     button against the same dataclass.
 

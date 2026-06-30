@@ -44,16 +44,17 @@ dependencies = [
 # installed". See [[llm-embedder-provider-swap]] for the wizard spec.
 
 [project.scripts]
-# Headless CLI (sprint 0b 2026-06-30). Run `kg --help` for subcommands.
-# `kg ingest <folder>`, `kg query "..."`, `kg health`. Wheel install +
-# `pyproject.toml [project.scripts]` is the canonical way to expose a
-# binary; `python -m knowledge_agent` ALSO works via `__main__.py`.
-kg = "knowledge_agent.cli:main"
+# Headless CLI (sprint 0b 2026-06-30, renamed kg -> ka 2026-06-30
+# because `kg` reads as 'knowledge graph' which is one of the agent's
+# stores — confusing). Run `ka --help` for subcommands.
+# `ka ingest <folder>`, `ka query "..."`, `ka health`.
+# `python -m knowledge_agent` ALSO works via `__main__.py`.
+ka = "knowledge_agent.cli:main"
 # Desktop GUI (sprint 1 slice 1, 2026-06-30). Three top tabs:
 # Search / Library / Evaluation. Search has a chat-on-left +
 # mode-switching display panel on the right. See gui/app.py docstring.
 # `python -m knowledge_agent.gui` ALSO works via `gui/__main__.py`.
-kg-gui = "knowledge_agent.gui.app:main"
+ka-gui = "knowledge_agent.gui.app:main"
 
 [project.optional-dependencies]
 dev = [

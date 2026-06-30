@@ -66,7 +66,7 @@ def test_build_parser_routes_health():
 
 
 def test_main_help_exits_zero():
-    """`kg --help` is a successful no-op."""
+    """`ka --help` is a successful no-op."""
     with pytest.raises(SystemExit) as exc:
         with redirect_stdout(io.StringIO()):
             main(["--help"])

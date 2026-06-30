@@ -2,15 +2,15 @@
 
 Three subcommands wired to the same async machinery the GUI calls:
 
-  - `kg ingest <folder>` — recursively scan, plan, ingest every supported
+  - `ka ingest <folder>` — recursively scan, plan, ingest every supported
     file via `ingestion.bulk_ops.ingest_folder_execute`. Failures
     fail-soft per-file (same contract as the GUI's Sync).
-  - `kg query "..."` — invoke the compiled agent graph
+  - `ka query "..."` — invoke the compiled agent graph
     (`graph.ainvoke({"query": "..."})`) and print the resulting
     `AgentAnswer.answer` to stdout. Source markers are kept in the
     answer; structured `chunk_sources` / `kg_sources` are emitted as
     JSON only when `--json` is set.
-  - `kg health` — basic liveness probe: Neo4j ping, LanceDB open,
+  - `ka health` — basic liveness probe: Neo4j ping, LanceDB open,
     active LLM + embedder provider keys present. Exit 0 = all OK; non-
     zero = at least one failure (the message names which).
 
@@ -165,7 +165,7 @@ _DEFAULT_CONFIG = "corpus.toml"
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="kg",
+        prog="ka",
         description=(
             "knowledge-agent CLI: headless ingest / query / health "
             "for cron, CI, eval harness, and scripting."

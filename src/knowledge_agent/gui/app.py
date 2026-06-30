@@ -444,35 +444,46 @@ class GuiApp:
         self.library_tab = LibraryTab(self)
         self.evaluation_tab = EvaluationTab(self)
 
-        tabs = ft.Tabs(
-            selected_index=0,
-            expand=True,
+        # Flet 1.0 tab architecture (Flutter-style): `Tabs` is the
+        # controller; the visible bar lives in `TabBar`; the bodies
+        # live in `TabBarView`, aligned by index. The two siblings
+        # share a `length` declared on the parent `Tabs`.
+        tab_bar = ft.TabBar(
             tabs=[
-                ft.Tab(
-                    text="Search",
-                    content=ft.Container(
-                        content=self.search_tab.build(),
-                        padding=8,
-                        expand=True,
-                    ),
+                ft.Tab(label="Search"),
+                ft.Tab(label="Library"),
+                ft.Tab(label="Evaluation"),
+            ],
+        )
+        tab_bodies = ft.TabBarView(
+            controls=[
+                ft.Container(
+                    content=self.search_tab.build(),
+                    padding=8,
+                    expand=True,
                 ),
-                ft.Tab(
-                    text="Library",
-                    content=ft.Container(
-                        content=self.library_tab.build(),
-                        padding=8,
-                        expand=True,
-                    ),
+                ft.Container(
+                    content=self.library_tab.build(),
+                    padding=8,
+                    expand=True,
                 ),
-                ft.Tab(
-                    text="Evaluation",
-                    content=ft.Container(
-                        content=self.evaluation_tab.build(),
-                        padding=8,
-                        expand=True,
-                    ),
+                ft.Container(
+                    content=self.evaluation_tab.build(),
+                    padding=8,
+                    expand=True,
                 ),
             ],
+            expand=True,
+        )
+        tabs = ft.Tabs(
+            length=3,
+            selected_index=0,
+            content=ft.Column(
+                controls=[tab_bar, tab_bodies],
+                expand=True,
+                spacing=0,
+            ),
+            expand=True,
         )
 
         self.page.add(tabs)
