@@ -216,7 +216,7 @@ class ImportOntologyResult:
     import_error: ErrorDetail | None = None
 
 
-def import_ontology_plan(
+async def import_ontology_plan(
     ontology_name: str, *, xrefs_mode: str = "none",
 ) -> ImportOntologyPlan:
     """Build a plan for importing the named ontology.
@@ -258,7 +258,7 @@ def import_ontology_plan(
     )
 
 
-def import_ontology_execute(
+async def import_ontology_execute(
     plan: ImportOntologyPlan,
 ) -> ImportOntologyResult:
     """Perform the import promised by `plan`.
@@ -364,7 +364,7 @@ class LinkOntologyResult:
     link_error: ErrorDetail | None = None
 
 
-def link_ontology_plan(
+async def link_ontology_plan(
     ontology_name: str,
     matching_strategy: str = "exact",
     *,
@@ -401,7 +401,7 @@ def link_ontology_plan(
     )
 
 
-def link_ontology_execute(plan: LinkOntologyPlan) -> LinkOntologyResult:
+async def link_ontology_execute(plan: LinkOntologyPlan) -> LinkOntologyResult:
     """Perform the linking pass promised by `plan`.
 
     Not-imported short-circuits to `link_ok=False, n_links_written=0`
@@ -426,7 +426,7 @@ def link_ontology_execute(plan: LinkOntologyPlan) -> LinkOntologyResult:
     kg_client = get_kg_client()
     doc_id = None if plan.scope == "global" else plan.scope
     try:
-        n = kg_client.link_entities_to_ontology(
+        n = await kg_client.link_entities_to_ontology(
             plan.ontology_name,
             plan.matching_strategy,
             doc_id=doc_id,
@@ -499,7 +499,7 @@ class DeleteOntologyResult:
     delete_error: ErrorDetail | None = None
 
 
-def delete_ontology_plan(ontology_name: str) -> DeleteOntologyPlan:
+async def delete_ontology_plan(ontology_name: str) -> DeleteOntologyPlan:
     """Build a plan for deleting the named ontology.
 
     Three KG round-trips: `is_imported`, `count_ontology_terms`,
@@ -526,8 +526,8 @@ def delete_ontology_plan(ontology_name: str) -> DeleteOntologyPlan:
             n_terms=0,
             n_canonical_links=0,
         )
-    n_terms = kg_client.count_ontology_terms(ontology_name)
-    n_links = kg_client.count_canonical_links(ontology_name)
+    n_terms = await kg_client.count_ontology_terms(ontology_name)
+    n_links = await kg_client.count_canonical_links(ontology_name)
     return DeleteOntologyPlan(
         ontology_name=ontology_name,
         is_imported=True,
@@ -536,7 +536,7 @@ def delete_ontology_plan(ontology_name: str) -> DeleteOntologyPlan:
     )
 
 
-def delete_ontology_execute(
+async def delete_ontology_execute(
     plan: DeleteOntologyPlan,
 ) -> DeleteOntologyResult:
     """Perform the delete promised by `plan`.
@@ -662,7 +662,7 @@ class InstallXrefsPlan:
         )
 
 
-def install_xrefs_plan(client, new_xrefs_mode: str) -> InstallXrefsPlan:
+async def install_xrefs_plan(client, new_xrefs_mode: str) -> InstallXrefsPlan:
     """Build the read-only plan summarising what flipping
     `layers.xrefs` to `new_xrefs_mode` means against the current
     KG state.
@@ -809,7 +809,7 @@ class InstallCrossDocXrefsPlan:
         )
 
 
-def install_cross_doc_xrefs_plan(
+async def install_cross_doc_xrefs_plan(
     client,
     *,
     enabling: bool,

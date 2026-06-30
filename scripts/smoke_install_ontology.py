@@ -40,6 +40,7 @@ Run from the project root:
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -64,9 +65,9 @@ from knowledge_agent.kg.ontology_lifecycle import (  # noqa: E402
 ONTOLOGY = "eco"
 
 
-def main() -> None:
+async def main() -> None:
     header(f"STEP 1: build import plan for {ONTOLOGY!r}")
-    plan = import_ontology_plan(ONTOLOGY)
+    plan = await import_ontology_plan(ONTOLOGY)
     print_plan(f"import_ontology_plan({ONTOLOGY!r})", plan)
 
     if plan.already_imported:
@@ -78,7 +79,7 @@ def main() -> None:
         bail_if_not_confirmed(
             f"Download + import {ONTOLOGY!r} into Neo4j now?"
         )
-        result = import_ontology_execute(plan)
+        result = await import_ontology_execute(plan)
         print_result("import_ontology_execute", result)
         if not result.import_ok:
             print(
@@ -101,10 +102,10 @@ def main() -> None:
         f"Delete {ONTOLOGY!r} from Neo4j now? "
         "(removes terms + their edges)"
     ):
-        del_plan = delete_ontology_plan(ONTOLOGY)
+        del_plan = await delete_ontology_plan(ONTOLOGY)
         print_plan(f"delete_ontology_plan({ONTOLOGY!r})", del_plan)
         if del_plan.is_imported:
-            del_result = delete_ontology_execute(del_plan)
+            del_result = await delete_ontology_execute(del_plan)
             print_result("delete_ontology_execute", del_result)
         else:
             print(f"\n{ONTOLOGY!r} not imported — nothing to delete.")
@@ -113,4 +114,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -191,7 +191,7 @@ async def main() -> None:
 
     # 6. ONTOLOGY LIFECYCLE -----------------------------------------------
     print("\n[ontology_lifecycle] inspecting MeSH state")
-    mesh_plan = ontology_lifecycle.delete_ontology_plan("mesh")
+    mesh_plan = await ontology_lifecycle.delete_ontology_plan("mesh")
     _print_plan("delete_ontology_plan('mesh')", mesh_plan)
 
     # 7. PAUSE FOR INSPECTION + OPTIONAL CLEANUP -------------------------
@@ -210,7 +210,7 @@ async def main() -> None:
         return
 
     if mesh_plan.is_imported:
-        result = ontology_lifecycle.delete_ontology_execute(mesh_plan)
+        result = await ontology_lifecycle.delete_ontology_execute(mesh_plan)
         _print_result("delete_ontology_execute", result)
 
 

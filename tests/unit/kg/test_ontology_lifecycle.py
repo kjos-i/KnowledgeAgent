@@ -7,7 +7,7 @@ path. These unit tests pin the plan/execute split + the dispatch via
 `ONTOLOGY_REGISTRY` with everything mocked.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 
 import pytest
 
@@ -55,12 +55,12 @@ def test_import_plan_summary_when_not_imported_mentions_size():
 # ---- import_ontology_plan ----
 
 
-def test_import_ontology_plan_raises_on_unknown_ontology():
+async def test_import_ontology_plan_raises_on_unknown_ontology():
     with pytest.raises(ValueError):
-        import_ontology_plan("not-a-real-ontology")
+        await import_ontology_plan("not-a-real-ontology")
 
 
-def test_import_ontology_plan_marks_already_imported_when_kg_has_it():
+async def test_import_ontology_plan_marks_already_imported_when_kg_has_it():
     """is_imported_fn returns True -> plan flags already_imported."""
     kg_mock = MagicMock()
     fake_registry = {
@@ -78,13 +78,13 @@ def test_import_ontology_plan_marks_already_imported_when_kg_has_it():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        plan = import_ontology_plan("mesh")
+        plan = await import_ontology_plan("mesh")
 
     assert plan.already_imported is True
     assert plan.download_size_mb == 115
 
 
-def test_import_ontology_plan_marks_not_imported_when_kg_has_none():
+async def test_import_ontology_plan_marks_not_imported_when_kg_has_none():
     kg_mock = MagicMock()
     fake_registry = {
         "go": {
@@ -101,7 +101,7 @@ def test_import_ontology_plan_marks_not_imported_when_kg_has_none():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        plan = import_ontology_plan("go")
+        plan = await import_ontology_plan("go")
 
     assert plan.already_imported is False
 
@@ -109,7 +109,7 @@ def test_import_ontology_plan_marks_not_imported_when_kg_has_none():
 # ---- import_ontology_execute ----
 
 
-def test_import_ontology_execute_no_op_when_already_imported():
+async def test_import_ontology_execute_no_op_when_already_imported():
     """already_imported=True -> did_import False, import_ok True (idempotent)."""
     plan = ImportOntologyPlan(
         ontology_name="mesh", already_imported=True, download_size_mb=115,
@@ -123,14 +123,14 @@ def test_import_ontology_execute_no_op_when_already_imported():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        result = import_ontology_execute(plan)
+        result = await import_ontology_execute(plan)
 
     import_fn.assert_not_called()
     assert result.did_import is False
     assert result.import_ok is True
 
 
-def test_import_ontology_execute_runs_import_fn_when_not_imported():
+async def test_import_ontology_execute_runs_import_fn_when_not_imported():
     plan = ImportOntologyPlan(
         ontology_name="mesh", already_imported=False, download_size_mb=115,
     )
@@ -142,14 +142,14 @@ def test_import_ontology_execute_runs_import_fn_when_not_imported():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        result = import_ontology_execute(plan)
+        result = await import_ontology_execute(plan)
 
     import_fn.assert_called_once()
     assert result.did_import is True
     assert result.import_ok is True
 
 
-def test_import_ontology_execute_propagates_failure_from_import_fn():
+async def test_import_ontology_execute_propagates_failure_from_import_fn():
     """Under typed-errors, the import_fn raises on failure; the
     execute boundary catches and reports `import_ok=False` plus a
     typed `import_error` carrying the message + exception class."""
@@ -172,7 +172,7 @@ def test_import_ontology_execute_propagates_failure_from_import_fn():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        result = import_ontology_execute(plan)
+        result = await import_ontology_execute(plan)
 
     assert result.did_import is True
     assert result.import_ok is False
@@ -181,7 +181,7 @@ def test_import_ontology_execute_propagates_failure_from_import_fn():
     assert result.import_error.exception_type == "builtins.RuntimeError"
 
 
-def test_import_ontology_execute_returns_result_dataclass():
+async def test_import_ontology_execute_returns_result_dataclass():
     plan = ImportOntologyPlan(
         ontology_name="mesh", already_imported=True, download_size_mb=115,
     )
@@ -191,7 +191,7 @@ def test_import_ontology_execute_returns_result_dataclass():
               {"mesh": {"import_fn": lambda c, **kw: True,
                         "download_size_mb": 115}}),
     ):
-        result = import_ontology_execute(plan)
+        result = await import_ontology_execute(plan)
     assert isinstance(result, ImportOntologyResult)
 
 
@@ -238,12 +238,12 @@ def test_link_plan_summary_doc_scope_mentions_doc_id():
 # ---- link_ontology_plan ----
 
 
-def test_link_ontology_plan_raises_on_unknown_ontology():
+async def test_link_ontology_plan_raises_on_unknown_ontology():
     with pytest.raises(ValueError):
-        link_ontology_plan("not-a-real-ontology")
+        await link_ontology_plan("not-a-real-ontology")
 
 
-def test_link_ontology_plan_raises_on_bad_matching_strategy():
+async def test_link_ontology_plan_raises_on_bad_matching_strategy():
     fake_registry = {
         "mesh": {
             "is_imported_fn": lambda client: True,
@@ -254,10 +254,10 @@ def test_link_ontology_plan_raises_on_bad_matching_strategy():
         fake_registry,
     ):
         with pytest.raises(ValueError):
-            link_ontology_plan("mesh", matching_strategy="nope")
+            await link_ontology_plan("mesh", matching_strategy="nope")
 
 
-def test_link_ontology_plan_marks_is_imported_true_when_terms_present():
+async def test_link_ontology_plan_marks_is_imported_true_when_terms_present():
     kg_mock = MagicMock()
     fake_registry = {
         "mesh": {
@@ -270,12 +270,12 @@ def test_link_ontology_plan_marks_is_imported_true_when_terms_present():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        plan = link_ontology_plan("mesh")
+        plan = await link_ontology_plan("mesh")
 
     assert plan.is_imported is True
 
 
-def test_link_ontology_plan_marks_is_imported_false_when_no_terms():
+async def test_link_ontology_plan_marks_is_imported_false_when_no_terms():
     kg_mock = MagicMock()
     fake_registry = {
         "mesh": {
@@ -288,12 +288,12 @@ def test_link_ontology_plan_marks_is_imported_false_when_no_terms():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        plan = link_ontology_plan("mesh")
+        plan = await link_ontology_plan("mesh")
 
     assert plan.is_imported is False
 
 
-def test_link_ontology_plan_defaults_to_global_scope_and_exact_matching():
+async def test_link_ontology_plan_defaults_to_global_scope_and_exact_matching():
     kg_mock = MagicMock()
     fake_registry = {
         "mesh": {"is_imported_fn": lambda client: True},
@@ -304,13 +304,13 @@ def test_link_ontology_plan_defaults_to_global_scope_and_exact_matching():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        plan = link_ontology_plan("mesh")
+        plan = await link_ontology_plan("mesh")
 
     assert plan.scope == "global"
     assert plan.matching_strategy == "exact"
 
 
-def test_link_ontology_plan_accepts_doc_id_scope_and_fuzzy_matching():
+async def test_link_ontology_plan_accepts_doc_id_scope_and_fuzzy_matching():
     kg_mock = MagicMock()
     fake_registry = {
         "go": {"is_imported_fn": lambda client: True},
@@ -321,7 +321,7 @@ def test_link_ontology_plan_accepts_doc_id_scope_and_fuzzy_matching():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        plan = link_ontology_plan(
+        plan = await link_ontology_plan(
             "go", matching_strategy="fuzzy", scope="doc-xyz",
         )
 
@@ -332,7 +332,7 @@ def test_link_ontology_plan_accepts_doc_id_scope_and_fuzzy_matching():
 # ---- link_ontology_execute ----
 
 
-def test_link_ontology_execute_no_op_when_not_imported():
+async def test_link_ontology_execute_no_op_when_not_imported():
     """is_imported=False -> link_ok=False, no link_entities call."""
     plan = LinkOntologyPlan(
         ontology_name="mesh",
@@ -345,14 +345,14 @@ def test_link_ontology_execute_no_op_when_not_imported():
         "knowledge_agent.kg.ontology_lifecycle.get_kg_client",
         return_value=kg_mock,
     ):
-        result = link_ontology_execute(plan)
+        result = await link_ontology_execute(plan)
 
     kg_mock.link_entities_to_ontology.assert_not_called()
     assert result.n_links_written == 0
     assert result.link_ok is False
 
 
-def test_link_ontology_execute_passes_none_doc_id_for_global_scope():
+async def test_link_ontology_execute_passes_none_doc_id_for_global_scope():
     plan = LinkOntologyPlan(
         ontology_name="mesh",
         is_imported=True,
@@ -360,12 +360,12 @@ def test_link_ontology_execute_passes_none_doc_id_for_global_scope():
         matching_strategy="exact",
     )
     kg_mock = MagicMock()
-    kg_mock.link_entities_to_ontology.return_value = 42
+    kg_mock.link_entities_to_ontology = AsyncMock(return_value=42)
     with patch(
         "knowledge_agent.kg.ontology_lifecycle.get_kg_client",
         return_value=kg_mock,
     ):
-        result = link_ontology_execute(plan)
+        result = await link_ontology_execute(plan)
 
     kg_mock.link_entities_to_ontology.assert_called_once_with(
         "mesh", "exact", doc_id=None,
@@ -374,7 +374,7 @@ def test_link_ontology_execute_passes_none_doc_id_for_global_scope():
     assert result.link_ok is True
 
 
-def test_link_ontology_execute_passes_doc_id_when_scope_is_doc_id():
+async def test_link_ontology_execute_passes_doc_id_when_scope_is_doc_id():
     plan = LinkOntologyPlan(
         ontology_name="go",
         is_imported=True,
@@ -382,12 +382,12 @@ def test_link_ontology_execute_passes_doc_id_when_scope_is_doc_id():
         matching_strategy="fuzzy",
     )
     kg_mock = MagicMock()
-    kg_mock.link_entities_to_ontology.return_value = 7
+    kg_mock.link_entities_to_ontology = AsyncMock(return_value=7)
     with patch(
         "knowledge_agent.kg.ontology_lifecycle.get_kg_client",
         return_value=kg_mock,
     ):
-        result = link_ontology_execute(plan)
+        result = await link_ontology_execute(plan)
 
     kg_mock.link_entities_to_ontology.assert_called_once_with(
         "go", "fuzzy", doc_id="abc123",
@@ -396,7 +396,7 @@ def test_link_ontology_execute_passes_doc_id_when_scope_is_doc_id():
     assert result.scope == "abc123"
 
 
-def test_link_ontology_execute_zero_links_is_still_link_ok():
+async def test_link_ontology_execute_zero_links_is_still_link_ok():
     """Empty match set is a valid outcome, not a failure."""
     plan = LinkOntologyPlan(
         ontology_name="mesh",
@@ -405,18 +405,18 @@ def test_link_ontology_execute_zero_links_is_still_link_ok():
         matching_strategy="exact",
     )
     kg_mock = MagicMock()
-    kg_mock.link_entities_to_ontology.return_value = 0
+    kg_mock.link_entities_to_ontology = AsyncMock(return_value=0)
     with patch(
         "knowledge_agent.kg.ontology_lifecycle.get_kg_client",
         return_value=kg_mock,
     ):
-        result = link_ontology_execute(plan)
+        result = await link_ontology_execute(plan)
 
     assert result.n_links_written == 0
     assert result.link_ok is True
 
 
-def test_link_ontology_execute_returns_result_dataclass():
+async def test_link_ontology_execute_returns_result_dataclass():
     plan = LinkOntologyPlan(
         ontology_name="mesh",
         is_imported=False,
@@ -427,11 +427,11 @@ def test_link_ontology_execute_returns_result_dataclass():
         "knowledge_agent.kg.ontology_lifecycle.get_kg_client",
         return_value=MagicMock(),
     ):
-        result = link_ontology_execute(plan)
+        result = await link_ontology_execute(plan)
     assert isinstance(result, LinkOntologyResult)
 
 
-def test_link_ontology_execute_catches_linking_pass_failure():
+async def test_link_ontology_execute_catches_linking_pass_failure():
     """Under typed-errors, the linking pass raises on Cypher failure;
     the execute boundary catches and reports `link_ok=False` plus a
     typed `link_error` so the UI dialog can surface the cause."""
@@ -442,12 +442,12 @@ def test_link_ontology_execute_catches_linking_pass_failure():
         matching_strategy="exact",
     )
     kg_mock = MagicMock()
-    kg_mock.link_entities_to_ontology.side_effect = RuntimeError("cypher boom")
+    kg_mock.link_entities_to_ontology = AsyncMock(side_effect=RuntimeError("cypher boom"))
     with patch(
         "knowledge_agent.kg.ontology_lifecycle.get_kg_client",
         return_value=kg_mock,
     ):
-        result = link_ontology_execute(plan)
+        result = await link_ontology_execute(plan)
     assert result.link_ok is False
     assert result.n_links_written == 0
     assert result.link_error is not None
@@ -480,12 +480,12 @@ def test_delete_plan_summary_mentions_terms_and_links():
 # ---- delete_ontology_plan ----
 
 
-def test_delete_ontology_plan_raises_on_unknown_ontology():
+async def test_delete_ontology_plan_raises_on_unknown_ontology():
     with pytest.raises(ValueError):
-        delete_ontology_plan("not-a-real-ontology")
+        await delete_ontology_plan("not-a-real-ontology")
 
 
-def test_delete_ontology_plan_skips_counts_when_not_imported():
+async def test_delete_ontology_plan_skips_counts_when_not_imported():
     """is_imported_fn=False -> don't even run the count queries."""
     kg_mock = MagicMock()
     fake_registry = {
@@ -500,7 +500,7 @@ def test_delete_ontology_plan_skips_counts_when_not_imported():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        plan = delete_ontology_plan("mesh")
+        plan = await delete_ontology_plan("mesh")
 
     assert plan.is_imported is False
     assert plan.n_terms == 0
@@ -509,10 +509,10 @@ def test_delete_ontology_plan_skips_counts_when_not_imported():
     kg_mock.count_canonical_links.assert_not_called()
 
 
-def test_delete_ontology_plan_populates_counts_when_imported():
+async def test_delete_ontology_plan_populates_counts_when_imported():
     kg_mock = MagicMock()
-    kg_mock.count_ontology_terms.return_value = 30142
-    kg_mock.count_canonical_links.return_value = 18
+    kg_mock.count_ontology_terms = AsyncMock(return_value=30142)
+    kg_mock.count_canonical_links = AsyncMock(return_value=18)
     fake_registry = {
         "mesh": {
             "is_imported_fn": lambda client: True,
@@ -525,18 +525,18 @@ def test_delete_ontology_plan_populates_counts_when_imported():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        plan = delete_ontology_plan("mesh")
+        plan = await delete_ontology_plan("mesh")
 
     assert plan.is_imported is True
     assert plan.n_terms == 30142
     assert plan.n_canonical_links == 18
 
 
-def test_delete_ontology_plan_propagates_count_failure():
+async def test_delete_ontology_plan_propagates_count_failure():
     """A count primitive raising -> propagates under typed-errors
     contract. The caller (Layer 3 GUI handler) decides how to surface."""
     kg_mock = MagicMock()
-    kg_mock.count_ontology_terms.side_effect = RuntimeError("cypher boom")
+    kg_mock.count_ontology_terms = AsyncMock(side_effect=RuntimeError("cypher boom"))
     fake_registry = {
         "mesh": {
             "is_imported_fn": lambda client: True,
@@ -550,13 +550,13 @@ def test_delete_ontology_plan_propagates_count_failure():
               fake_registry),
     ):
         with pytest.raises(RuntimeError, match="cypher boom"):
-            delete_ontology_plan("mesh")
+            await delete_ontology_plan("mesh")
 
 
 # ---- delete_ontology_execute ----
 
 
-def test_delete_ontology_execute_no_op_when_not_imported():
+async def test_delete_ontology_execute_no_op_when_not_imported():
     plan = DeleteOntologyPlan(
         ontology_name="mesh", is_imported=False,
         n_terms=0, n_canonical_links=0,
@@ -568,14 +568,14 @@ def test_delete_ontology_execute_no_op_when_not_imported():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        result = delete_ontology_execute(plan)
+        result = await delete_ontology_execute(plan)
 
     delete_fn.assert_not_called()
     assert result.did_delete is False
     assert result.delete_ok is True
 
 
-def test_delete_ontology_execute_runs_delete_fn_when_imported():
+async def test_delete_ontology_execute_runs_delete_fn_when_imported():
     plan = DeleteOntologyPlan(
         ontology_name="mesh", is_imported=True,
         n_terms=100, n_canonical_links=5,
@@ -588,14 +588,14 @@ def test_delete_ontology_execute_runs_delete_fn_when_imported():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        result = delete_ontology_execute(plan)
+        result = await delete_ontology_execute(plan)
 
     delete_fn.assert_called_once()
     assert result.did_delete is True
     assert result.delete_ok is True
 
 
-def test_delete_ontology_execute_propagates_failure():
+async def test_delete_ontology_execute_propagates_failure():
     """Under typed-errors, delete_fn raises on failure; the execute
     boundary catches and reports `delete_ok=False` plus a typed
     `delete_error` carrying the message + exception class."""
@@ -614,7 +614,7 @@ def test_delete_ontology_execute_propagates_failure():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        result = delete_ontology_execute(plan)
+        result = await delete_ontology_execute(plan)
 
     assert result.did_delete is True
     assert result.delete_ok is False
@@ -623,7 +623,7 @@ def test_delete_ontology_execute_propagates_failure():
     assert result.delete_error.exception_type == "builtins.RuntimeError"
 
 
-def test_delete_ontology_execute_returns_result_dataclass():
+async def test_delete_ontology_execute_returns_result_dataclass():
     plan = DeleteOntologyPlan(
         ontology_name="mesh", is_imported=False,
         n_terms=0, n_canonical_links=0,
@@ -633,7 +633,7 @@ def test_delete_ontology_execute_returns_result_dataclass():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               {"mesh": {"delete_fn": lambda c: True}}),
     ):
-        result = delete_ontology_execute(plan)
+        result = await delete_ontology_execute(plan)
     assert isinstance(result, DeleteOntologyResult)
 
 
@@ -683,7 +683,7 @@ def test_import_plan_summary_xrefs_none_matches_legacy():
     assert ":<X>_XREF" not in summary
 
 
-def test_import_ontology_plan_threads_xrefs_mode_into_dataclass():
+async def test_import_ontology_plan_threads_xrefs_mode_into_dataclass():
     kg_mock = MagicMock()
     fake_registry = {
         "mesh": {
@@ -700,11 +700,11 @@ def test_import_ontology_plan_threads_xrefs_mode_into_dataclass():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        plan = import_ontology_plan("mesh", xrefs_mode="use")
+        plan = await import_ontology_plan("mesh", xrefs_mode="use")
     assert plan.xrefs_mode == "use"
 
 
-def test_import_ontology_execute_passes_xrefs_mode_to_import_fn():
+async def test_import_ontology_execute_passes_xrefs_mode_to_import_fn():
     """The plan's `xrefs_mode` flows through to the per-ontology
     `import_fn` as the kwarg of the same name."""
     plan = ImportOntologyPlan(
@@ -731,7 +731,7 @@ def test_import_ontology_execute_passes_xrefs_mode_to_import_fn():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        result = import_ontology_execute(plan)
+        result = await import_ontology_execute(plan)
     assert result.import_ok is True
     assert captured.get("xrefs_mode") == "collect_only"
 
@@ -794,7 +794,7 @@ def test_install_xrefs_plan_summary_none_describes_disable():
     assert "NOT removed" in s
 
 
-def test_install_xrefs_plan_factory_aggregates_counts_across_18():
+async def test_install_xrefs_plan_factory_aggregates_counts_across_18():
     """`install_xrefs_plan` walks all 18 sub-labels via the diagnostics
     in `kg.ontology_xrefs` and aggregates counts."""
     # Stub the count primitives to return predictable per-label counts.
@@ -837,19 +837,19 @@ def test_install_xrefs_plan_factory_aggregates_counts_across_18():
             {lbl: f"key_{lbl}" for lbl in ONTOLOGY_SUB_LABELS},
         ),
     ):
-        plan = install_xrefs_plan(MagicMock(), "use")
+        plan = await install_xrefs_plan(MagicMock(), "use")
     assert plan.new_xrefs_mode == "use"
     assert plan.n_imported_ontologies == 18
     assert plan.n_dangling_xref_sources == 4 + 3  # MeSH + GO contribute
     assert plan.n_existing_xref_edges == 17
 
 
-def test_install_xrefs_plan_factory_rejects_unknown_mode():
+async def test_install_xrefs_plan_factory_rejects_unknown_mode():
     with pytest.raises(ValueError):
-        install_xrefs_plan(MagicMock(), "definitely_not_a_mode")
+        await install_xrefs_plan(MagicMock(), "definitely_not_a_mode")
 
 
-def test_install_xrefs_plan_factory_fail_soft_on_dangling_count_none():
+async def test_install_xrefs_plan_factory_fail_soft_on_dangling_count_none():
     """When `count_dangling_xrefs` returns None for a label, the
     factory skips that label and keeps going (the plan is still
     built from the data we did get)."""
@@ -868,7 +868,7 @@ def test_install_xrefs_plan_factory_fail_soft_on_dangling_count_none():
         patch("knowledge_agent.kg.ontology_lifecycle.count_xref_edges",
               side_effect=fake_edges),
     ):
-        plan = install_xrefs_plan(MagicMock(), "collect_only")
+        plan = await install_xrefs_plan(MagicMock(), "collect_only")
     assert isinstance(plan, InstallXrefsPlan)
 
 
@@ -920,7 +920,7 @@ def test_install_cross_doc_xrefs_plan_summary_disabling():
     assert "does NOT remove them" in s
 
 
-def test_install_cross_doc_xrefs_plan_factory_reads_live_counts():
+async def test_install_cross_doc_xrefs_plan_factory_reads_live_counts():
     """The factory queries `:Document|:Artifact` count and the L10
     edge count via session.run(); both come back as the plan's
     `n_docs` / `n_existing_l10_edges`."""
@@ -961,7 +961,7 @@ def test_install_cross_doc_xrefs_plan_factory_reads_live_counts():
     class FakeClient:
         driver = FakeDriver()
 
-    plan = install_cross_doc_xrefs_plan(
+    plan = await install_cross_doc_xrefs_plan(
         FakeClient(),
         enabling=True,
         entities_layer_on=True,
@@ -971,7 +971,7 @@ def test_install_cross_doc_xrefs_plan_factory_reads_live_counts():
     assert plan.n_existing_l10_edges == 19
 
 
-def test_install_cross_doc_xrefs_plan_factory_fail_soft_on_count_error():
+async def test_install_cross_doc_xrefs_plan_factory_fail_soft_on_count_error():
     """If both count primitives raise, the plan still builds with
     n_docs=0 and n_existing_l10_edges=0 (graceful degradation)."""
     class FakeDriver:
@@ -981,7 +981,7 @@ def test_install_cross_doc_xrefs_plan_factory_fail_soft_on_count_error():
     class FakeClient:
         driver = FakeDriver()
 
-    plan = install_cross_doc_xrefs_plan(
+    plan = await install_cross_doc_xrefs_plan(
         FakeClient(),
         enabling=True,
         entities_layer_on=True,
@@ -1167,7 +1167,7 @@ def test_import_plan_rich_summary_composes_with_xrefs_use_clause():
 # ---- import_ontology_plan factory reads provenance from registry ----
 
 
-def test_import_ontology_plan_factory_reads_provenance_from_registry():
+async def test_import_ontology_plan_factory_reads_provenance_from_registry():
     """When the registry entry carries `"provenance"`, the factory
     threads it onto the returned ImportOntologyPlan."""
     kg_mock = MagicMock()
@@ -1188,11 +1188,11 @@ def test_import_ontology_plan_factory_reads_provenance_from_registry():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        plan = import_ontology_plan("mesh")
+        plan = await import_ontology_plan("mesh")
     assert plan.provenance is p
 
 
-def test_import_ontology_plan_factory_handles_registry_without_provenance():
+async def test_import_ontology_plan_factory_handles_registry_without_provenance():
     """Registry entries missing `"provenance"` (transitional during the
     18-ontology rollout) produce a plan with provenance=None — summary
     falls back to legacy one-liner."""
@@ -1213,7 +1213,7 @@ def test_import_ontology_plan_factory_handles_registry_without_provenance():
         patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
               fake_registry),
     ):
-        plan = import_ontology_plan("go")
+        plan = await import_ontology_plan("go")
     assert plan.provenance is None
     # Legacy summary still works.
     assert plan.summary == "Import go (~200 MB download)."
@@ -1316,8 +1316,8 @@ def test_go_domain_tags_dropped_pharmacology():
     )
 
 
-def test_mesh_pilot_factory_produces_rich_summary():
-    """End-to-end against the live registry: `import_ontology_plan("mesh")`
+async def test_mesh_pilot_factory_produces_rich_summary():
+    """End-to-end against the live registry: `await import_ontology_plan("mesh")`
     builds a plan whose summary surfaces real MeSH provenance values.
 
     The registry's is_imported_fn captures the module-level function at
@@ -1335,7 +1335,7 @@ def test_mesh_pilot_factory_produces_rich_summary():
             "knowledge_agent.kg.ontology_lifecycle.get_kg_client",
             return_value=MagicMock(),
         ):
-            plan = import_ontology_plan("mesh")
+            plan = await import_ontology_plan("mesh")
     finally:
         ONTOLOGY_REGISTRY["mesh"] = original_entry
     s = plan.summary
@@ -1475,7 +1475,7 @@ def test_get_extractor_candidates_skips_llm_open_vocab():
 # ---- ImportOntologyPlan summary with cross-link surface ----
 
 
-def test_import_plan_rich_summary_surfaces_extractor_candidates():
+async def test_import_plan_rich_summary_surfaces_extractor_candidates():
     """When the plan carries extractor_candidates, the summary
     appends a 'Pairs well with extractors:' block."""
     from knowledge_agent.kg.ontology_linking import ONTOLOGY_REGISTRY
@@ -1489,14 +1489,14 @@ def test_import_plan_rich_summary_surfaces_extractor_candidates():
             {"is_imported_fn": lambda client: False},
         ),
     ):
-        plan = import_ontology_plan("mesh")
+        plan = await import_ontology_plan("mesh")
     s = plan.summary
     assert "Pairs well with extractors" in s
     # At least one biomedical extractor name appears in the block.
     assert "gliner_biomed" in s or "hunflair2" in s
 
 
-def test_import_plan_rich_summary_handles_empty_extractor_candidates():
+async def test_import_plan_rich_summary_handles_empty_extractor_candidates():
     """ECO has covers_labels=() so extractor_candidates is empty —
     summary surfaces the explanatory 'no extractor-pairable surface'
     note instead of dangling the Pairs-well-with block."""
@@ -1511,7 +1511,7 @@ def test_import_plan_rich_summary_handles_empty_extractor_candidates():
             {"is_imported_fn": lambda client: False},
         ),
     ):
-        plan = import_ontology_plan("eco")
+        plan = await import_ontology_plan("eco")
     s = plan.summary
     assert "Pairs well with" not in s
     assert "no extractor-pairable" in s
@@ -1580,7 +1580,7 @@ def test_install_extractor_plan_llm_says_open_vocab_lexically():
 # ---- Factory threading ----
 
 
-def test_import_ontology_plan_threads_extractor_candidates():
+async def test_import_ontology_plan_threads_extractor_candidates():
     """Factory pre-computes extractor candidates and stores them on
     the plan."""
     from knowledge_agent.kg.ontology_linking import ONTOLOGY_REGISTRY
@@ -1594,7 +1594,7 @@ def test_import_ontology_plan_threads_extractor_candidates():
             {"is_imported_fn": lambda client: False},
         ),
     ):
-        plan = import_ontology_plan("mondo")
+        plan = await import_ontology_plan("mondo")
     # MONDO covers DISEASE; at least one biomedical extractor should
     # match.
     assert len(plan.extractor_candidates) >= 1
