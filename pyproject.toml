@@ -28,6 +28,13 @@ dependencies = [
     "pronto>=2.7,<3",
     "rdflib>=7,<8",
     "platformdirs>=4.2,<5",
+    # GUI dependencies — Flet desktop shell + OS-keyring for secrets.
+    # Both are imported only when the GUI launches; the CLI / smoke
+    # scripts / tests don't pull them at runtime, but they're in base
+    # deps so a `pip install knowledge-agent` produces a ready-to-run
+    # GUI.
+    "flet>=0.85.0,<0.86.0",
+    "keyring>=25,<26",
 ]
 # LLM and embedder provider adapters are intentionally NOT in base
 # dependencies. The first-launch GUI wizard asks the user which
@@ -42,6 +49,11 @@ dependencies = [
 # `pyproject.toml [project.scripts]` is the canonical way to expose a
 # binary; `python -m knowledge_agent` ALSO works via `__main__.py`.
 kg = "knowledge_agent.cli:main"
+# Desktop GUI (sprint 1 slice 1, 2026-06-30). Three top tabs:
+# Search / Library / Evaluation. Search has a chat-on-left +
+# mode-switching display panel on the right. See gui/app.py docstring.
+# `python -m knowledge_agent.gui` ALSO works via `gui/__main__.py`.
+kg-gui = "knowledge_agent.gui.app:main"
 
 [project.optional-dependencies]
 dev = [

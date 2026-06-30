@@ -30,6 +30,7 @@ _ASYNC_BEARING_MODULES = [
     _SRC_ROOT / "_http_client.py",
     _SRC_ROOT / "cli.py",
     _SRC_ROOT / "health.py",
+    _SRC_ROOT / "gui" / "app.py",
     _SRC_ROOT / "kg" / "client.py",
     _SRC_ROOT / "search" / "client.py",
     _SRC_ROOT / "ingestion" / "metadata.py",
