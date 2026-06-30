@@ -23,6 +23,7 @@ from knowledge_agent.gui._styles import (
     CHAT_EMPTY_PLACEHOLDER,
     FRAME_BORDER_COLOR,
     PANEL_BG,
+    centered_label,
 )
 
 if TYPE_CHECKING:
@@ -101,20 +102,21 @@ class ChatPanel:
         )
 
         self.send_button = ft.Button(
-            content="Send", expand=True, on_click=self.app.on_send,
+            content=centered_label("Send"), expand=True,
+            on_click=self.app.on_send,
         )
         self.stop_button = ft.Button(
-            content="Stop", expand=True, on_click=self.app.on_stop,
-            disabled=True,
+            content=centered_label("Stop"), expand=True,
+            on_click=self.app.on_stop, disabled=True,
         )
         button_row = ft.Row(
             controls=[
                 ft.Button(
-                    content="Save Chat", expand=True,
+                    content=centered_label("Save"), expand=True,
                     on_click=self.app.on_save_chat,
                 ),
                 ft.Button(
-                    content="Clear", expand=True,
+                    content=centered_label("Clear"), expand=True,
                     on_click=self.app.on_clear,
                 ),
                 self.stop_button,

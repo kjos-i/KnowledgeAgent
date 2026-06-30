@@ -36,8 +36,9 @@ def test_evaluation_tab_stub_mentions_eval_harness(fake_app: MagicMock):
 def test_search_tab_composes_chat_panel_and_right_panel_in_row(
     fake_app: MagicMock,
 ):
-    """SearchTab is a 45/55 Row composition; both panels are present
-    inside Container wrappers with the expected `expand` ratios."""
+    """SearchTab is a 40/60 Row composition; chat takes the narrower
+    left column, the right panel (result + buttons) takes the wider
+    right column."""
     fake_app.chat_panel = ChatPanel(fake_app)
     fake_app.right_panel = RightPanel(fake_app)
 
@@ -48,6 +49,6 @@ def test_search_tab_composes_chat_panel_and_right_panel_in_row(
     chat_container, right_container = ctl.controls
     assert isinstance(chat_container, ft.Container)
     assert isinstance(right_container, ft.Container)
-    # Ratios are 45/55 — pinned because they match RA.
-    assert chat_container.expand == 45
-    assert right_container.expand == 55
+    # 40 : 60 ratio → chat takes the narrower left column.
+    assert chat_container.expand == 40
+    assert right_container.expand == 60

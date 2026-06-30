@@ -1,14 +1,13 @@
 """Search tab — the daily-use workflow.
 
-Composes `ChatPanel` (left, 45%) + `RightPanel` (right, 55%) into a
+Composes `ChatPanel` (left, 40%) + `RightPanel` (right, 60%) into a
 single `ft.Row`. Owns no state itself — both child panels hold their
 own controls, and `GuiApp` owns the session state they read from.
 
-The split is the same as `ResearchArticlesAgent`'s main window
-layout. Library and Evaluation are separate top-level tabs because
-they need the full window for dense data tables; Search keeps the
-side-by-side split because reading the Latest result alongside
-composing the next query is the core workflow.
+Library and Evaluation are separate top-level tabs because they need
+the full window for dense data tables; Search keeps the side-by-side
+split because reading the result alongside composing the next query
+is the core workflow.
 """
 from __future__ import annotations
 
@@ -20,11 +19,11 @@ if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
 
 
-# Column-width ratios chosen to match ResearchArticlesAgent so the two
-# apps visually align. Adjusting these moves the same numbers in the
-# sibling app for parity.
-CHAT_COLUMN_EXPAND = 45
-RIGHT_COLUMN_EXPAND = 55
+# Column-width ratio: chat (left) takes 40%, results (right) takes 60%.
+# The right panel is wider because it hosts answers / settings / info,
+# but the chat side stays roomy enough for a multi-line query.
+CHAT_COLUMN_EXPAND = 40
+RIGHT_COLUMN_EXPAND = 60
 
 
 class SearchTab:

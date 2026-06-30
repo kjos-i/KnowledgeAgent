@@ -206,22 +206,24 @@ def test_on_clear_drops_loaded_file_when_toggle_off(fake_page: MagicMock):
 # ---- on_save_answer ----
 
 
-def test_save_answer_no_answer_appends_system_message(fake_page: MagicMock):
+async def test_save_answer_no_answer_appends_system_message(fake_page: MagicMock):
     """Save Answer with no current answer → user-friendly system message
-    in chat, no exception."""
+    in chat, no exception. Handler is async since it awaits the OS
+    folder picker; the early-return branch we exercise here doesn't
+    actually open the picker but still has to be awaited."""
     app = _make_app(fake_page)
     app.last_answer = None
     app.last_query = None
 
-    app.on_save_answer(MagicMock())
+    await app.on_save_answer(MagicMock())
 
     app.chat_panel.append_system.assert_called_once()
     msg = app.chat_panel.append_system.call_args.args[0]
     assert "nothing to save" in msg
 
 
-def test_save_chat_empty_chat_appends_system_message(fake_page: MagicMock):
+async def test_save_chat_empty_chat_appends_system_message(fake_page: MagicMock):
     app = _make_app(fake_page)
-    app.on_save_chat(MagicMock())
+    await app.on_save_chat(MagicMock())
     msg = app.chat_panel.append_system.call_args.args[0]
     assert "empty" in msg.lower()

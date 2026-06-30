@@ -431,6 +431,12 @@ async def lancedb_retriever_node(state: AgentState) -> dict[str, Any]:
     settings = get_settings()
     query = state.get("search_query") or state["query"]
     top_k = state.get("top_k") or settings.top_k
+    # MMR rerank: per-invocation override wins; otherwise the persistent
+    # `default_use_mmr` setting (env-bridged from GUI Settings →
+    # Retrieval). Silently ignored at the LanceDB layer for fts mode.
+    use_mmr = state.get("use_mmr")
+    if use_mmr is None:
+        use_mmr = settings.default_use_mmr
 
     filters: dict[str, Any] | None = None
     if effective_mode(state, settings) == "neo4j_then_lancedb":
@@ -448,7 +454,9 @@ async def lancedb_retriever_node(state: AgentState) -> dict[str, Any]:
 
     client = get_search_client()
     try:
-        hits = await client.retrieve(query=query, top_k=top_k, filters=filters)
+        hits = await client.retrieve(
+            query=query, top_k=top_k, use_mmr=use_mmr, filters=filters,
+        )
     except Exception as exc:
         # Search-path methods now raise on failure (typed-errors
         # contract); catch at the node boundary so the agent's response

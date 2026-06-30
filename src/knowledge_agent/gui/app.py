@@ -2,9 +2,8 @@
 
 Owns session state (`messages`, `last_answer`, `last_query`,
 `loaded_file`, `busy`, `_send_task`) and the cross-cutting handlers
-(Send → chat-router → graph, Stop, Clear, Save Answer, Save Chat,
-Open Result, paste path). Page layout is top-level `ft.Tabs` with
-3 entries:
+(Send → chat-router → graph, Stop, Clear, Save chat, Save Result,
+Open Result). Page layout is top-level `ft.Tabs` with 3 entries:
 
     [ Search ] [ Library ] [ Evaluation ]
 
@@ -49,11 +48,16 @@ from knowledge_agent.gui.chat_router import (
 )
 from knowledge_agent.gui.config_store import (
     KEYRING_TO_ENV,
+    ConfigError,
     GuiConfig,
-    active_results_dir,
+    apply_connection_to_env,
+    apply_embedding_to_env,
     apply_keys_to_env,
+    apply_llm_to_env,
+    apply_retrieval_to_env,
     get_api_key,
     load_config,
+    save_config,
 )
 from knowledge_agent.gui.right_panel import (
     MODE_FILE,
@@ -156,12 +160,18 @@ class GuiApp:
         """Load the corpus.toml the agent needs to build prompts.
 
         Resolution order:
-          1. `gui_config.corpus_config_path` if set + the file exists.
+          1. `gui_config.corpus_config_path` if set + file exists AND
+             `gui_config.restore_last_corpus` is True. When the toggle
+             is off, the stored path is skipped — user starts without a
+             corpus unless CWD has one.
           2. `corpus.toml` in the current working directory.
           3. None → caller surfaces a user-facing banner.
         """
         candidates: list[Path] = []
-        if self.gui_config.corpus_config_path is not None:
+        if (
+            self.gui_config.restore_last_corpus
+            and self.gui_config.corpus_config_path is not None
+        ):
             candidates.append(self.gui_config.corpus_config_path)
         candidates.append(Path.cwd() / "corpus.toml")
         for p in candidates:
@@ -322,18 +332,57 @@ class GuiApp:
             self.right_panel.switch_mode(MODE_LATEST)
         self.page.update()
 
-    def _results_dir(self) -> Path:
-        return active_results_dir(self.gui_config)
+    async def _prompt_save_directory(self, dialog_title: str) -> Path | None:
+        """Open the OS folder picker; remember the choice.
 
-    def on_save_answer(self, e: ft.Event) -> None:
+        Returns the chosen path (and persists it as `gui_config.results_dir`
+        so the next press opens at the same place), or None on cancel.
+
+        `results_dir` is no longer a configurable default — it's hidden
+        last-used state behind the Save buttons. Settings has no form
+        entry for it.
+        """
+        initial = (
+            str(self.gui_config.results_dir)
+            if self.gui_config.results_dir is not None
+            else None
+        )
+        try:
+            chosen = await self.file_picker.get_directory_path_async(
+                dialog_title=dialog_title,
+                initial_directory=initial,
+            )
+        except Exception as exc:
+            logger.warning("folder picker failed: %r", exc)
+            self.chat_panel.append_system(f"folder picker error: {exc}")
+            return None
+        if not chosen:
+            return None
+        path = Path(chosen)
+        # Remember the picked folder so the next press opens here.
+        previous = self.gui_config.results_dir
+        self.gui_config.results_dir = path
+        try:
+            save_config(self.gui_config)
+        except ConfigError as exc:
+            # Save failure is non-fatal — the picker still works next time,
+            # but the picker won't restore this folder until restart.
+            logger.warning("could not persist results_dir: %r", exc)
+            self.gui_config.results_dir = previous
+        return path
+
+    async def on_save_answer(self, e: ft.Event) -> None:
         if self.last_answer is None or self.last_query is None:
             self.chat_panel.append_system(
                 "nothing to save yet — ask a question first"
             )
             return
+        target = await self._prompt_save_directory("Save result to folder")
+        if target is None:
+            return
         try:
             md_path, json_path = save_answer(
-                self.last_answer, self.last_query, self._results_dir(),
+                self.last_answer, self.last_query, target,
             )
         except SaveError as exc:
             self.chat_panel.append_system(f"could not save: {exc}")
@@ -341,15 +390,18 @@ class GuiApp:
         self.chat_panel.append_system(f"saved: {md_path}")
         self.chat_panel.append_system(f"saved: {json_path}")
 
-    def on_save_chat(self, e: ft.Event) -> None:
+    async def on_save_chat(self, e: ft.Event) -> None:
         if not self.messages:
             self.chat_panel.append_system(
                 "nothing to save — chat is empty"
             )
             return
+        target = await self._prompt_save_directory("Save chat to folder")
+        if target is None:
+            return
         try:
             path = save_chat(
-                self.messages, self.last_query, self._results_dir(),
+                self.messages, self.last_query, target,
             )
         except SaveError as exc:
             self.chat_panel.append_system(f"could not save: {exc}")
@@ -385,35 +437,6 @@ class GuiApp:
         self.loaded_file = _LoadedFile(name=first.name, content=content)
         self.right_panel.switch_mode(MODE_FILE)
 
-    def on_load_path_field(self, e: ft.Event) -> None:
-        """Load the .md path the user typed/pasted into the path field."""
-        field_ctl = self.right_panel.paste_path_field
-        raw = (field_ctl.value or "").strip() if field_ctl is not None else ""
-        if not raw:
-            return
-        path_str = raw.strip('"').strip("'")
-        path = Path(path_str)
-        if not path.exists():
-            self.chat_panel.append_system(f"path does not exist: {path}")
-            return
-        if not path.is_file():
-            self.chat_panel.append_system(f"not a regular file: {path}")
-            return
-        if path.suffix.lower() != ".md":
-            self.chat_panel.append_system(
-                f"only .md files supported; got: {path.suffix}"
-            )
-            return
-        try:
-            content = path.read_text(encoding="utf-8")
-        except OSError as exc:
-            self.chat_panel.append_system(f"could not read file: {exc}")
-            return
-        self.loaded_file = _LoadedFile(name=path.name, content=content)
-        if field_ctl is not None:
-            field_ctl.value = ""
-        self.right_panel.switch_mode(MODE_FILE)
-
     # ----- page assembly ----------------------------------------------------
 
     def build(self) -> None:
@@ -432,6 +455,10 @@ class GuiApp:
         disable_env_file()
         self.gui_config = load_config()
         apply_keys_to_env()
+        apply_connection_to_env(self.gui_config)
+        apply_retrieval_to_env(self.gui_config)
+        apply_llm_to_env(self.gui_config)
+        apply_embedding_to_env(self.gui_config)
         get_settings.cache_clear()
 
         # Register FilePicker as a service (Flet 1.0+ API).
@@ -444,10 +471,10 @@ class GuiApp:
         self.library_tab = LibraryTab(self)
         self.evaluation_tab = EvaluationTab(self)
 
-        # Flet 1.0 tab architecture (Flutter-style): `Tabs` is the
-        # controller; the visible bar lives in `TabBar`; the bodies
-        # live in `TabBarView`, aligned by index. The two siblings
-        # share a `length` declared on the parent `Tabs`.
+        # Native Flet `Tabs` (Flutter-style: TabBar + TabBarView aligned
+        # by index through a shared `length`). The M3 chrome enforces a
+        # ~46 px floor on Tab.height — accepted as the right cost for
+        # native accessibility / keyboard nav / indicator animation.
         tab_bar = ft.TabBar(
             tabs=[
                 ft.Tab(label="Search"),

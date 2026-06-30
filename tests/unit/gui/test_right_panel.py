@@ -61,19 +61,65 @@ def test_switch_to_file_mode_with_no_loaded_file_falls_through_to_latest(
     # but the build mustn't raise.
 
 
-def test_switch_to_settings_renders_stub_message(fake_app: MagicMock):
-    """Slice 1 ships Settings as an empty-state. Confirm the stub is in
-    the rendered tree so the user sees a 'coming soon' message rather
-    than a blank panel."""
+def test_switch_to_settings_renders_settings_view(fake_app: MagicMock):
+    """Slice 2 wired the real SettingsView into MODE_SETTINGS.
+
+    Verify the rendered tree IS the sub-tab Tabs widget (not the old
+    'coming soon' stub Column). The actual sub-tab content is covered
+    by each sub-tab's own tests."""
+    fake_app.gui_config = MagicMock()
+    fake_app.gui_config.llm_provider = "anthropic"
+    fake_app.gui_config.embedding_provider = "voyage"
+    # Numeric / string defaults the sub-tabs read at init time.
+    for attr, val in (
+        ("top_k", 5),
+        ("retrieval_mode", "auto"),
+        ("lancedb_search_mode", "hybrid"),
+        ("num_candidates", 100),
+        ("rrf_rank_constant", 60),
+        ("rrf_rank_window_size", 50),
+        ("mmr_lambda", 0.6),
+        ("mmr_candidate_multiplier", 4),
+        ("kg_max_rows", 50),
+        ("chat_router_temperature", 0.0),
+        ("skip_query_builder", False),
+        ("direct_retrieve", False),
+        ("use_mmr", False),
+        ("keep_loaded_file_on_clear", True),
+        ("restore_last_corpus", True),
+        ("debug_mode", False),
+        ("neo4j_uri", "neo4j://localhost:7687"),
+        ("neo4j_user", "neo4j"),
+        ("lancedb_path", None),
+        ("ollama_base_url", "http://localhost:11434"),
+        ("mode_classifier_model", "claude-haiku-4-5-20251001"),
+        ("mode_classifier_temperature", 0.0),
+        ("query_builder_model", "claude-haiku-4-5-20251001"),
+        ("query_builder_temperature", 0.0),
+        ("cypher_builder_model", "claude-sonnet-4-6"),
+        ("cypher_builder_temperature", 0.0),
+        ("synthesizer_model", "claude-sonnet-4-6"),
+        ("synthesizer_temperature", 0.0),
+        ("anthropic_requests_per_second", None),
+        ("openai_requests_per_second", None),
+        ("google_requests_per_second", None),
+        ("ollama_requests_per_second", None),
+        ("llm_max_retries", 3),
+        ("embedding_model", "voyage-multimodal-3"),
+        ("voyage_embedding_model", "voyage-multimodal-3"),
+        ("openai_embedding_model", "text-embedding-3-small"),
+        ("google_embedding_model", "models/text-embedding-004"),
+        ("hf_embedding_model", "BAAI/bge-m3"),
+        ("voyage_requests_per_second", None),
+    ):
+        setattr(fake_app.gui_config, attr, val)
     panel = RightPanel(fake_app)
     panel.build()
     panel.switch_mode(MODE_SETTINGS)
     content = panel.view_container.content
-    # The stub goes through view_with_header → Column → [header, body].
-    assert isinstance(content, ft.Column)
-    body = content.controls[1]
-    assert isinstance(body, ft.Container)
-    assert "slice 2" in body.content.value.lower()
+    # SettingsView returns a Tabs widget (the 5 sub-tabs).
+    assert isinstance(content, ft.Tabs)
+    assert content.length == 5
 
 
 def test_switch_to_info_renders_stub_message(fake_app: MagicMock):
@@ -85,12 +131,21 @@ def test_switch_to_info_renders_stub_message(fake_app: MagicMock):
     assert "info" in body.content.value.lower()
 
 
-def test_paste_path_field_submits_to_app_handler(fake_app: MagicMock):
-    """The paste-path field's on_submit must wire through to
-    GuiApp.on_load_path_field — the user presses Enter inside the
-    field rather than clicking a button."""
+def test_button_row_contains_all_five_buttons_with_view_result_label(
+    fake_app: MagicMock,
+):
+    """All five buttons live on one row inside the panel:
+    View Result, Save Result, Open Result, Settings, Info. The
+    MODE_LATEST mode button is labelled "View Result" (renamed for
+    clarity — "Result" matches the file artifacts the agent produces)."""
     panel = RightPanel(fake_app)
-    panel.build()
-    assert panel.paste_path_field is not None
-    # Flet sets the bound callable on .on_submit.
-    assert panel.paste_path_field.on_submit is fake_app.on_load_path_field
+    container = panel.build()
+    # The outer Container wraps an inner Column [view_container, button_row].
+    column = container.content
+    button_row = column.controls[1]
+    assert isinstance(button_row, ft.Row)
+    assert len(button_row.controls) == 5
+    # The MODE_LATEST button now reads "View Result". The button's
+    # content is a centred Text widget (so two-line wrapping stays
+    # centred), so we read `.content.value`.
+    assert panel.mode_buttons[MODE_LATEST].content.value == "View Result"

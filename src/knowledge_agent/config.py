@@ -357,6 +357,17 @@ class Settings(BaseSettings):
             "and the mode supports it (hybrid/vector, not fts)."
         ),
     )
+    default_use_mmr: bool = Field(
+        default=False,
+        description=(
+            "Default for the `use_mmr` flag the LanceDB retriever node "
+            "passes to `client.retrieve()`. When True, hybrid/vector "
+            "searches Python-side MMR-rerank the candidate pool to "
+            "boost diversity. Silently ignored for `fts` mode (no "
+            "vectors). Per-invocation override lives on the graph "
+            "state's `use_mmr` field."
+        ),
+    )
     mmr_candidate_multiplier: int = Field(
         default=4,
         ge=1,
@@ -765,6 +776,45 @@ def disable_env_file() -> None:
     global _env_file_disabled
     _env_file_disabled = True
     get_settings.cache_clear()
+
+
+def reset_after_key_change() -> None:
+    """Drop cached state that captured an API key at construction.
+
+    Call after a key reached `os.environ` (any path — GUI keyring
+    bridge, a fresh CLI shell export, the first-launch wizard, etc.).
+    Without this, the next factory call returns a client that was
+    built against the OLD key:
+
+      - `get_settings` is `lru_cache`d — the new value reaches
+        `pydantic-settings` only after a clear.
+      - `kg.client.get_kg_client` captures the Neo4j password at
+        driver init (`AsyncDriver(auth=...)`).
+      - `llm_factory._build_llm` passes the provider api_key at LLM
+        build; the cache key is `(provider, model, temperature)` so
+        the same (provider, model) returns the same stale client.
+      - `embedder_factory._build_voyage_client` captures the Voyage
+        api_key at native-client construction.
+      - `embedder_factory._build_langchain_embedder` captures the
+        openai/google api_key the same way.
+
+    Lazy imports so the function is free to call from contexts that
+    don't have the heavy provider deps installed (e.g. the CLI
+    `health` check loads this module but not necessarily neo4j /
+    langchain).
+    """
+    get_settings.cache_clear()
+    from knowledge_agent.embedder_factory import (
+        _build_langchain_embedder,
+        _build_voyage_client,
+    )
+    from knowledge_agent.kg.client import get_kg_client
+    from knowledge_agent.llm_factory import _build_llm
+
+    _build_llm.cache_clear()
+    _build_voyage_client.cache_clear()
+    _build_langchain_embedder.cache_clear()
+    get_kg_client.cache_clear()
 
 
 def load_test_env() -> None:

@@ -20,7 +20,6 @@ from knowledge_agent.gui.config_store import (
     GuiConfig,
     KEYRING_TO_ENV,
     ConfigError,
-    active_results_dir,
     apply_keys_to_env,
     get_api_key,
     load_config,
@@ -127,29 +126,6 @@ def test_save_config_cleans_tmp_on_failure(
     monkeypatch.setattr(Path, "write_text", boom)
     with pytest.raises(ConfigError):
         save_config(GuiConfig())
-
-
-# ---- active_results_dir ----
-
-
-def test_active_results_dir_uses_explicit_when_set(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
-):
-    target = tmp_path / "my-results"
-    cfg = GuiConfig(results_dir=target)
-    result = active_results_dir(cfg)
-    assert result == target
-    assert target.is_dir()  # created on demand
-
-
-def test_active_results_dir_falls_back_under_config_dir(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
-):
-    _redirect_config_dir(monkeypatch, tmp_path)
-    cfg = GuiConfig(results_dir=None)
-    result = active_results_dir(cfg)
-    assert result == tmp_path / "results"
-    assert result.is_dir()
 
 
 # ---- keyring + env bridge ----

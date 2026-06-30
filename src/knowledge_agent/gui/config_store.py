@@ -131,12 +131,229 @@ class GuiConfig(BaseModel):
         ),
     )
 
+    # ---- retrieval knobs (mirror backend Settings; bridged to env) -----
+    # All seven default to the same value as the backend `Settings`
+    # field of the same name. Bridged at startup so backend
+    # `pydantic-settings` picks them up; the user edits them through
+    # Settings → Retrieval.
+    lancedb_search_mode: Literal["hybrid", "fts", "vector"] = Field(
+        default="hybrid",
+        description=(
+            "Default search mode WITHIN LanceDB. Distinct from "
+            "`retrieval_mode` (which picks store(s) at the agent level)."
+        ),
+    )
+    num_candidates: int = Field(
+        default=100,
+        ge=1,
+        description=(
+            "Vector-search breadth (kNN candidate pool size). Must be "
+            ">= rrf_rank_window_size."
+        ),
+    )
+    rrf_rank_constant: int = Field(
+        default=60,
+        ge=1,
+        description=(
+            "RRF rank constant `k` in 1/(k + rank). Lower = top-ranked "
+            "hits dominate more; higher = flattens contribution across "
+            "ranks."
+        ),
+    )
+    rrf_rank_window_size: int = Field(
+        default=50,
+        ge=1,
+        description=(
+            "How deep into each sub-retriever's list RRF fuses before "
+            "truncating to top_k. Must satisfy "
+            "top_k <= this <= num_candidates."
+        ),
+    )
+    use_mmr: bool = Field(
+        default=False,
+        description=(
+            "When True, hybrid/vector LanceDB searches MMR-rerank the "
+            "candidate pool for diversity. Bridged to USE_MMR; backend "
+            "Settings.default_use_mmr picks it up. Silently ignored in "
+            "FTS mode (no vectors). Per-call override via graph state."
+        ),
+    )
+    mmr_lambda: float = Field(
+        default=0.6,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "MMR relevance/diversity tradeoff. 1.0 = pure relevance, "
+            "0.0 = pure diversity."
+        ),
+    )
+    mmr_candidate_multiplier: int = Field(
+        default=4,
+        ge=1,
+        description=(
+            "Candidate-pool multiplier for MMR: underlying retriever "
+            "is asked for top_k * this many candidates before re-rank."
+        ),
+    )
+    kg_max_rows: int = Field(
+        default=50,
+        ge=1,
+        description=(
+            "Maximum rows returned from a single Neo4j query. Wrapped "
+            "around the LLM-generated Cypher at retrieval time."
+        ),
+    )
+
+    # ---- LLM provider + per-node models + rate limits ------------------
+    # Mirrors backend `Settings`. Active provider + ollama URL bridge to
+    # env so factories pick them up. The 4 query-time node model +
+    # temperature pairs also bridge; rate limits bridge with the
+    # "unset env var = None" convention (pydantic-settings default
+    # path applies). Per-call overrides via invoke_state still win.
+    llm_provider: Literal["anthropic", "openai", "google", "ollama"] = Field(
+        default="anthropic",
+        description=(
+            "Active LLM provider. Switching saves the choice + bridges "
+            "to env; install/uninstall remain manual per the "
+            "no-auto-install rule."
+        ),
+    )
+    ollama_base_url: str = Field(
+        default="http://localhost:11434",
+        description=(
+            "Ollama daemon endpoint. Consulted when `llm_provider` is "
+            "ollama. Daemon itself isn't pip-installable — install from "
+            "ollama.com."
+        ),
+    )
+    mode_classifier_model: str = Field(
+        default="claude-haiku-4-5-20251001",
+        description="Model used by the mode-classifier node.",
+    )
+    mode_classifier_temperature: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="Temperature for the mode-classifier LLM.",
+    )
+    query_builder_model: str = Field(
+        default="claude-haiku-4-5-20251001",
+        description="Model used by the query-builder node.",
+    )
+    query_builder_temperature: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="Temperature for the query-builder LLM.",
+    )
+    cypher_builder_model: str = Field(
+        default="claude-sonnet-4-6",
+        description="Model used by the cypher-builder node.",
+    )
+    cypher_builder_temperature: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="Temperature for the cypher-builder LLM.",
+    )
+    synthesizer_model: str = Field(
+        default="claude-sonnet-4-6",
+        description="Model used by the synthesizer node.",
+    )
+    synthesizer_temperature: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="Temperature for the synthesizer LLM.",
+    )
+    anthropic_requests_per_second: float | None = Field(
+        default=None, gt=0.0,
+        description=(
+            "Anthropic LLM rate cap (req/sec). None disables the "
+            "InMemoryRateLimiter for that provider."
+        ),
+    )
+    openai_requests_per_second: float | None = Field(
+        default=None, gt=0.0,
+        description="OpenAI LLM+embedding rate cap (req/sec).",
+    )
+    google_requests_per_second: float | None = Field(
+        default=None, gt=0.0,
+        description="Google (Gemini) LLM+embedding rate cap (req/sec).",
+    )
+    ollama_requests_per_second: float | None = Field(
+        default=None, gt=0.0,
+        description="Ollama LLM rate cap (req/sec).",
+    )
+    llm_max_retries: int = Field(
+        default=3, ge=1, le=10,
+        description=(
+            "Max attempts (incl. the first) per LLM call. Applied via "
+            "`.with_retry(stop_after_attempt=N, "
+            "wait_exponential_jitter=True)` at every LLM call site."
+        ),
+    )
+
+    # ---- Embedding provider + per-provider models + Voyage rate ---------
+    # Same shape as LLM. `embedding_model` mirrors the active provider's
+    # per-provider field (kept in sync by `on_active_provider_changed`
+    # in the Embedding tab). Per-provider fields persist each provider's
+    # model choice so a A→B→A switch restores A's previous choice.
+    embedding_provider: Literal[
+        "voyage", "openai", "google", "huggingface"
+    ] = Field(
+        default="voyage",
+        description=(
+            "Active embedding provider. Switching saves the choice + "
+            "bridges to env; dimension guard fires in slice 4 (changing "
+            "dim breaks the LanceDB chunks-table schema)."
+        ),
+    )
+    embedding_model: str = Field(
+        default="voyage-multimodal-3",
+        description=(
+            "Active embedding model name. Mirrors the active "
+            "provider's per-provider field; the bridge writes this to "
+            "EMBEDDING_MODEL env var."
+        ),
+    )
+    voyage_embedding_model: str = Field(
+        default="voyage-multimodal-3",
+        description=(
+            "Voyage model — persisted per-provider so a switch away "
+            "and back restores this choice."
+        ),
+    )
+    openai_embedding_model: str = Field(
+        default="text-embedding-3-small",
+        description="OpenAI embedding model.",
+    )
+    google_embedding_model: str = Field(
+        default="models/text-embedding-004",
+        description="Google embedding model.",
+    )
+    hf_embedding_model: str = Field(
+        default="BAAI/bge-m3",
+        description="HuggingFace embedding model (downloaded on first use).",
+    )
+    voyage_requests_per_second: float | None = Field(
+        default=None, gt=0.0,
+        description=(
+            "Voyage embedding rate cap (req/sec). None disables the "
+            "limiter. Voyage uses its native client; the limiter wraps "
+            "at the factory level."
+        ),
+    )
+
     # ---- app behaviour ------------------------------------------------
     keep_loaded_file_on_clear: bool = Field(
         default=True,
         description=(
             "When the Clear button is pressed, keep any answer file "
             "loaded via Open Result / paste-path visible."
+        ),
+    )
+    restore_last_corpus: bool = Field(
+        default=True,
+        description=(
+            "When True, the GUI loads the corpus referenced by "
+            "`corpus_config_path` on startup (and falls back to "
+            "`<cwd>/corpus.toml`). When False, the explicit path is "
+            "skipped — only the CWD fallback applies, so the user "
+            "starts without a corpus unless one is sitting in the "
+            "working directory. Mirrors RA's `restore_last_corpus`."
         ),
     )
     debug_mode: bool = Field(
@@ -152,8 +369,10 @@ class GuiConfig(BaseModel):
     results_dir: Path | None = Field(
         default=None,
         description=(
-            "Where Save Answer / Save Chat write. None = "
-            "`<config_dir>/results`."
+            "Last folder the user picked for Save Result / Save (chat). "
+            "Internal state — the picker opens here by default; pressing "
+            "Save and choosing a different folder updates it. NOT exposed "
+            "as a Settings form field."
         ),
     )
     corpus_config_path: Path | None = Field(
@@ -162,6 +381,39 @@ class GuiConfig(BaseModel):
             "Path to the active corpus's `corpus.toml`. None means the "
             "user hasn't picked one yet — agent calls that need a "
             "CorpusConfig will surface a banner asking them to set it."
+        ),
+    )
+
+    # ---- Backend connection params (bridged to os.environ at startup) ----
+    # These three mirror the backend `Settings` fields of the same name.
+    # Storing them here + bridging to env lets the end user configure
+    # them through the GUI form. Without this bridge an end user would
+    # have to set OS env vars before launching `ka-gui` — not a real
+    # end-user workflow. CLI continues to read from `.env` separately
+    # (it doesn't call `disable_env_file()`).
+    neo4j_uri: str = Field(
+        default="neo4j://127.0.0.1:7687",
+        description=(
+            "Neo4j Bolt endpoint. Bridged to `NEO4J_URI` at GUI startup. "
+            "Default targets a local Neo4j Desktop install on the "
+            "standard Bolt port; override for a remote / cluster setup."
+        ),
+    )
+    neo4j_user: str = Field(
+        default="neo4j",
+        description=(
+            "Neo4j database user. Bridged to `NEO4J_USER` at GUI "
+            "startup. `neo4j` is the universal default user; override "
+            "if your DBMS uses a different account."
+        ),
+    )
+    lancedb_path: Path | None = Field(
+        default=None,
+        description=(
+            "Directory where LanceDB stores its dataset files. Bridged "
+            "to `LANCEDB_PATH` at GUI startup. None resolves to "
+            "`<user_data_dir>/lancedb` at apply time so the platform-"
+            "conventional location wins."
         ),
     )
 
@@ -183,20 +435,6 @@ def _config_dir() -> Path:
 
 def _config_file() -> Path:
     return _config_dir() / "settings.json"
-
-
-def active_results_dir(cfg: GuiConfig) -> Path:
-    """Resolve the effective results directory.
-
-    `cfg.results_dir` if set; otherwise `<config_dir>/results`. Created
-    on demand so callers don't have to mkdir.
-    """
-    if cfg.results_dir is not None:
-        target = cfg.results_dir
-    else:
-        target = _config_dir() / "results"
-    target.mkdir(parents=True, exist_ok=True)
-    return target
 
 
 # =============================================================================
@@ -306,3 +544,110 @@ def apply_keys_to_env() -> None:
         value = get_api_key(name)
         if value:
             os.environ[env_var] = value
+
+
+def apply_retrieval_to_env(cfg: "GuiConfig") -> None:
+    """Bridge GuiConfig's retrieval knobs to the matching env vars.
+
+    Same shape as `apply_connection_to_env()` — copies the persisted
+    retrieval settings into `os.environ` so backend `Settings` reads
+    them on the next `get_settings()` call. Per-query overrides via
+    invoke_state still win at retrieval time; this bridge only sets
+    the persistent defaults the backend sees.
+
+    Note: GuiConfig's `retrieval_mode` maps to backend Settings's
+    `default_retrieval_mode` (different field names, same concept).
+    """
+    os.environ["TOP_K"] = str(cfg.top_k)
+    os.environ["DEFAULT_RETRIEVAL_MODE"] = cfg.retrieval_mode
+    os.environ["LANCEDB_SEARCH_MODE"] = cfg.lancedb_search_mode
+    os.environ["NUM_CANDIDATES"] = str(cfg.num_candidates)
+    os.environ["RRF_RANK_CONSTANT"] = str(cfg.rrf_rank_constant)
+    os.environ["RRF_RANK_WINDOW_SIZE"] = str(cfg.rrf_rank_window_size)
+    os.environ["DEFAULT_USE_MMR"] = str(cfg.use_mmr).lower()
+    os.environ["MMR_LAMBDA"] = str(cfg.mmr_lambda)
+    os.environ["MMR_CANDIDATE_MULTIPLIER"] = str(cfg.mmr_candidate_multiplier)
+    os.environ["KG_MAX_ROWS"] = str(cfg.kg_max_rows)
+    os.environ["SKIP_QUERY_BUILDER"] = str(cfg.skip_query_builder).lower()
+    os.environ["DIRECT_RETRIEVAL"] = str(cfg.direct_retrieve).lower()
+
+
+def apply_llm_to_env(cfg: "GuiConfig") -> None:
+    """Bridge GuiConfig's LLM fields to the matching env vars.
+
+    Active provider + ollama URL + per-node model + temperature pairs
+    bridge unconditionally. Rate limits use the unset-env-var-=-None
+    convention: when `cfg.<provider>_requests_per_second is None`, we
+    DELETE the env var (not set it to "") so pydantic-settings falls
+    back to the default (None → no limiter).
+    """
+    os.environ["LLM_PROVIDER"] = cfg.llm_provider
+    os.environ["OLLAMA_BASE_URL"] = cfg.ollama_base_url
+    os.environ["MODE_CLASSIFIER_MODEL"] = cfg.mode_classifier_model
+    os.environ["MODE_CLASSIFIER_TEMPERATURE"] = str(cfg.mode_classifier_temperature)
+    os.environ["QUERY_BUILDER_MODEL"] = cfg.query_builder_model
+    os.environ["QUERY_BUILDER_TEMPERATURE"] = str(cfg.query_builder_temperature)
+    os.environ["CYPHER_BUILDER_MODEL"] = cfg.cypher_builder_model
+    os.environ["CYPHER_BUILDER_TEMPERATURE"] = str(cfg.cypher_builder_temperature)
+    os.environ["SYNTHESIZER_MODEL"] = cfg.synthesizer_model
+    os.environ["SYNTHESIZER_TEMPERATURE"] = str(cfg.synthesizer_temperature)
+    os.environ["LLM_MAX_RETRIES"] = str(cfg.llm_max_retries)
+    # Rate limits: None → drop env var so pydantic default (None) applies.
+    for provider, value in (
+        ("ANTHROPIC", cfg.anthropic_requests_per_second),
+        ("OPENAI", cfg.openai_requests_per_second),
+        ("GOOGLE", cfg.google_requests_per_second),
+        ("OLLAMA", cfg.ollama_requests_per_second),
+    ):
+        var = f"{provider}_REQUESTS_PER_SECOND"
+        if value is None:
+            os.environ.pop(var, None)
+        else:
+            os.environ[var] = str(value)
+
+
+def apply_embedding_to_env(cfg: "GuiConfig") -> None:
+    """Bridge GuiConfig's embedding fields to the matching env vars.
+
+    Active provider + per-provider models + active model bridge
+    unconditionally. Voyage rate limit uses the unset-env-var-=-None
+    convention (same as the LLM rate limits).
+    """
+    os.environ["EMBEDDING_PROVIDER"] = cfg.embedding_provider
+    os.environ["EMBEDDING_MODEL"] = cfg.embedding_model
+    os.environ["OPENAI_EMBEDDING_MODEL"] = cfg.openai_embedding_model
+    os.environ["GOOGLE_EMBEDDING_MODEL"] = cfg.google_embedding_model
+    os.environ["HF_EMBEDDING_MODEL"] = cfg.hf_embedding_model
+    var = "VOYAGE_REQUESTS_PER_SECOND"
+    if cfg.voyage_requests_per_second is None:
+        os.environ.pop(var, None)
+    else:
+        os.environ[var] = str(cfg.voyage_requests_per_second)
+
+
+def apply_connection_to_env(cfg: "GuiConfig") -> None:
+    """Bridge GuiConfig's connection params to the matching env vars.
+
+    Called at GUI startup AFTER `disable_env_file()`. Same role as
+    `apply_keys_to_env()` but for the URI / user / path triple. Lets
+    the end user configure backend connection through the GUI form
+    instead of editing OS env vars.
+
+    `lancedb_path` resolution: if `cfg.lancedb_path is None`, falls
+    back to `<user_data_dir>/lancedb` (platform-conventional). The
+    directory is NOT created here — LanceDB creates it on first write.
+    """
+    os.environ["NEO4J_URI"] = cfg.neo4j_uri
+    os.environ["NEO4J_USER"] = cfg.neo4j_user
+    if cfg.lancedb_path is not None:
+        os.environ["LANCEDB_PATH"] = str(cfg.lancedb_path)
+    else:
+        # Platform-conventional fallback. Distinct from `_config_dir`
+        # (which is config files) — data goes under user_data_dir.
+        from platformdirs import user_data_dir
+
+        os.environ["LANCEDB_PATH"] = str(
+            Path(user_data_dir(APP_ID, appauthor=False)) / "lancedb"
+        )
+
+

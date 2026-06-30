@@ -681,10 +681,11 @@ def test_retriever_prefers_rewritten_search_query():
     ):
         mock_settings.return_value.top_k = 5
         mock_settings.return_value.default_retrieval_mode = "lancedb_only"
+        mock_settings.return_value.default_use_mmr = False
         state = {"query": "raw", "search_query": "rewritten"}
         result = asyncio.run(lancedb_retriever_node(state))
     mock_client.retrieve.assert_called_once_with(
-        query="rewritten", top_k=5, filters=None,
+        query="rewritten", top_k=5, use_mmr=False, filters=None,
     )
     assert result == {"retrieved_chunks": hits}
 
@@ -703,9 +704,10 @@ def test_retriever_falls_back_to_raw_query_when_no_search_query():
     ):
         mock_settings.return_value.top_k = 5
         mock_settings.return_value.default_retrieval_mode = "lancedb_only"
+        mock_settings.return_value.default_use_mmr = False
         asyncio.run(lancedb_retriever_node({"query": "raw"}))
     mock_client.retrieve.assert_called_once_with(
-        query="raw", top_k=5, filters=None,
+        query="raw", top_k=5, use_mmr=False, filters=None,
     )
 
 

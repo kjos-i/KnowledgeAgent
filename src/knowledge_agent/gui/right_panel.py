@@ -1,19 +1,17 @@
-"""Right column of the Search tab: mode-switching display area + action
-button row.
+"""Right column of the Search tab: mode-switching display area + a
+single button row underneath.
 
 Owns:
 - The current mode (`MODE_LATEST` / `MODE_FILE` / `MODE_SETTINGS` /
   `MODE_INFO`).
 - The view container whose content swaps as the mode changes.
-- Two button rows under the view (action row + mode-switcher row).
+- One button row mixing mode switchers and the Save Answer action:
+  [View result] [Save Answer] [Open Result] [Settings] [Info].
 - Mode-button highlight tracking.
 
-This panel deliberately mirrors `ResearchArticlesAgent`'s
-display_panel pattern: per-mode views are rebuilt on switch (lazy +
-keeps the controls owned by the active view's lifecycle), the
-highlight on the current mode button tracks `current_mode`, and the
-action buttons (Save Answer / Open Result / paste path) live on
-their own row above the mode-switcher.
+Per-mode views are rebuilt on switch (lazy + keeps the controls owned
+by the active view's lifecycle). The highlight on the current mode
+button tracks `current_mode`.
 
 Settings + Info are stubs in slice 1 (empty-state). Slice 2 fills
 the Settings view; Info ships as static help text. Library and
@@ -30,7 +28,9 @@ from knowledge_agent.gui._styles import (
     ACTIVE_BG,
     FRAME_BORDER_COLOR,
     PANEL_BG,
+    centered_label,
 )
+from knowledge_agent.gui.settings import SettingsView
 from knowledge_agent.gui.views._frame import empty_state, view_with_header
 from knowledge_agent.gui.views.file_view import FileView
 from knowledge_agent.gui.views.latest_view import LatestView
@@ -53,9 +53,16 @@ class RightPanel:
         self.current_mode: str = MODE_LATEST
         # Late-bound — populated by build().
         self.view_container: ft.Container | None = None
-        self.paste_path_field: ft.TextField | None = None
         self.open_result_button: ft.Button | None = None
         self.mode_buttons: dict[str, ft.Button] = {}
+        # Cached Settings view — building the full sub-tab tree (~150
+        # widgets) is slow enough to feel laggy on every mode switch.
+        # Cached on first MODE_SETTINGS visit, then re-displayed
+        # instantly. Side benefit: sub-tab state (which sub-tab the
+        # user last viewed, mid-edit field contents) survives mode
+        # switches.
+        self._settings_view: SettingsView | None = None
+        self._settings_built: ft.Control | None = None
 
     # ----- public API -------------------------------------------------------
 
@@ -66,30 +73,17 @@ class RightPanel:
             padding=12,
         )
 
-        self.paste_path_field = ft.TextField(
-            hint_text="Paste .md file path",
-            border_color=FRAME_BORDER_COLOR,
-            bgcolor=PANEL_BG,
-            on_submit=self.app.on_load_path_field,
-            dense=True,
-            expand=True,
-        )
-
-        action_row = ft.Row(
+        # Single button row: mode switchers + Save Answer action mixed.
+        # Order chosen so the most-used buttons (view + save) sit on
+        # the left where the user reaches first.
+        button_row = ft.Row(
             controls=[
+                self._mode_button("View Result", MODE_LATEST),
                 ft.Button(
-                    content="Save Answer", expand=True,
+                    content=centered_label("Save Result"), expand=True,
                     on_click=self.app.on_save_answer,
                 ),
                 self._open_result_button(),
-                self.paste_path_field,
-            ],
-            spacing=8,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
-        mode_row = ft.Row(
-            controls=[
-                self._mode_button("Latest", MODE_LATEST),
                 self._mode_button("Settings", MODE_SETTINGS),
                 self._mode_button("Info", MODE_INFO),
             ],
@@ -98,7 +92,7 @@ class RightPanel:
         )
 
         inner = ft.Column(
-            controls=[self.view_container, action_row, mode_row],
+            controls=[self.view_container, button_row],
             expand=True,
             spacing=8,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
@@ -145,14 +139,10 @@ class RightPanel:
                 content=self.app.loaded_file.content,
             ).build()
         if mode == MODE_SETTINGS:
-            return view_with_header(
-                "Settings",
-                empty_state(
-                    "Settings view lands in slice 2 — keys, retrieval "
-                    "defaults, install dialogs, and the Diagnostics "
-                    "sub-tab will live here."
-                ),
-            )
+            if self._settings_built is None:
+                self._settings_view = SettingsView(self.app)
+                self._settings_built = self._settings_view.build()
+            return self._settings_built
         if mode == MODE_INFO:
             return view_with_header(
                 "Information",
@@ -169,7 +159,7 @@ class RightPanel:
 
     def _mode_button(self, label: str, mode: str) -> ft.Button:
         btn = ft.Button(
-            content=label, expand=True,
+            content=centered_label(label), expand=True,
             on_click=lambda e, m=mode: self.switch_mode(m),
         )
         self.mode_buttons[mode] = btn
@@ -177,7 +167,7 @@ class RightPanel:
 
     def _open_result_button(self) -> ft.Button:
         btn = ft.Button(
-            content="Open Result", expand=True,
+            content=centered_label("Open Result"), expand=True,
             on_click=self.app.on_open_result,
         )
         # Registered as the mode switcher for MODE_FILE so its highlight
