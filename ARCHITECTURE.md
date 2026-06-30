@@ -234,6 +234,23 @@ Per-corpus settings (which layers are on, which extractor, which ontologies) liv
 
 ---
 
+## Async surface
+
+Shipped 2026-06-30. The entire I/O surface is `async def` end to end — no sync wrapper layer.
+
+- **All `Neo4jClient` + `LanceClient` methods are `async def`.** Each method dispatches blocking work via `asyncio.to_thread` (the official Neo4j Python driver is sync; LanceDB is local on-disk and embedded). No sync siblings, no `a*`-prefixed aliases.
+- **`pipeline.ingest_document` and `bulk_ops.*` are `async def`.** Per-chunk extraction in L6a and L8 fans out via `asyncio.gather` bounded by `asyncio.Semaphore(settings.pipeline_max_concurrent_chunks)` — this is the wall-clock win.
+- **Embedder calls (`embed_texts`) are `async def`.** Voyage uses `asyncio.to_thread` over its sync SDK; OpenAI / Google / HuggingFace use LangChain's native `.aembed_documents()` / `.aembed_query()`.
+- **LLM calls (`init_chat_model` runnables) use `.ainvoke()`** with an `InMemoryRateLimiter` wired into the factory and `.with_retry()` for `RunnableRetry` backoff.
+- **Two sync escape hatches remain:**
+  - `kg/ontology_*_writes.py` and `kg/cross_doc_xrefs_writes.py` use `with client.driver.session() as session:` directly — they're sync helpers wrapped at the orchestrator boundary via `asyncio.to_thread`. Cypher streaming patterns make this cleaner than threading async sessions through every helper.
+  - Smoke scripts and the GUI are sync entry points; both wrap `asyncio.run(main())` at the boundary.
+- **Pytest config:** `asyncio_mode = "auto"` (pytest-asyncio). Every `async def test_*` runs transparently — no `@pytest.mark.asyncio` decorators in the suite.
+
+The performance shape: a single PDF with ~50 chunks at L6a goes from `O(50 * t_extract)` sequential to `O(50/8 * t_extract)` parallel — ~5-8× wall-clock improvement on extraction-bound workloads. KG writes still bottleneck at the Neo4j driver pool (`settings.neo4j_max_connection_pool_size`, default 100).
+
+---
+
 ## Error handling contract
 
 Locked 2026-06-26. See [errors.py](src/knowledge_agent/errors.py) for the dataclass.
@@ -276,7 +293,6 @@ Smoke scripts in [scripts/](scripts/) are the human-supervised counterpart: inst
 
 See `MEMORY.md` in `.claude/projects/` for the live deferred-items list. High-impact items:
 
-- Full async refactor (~2 weeks; LangChain abatch + AsyncDriver + AsyncConnection + InMemoryRateLimiter + .with_retry backoff)
 - LangGraph SqliteSaver checkpointing + pause/cancel for in-flight ingest
 - Structured progress events for the GUI (beyond log tailing)
 - Backup/restore bulk ops (export_corpus / import_corpus)
