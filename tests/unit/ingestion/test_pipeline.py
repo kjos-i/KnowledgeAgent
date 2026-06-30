@@ -1019,7 +1019,7 @@ async def test_backfill_chunks_happy_path_rewrites_kg_and_chains_into_entities()
     kg_mock.write_chunks = AsyncMock(return_value=True)
     kg_mock.write_entities = AsyncMock(return_value=True)
     extractor_mock = MagicMock()
-    extractor_mock.extract.return_value = []
+    extractor_mock.extract = AsyncMock(return_value=[])
 
     config = _entities_enabled_config()
 
@@ -1198,11 +1198,11 @@ async def test_backfill_entities_happy_path_extracts_and_writes():
 
     extractor_mock = MagicMock()
     # Two mentions in chunk 0, one in chunk 1.
-    extractor_mock.extract.side_effect = [
+    extractor_mock.extract = AsyncMock(side_effect=[
         [Mention(raw_text="A", entity_type="GENE", offset=0, confidence=None),
          Mention(raw_text="B", entity_type="GENE", offset=2, confidence=None)],
         [Mention(raw_text="C", entity_type="DISEASE", offset=0, confidence=None)],
-    ]
+    ])
     config = _entities_enabled_config()
 
     with (
@@ -1240,10 +1240,10 @@ async def test_backfill_entities_one_chunk_extraction_failure_does_not_poison_ot
 
     extractor_mock = MagicMock()
     # First chunk extraction raises; second succeeds.
-    extractor_mock.extract.side_effect = [
+    extractor_mock.extract = AsyncMock(side_effect=[
         RuntimeError("model down"),
         [Mention(raw_text="X", entity_type="GENE", offset=0, confidence=None)],
-    ]
+    ])
     config = _entities_enabled_config()
 
     with (
@@ -1277,9 +1277,9 @@ async def test_backfill_entities_chains_into_backfill_ontology_when_entities_ok(
     kg_mock.link_entities_to_ontology = AsyncMock(return_value=5)
 
     extractor_mock = MagicMock()
-    extractor_mock.extract.return_value = [
+    extractor_mock.extract = AsyncMock(return_value=[
         Mention(raw_text="A", entity_type="GENE", offset=0, confidence=None),
-    ]
+    ])
 
     config = _entities_enabled_config("mesh")
 
@@ -1312,7 +1312,7 @@ async def test_backfill_entities_skips_ontology_when_entity_write_fails():
     kg_mock.write_entities = AsyncMock(side_effect=RuntimeError("boom"))
 
     extractor_mock = MagicMock()
-    extractor_mock.extract.return_value = []
+    extractor_mock.extract = AsyncMock(return_value=[])
     config = _entities_enabled_config("mesh")
 
     with (
@@ -1540,9 +1540,9 @@ async def test_backfill_entities_chains_into_backfill_triples_when_triples_enabl
     kg_mock.write_triples = AsyncMock(return_value=True)
 
     extractor_mock = MagicMock()
-    extractor_mock.extract.return_value = [
+    extractor_mock.extract = AsyncMock(return_value=[
         Mention(raw_text="alpha", entity_type="GENE")
-    ]
+    ])
 
     config = _triples_enabled_config()
 
@@ -1576,7 +1576,7 @@ async def test_backfill_entities_does_not_run_triples_when_triples_off():
     kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_entities = AsyncMock(return_value=True)
     extractor_mock = MagicMock()
-    extractor_mock.extract.return_value = []
+    extractor_mock.extract = AsyncMock(return_value=[])
     # triples disabled in this config.
     config = _entities_enabled_config()
 
@@ -1760,9 +1760,9 @@ async def test_backfill_entities_chains_into_backfill_cross_doc_when_enabled():
     kg_mock.recompute_cross_doc_edges = AsyncMock(return_value=3)
 
     extractor_mock = MagicMock()
-    extractor_mock.extract.return_value = [
+    extractor_mock.extract = AsyncMock(return_value=[
         Mention(raw_text="alpha", entity_type="GENE")
-    ]
+    ])
 
     config = _cross_doc_enabled_config()
 
@@ -1790,7 +1790,7 @@ async def test_backfill_entities_does_not_run_cross_doc_when_disabled():
     kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_entities = AsyncMock(return_value=True)
     extractor_mock = MagicMock()
-    extractor_mock.extract.return_value = []
+    extractor_mock.extract = AsyncMock(return_value=[])
     # cross_doc disabled.
     config = _entities_enabled_config()
 
@@ -2069,8 +2069,13 @@ _DUMMY_WORK: dict = {"id": "https://openalex.org/W1"}
 
 
 def _make_mock_kg() -> MagicMock:
-    """KG-client mock where every write reports success (return True)."""
-    mock = MagicMock()
+    """KG-client mock where every write reports success (return True).
+
+    `spec=Neo4jClient` auto-creates AsyncMock attributes for every
+    `async def` method on the real client, so awaiting them inside
+    `asyncio.gather` works without per-test setup.
+    """
+    mock = MagicMock(spec=Neo4jClient)
     for write in (
         "write_citations",
         "write_authorships",
@@ -2079,7 +2084,7 @@ def _make_mock_kg() -> MagicMock:
         "write_chunks",
         "write_entities",
     ):
-        getattr(mock, write).return_value = True
+        setattr(mock, write, AsyncMock(return_value=True))
     return mock
 
 
@@ -2394,9 +2399,9 @@ async def test_ingest_document_runs_l6a_when_entities_layer_on(
     mock_get_kg.return_value = mock_kg
 
     fake_extractor = MagicMock()
-    fake_extractor.extract.return_value = [
+    fake_extractor.extract = AsyncMock(return_value=[
         Mention(raw_text="BRCA1", entity_type="GENE")
-    ]
+    ])
     mock_get_extractor.return_value = fake_extractor
 
     config = _config_with_entities(["GENE"])
@@ -2546,10 +2551,10 @@ async def test_ingest_document_l6a_extractor_exception_skips_only_failing_chunk(
     mock_get_kg.return_value = mock_kg
 
     fake_extractor = MagicMock()
-    fake_extractor.extract.side_effect = [
+    fake_extractor.extract = AsyncMock(side_effect=[
         RuntimeError("backend died"),
         [Mention(raw_text="TP53", entity_type="GENE")],
-    ]
+    ])
     mock_get_extractor.return_value = fake_extractor
 
     config = _config_with_entities(["GENE"])
@@ -2635,7 +2640,7 @@ async def test_ingest_document_skips_l7_when_no_ontology_layer_enabled(
     mock_get_kg.return_value = mock_kg
 
     fake_extractor = MagicMock()
-    fake_extractor.extract.return_value = []
+    fake_extractor.extract = AsyncMock(return_value=[])
     mock_get_extractor.return_value = fake_extractor
 
     config = _config_with_entities(["GENE"])  # entities on, no ontology
@@ -2679,7 +2684,7 @@ async def test_ingest_document_l7_skipped_when_entities_failed(
     mock_get_kg.return_value = mock_kg
 
     fake_extractor = MagicMock()
-    fake_extractor.extract.return_value = []
+    fake_extractor.extract = AsyncMock(return_value=[])
     mock_get_extractor.return_value = fake_extractor
 
     config = _config_with_ontology_mesh()
@@ -2726,9 +2731,9 @@ async def test_ingest_document_l7_first_import_runs_global_link(
     mock_get_kg.return_value = mock_kg
 
     fake_extractor = MagicMock()
-    fake_extractor.extract.return_value = [
+    fake_extractor.extract = AsyncMock(return_value=[
         Mention(raw_text="x", entity_type="DISEASE")
-    ]
+    ])
     mock_get_extractor.return_value = fake_extractor
 
     config = _config_with_ontology_mesh()
@@ -2779,9 +2784,9 @@ async def test_ingest_document_l7_subsequent_ingest_links_only_this_doc(
     mock_get_kg.return_value = mock_kg
 
     fake_extractor = MagicMock()
-    fake_extractor.extract.return_value = [
+    fake_extractor.extract = AsyncMock(return_value=[
         Mention(raw_text="x", entity_type="DISEASE")
-    ]
+    ])
     mock_get_extractor.return_value = fake_extractor
 
     config = _config_with_ontology_mesh(matching="fuzzy")
@@ -2828,9 +2833,9 @@ async def test_ingest_document_l7_import_failure_skips_linking_returns_status(
     mock_get_kg.return_value = mock_kg
 
     fake_extractor = MagicMock()
-    fake_extractor.extract.return_value = [
+    fake_extractor.extract = AsyncMock(return_value=[
         Mention(raw_text="x", entity_type="DISEASE")
-    ]
+    ])
     mock_get_extractor.return_value = fake_extractor
 
     config = _config_with_ontology_mesh()
@@ -2876,9 +2881,9 @@ async def test_ingest_document_l7_runs_each_enabled_ontology_independently(
     mock_get_kg.return_value = mock_kg
 
     fake_extractor = MagicMock()
-    fake_extractor.extract.return_value = [
+    fake_extractor.extract = AsyncMock(return_value=[
         Mention(raw_text="x", entity_type="DISEASE")
-    ]
+    ])
     mock_get_extractor.return_value = fake_extractor
 
     config = CorpusConfig(

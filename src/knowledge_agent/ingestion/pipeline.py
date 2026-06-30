@@ -864,13 +864,22 @@ async def ingest_document(
     # ---- 2. Parse (CPU-bound, threaded) ----
     chunks = await asyncio.to_thread(parse_document, path)
 
-    # ---- 2b. Delete stale across BOTH stores in parallel ----
-    # adelete_doc on pipeline.py would re-call sync delete via thread;
-    # split into the two underlying calls and gather instead for true
-    # 2-way parallelism.
+    # ---- 2b. Delete stale across BOTH stores ----
+    # LanceDB wipe is independent of KG and can run concurrently.
+    # The KG side mirrors pipeline.delete_doc's full sequence so a
+    # re-ingest produces the same clean state as the bulk delete op.
+    # KG order is load-bearing: L8 triples MUST be wiped BEFORE L6a
+    # entity orphan GC (the GC uses plain DELETE which errors on
+    # entities still connected to surviving L8 edges).
+    async def _kg_wipe() -> None:
+        await kg_client.delete_doc(doc_id)                # L1-L4
+        await kg_client.delete_chunks_by_doc_id(doc_id)   # L5
+        await kg_client.delete_triples_by_doc_id(doc_id)  # L8
+        await kg_client.delete_entities_by_doc_id(doc_id) # L6a
+
     await asyncio.gather(
         search_client.delete_chunks_by_doc_id(doc_id),
-        kg_client.delete_doc(doc_id),
+        _kg_wipe(),
     )
 
     # ---- 3. Metadata resolution (one HTTP call) ----
