@@ -33,6 +33,7 @@ Run via `pytest -m integration tests/integration/kg/`.
 """
 
 import argparse
+import asyncio
 from dataclasses import dataclass
 
 # Switch the process to the smoke-test Neo4j instance BEFORE any other
@@ -183,7 +184,7 @@ def _drop_constraints(client) -> None:
             session.run(f"DROP CONSTRAINT {name} IF EXISTS")
 
 
-def main() -> None:
+async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--drop-constraints",
@@ -202,30 +203,30 @@ def main() -> None:
     # surfaces the steps via prints alone and lets any exception
     # propagate so a failing run aborts visibly.
     print("Applying constraints...")
-    client.ensure_constraints()
+    await client.ensure_constraints()
     print("  ensure_constraints -> ok")
 
     print("Clearing any leftover smoke nodes from previous runs...")
     _delete_smoke_nodes(client)
 
     print(f"L1: writing focal document ({SYNTHETIC_DOC_ID}) + 3 citations...")
-    client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
     print("  write_citations -> ok")
 
     print("L2: writing 3 authors + AUTHORED edges...")
-    client.write_authorships(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await client.write_authorships(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
     print("  write_authorships -> ok")
 
     print("L3: writing venue + PUBLISHED_IN edge...")
-    client.write_venue(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await client.write_venue(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
     print("  write_venue -> ok")
 
     print("L4: writing 2 topics + ABOUT_TOPIC edges...")
-    client.write_topics(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
+    await client.write_topics(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
     print("  write_topics -> ok")
 
     print("L5: writing 3 chunks + PART_OF edges...")
-    client.write_chunks(
+    await client.write_chunks(
         SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper"
     )
     print("  write_chunks -> ok")
@@ -253,7 +254,7 @@ def main() -> None:
     except KeyboardInterrupt:
         print()
         print("Keeping smoke nodes. Re-run this script to clean them up later.")
-        client.close()
+        await client.close()
         return
 
     print("Deleting smoke nodes...")
@@ -262,8 +263,8 @@ def main() -> None:
         print("Dropping schema constraints...")
         _drop_constraints(client)
     print("Done.")
-    client.close()
+    await client.close()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

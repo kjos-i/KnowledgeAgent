@@ -28,6 +28,7 @@ Lifecycle (mirrors `smoke_kg_l1_l5.py` / `smoke_pipeline.py`):
 """
 
 import argparse
+import asyncio
 from datetime import datetime
 
 from knowledge_agent.config import get_settings
@@ -75,15 +76,15 @@ SYNTHETIC_CHUNKS = [
 ]
 
 
-def _cleanup_synthetic_chunks(client) -> None:
+async def _cleanup_synthetic_chunks(client) -> None:
     """Remove every chunk row written by this smoke test."""
     try:
-        client.delete_chunks_by_doc_id(SYNTHETIC_DOC_ID)
+        await client.delete_chunks_by_doc_id(SYNTHETIC_DOC_ID)
     except Exception as exc:
         print(f"(cleanup error, may be benign: {exc})")
 
 
-def main() -> None:
+async def main() -> None:
     parser = argparse.ArgumentParser(
         description="LanceDB chunks-table smoke test.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -106,17 +107,17 @@ def main() -> None:
 
     if args.reset:
         print("--reset: dropping LanceDB chunks table (schema-fresh start)...")
-        client.drop_chunks_table()
+        await client.drop_chunks_table()
 
     print("Applying schema...")
-    client.ensure_schema()
+    await client.ensure_schema()
     print("  ensure_schema -> ok")
 
     print(f"Clearing any leftover smoke chunks for doc_id={SYNTHETIC_DOC_ID!r}...")
     _cleanup_synthetic_chunks(client)
 
     print(f"Writing {len(SYNTHETIC_CHUNKS)} chunks...")
-    client.write_chunks(SYNTHETIC_CHUNKS)
+    await client.write_chunks(SYNTHETIC_CHUNKS)
     print(f"  write_chunks -> ok ({len(SYNTHETIC_CHUNKS)} chunks)")
 
     table = client.conn.open_table(CHUNKS_TABLE)
@@ -142,14 +143,14 @@ def main() -> None:
     except KeyboardInterrupt:
         print()
         print("Keeping smoke chunks. Re-run this script to clean them up later.")
-        client.close()
+        await client.close()
         return
 
     print("Deleting smoke chunks...")
     _cleanup_synthetic_chunks(client)
     print("Done.")
-    client.close()
+    await client.close()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -65,6 +65,7 @@ Run via `pytest -m integration tests/integration/kg/`.
 """
 
 import argparse
+import asyncio
 import sys
 
 # Switch the process to the smoke-test Neo4j instance BEFORE any other
@@ -145,7 +146,7 @@ def _summary(client) -> None:
         )
 
 
-def main() -> None:
+async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--include-l10",
@@ -177,7 +178,7 @@ def main() -> None:
     client = get_kg_client()
 
     print("Applying constraints...")
-    client.ensure_constraints()
+    await client.ensure_constraints()
     print("  ensure_constraints -> ok")
 
     print()
@@ -192,7 +193,7 @@ def main() -> None:
         )
     except Exception as exc:
         print(f"  HPO import failed: {exc!r} — abort.", file=sys.stderr)
-        client.close()
+        await client.close()
         sys.exit(1)
     print()
     print("Importing MONDO with xrefs_mode='use'...")
@@ -202,17 +203,17 @@ def main() -> None:
         )
     except Exception as exc:
         print(f"  MONDO import failed: {exc!r} — abort.", file=sys.stderr)
-        client.close()
+        await client.close()
         sys.exit(1)
     print()
     print("Importing MeSH with xrefs_mode='use'...")
     try:
-        ontology_mesh_writes.import_mesh(
+        await ontology_mesh_writes.import_mesh(
             client, force=True, xrefs_mode="use",
         )
     except Exception as exc:
         print(f"  MeSH import failed: {exc!r} — abort.", file=sys.stderr)
-        client.close()
+        await client.close()
         sys.exit(1)
 
     print()
@@ -224,7 +225,7 @@ def main() -> None:
     first = ontology_xrefs.backfill_resolved_xrefs(client)
     if first is None:
         print("  backfill returned None — session error.", file=sys.stderr)
-        client.close()
+        await client.close()
         sys.exit(1)
     n1_attempted = sum(r["n_edges_attempted"] for r in first.values())
     n1_cleaned = sum(r["n_sources_cleaned"] for r in first.values())
@@ -238,7 +239,7 @@ def main() -> None:
     second = ontology_xrefs.backfill_resolved_xrefs(client)
     if second is None:
         print("  backfill returned None on call #2.", file=sys.stderr)
-        client.close()
+        await client.close()
         sys.exit(1)
     n2_cleaned = sum(r["n_sources_cleaned"] for r in second.values())
     if n2_cleaned == 0:
@@ -257,7 +258,7 @@ def main() -> None:
     print("Demonstrating clear_xref_edges_for_ontology(MeSHTerm)...")
     pre_mesh = _count_one_xref_type(client, MESH_TERM_LABEL)
     print(f"  before clear: {pre_mesh} outgoing :MESH_XREF edges")
-    n_cleared = ontology_xrefs.clear_xref_edges_for_ontology(
+    n_cleared = await ontology_xrefs.clear_xref_edges_for_ontology(
         client, MESH_TERM_LABEL,
     )
     post_mesh = _count_one_xref_type(client, MESH_TERM_LABEL)
@@ -322,14 +323,14 @@ def main() -> None:
             "Keeping smoke data. Re-run this script (which clears at "
             "start) to clean it up later."
         )
-        client.close()
+        await client.close()
         return
 
     print("Deleting smoke ontology data...")
     _clear_terms(client)
     print("Done.")
-    client.close()
+    await client.close()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

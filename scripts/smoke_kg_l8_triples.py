@@ -44,6 +44,7 @@ Run via `pytest -m integration tests/integration/kg/`.
 """
 
 import argparse
+import asyncio
 
 # Switch to the smoke-test Neo4j instance BEFORE any other RLA
 # import. Per [[test-instance-setup]] the test instance has a
@@ -189,13 +190,13 @@ def _show_state(client) -> None:
         print(f"    ... and {len(rows) - 15} more")
 
 
-def main() -> None:
+async def main() -> None:
     argparse.ArgumentParser(description=__doc__).parse_args()
 
     client = get_kg_client()
 
     print("Applying constraints...")
-    client.ensure_constraints()
+    await client.ensure_constraints()
 
     print("Clearing any leftover smoke nodes from previous runs...")
     _delete_smoke_nodes(client)
@@ -218,7 +219,7 @@ def main() -> None:
         print(f"    ... and {len(triples) - 10} more")
 
     print("Writing triples via client.write_triples ...")
-    client.write_triples(SYNTHETIC_DOC_ID, [(chunk_id, triples)])
+    await client.write_triples(SYNTHETIC_DOC_ID, [(chunk_id, triples)])
     print("  write_triples -> ok")
 
     print()
@@ -243,14 +244,14 @@ def main() -> None:
     except KeyboardInterrupt:
         print()
         print("Keeping smoke nodes. Re-run this script to clean them up later.")
-        client.close()
+        await client.close()
         return
 
     print("Deleting smoke nodes...")
     _delete_smoke_nodes(client)
     print("Done.")
-    client.close()
+    await client.close()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

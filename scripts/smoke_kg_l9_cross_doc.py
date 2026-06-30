@@ -22,7 +22,7 @@ Lifecycle:
   2. Seed two synthetic docs sharing 3 entities (alpha + beta share
      {a, b, c}; alpha additionally has {d}; beta additionally has
      {e}).
-  3. Run `client.recompute_cross_doc_edges(alpha_doc_id, threshold)`.
+  3. Run `await client.recompute_cross_doc_edges(alpha_doc_id, threshold)`.
   4. Print the edge count + read back :RELATED_TO + its properties.
   5. Pause — you inspect in Neo4j Desktop.
   6. Press Enter to clean up, Ctrl+C to keep the nodes.
@@ -41,6 +41,7 @@ Run via `pytest -m integration tests/integration/kg/`.
 """
 
 import argparse
+import asyncio
 
 # Switch to the smoke-test Neo4j instance BEFORE any other RLA import.
 from knowledge_agent.config import load_test_env
@@ -159,7 +160,7 @@ def _show_state(client) -> None:
         print(f"               computed_at={r['ts']}")
 
 
-def main() -> None:
+async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--threshold",
@@ -176,7 +177,7 @@ def main() -> None:
     client = get_kg_client()
 
     print("Applying constraints...")
-    client.ensure_constraints()
+    await client.ensure_constraints()
 
     print("Clearing any leftover smoke nodes from previous runs...")
     _delete_smoke_nodes(client)
@@ -193,7 +194,7 @@ def main() -> None:
     print(
         f"Running recompute_cross_doc_edges(alpha, threshold={args.threshold})..."
     )
-    n = client.recompute_cross_doc_edges(DOC_ALPHA, args.threshold)
+    n = await client.recompute_cross_doc_edges(DOC_ALPHA, args.threshold)
     print(f"  :RELATED_TO edges written: {n}")
     expected_present = args.threshold <= len(SHARED_ENTITIES)
     if expected_present and n == 0:
@@ -230,14 +231,14 @@ def main() -> None:
     except KeyboardInterrupt:
         print()
         print("Keeping smoke nodes. Re-run this script to clean them up later.")
-        client.close()
+        await client.close()
         return
 
     print("Deleting smoke nodes...")
     _delete_smoke_nodes(client)
     print("Done.")
-    client.close()
+    await client.close()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

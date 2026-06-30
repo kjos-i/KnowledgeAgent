@@ -57,6 +57,7 @@ Run via `pytest -m integration tests/integration/ingestion/`.
 """
 
 import argparse
+import asyncio
 from pathlib import Path
 
 # Switch the process to the smoke-test Neo4j instance BEFORE any other
@@ -90,7 +91,7 @@ from knowledge_agent.search.client import get_search_client  # noqa: E402
 TEST_DOCS = Path(__file__).resolve().parent.parent / "test_documents"
 
 
-def _cleanup_doc(doc_id: str) -> None:
+async def _cleanup_doc(doc_id: str) -> None:
     """Remove everything this script wrote for `doc_id` from both stores.
 
     LanceDB: drop chunk rows.
@@ -99,7 +100,7 @@ def _cleanup_doc(doc_id: str) -> None:
     """
     # LanceDB chunks.
     search_client = get_search_client()
-    search_client.delete_chunks_by_doc_id(doc_id)
+    await search_client.delete_chunks_by_doc_id(doc_id)
 
     # Neo4j cleanup (password is now required at Settings load, so a
     # client always has credentials).
@@ -136,10 +137,10 @@ def _cleanup_doc(doc_id: str) -> None:
     # L6a: GC orphan :Entity nodes whose last incoming :MENTIONS edge
     # came from this doc's chunks. Mirrors the pipeline's
     # `delete_entities_by_doc_id` GC step so re-runs leave a clean DB.
-    kg_client.delete_entities_by_doc_id(doc_id)
+    await kg_client.delete_entities_by_doc_id(doc_id)
 
 
-def main() -> None:
+async def main() -> None:
     parser = argparse.ArgumentParser(
         description="L1-L5 + L6a end-to-end smoke test.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -175,13 +176,13 @@ def main() -> None:
     # table.
     if args.reset:
         print("--reset: dropping LanceDB chunks table (schema-fresh start)...")
-        get_search_client().drop_chunks_table()
+        await get_search_client().drop_chunks_table()
         print("--reset: dropping :MeSHTerm nodes (ontology will re-import)...")
-        get_kg_client().delete_mesh()
+        await get_kg_client().delete_mesh()
 
     # Idempotent re-run: clear any leftover data for this doc_id first.
     print("Clearing any leftover smoke data for this doc_id...")
-    _cleanup_doc(doc_id)
+    await _cleanup_doc(doc_id)
 
     # In-memory corpus config - biomedical paper corpus with every layer
     # on: OpenAlex (L1-L4) + chunks (L5) + entity extraction (L6a) +
@@ -212,7 +213,7 @@ def main() -> None:
     )
     print()
 
-    result = ingest_document(target, config, "Document", "Paper")
+    result = await ingest_document(target, config, "Document", "Paper")
 
     print()
     print("Result:")
@@ -326,9 +327,9 @@ def main() -> None:
         return
 
     print("Deleting smoke data...")
-    _cleanup_doc(doc_id)
+    await _cleanup_doc(doc_id)
     print("Done.")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

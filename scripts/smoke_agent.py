@@ -102,10 +102,10 @@ VALID_MODES: tuple[str, ...] = (
 )
 
 
-def _cleanup_doc(doc_id: str) -> None:
+async def _cleanup_doc(doc_id: str) -> None:
     """Remove everything this script wrote for `doc_id` from both stores."""
     search_client = get_search_client()
-    search_client.delete_chunks_by_doc_id(doc_id)
+    await search_client.delete_chunks_by_doc_id(doc_id)
 
     kg_client = get_kg_client()
     with kg_client.driver.session() as session:
@@ -140,7 +140,7 @@ def _cleanup_doc(doc_id: str) -> None:
     # L6a: GC orphan :Entity nodes left behind if entity extraction ran.
     # Mirrors the pipeline's `delete_entities_by_doc_id` GC step so
     # repeated smokes don't accumulate entity nodes.
-    kg_client.delete_entities_by_doc_id(doc_id)
+    await kg_client.delete_entities_by_doc_id(doc_id)
 
 
 async def _run_agent(question: str, mode: str, config: CorpusConfig) -> dict:
@@ -186,7 +186,7 @@ def _print_routing_summary(final_state: dict) -> None:
     print(f"  kg_hits                         : {len(kg_hits)}")
 
 
-def main() -> None:
+async def main() -> None:
     parser = argparse.ArgumentParser(
         description="Run the agent in one of 6 retrieval modes.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -246,7 +246,7 @@ def main() -> None:
         allowed_types=["Paper"],
         layers=LayerFlags(openalex_papers=True, chunks=True),
     )
-    result = ingest_document(target, config, "Document", "Paper")
+    result = await ingest_document(target, config, "Document", "Paper")
     print(
         f"  n_chunks={result.n_chunks}, "
         f"metadata_status={result.metadata_status!r}, "
@@ -258,7 +258,7 @@ def main() -> None:
 
     print(f"Running the agent (mode={args.mode})...")
     print("(first run is slow - Anthropic LLM calls)")
-    final_state = asyncio.run(_run_agent(args.question, args.mode, config))
+    final_state = await _run_agent(args.question, args.mode, config)
     print()
 
     _print_routing_summary(final_state)
@@ -297,4 +297,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

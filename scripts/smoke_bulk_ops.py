@@ -57,6 +57,7 @@ Automated counterpart (for regression catching, no inspection):
 Run via `pytest -m integration tests/integration/ingestion/`.
 """
 
+import asyncio
 import shutil
 import tempfile
 from pathlib import Path
@@ -108,7 +109,7 @@ def _print_result(label: str, result) -> None:
     print(f"  {label} result: {result}")
 
 
-def _clear_at_start(doc_id: str) -> None:
+async def _clear_at_start(doc_id: str) -> None:
     """Wipe every persistent footprint this smoke could collide with.
 
     Per the smoke-test cleanup memory, ALL smokes that write persistent
@@ -119,12 +120,12 @@ def _clear_at_start(doc_id: str) -> None:
     off them). MeSH terms stay imported - they're reference data, not
     smoke output.
     """
-    get_search_client().drop_chunks_table()
-    pipeline.delete_doc(doc_id)
+    await get_search_client().drop_chunks_table()
+    await pipeline.delete_doc(doc_id)
     print(f"[clear-at-start] dropped chunks table + wiped {doc_id[:12]}")
 
 
-def main() -> None:
+async def main() -> None:
     # Pick the first PDF in test_documents/ and copy into a tmp corpus folder
     # so we can rename it between sync runs without polluting the source.
     pdfs = sorted(TEST_DOCS.glob("*.pdf"))
@@ -133,7 +134,7 @@ def main() -> None:
     source_pdf = pdfs[0]
     doc_id_for_first_pdf = compute_doc_id(source_pdf)
 
-    _clear_at_start(doc_id_for_first_pdf)
+    await _clear_at_start(doc_id_for_first_pdf)
 
     config = _biomedical_config()
 
@@ -148,15 +149,15 @@ def main() -> None:
         print(f"[setup] doc_id = {doc_id[:12]}...")
 
         # 1. INGEST FOLDER -----------------------------------------------
-        plan = bulk_ops.ingest_folder_plan(corpus_folder, "Document", "Paper")
+        plan = await bulk_ops.ingest_folder_plan(corpus_folder, "Document", "Paper")
         _print_plan("ingest_folder_plan", plan)
-        result = bulk_ops.ingest_folder_execute(plan, config)
+        result = await bulk_ops.ingest_folder_execute(plan, config)
         _print_result("ingest_folder_execute", result)
         if result.n_failed:
             raise SystemExit(f"ingest_folder reported failures: {result.failures}")
 
         # 2. SYNC (UNCHANGED) --------------------------------------------
-        plan = bulk_ops.sync_plan(corpus_folder, "Document", "Paper")
+        plan = await bulk_ops.sync_plan(corpus_folder, "Document", "Paper")
         _print_plan("sync_plan (expect UNCHANGED)", plan)
         assert plan.n_unchanged == 1, (
             f"expected UNCHANGED=1, got new={plan.n_new} "
@@ -167,24 +168,24 @@ def main() -> None:
         # 3. SYNC (MOVED) ------------------------------------------------
         moved_path = corpus_folder / f"moved-{source_pdf.name}"
         first_path.rename(moved_path)
-        plan = bulk_ops.sync_plan(corpus_folder, "Document", "Paper")
+        plan = await bulk_ops.sync_plan(corpus_folder, "Document", "Paper")
         _print_plan("sync_plan (expect MOVED after rename)", plan)
         assert plan.n_moved == 1, (
             f"expected MOVED=1 after rename, got moved={plan.n_moved}"
         )
-        result = bulk_ops.sync_execute(plan, config)
+        result = await bulk_ops.sync_execute(plan, config)
         _print_result("sync_execute", result)
 
         # 4. BULK RESOLVE OPENALEX ---------------------------------------
-        plan = bulk_ops.bulk_resolve_openalex_plan(skip_manual=True)
+        plan = await bulk_ops.bulk_resolve_openalex_plan(skip_manual=True)
         _print_plan("bulk_resolve_openalex_plan", plan)
-        result = bulk_ops.bulk_resolve_openalex_execute(plan)
+        result = await bulk_ops.bulk_resolve_openalex_execute(plan)
         _print_result("bulk_resolve_openalex_execute", result)
 
         # 5. DELETE DOC --------------------------------------------------
-        plan = bulk_ops.delete_doc_plan(doc_id)
+        plan = await bulk_ops.delete_doc_plan(doc_id)
         _print_plan(f"delete_doc_plan ({doc_id[:12]})", plan)
-        result = bulk_ops.delete_doc_execute(plan)
+        result = await bulk_ops.delete_doc_execute(plan)
         _print_result("delete_doc_execute", result)
         assert result.ok, "delete_doc returned ok=False"
 
@@ -214,4 +215,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

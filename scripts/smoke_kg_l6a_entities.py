@@ -51,6 +51,7 @@ Run via `pytest -m integration tests/integration/kg/`.
 """
 
 import argparse
+import asyncio
 
 # Switch the process to the smoke-test Neo4j instance BEFORE any other
 # RLA import that might trigger `get_settings()`. Per
@@ -160,7 +161,7 @@ def _show_state(client) -> None:
         print(f"    ... and {len(rows) - 20} more")
 
 
-def main() -> None:
+async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--adapter",
@@ -177,7 +178,7 @@ def main() -> None:
     client = get_kg_client()
 
     print("Applying constraints...")
-    client.ensure_constraints()
+    await client.ensure_constraints()
 
     print("Clearing any leftover smoke nodes from previous runs...")
     _delete_smoke_nodes(client)
@@ -202,7 +203,7 @@ def main() -> None:
         print(f"    ... and {len(mentions) - 10} more")
 
     print("Writing mentions to KG via write_entities ...")
-    client.write_entities(SYNTHETIC_DOC_ID, [(chunk_id, mentions)])
+    await client.write_entities(SYNTHETIC_DOC_ID, [(chunk_id, mentions)])
     print("  write_entities -> ok")
 
     print()
@@ -227,14 +228,14 @@ def main() -> None:
     except KeyboardInterrupt:
         print()
         print("Keeping smoke nodes. Re-run this script to clean them up later.")
-        client.close()
+        await client.close()
         return
 
     print("Deleting smoke nodes...")
     _delete_smoke_nodes(client)
     print("Done.")
-    client.close()
+    await client.close()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
