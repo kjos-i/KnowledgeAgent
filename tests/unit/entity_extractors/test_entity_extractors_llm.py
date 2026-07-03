@@ -8,6 +8,10 @@ tests don't hit the network. We verify:
   - Result mapping: structured-output result is mapped to Mention with
     offset=None, confidence=None.
   - Defensive fallback: a non-_ExtractedMentions result returns [].
+
+Model + temperature are per-corpus kwargs threaded through the
+extractor call — 2026-07-02 refactor removed the get_settings() global
+read. Tests pass them explicitly.
 """
 
 from unittest.mock import MagicMock, patch, AsyncMock
@@ -20,10 +24,14 @@ from knowledge_agent.entity_extractors.llm import (
 )
 
 
+# Constants for the model + temperature kwargs. Value doesn't matter
+# except in `test_extract_propagates_model_and_temperature_to_get_llm`.
+_TEST_MODEL = "claude-haiku"
+_TEST_TEMPERATURE = 0.0
+
+
 def _mock_llm_returning(structured_output):
     """Build the mock chain: llm.with_structured_output(...).invoke(...) -> output.
-
-    Sync invoke (not ainvoke), matching the adapter's call site.
 
     `with_retry` is wired so that the production code's `_with_retry(structured)`
     call resolves to the same mock — i.e. the retry wrapper is the identity in
@@ -76,20 +84,15 @@ async def test_extract_returns_mentions_from_structured_output():
         ]
     )
     mock_llm = _mock_llm_returning(output)
-    with (
-        patch(
-            "knowledge_agent.entity_extractors.llm._get_llm",
-            return_value=mock_llm,
-        ),
-        patch(
-            "knowledge_agent.entity_extractors.llm.get_settings"
-        ) as mock_settings,
+    with patch(
+        "knowledge_agent.entity_extractors.llm._get_llm",
+        return_value=mock_llm,
     ):
-        mock_settings.return_value.entity_extractor_model = "claude-haiku"
-        mock_settings.return_value.entity_extractor_temperature = 0.0
         result = await llm.extract(
             "BRCA1 mutations cause breast cancer.",
             ["GENE", "DISEASE"],
+            model=_TEST_MODEL,
+            temperature=_TEST_TEMPERATURE,
         )
 
     assert result == [
@@ -107,36 +110,28 @@ async def test_extract_returns_empty_when_no_mentions_found():
     """LLM returns empty mentions list -> adapter returns []."""
     output = _ExtractedMentions(mentions=[])
     mock_llm = _mock_llm_returning(output)
-    with (
-        patch(
-            "knowledge_agent.entity_extractors.llm._get_llm",
-            return_value=mock_llm,
-        ),
-        patch(
-            "knowledge_agent.entity_extractors.llm.get_settings"
-        ) as mock_settings,
+    with patch(
+        "knowledge_agent.entity_extractors.llm._get_llm",
+        return_value=mock_llm,
     ):
-        mock_settings.return_value.entity_extractor_model = "claude-haiku"
-        mock_settings.return_value.entity_extractor_temperature = 0.0
-        assert await llm.extract("Just a plain sentence.", ["GENE"]) == []
+        assert await llm.extract(
+            "Just a plain sentence.",
+            ["GENE"],
+            model=_TEST_MODEL,
+            temperature=_TEST_TEMPERATURE,
+        ) == []
 
 
-async def test_extract_uses_settings_model_and_temperature():
-    """Adapter pulls model + temperature from settings (single source of truth)."""
+async def test_extract_propagates_model_and_temperature_to_get_llm():
+    """Adapter forwards the per-corpus model + temperature kwargs
+    verbatim to `_get_llm` (which builds the ChatAnthropic client)."""
     output = _ExtractedMentions(mentions=[])
     mock_llm = _mock_llm_returning(output)
-    with (
-        patch(
-            "knowledge_agent.entity_extractors.llm._get_llm",
-            return_value=mock_llm,
-        ) as mock_get_llm,
-        patch(
-            "knowledge_agent.entity_extractors.llm.get_settings"
-        ) as mock_settings,
-    ):
-        mock_settings.return_value.entity_extractor_model = "test-model"
-        mock_settings.return_value.entity_extractor_temperature = 0.3
-        await llm.extract("text", [])
+    with patch(
+        "knowledge_agent.entity_extractors.llm._get_llm",
+        return_value=mock_llm,
+    ) as mock_get_llm:
+        await llm.extract("text", [], model="test-model", temperature=0.3)
 
     mock_get_llm.assert_called_once_with("test-model", 0.3)
 
@@ -146,18 +141,13 @@ async def test_extract_uses_structured_output_with_extracted_mentions_schema():
     same single-source-of-truth pattern as the rest of the agent."""
     output = _ExtractedMentions(mentions=[])
     mock_llm = _mock_llm_returning(output)
-    with (
-        patch(
-            "knowledge_agent.entity_extractors.llm._get_llm",
-            return_value=mock_llm,
-        ),
-        patch(
-            "knowledge_agent.entity_extractors.llm.get_settings"
-        ) as mock_settings,
+    with patch(
+        "knowledge_agent.entity_extractors.llm._get_llm",
+        return_value=mock_llm,
     ):
-        mock_settings.return_value.entity_extractor_model = "claude-haiku"
-        mock_settings.return_value.entity_extractor_temperature = 0.0
-        await llm.extract("text", [])
+        await llm.extract(
+            "text", [], model=_TEST_MODEL, temperature=_TEST_TEMPERATURE,
+        )
 
     mock_llm.with_structured_output.assert_called_once_with(_ExtractedMentions)
 
@@ -167,18 +157,16 @@ async def test_extract_passes_chunk_text_in_human_message():
     output = _ExtractedMentions(mentions=[])
     mock_llm = _mock_llm_returning(output)
     mock_structured = mock_llm.with_structured_output.return_value
-    with (
-        patch(
-            "knowledge_agent.entity_extractors.llm._get_llm",
-            return_value=mock_llm,
-        ),
-        patch(
-            "knowledge_agent.entity_extractors.llm.get_settings"
-        ) as mock_settings,
+    with patch(
+        "knowledge_agent.entity_extractors.llm._get_llm",
+        return_value=mock_llm,
     ):
-        mock_settings.return_value.entity_extractor_model = "claude-haiku"
-        mock_settings.return_value.entity_extractor_temperature = 0.0
-        await llm.extract("This text mentions BRCA1.", [])
+        await llm.extract(
+            "This text mentions BRCA1.",
+            [],
+            model=_TEST_MODEL,
+            temperature=_TEST_TEMPERATURE,
+        )
 
     # invoke is called with a list of [SystemMessage, HumanMessage].
     messages = mock_structured.ainvoke.call_args.args[0]
@@ -193,18 +181,16 @@ async def test_extract_offset_and_confidence_always_none_for_llm():
         mentions=[_ExtractedMention(raw_text="TP53", entity_type="GENE")]
     )
     mock_llm = _mock_llm_returning(output)
-    with (
-        patch(
-            "knowledge_agent.entity_extractors.llm._get_llm",
-            return_value=mock_llm,
-        ),
-        patch(
-            "knowledge_agent.entity_extractors.llm.get_settings"
-        ) as mock_settings,
+    with patch(
+        "knowledge_agent.entity_extractors.llm._get_llm",
+        return_value=mock_llm,
     ):
-        mock_settings.return_value.entity_extractor_model = "claude-haiku"
-        mock_settings.return_value.entity_extractor_temperature = 0.0
-        result = await llm.extract("TP53 is a tumour suppressor.", [])
+        result = await llm.extract(
+            "TP53 is a tumour suppressor.",
+            [],
+            model=_TEST_MODEL,
+            temperature=_TEST_TEMPERATURE,
+        )
 
     assert result[0].offset is None
     assert result[0].confidence is None
@@ -219,15 +205,10 @@ async def test_extract_defensive_fallback_on_non_extracted_mentions_result():
     mock_structured.with_retry = MagicMock(return_value=mock_structured)
     mock_llm = MagicMock()
     mock_llm.with_structured_output = MagicMock(return_value=mock_structured)
-    with (
-        patch(
-            "knowledge_agent.entity_extractors.llm._get_llm",
-            return_value=mock_llm,
-        ),
-        patch(
-            "knowledge_agent.entity_extractors.llm.get_settings"
-        ) as mock_settings,
+    with patch(
+        "knowledge_agent.entity_extractors.llm._get_llm",
+        return_value=mock_llm,
     ):
-        mock_settings.return_value.entity_extractor_model = "claude-haiku"
-        mock_settings.return_value.entity_extractor_temperature = 0.0
-        assert await llm.extract("text", []) == []
+        assert await llm.extract(
+            "text", [], model=_TEST_MODEL, temperature=_TEST_TEMPERATURE,
+        ) == []

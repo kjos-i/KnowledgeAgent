@@ -636,6 +636,13 @@ def _row_to_chunk(row: dict[str, Any], mode: str) -> RetrievedChunk:
         source_url=row.get("source_url"),
         section=row.get("section"),
         page=row.get("page"),
+        # Multimodal fields. LanceDB rows carry both since 2026-07-03
+        # (schema always had the columns; ingest populates them). Text
+        # chunks have `content_type='text'` and `image_ref=None`;
+        # figure chunks have `content_type='figure'` and `image_ref`
+        # set to the picture file path.
+        content_type=row.get("content_type"),
+        image_ref=row.get("image_ref"),
     )
 
 

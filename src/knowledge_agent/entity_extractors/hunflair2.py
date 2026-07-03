@@ -1,4 +1,4 @@
-"""HunFlair2 biomedical NER extractor (L6a, closed vocabulary — but
+"""HunFlair2 biomedical NER extractor (L6, closed vocabulary — but
 exposed to the user as a single on/off option).
 
 UX intent (locked 2026-06-23): user enables `hunflair2` and gets the
@@ -93,35 +93,36 @@ def _get_model():
     """Load the HunFlair2 unified NER tagger once per process.
 
     Heavy: ~1.24 GB resident (pytorch_model.bin), ~10-20s first-call
-    load + (optional) one-time HF download. Cached for the rest of
-    the process lifetime via lru_cache. The Flair import lives inside
-    the function (not at module top-level) so the dispatcher's
-    `get_known_labels("hunflair2")` can answer without paying the
-    Flair + PyTorch import cost.
+    load. Cached for the rest of the process lifetime via lru_cache.
+    The Flair import lives inside the function (not at module top-
+    level) so the dispatcher's `get_known_labels("hunflair2")` can
+    answer without paying the Flair + PyTorch import cost.
 
-    Pinned revision: Flair's `PrefixedSequenceTagger.load` does NOT
-    accept a `revision` kwarg directly — it goes through HF
-    `snapshot_download`. We force the pinned revision by setting the
-    HF cache to download a specific snapshot before delegating to
-    Flair. This keeps us off `main` even though the Flair API itself
-    has no per-call revision knob.
+    NO auto-download: raises `WeightsNotDownloadedError` if the pinned
+    revision isn't on disk (2026-07-03 rule — weights are an explicit
+    user action via Library → Installs). Flair's
+    `PrefixedSequenceTagger.load` accepts a bare repo ID and resolves
+    it through the HF hub cache; when the pinned snapshot is present
+    it loads locally, no network call.
 
     Pickle format: this checkpoint has no .safetensors file — loading
     inevitably uses pickle deserialisation. Install dialog warns the
     user before download.
     """
     from flair.models import PrefixedSequenceTagger
-    from huggingface_hub import snapshot_download
 
-    # Pre-download the pinned revision to the HF cache so the
-    # subsequent Flair load picks up exactly that snapshot. Flair
-    # resolves model identifiers via the HF cache transparently when
-    # the files are already present.
-    snapshot_download(
-        repo_id=MODEL_NAME,
-        revision=MODEL_REVISION,
+    from knowledge_agent.entity_extractors.extractor_lifecycle import (
+        WeightsNotDownloadedError,
+        _HUNFLAIR2_PROVENANCE,
+        _is_weights_downloaded,
     )
 
+    if not _is_weights_downloaded(_HUNFLAIR2_PROVENANCE):
+        raise WeightsNotDownloadedError(
+            "hunflair2", MODEL_NAME,
+            "Open Library → Installs and press Download weights on "
+            "the HunFlair2 row before running extraction.",
+        )
     return PrefixedSequenceTagger.load(MODEL_NAME)
 
 

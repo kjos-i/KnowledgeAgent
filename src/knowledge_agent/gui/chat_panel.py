@@ -78,6 +78,12 @@ class ChatPanel:
             content=chat_area, bgcolor=PANEL_BG, padding=16,
             expand=True, border_radius=4,
         )
+        # Passive divider between output and input. NOT draggable —
+        # Flet 0.85's TextField has a rigid line-based height model
+        # (min_lines / max_lines set the actual rendered height; no
+        # equivalent of Flutter's `expands: true`), so a draggable
+        # vertical splitter would move the divider without resizing
+        # the TextField. Kept as a visual separator only.
         splitter = ft.Container(
             content=ft.Divider(height=4, color=FRAME_BORDER_COLOR), height=4,
         )

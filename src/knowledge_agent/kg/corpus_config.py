@@ -1,8 +1,8 @@
 """Per-corpus configuration loaded from `corpus.toml`.
 
 Each corpus folder gets its own `corpus.toml` holding the choices that
-vary per corpus (which knowledge-graph layers are active, the domain
-label). Shared infrastructure settings (Neo4j URI, API keys, embedding
+vary per corpus (which knowledge-graph layers are active, sub-label
+filter). Shared infrastructure settings (Neo4j URI, API keys, embedding
 model) stay in `config.py` + `.env`.
 
 Principle (parallel to `config.py` + `.env`):
@@ -26,7 +26,7 @@ Why TOML, not YAML:
 """
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import tomlkit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -68,7 +68,7 @@ class LayerFlags(BaseModel):
     entities: bool = Field(
         default=False,
         description=(
-            "L6a: chunk-level entity extraction. Writes `:Entity` nodes "
+            "L6: chunk-level entity extraction. Writes `:Entity` nodes "
             "and `:MENTIONS` edges from `:Chunk`. Requires an "
             "`[entities]` section in `corpus.toml` declaring the "
             "`extractor`. Independent of `:Document` sub-label - runs "
@@ -84,7 +84,7 @@ class LayerFlags(BaseModel):
             "from chunk text. Writes one edge per chunk assertion "
             "between :Entity nodes, using one of 15 fixed predicate "
             "edge types (INHIBITS, ACTIVATES, BINDS_TO, ...). Requires "
-            "`entities=true` - the LLM is constrained to the L6a "
+            "`entities=true` - the LLM is constrained to the L6 "
             "entity vocabulary mined from each chunk. Cost: one "
             "Haiku call per chunk (~$0.05-0.10 per 200-chunk paper). "
             "Per-corpus settings live in `config.py` (model + "
@@ -97,9 +97,9 @@ class LayerFlags(BaseModel):
         description=(
             "L9: cross-document synthesis - materialised `:RELATED_TO` "
             "edges between two documents (or artifacts) that share at "
-            "least N L6a `:Entity` nodes (default N=2). Undirected; "
+            "least N L6 `:Entity` nodes (default N=2). Undirected; "
             "edge carries the shared entity keys + count + timestamp. "
-            "Requires `entities=true` - the shared signal is L6a "
+            "Requires `entities=true` - the shared signal is L6 "
             "entities (NOT canonicals, so this layer is unaffected by "
             "ontology import/delete). No LLM cost: pure Cypher pass. "
             "Recomputed per-doc on ingest / backfill. Threshold "
@@ -383,25 +383,41 @@ class LayerFlags(BaseModel):
 
 
 class EntityConfig(BaseModel):
-    """L6a entity-extraction settings.
+    """L6 entity-extraction settings.
 
     Required when `layers.entities=true`; ignored otherwise.
     `CorpusConfig`'s model validator enforces that pairing.
 
-    Validation of `extractor` against the dispatcher's known adapter
-    set, and of `entity_types` against the chosen NER adapter's
-    `KNOWN_LABELS`, happens at extraction time (not here) - those
-    checks live with the dispatcher to avoid a kg/ -> entity_extractors/
+    Validation of each extractor name against the dispatcher's known
+    adapter set happens at extraction time (not here) - that check
+    lives with the dispatcher to avoid a kg/ -> entity_extractors/
     import dependency.
+
+    Multi-extractor (priority-ordered union): `extractors` is an
+    ORDERED list. Index 0 is the base/primary (owns overlaps); each
+    later extractor contributes only spans no higher-priority extractor
+    already found. This is fragmentation-free by construction (one
+    owner per span). Back-compat: a legacy singular `extractor = "llm"`
+    is auto-migrated to `extractors = ["llm"]` by the validator below,
+    and the `extractor` property returns the primary for old read
+    sites.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    extractor: str = Field(
+    extractors: list[str] = Field(
+        min_length=1,
         description=(
-            "Adapter name from `entity_extractors/` (e.g. 'llm', "
-            "'scispacy'). Required - the dispatcher validates the value "
-            "at extraction time and raises if no adapter matches."
+            "Ordered list of adapter names from `entity_extractors/` "
+            "(e.g. ['hunflair2', 'llm']). Order = priority: index 0 is "
+            "the base (owns overlapping spans); each later extractor "
+            "adds only spans the earlier ones didn't find. A single-"
+            "element list (e.g. ['llm']) is the common case. The "
+            "dispatcher validates each name at extraction time and "
+            "raises if no adapter matches. When a NER and the LLM are "
+            "combined, the recommended order is NER first (its high-"
+            "precision domain types own overlaps) then LLM (fills the "
+            "gaps its fixed vocab can't reach)."
         ),
     )
     entity_types: list[str] = Field(
@@ -409,15 +425,56 @@ class EntityConfig(BaseModel):
         description=(
             "Free-form list of entity-type labels the corpus cares about "
             "(e.g. ['GENE', 'DISEASE', 'CHEMICAL']). Empty list = use "
-            "the adapter's default behaviour: the LLM adapter is "
-            "prompted to categorise entities freely; NER adapters "
-            "return their model's full label set. NOT validated against "
+            "each adapter's default behaviour: the LLM adapter is "
+            "prompted to categorise entities freely; zero-shot NER "
+            "adapters return their DEFAULT_LABELS; HunFlair2 returns its "
+            "fixed model label set regardless. NOT validated against "
             "any project-wide enum - entity types are per-corpus user "
-            "vocabulary, distinct from the fixed sub-label list. NER "
-            "adapters additionally cross-check entries against their "
-            "`KNOWN_LABELS` at extraction time."
+            "vocabulary, distinct from the fixed sub-label list. Shared "
+            "across all selected extractors; each interprets it per its "
+            "nature (see `entity_types_mode`)."
         ),
     )
+    entity_types_mode: Literal["replace", "add"] = Field(
+        default="replace",
+        description=(
+            "How a non-empty `entity_types` list interacts with each "
+            "extractor's own default labels. 'replace' (default): the "
+            "typed list is used ALONE - the adapter's defaults are not "
+            "included. 'add': the typed list is merged WITH each "
+            "adapter's DEFAULT_LABELS (so you can extend the defaults "
+            "with a custom label without re-listing them all). Only "
+            "meaningful for adapters that HAVE defaults (the zero-shot "
+            "GLiNER adapters); the LLM has no fixed defaults (so 'add' "
+            "≈ 'replace' for it) and HunFlair2 ignores `entity_types` "
+            "entirely. Ignored when `entity_types` is empty."
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_singular_extractor(cls, data: Any) -> Any:
+        """Back-compat: map a legacy singular `extractor = "x"` onto the
+        new `extractors = ["x"]` list. Existing `corpus.toml` files +
+        older `EntityConfig(extractor="llm")` call sites keep working.
+        When both keys are present, `extractors` wins and the singular
+        is dropped (so `extra="forbid"` doesn't reject it)."""
+        if isinstance(data, dict) and "extractor" in data:
+            legacy = data.get("extractor")
+            data = {k: v for k, v in data.items() if k != "extractor"}
+            if "extractors" not in data:
+                if isinstance(legacy, str):
+                    data["extractors"] = [legacy]
+                elif legacy is not None:
+                    data["extractors"] = list(legacy)
+        return data
+
+    @property
+    def extractor(self) -> str:
+        """Primary (highest-priority) extractor name. Back-compat
+        accessor for the pre-list single-extractor field; equals
+        `extractors[0]`."""
+        return self.extractors[0]
 
 
 class OntologyConfig(BaseModel):
@@ -453,7 +510,7 @@ class CrossDocConfig(BaseModel):
 
     Optional; the `CorpusConfig` model validator auto-populates a
     default instance whenever `layers.cross_doc=true` and the section
-    was omitted. Single tunable: the minimum number of shared L6a
+    was omitted. Single tunable: the minimum number of shared L6
     entity keys required to materialise a `:RELATED_TO` edge between
     two docs.
     """
@@ -464,7 +521,7 @@ class CrossDocConfig(BaseModel):
         default=2,
         ge=1,
         description=(
-            "Minimum number of distinct shared L6a `:Entity` keys "
+            "Minimum number of distinct shared L6 `:Entity` keys "
             "required to materialise a `:RELATED_TO` edge between two "
             "docs. Default 2: single-shared-entity = noise floor "
             "(common generic terms like 'patient' or 'study'); two "
@@ -516,36 +573,189 @@ class CorpusConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    domain: str = Field(
-        default="generic",
-        description=(
-            "Informational label for the corpus's domain (e.g. "
-            "'biomedical', 'legal', 'finance'). Display-only today - "
-            "does not drive logic. Future L6+ layer modules may read it "
-            "for sensible defaults (e.g. ontology choice for "
-            "`bio_entities`)."
-        ),
-    )
     layers: LayerFlags = Field(
         default_factory=LayerFlags,
         description="Per-layer on/off toggles. See LayerFlags.",
     )
     allowed_types: list[str] = Field(
-        default_factory=list,
+        default_factory=lambda: list(ALL_SUB_LABELS),
         description=(
             "Sub-labels this corpus accepts at ingest time. Each entry "
             "must be a known sub-label name from `schema.ALL_SUB_LABELS` "
-            "(case-sensitive, e.g. 'Paper', 'Note', 'Dataset'). Empty "
-            "list = no sub-label allowed; files can still be ingested "
-            "but only get a top-level (`:Document` or `:Artifact`) label, "
-            "no sub-label. `ingest_document` validates the caller's "
-            "`sub_label` argument against this list."
+            "(case-sensitive, e.g. 'Paper', 'Note', 'Dataset'). Default "
+            "= every known sub-label — a fresh corpus can be tagged with "
+            "any of them. Narrow the list to restrict a corpus (e.g. "
+            "`['Paper']` for a paper-only corpus rejects everything else "
+            "at ingest). Explicit `[]` = no sub-label allowed (files "
+            "still ingest but only get a top-level `:Document` / "
+            "`:Artifact` label). `ingest_document` validates the "
+            "caller's `sub_label` argument against this list."
+        ),
+    )
+    enable_pdf_ocr: bool = Field(
+        default=False,
+        description=(
+            "OCR for PDF inputs. Default off — research papers are "
+            "usually born-digital (text already embedded), so OCR adds "
+            "latency for no gain. Turn on for scanned / image-only PDFs. "
+            "Per-corpus (the previous global `Settings.enable_pdf_ocr` "
+            "is no longer read at ingest time; each corpus captures its "
+            "own value at creation)."
+        ),
+    )
+    enable_image_ocr: bool = Field(
+        default=True,
+        description=(
+            "OCR for standalone image-format inputs (PNG / JPG / TIFF as "
+            "the whole document). Default on — without OCR, image-only "
+            "inputs produce no searchable text. Per-corpus."
+        ),
+    )
+    chunker_strategy: Literal["hybrid", "hierarchical"] = Field(
+        default="hybrid",
+        description=(
+            "Which docling chunker to use. 'hybrid' (default) is "
+            "structure- AND token-aware: respects headings / paragraphs "
+            "/ tables AND splits anything over `chunk_max_tokens`. "
+            "'hierarchical' is structure-only with no token cap — chunks "
+            "align to document sections exactly but can be arbitrarily "
+            "large. Per-corpus. Changing this on a corpus with existing "
+            "chunks yields inconsistent chunk shapes across ingests "
+            "until backfill is run."
+        ),
+    )
+    chunk_max_tokens: int = Field(
+        default=512,
+        ge=64,
+        description=(
+            "Max tokens per chunk (HybridChunker only — ignored when "
+            "`chunker_strategy=\"hierarchical\"`). Higher = broader "
+            "context per chunk, fewer chunks total, more storage per "
+            "chunk. Per-corpus. Changing this on a corpus with existing "
+            "chunks yields inconsistent chunk sizes across ingests "
+            "until backfill is run."
+        ),
+    )
+    merge_peers: bool = Field(
+        default=True,
+        description=(
+            "HybridChunker knob (ignored when "
+            "`chunker_strategy=\"hierarchical\"`). When true, adjacent "
+            "chunks in the same section that both fit under "
+            "`chunk_max_tokens` are greedy-merged into one — fewer, "
+            "larger chunks. False leaves each structure-aligned unit "
+            "as its own chunk. Per-corpus."
+        ),
+    )
+    images_scale: float = Field(
+        default=1.0,
+        gt=0.0,
+        description=(
+            "Docling PDF-render scale factor applied to PDF and "
+            "standalone IMAGE inputs. Higher = more detail per rendered "
+            "page (better OCR fidelity on small text; slower to render). "
+            "Per-corpus. Meaningful only when OCR is on."
+        ),
+    )
+    extract_figures: bool = Field(
+        default=False,
+        description=(
+            "Multimodal: extract figure images from PDF / Word / PPT "
+            "sources during parsing. Each picture is saved as "
+            "`<corpus_root>/figures/<doc_id>/<i>.png` for downstream "
+            "embedding + display. Standalone image files (PNG / JPG / "
+            "TIFF) always reference the original file in place, "
+            "regardless of this toggle. Default off — text-only corpora "
+            "skip the extra parse work. Per-corpus."
+        ),
+    )
+    embed_images: bool = Field(
+        default=False,
+        description=(
+            "Multimodal: produce figure chunks (content_type='figure') "
+            "at chunking time and send image + caption to the "
+            "multimodal embedder. Requires a multimodal-capable "
+            "embedding provider (Voyage today). When off, only text "
+            "chunks are produced even if `extract_figures=true` (the "
+            "PNGs get saved but not embedded). Default off. Per-corpus."
+        ),
+    )
+    min_figure_bytes: int = Field(
+        default=2048,
+        ge=0,
+        description=(
+            "Multimodal: minimum size in bytes for a saved figure PNG "
+            "to be kept. Files smaller than this are deleted right "
+            "after being written and no figure chunk is emitted. "
+            "Docling can flag tiny decorative pictures (page banners, "
+            "logos, single-glyph icons) around 400-1000 B; the 2 KB "
+            "default filters those without touching real diagrams. "
+            "Set to 0 to disable the filter entirely and keep every "
+            "picture Docling emits. Applies only when "
+            "`extract_figures=true`. Per-corpus."
+        ),
+    )
+    optimize_indexes_per_ingest: bool = Field(
+        default=True,
+        description=(
+            "When true, `ingest_document` calls "
+            "`LanceClient.ensure_indexes()` after each successful write "
+            "so LanceDB vector + FTS indexes stay current. Turn off for "
+            "bulk ingest sessions when you'd rather defer index rebuild "
+            "to a single optimize at the end. Per-corpus."
+        ),
+    )
+    entity_extractor_model: str = Field(
+        default="claude-haiku-4-5-20251001",
+        description=(
+            "Model used by the LLM entity-extractor adapter (L6). "
+            "Haiku is cheap + fast — one call per chunk, short input, "
+            "straightforward span extraction (~$0.05 per 200-chunk "
+            "paper at current Haiku pricing). Consulted only when "
+            "`entities.extractor='llm'`. Per-corpus — a biomedical "
+            "corpus wanting Sonnet-grade extraction picks it here "
+            "without disturbing other corpora."
+        ),
+    )
+    entity_extractor_temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Temperature for the LLM entity-extractor adapter. 0.0 = "
+            "deterministic — structured Pydantic output (ExtractedMentions) "
+            "works best at temperature 0. Consulted only when "
+            "`entities.extractor='llm'`. Per-corpus."
+        ),
+    )
+    triples_extractor_model: str = Field(
+        default="claude-haiku-4-5-20251001",
+        description=(
+            "Model used by the L8 LLM triples-extractor. Haiku by "
+            "default (~$0.05 per 200-chunk paper). Bumping to a "
+            "stronger model helps when the L6 entity vocabulary is "
+            "dense and the LLM needs to disambiguate many candidate "
+            "relations. Consulted only when `layers.triples=true`. "
+            "Per-corpus — a biomedical corpus wanting Sonnet-grade "
+            "extraction picks it here without disturbing other corpora."
+        ),
+    )
+    triples_extractor_temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Temperature for the L8 LLM triples-extractor. 0.0 = "
+            "deterministic — the constrained predicate vocabulary + "
+            "structured Pydantic output (ExtractedTriples) benefit "
+            "from stable output. Consulted only when "
+            "`layers.triples=true`. Per-corpus."
         ),
     )
     entities: EntityConfig | None = Field(
         default=None,
         description=(
-            "L6a entity-extraction settings. Required when "
+            "L6 entity-extraction settings. Required when "
             "`layers.entities=true`; ignored otherwise (the model "
             "validator below enforces that pairing). When the "
             "`entities` layer flag is off, this section can be omitted "
@@ -635,7 +845,7 @@ class CorpusConfig(BaseModel):
 
     @model_validator(mode="after")
     def _check_triples_requires_entities(self):
-        """L8 LLM extractor is constrained to the L6a entity vocabulary.
+        """L8 LLM extractor is constrained to the L6 entity vocabulary.
         Without entities there is no vocabulary to constrain to, and
         all triples would be dropped at the extractor's post-validation
         step. Catch at config load rather than after spending LLM
@@ -643,7 +853,7 @@ class CorpusConfig(BaseModel):
         if self.layers.triples and not self.layers.entities:
             raise ValueError(
                 "layers.triples=true requires layers.entities=true - "
-                "the L8 extractor uses each chunk's L6a entity "
+                "the L8 extractor uses each chunk's L6 entity "
                 "vocabulary as the constrained subject/object set. "
                 "Turn entities on, or turn triples off."
             )
@@ -652,13 +862,13 @@ class CorpusConfig(BaseModel):
     @model_validator(mode="after")
     def _check_cross_doc_requires_entities(self):
         """L9 :RELATED_TO edges materialise overlap between two docs'
-        L6a entity sets. Without entities every overlap is the empty
+        L6 entity sets. Without entities every overlap is the empty
         set and no edge would ever be created - the layer is silently
         useless. Catch at config load."""
         if self.layers.cross_doc and not self.layers.entities:
             raise ValueError(
                 "layers.cross_doc=true requires layers.entities=true - "
-                "L9 materialises edges between docs that share L6a "
+                "L9 materialises edges between docs that share L6 "
                 "entities. Without entities, every overlap is empty "
                 "and no edges would ever be written. Turn entities "
                 "on, or turn cross_doc off."
@@ -702,7 +912,7 @@ class CorpusConfig(BaseModel):
 
     @model_validator(mode="after")
     def _check_ontology_requires_entities(self):
-        """Every L7 ontology layer needs L6a entities to link to. The
+        """Every L7 ontology layer needs L6 entities to link to. The
         ontology import itself works without entities (the term nodes
         get written either way), but the linking pass is the point of
         L7 and it needs entities. Catch at load time rather than
@@ -713,7 +923,7 @@ class CorpusConfig(BaseModel):
             raise ValueError(
                 f"Ontology layers {enabled} require layers.entities=true. "
                 f"The :CANONICAL_TO edges from the linking pass connect "
-                f":Entity nodes (from L6a) to ontology terms; without "
+                f":Entity nodes (from L6) to ontology terms; without "
                 f"entities, the imported ontology nodes have nothing to "
                 f"link to. Turn entities on, or turn the ontology "
                 f"layer(s) off."
@@ -778,3 +988,36 @@ def load_corpus_config(path: Path) -> CorpusConfig:
     text = path.read_text(encoding="utf-8")
     raw = dict(tomlkit.loads(text))
     return CorpusConfig.model_validate(raw)
+
+
+def corpus_folder(corpus_toml_path: Path) -> Path:
+    """Return the corpus folder — the directory that owns
+    `corpus.toml`, `lancedb/`, and (with multimodal on) `figures/`.
+
+    Convention from Create New Dataset: the user picks one folder to
+    hold everything for a corpus. `corpus.toml` sits inside it;
+    `lancedb/` is a sub-directory; figures land in `figures/` next to
+    LanceDB. This helper returns the folder itself so callers can
+    resolve sub-paths (LanceDB, figures, future backups) without
+    duplicating the `.parent` derivation.
+    """
+    return corpus_toml_path.parent
+
+
+def corpus_figures_dir(corpus_toml_path: Path, doc_id: str) -> Path:
+    """Return the per-doc figures directory inside the LanceDB folder.
+
+    Path is `<corpus folder>/lancedb/figures/<doc_id>/`. Figures live
+    INSIDE the LanceDB dir (option 1 locked 2026-07-03) so a corpus
+    folder stays self-contained: everything the corpus owns sits
+    inside `<corpus folder>/lancedb/`. LanceDB uses named subfolders
+    (`chunks.lance/`) for its own tables, so `figures/` alongside
+    them doesn't collide.
+
+    Created idempotently on call so callers can start writing PNGs
+    immediately. Used by the parser when `config.extract_figures=True`;
+    each picture is saved as `<returned dir>/<i>.png`.
+    """
+    d = corpus_folder(corpus_toml_path) / "lancedb" / "figures" / doc_id
+    d.mkdir(parents=True, exist_ok=True)
+    return d

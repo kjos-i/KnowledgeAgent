@@ -12,13 +12,12 @@ Three stacked blocks (top to bottom):
      chips render the four ComponentStatus entries (neo4j / lancedb /
      llm_key / embed_key) from `health.system_status()`.
 
-  3. Database connection — three EDITABLE TextFields (Neo4j URI,
-     Neo4j user, LanceDB path) backed by GuiConfig. On_blur:
-     persist to JSON, bridge to `os.environ` via
-     `apply_connection_to_env`, then `reset_after_key_change()` to
-     drop the cached AsyncDriver/LanceClient + Settings. The two
-     advanced tuning knobs (pool size, acquisition timeout) stay
-     read-only env-only — they're rare to change.
+  3. Database connection — READ-ONLY display of the active corpus's
+     connection (mirrors the active `CorpusEntry` from
+     `GuiConfig.corpora`). Edit the connection or switch corpora via
+     Library → Select Dataset; add a new corpus via Library → Create
+     New Dataset. Pool size + acquisition timeout also read-only —
+     they're backend Settings defaults, override via env vars.
 
 Save pattern (RA-mirror): each handler captures the previous value,
 mutates GuiConfig, calls `save_config`, rolls back on ConfigError,
@@ -31,23 +30,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import flet as ft
 from pydantic import ValidationError
 
-from knowledge_agent.config import get_settings, reset_after_key_change
-from knowledge_agent.gui._styles import (
-    FRAME_BORDER_COLOR,
-    PANEL_BG,
-    centered_label,
-)
-from knowledge_agent.gui.config_store import (
-    ConfigError,
-    apply_connection_to_env,
-    save_config,
-)
+from knowledge_agent.config import get_settings
+from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, centered_label
+from knowledge_agent.gui.config_store import ConfigError, save_config
 from knowledge_agent.gui.views._frame import view_header
 from knowledge_agent.health import system_status
 
@@ -66,11 +56,12 @@ _DEBUG_BLURB = (
 )
 
 _CONNECTION_BLURB = (
-    "Backend connection. Edits save immediately, bridge to the "
-    "running process, and re-open the cached drivers — no restart "
-    "needed. Pool size + acquisition timeout are advanced tuning "
-    "(set NEO4J_MAX_CONNECTION_POOL_SIZE / "
-    "NEO4J_CONNECTION_ACQUISITION_TIMEOUT as env vars to change)."
+    "Read-only display of the active corpus's connection. Edit the "
+    "connection or switch corpora via Library → Select Dataset. Add "
+    "a new corpus via Library → Create New Dataset. Pool size + "
+    "acquisition timeout are advanced tuning (set "
+    "NEO4J_MAX_CONNECTION_POOL_SIZE / "
+    "NEO4J_CONNECTION_ACQUISITION_TIMEOUT env vars to change)."
 )
 
 
@@ -85,9 +76,10 @@ class AppTab:
         self.debug_mode_checkbox: ft.Checkbox | None = None
         self.chips_row: ft.Row | None = None
         self.rerun_button: ft.Button | None = None
-        self.neo4j_uri_field: ft.TextField | None = None
-        self.neo4j_user_field: ft.TextField | None = None
-        self.lancedb_path_field: ft.TextField | None = None
+        self.active_corpus_text: ft.Text | None = None
+        self.neo4j_uri_text: ft.Text | None = None
+        self.neo4j_user_text: ft.Text | None = None
+        self.lancedb_path_text: ft.Text | None = None
         self.pool_size_text: ft.Text | None = None
         self.acq_timeout_text: ft.Text | None = None
         self._first_build = True
@@ -135,42 +127,30 @@ class AppTab:
             on_click=self.on_rerun_diagnostics,
         )
 
-        # Block 3: DB connection — editable URI / user / path TextFields
-        # backed by GuiConfig + two read-only tuning rows. Defaults are
-        # filled in from GuiConfig so an empty field never reaches
-        # `os.environ` (the bridge already wrote the field's value at
-        # startup).
-        self.neo4j_uri_field = ft.TextField(
-            label="Neo4j URI",
-            value=self.app.gui_config.neo4j_uri,
-            border=ft.InputBorder.OUTLINE,
-            border_color=FRAME_BORDER_COLOR,
-            bgcolor=PANEL_BG,
-            on_blur=self.on_neo4j_uri_blur,
+        # Block 3: DB connection — all READ-ONLY. Post-Slice-3 the
+        # active corpus's connection lives in `GuiConfig.corpora`
+        # (see [[gui-slice3-library-design]]); this tab just displays
+        # what's active. Edits happen via Library → Select Dataset
+        # (switch active corpus) or Library → Create New Dataset (add
+        # a new corpus).
+        self.active_corpus_text = ft.Text(
+            "(loading…)", size=12,
+            color=ft.Colors.WHITE, selectable=True,
         )
-        self.neo4j_user_field = ft.TextField(
-            label="Neo4j user",
-            value=self.app.gui_config.neo4j_user,
-            border=ft.InputBorder.OUTLINE,
-            border_color=FRAME_BORDER_COLOR,
-            bgcolor=PANEL_BG,
-            on_blur=self.on_neo4j_user_blur,
+        self.neo4j_uri_text = ft.Text(
+            "(loading…)", size=12,
+            color=ft.Colors.WHITE, selectable=True,
         )
-        self.lancedb_path_field = ft.TextField(
-            label="LanceDB path",
-            value=(
-                str(self.app.gui_config.lancedb_path)
-                if self.app.gui_config.lancedb_path is not None
-                else ""
-            ),
-            hint_text="(empty = platform default)",
-            border=ft.InputBorder.OUTLINE,
-            border_color=FRAME_BORDER_COLOR,
-            bgcolor=PANEL_BG,
-            on_blur=self.on_lancedb_path_blur,
+        self.neo4j_user_text = ft.Text(
+            "(loading…)", size=12,
+            color=ft.Colors.WHITE, selectable=True,
         )
-        # Tuning knobs — read-only. Populated lazily on first build
-        # since settings construction can raise on a fresh install.
+        self.lancedb_path_text = ft.Text(
+            "(loading…)", size=12,
+            color=ft.Colors.WHITE, selectable=True,
+        )
+        # Tuning knobs — also read-only (backend Settings defaults;
+        # override via env vars).
         self.pool_size_text = ft.Text(
             "(loading…)", size=12,
             color=ft.Colors.WHITE, selectable=True,
@@ -189,7 +169,7 @@ class AppTab:
         # (no loop) doesn't leave an unawaited-coroutine warning.
         if self._first_build:
             self._first_build = False
-            self._populate_tuning_display()
+            self._populate_connection_display()
             try:
                 asyncio.get_running_loop()
             except RuntimeError:
@@ -224,7 +204,7 @@ class AppTab:
                 self.chips_row,
                 ft.Row(controls=[self.rerun_button]),
                 ft.Divider(),
-                # ---- Block 3: DB connection (editable) -----------------
+                # ---- Block 3: DB connection (read-only display) --------
                 ft.Text(
                     "Database connection",
                     weight=ft.FontWeight.BOLD,
@@ -233,9 +213,10 @@ class AppTab:
                     _CONNECTION_BLURB,
                     size=11, color=ft.Colors.GREY_500, italic=True,
                 ),
-                self.neo4j_uri_field,
-                self.neo4j_user_field,
-                self.lancedb_path_field,
+                _kv_row("Active corpus", self.active_corpus_text),
+                _kv_row("Neo4j URI", self.neo4j_uri_text),
+                _kv_row("Neo4j user", self.neo4j_user_text),
+                _kv_row("LanceDB path", self.lancedb_path_text),
                 _kv_row("Connection pool size", self.pool_size_text),
                 _kv_row(
                     "Connection acquisition timeout", self.acq_timeout_text,
@@ -348,16 +329,39 @@ class AppTab:
 
     # ----- Block 3 (editable connection + read-only tuning) ----------------
 
-    def _populate_tuning_display(self) -> None:
-        """Refresh the two read-only tuning rows from backend Settings.
+    def _populate_connection_display(self) -> None:
+        """Refresh the read-only connection + tuning rows.
 
-        URI / user / path show whatever GuiConfig holds (no need to
-        consult backend Settings — the bridge keeps them in sync).
-        Pool size + acquisition timeout aren't in GuiConfig, so we go
-        through `get_settings()` for them. If that raises (because
-        `neo4j_password` isn't in the keyring yet), we render an
-        actionable placeholder pointing the user at the Keys tab.
+        Active corpus / URI / user / path come from GuiConfig (mirror
+        of the active `CorpusEntry`). Pool size + acquisition timeout
+        come from backend Settings; if that raises (bridge hasn't
+        seeded env yet on a fresh install), we render an actionable
+        placeholder.
         """
+        # ---- Corpus + connection mirrors from GuiConfig ---------------
+        cfg = self.app.gui_config
+        if self.active_corpus_text is not None:
+            self.active_corpus_text.value = (
+                cfg.active_corpus_name
+                or "(no corpus — create one in Library)"
+            )
+        if self.neo4j_uri_text is not None:
+            self.neo4j_uri_text.value = cfg.neo4j_uri
+        if self.neo4j_user_text is not None:
+            self.neo4j_user_text.value = cfg.neo4j_user
+        if self.lancedb_path_text is not None:
+            self.lancedb_path_text.value = (
+                str(cfg.lancedb_path)
+                if cfg.lancedb_path is not None
+                else "(default under user_data_dir)"
+            )
+        # ---- Tuning knobs -----------------------------------------------
+        # Always show a value. When Settings() constructs cleanly, we
+        # show the LIVE value (which may reflect env-var overrides).
+        # When it raises (typically because NEO4J_PASSWORD isn't set
+        # on a fresh install), we fall back to the pydantic-declared
+        # Field defaults so the row shows "100 (default)" instead of
+        # a stale "password not set" message that doesn't apply here.
         if self.pool_size_text is None or self.acq_timeout_text is None:
             return
         try:
@@ -369,105 +373,25 @@ class AppTab:
                 f"{settings.neo4j_connection_acquisition_timeout}s"
             )
         except Exception as exc:
-            logger.warning("tuning display: settings load failed: %r", exc)
-            placeholder = _missing_field_message(exc)
-            self.pool_size_text.value = placeholder
-            self.acq_timeout_text.value = placeholder
-
-    def _commit_connection_change(self, label: str) -> None:
-        """Persist + bridge + reset cached drivers after a connection field
-        changed. Triggers a diagnostics re-run so the chip turns the new
-        colour right away.
-        """
-        if self.status is None:
-            return
-        try:
-            save_config(self.app.gui_config)
-        except ConfigError as exc:
-            self.status.value = f"could not save: {exc}"
-            self.app.page.update()
-            return
-        apply_connection_to_env(self.app.gui_config)
-        try:
-            reset_after_key_change()
-        except Exception as exc:
-            # Cache-clear failure is non-fatal — change is saved + bridged.
-            logger.warning("reset_after_key_change failed: %r", exc)
-        self.status.value = f"saved {label}"
-        # Refresh tuning row + diagnostics chips for the new connection.
-        self._populate_tuning_display()
-        self.app.page.update()
-        asyncio.create_task(self._refresh_diagnostics())
-
-    def on_neo4j_uri_blur(self, e: ft.Event) -> None:
-        """Persist neo4j_uri on blur; snap back if pydantic-side bridge fails."""
-        if self.neo4j_uri_field is None:
-            return
-        raw = (self.neo4j_uri_field.value or "").strip()
-        if not raw:
-            # Empty URI is invalid — restore the previous value so the
-            # backend doesn't see "" and crash at AsyncDriver init.
-            self.neo4j_uri_field.value = self.app.gui_config.neo4j_uri
-            if self.status is not None:
-                self.status.value = "Neo4j URI can't be empty"
-            self.app.page.update()
-            return
-        if raw == self.app.gui_config.neo4j_uri:
-            return
-        previous = self.app.gui_config.neo4j_uri
-        self.app.gui_config.neo4j_uri = raw
-        # Inline rollback hook: if save fails, _commit will restore the
-        # previous value via this closure.
-        try:
-            self._commit_connection_change("Neo4j URI")
-        except Exception as exc:
-            self.app.gui_config.neo4j_uri = previous
-            self.neo4j_uri_field.value = previous
-            if self.status is not None:
-                self.status.value = f"could not save: {exc}"
-            self.app.page.update()
-
-    def on_neo4j_user_blur(self, e: ft.Event) -> None:
-        """Persist neo4j_user on blur; empty resets to default `neo4j`."""
-        if self.neo4j_user_field is None:
-            return
-        raw = (self.neo4j_user_field.value or "").strip() or "neo4j"
-        if raw == self.app.gui_config.neo4j_user:
-            self.neo4j_user_field.value = raw  # normalise (whitespace, etc.)
-            self.app.page.update()
-            return
-        previous = self.app.gui_config.neo4j_user
-        self.app.gui_config.neo4j_user = raw
-        self.neo4j_user_field.value = raw
-        try:
-            self._commit_connection_change("Neo4j user")
-        except Exception as exc:
-            self.app.gui_config.neo4j_user = previous
-            self.neo4j_user_field.value = previous
-            if self.status is not None:
-                self.status.value = f"could not save: {exc}"
-            self.app.page.update()
-
-    def on_lancedb_path_blur(self, e: ft.Event) -> None:
-        """Persist lancedb_path on blur; empty = platform default."""
-        if self.lancedb_path_field is None:
-            return
-        raw = (self.lancedb_path_field.value or "").strip()
-        new_value = Path(raw) if raw else None
-        if new_value == self.app.gui_config.lancedb_path:
-            return
-        previous = self.app.gui_config.lancedb_path
-        self.app.gui_config.lancedb_path = new_value
-        try:
-            self._commit_connection_change("LanceDB path")
-        except Exception as exc:
-            self.app.gui_config.lancedb_path = previous
-            self.lancedb_path_field.value = (
-                str(previous) if previous is not None else ""
+            logger.warning(
+                "connection display: settings load failed; falling "
+                "back to Field defaults: %r", exc,
             )
-            if self.status is not None:
-                self.status.value = f"could not save: {exc}"
-            self.app.page.update()
+            from knowledge_agent.config import Settings
+
+            pool_default = Settings.model_fields[
+                "neo4j_max_connection_pool_size"
+            ].default
+            acq_default = Settings.model_fields[
+                "neo4j_connection_acquisition_timeout"
+            ].default
+            self.pool_size_text.value = f"{pool_default} (default)"
+            self.acq_timeout_text.value = f"{acq_default}s (default)"
+
+    # DB connection is display-only post-Slice-3. Editing happens via
+    # Library → Select Dataset (switch corpus) or Create New Dataset
+    # (register a new one). The old on_blur handlers + commit helper
+    # for URI / user / path were removed with the read-only pivot.
 
 
 # =============================================================================
@@ -477,11 +401,20 @@ class AppTab:
 
 # Human-readable name per known required-no-default field. Used to render
 # clearer "missing X — set in Y tab" messages instead of raw pydantic errors.
+# NEO4J connection params all point at Library now — they're per-corpus.
 _FIELD_GUIDANCE: dict[str, str] = {
-    "neo4j_password": "Neo4j password not set — open the Keys tab",
-    "neo4j_uri": "Neo4j URI not set — type one above",
-    "neo4j_user": "Neo4j user not set — type one above",
-    "lancedb_path": "LanceDB path not set — type one above",
+    "neo4j_password": (
+        "Neo4j password not set — create a corpus in Library"
+    ),
+    "neo4j_uri": (
+        "Neo4j URI not set — create a corpus in Library"
+    ),
+    "neo4j_user": (
+        "Neo4j user not set — create a corpus in Library"
+    ),
+    "lancedb_path": (
+        "LanceDB path not set — create a corpus in Library"
+    ),
 }
 
 

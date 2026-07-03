@@ -396,7 +396,7 @@ async def test_walk_and_cache_calls_ensure_cached_per_path(tmp_path):
             ontology_fibo_writes, "ensure_cached", new_callable=AsyncMock,
         ) as mock_cache,
         patch.object(
-            ontology_fibo_writes, "get_cache_dir", return_value=tmp_path,
+            ontology_fibo_writes, "get_downloads_dir", return_value=tmp_path,
         ),
     ):
         await ontology_fibo_writes._walk_and_cache_fibo(paths=paths)
@@ -420,7 +420,7 @@ async def test_walk_and_cache_uses_listing_when_paths_omitted(tmp_path):
             ontology_fibo_writes, "ensure_cached", new_callable=AsyncMock,
         ),
         patch.object(
-            ontology_fibo_writes, "get_cache_dir", return_value=tmp_path,
+            ontology_fibo_writes, "get_downloads_dir", return_value=tmp_path,
         ),
     ):
         await ontology_fibo_writes._walk_and_cache_fibo()
@@ -434,7 +434,7 @@ async def test_walk_and_cache_returns_fibo_subdir(tmp_path):
             ontology_fibo_writes, "ensure_cached", new_callable=AsyncMock,
         ),
         patch.object(
-            ontology_fibo_writes, "get_cache_dir", return_value=tmp_path,
+            ontology_fibo_writes, "get_downloads_dir", return_value=tmp_path,
         ),
     ):
         result = await ontology_fibo_writes._walk_and_cache_fibo(paths=[])

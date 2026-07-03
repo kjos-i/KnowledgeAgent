@@ -231,7 +231,6 @@ def _config_with_ontologies(*names: str) -> CorpusConfig:
         flags_kwargs[f"ontology_{n}"] = True
         ontology_cfg[n] = OntologyConfig(matching="exact")
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(**flags_kwargs),
         entities=EntityConfig(extractor="llm"),
@@ -329,7 +328,6 @@ async def test_backfill_ontology_empty_when_no_ontology_layers_enabled():
     """No enabled ontologies -> empty result, no client calls."""
     kg_mock = MagicMock(spec=Neo4jClient)
     config = CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(chunks=True, entities=True),
         entities=EntityConfig(extractor="llm"),
@@ -792,6 +790,17 @@ async def test_lookup_known_doi_has_no_skip_manual_concept():
 # ---- re_embed ----
 
 
+def _re_embed_config(optimize: bool = False) -> Any:
+    """Build a minimal MagicMock CorpusConfig for re_embed tests.
+
+    Only `optimize_indexes_per_ingest` matters — that's the sole field
+    `re_embed` reads. Split out because 6 tests need the same setup.
+    """
+    cfg = MagicMock()
+    cfg.optimize_indexes_per_ingest = optimize
+    return cfg
+
+
 async def test_re_embed_aborts_when_lancedb_read_fails():
     search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=None)
@@ -799,7 +808,7 @@ async def test_re_embed_aborts_when_lancedb_read_fails():
         "knowledge_agent.ingestion.pipeline.get_search_client",
         return_value=search_mock,
     ):
-        result = await re_embed("docZ")
+        result = await re_embed("docZ", _re_embed_config())
 
     assert result == {"embed_ok": False, "lancedb_ok": False, "n_chunks": 0}
 
@@ -811,7 +820,7 @@ async def test_re_embed_skips_when_no_chunks_found():
         "knowledge_agent.ingestion.pipeline.get_search_client",
         return_value=search_mock,
     ):
-        result = await re_embed("docZ")
+        result = await re_embed("docZ", _re_embed_config())
 
     assert result == {"embed_ok": False, "lancedb_ok": False, "n_chunks": 0}
 
@@ -829,9 +838,9 @@ async def test_re_embed_returns_embed_false_when_embedder_fails():
     with (
         patch("knowledge_agent.ingestion.pipeline.get_search_client",
               return_value=search_mock),
-        patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, side_effect=RuntimeError("voyage boom")),
+        patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, side_effect=RuntimeError("voyage boom")),
     ):
-        result = await re_embed("docZ")
+        result = await re_embed("docZ", _re_embed_config())
 
     assert result["embed_ok"] is False
     assert result["lancedb_ok"] is False
@@ -853,17 +862,13 @@ async def test_re_embed_happy_path_swaps_embeddings_and_rewrites():
     search_mock.write_chunks = AsyncMock(return_value=True)
 
     new_vecs = [[0.9, 0.8], [0.7, 0.6]]
-    settings_mock = MagicMock()
-    settings_mock.optimize_indexes_per_ingest = False
 
     with (
         patch("knowledge_agent.ingestion.pipeline.get_search_client",
               return_value=search_mock),
-        patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=new_vecs),
-        patch("knowledge_agent.ingestion.pipeline.get_settings",
-              return_value=settings_mock),
+        patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=new_vecs),
     ):
-        result = await re_embed("docZ")
+        result = await re_embed("docZ", _re_embed_config(optimize=False))
 
     assert result["embed_ok"] is True
     assert result["lancedb_ok"] is True
@@ -876,7 +881,7 @@ async def test_re_embed_happy_path_swaps_embeddings_and_rewrites():
     assert written[0]["embedding"] == [0.9, 0.8]
     assert written[1]["embedding"] == [0.7, 0.6]
     assert written[0]["title"] == "old"  # doc-level fields preserved
-    # No index rebuild because the setting was False.
+    # No index rebuild because the config setting was False.
     search_mock.ensure_indexes.assert_not_called()
 
 
@@ -888,17 +893,13 @@ async def test_re_embed_rebuilds_index_when_setting_enabled():
     search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
     search_mock.write_chunks = AsyncMock(return_value=True)
-    settings_mock = MagicMock()
-    settings_mock.optimize_indexes_per_ingest = True
 
     with (
         patch("knowledge_agent.ingestion.pipeline.get_search_client",
               return_value=search_mock),
-        patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=[[1.0]]),
-        patch("knowledge_agent.ingestion.pipeline.get_settings",
-              return_value=settings_mock),
+        patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=[[1.0]]),
     ):
-        await re_embed("docZ")
+        await re_embed("docZ", _re_embed_config(optimize=True))
 
     search_mock.ensure_indexes.assert_called_once()
 
@@ -916,17 +917,13 @@ async def test_re_embed_skips_index_rebuild_when_lancedb_write_fails():
     search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
     search_mock.write_chunks = AsyncMock(side_effect=RuntimeError("boom"))
-    settings_mock = MagicMock()
-    settings_mock.optimize_indexes_per_ingest = True
 
     with (
         patch("knowledge_agent.ingestion.pipeline.get_search_client",
               return_value=search_mock),
-        patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=[[1.0]]),
-        patch("knowledge_agent.ingestion.pipeline.get_settings",
-              return_value=settings_mock),
+        patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=[[1.0]]),
     ):
-        await re_embed("docZ")
+        await re_embed("docZ", _re_embed_config(optimize=True))
 
     search_mock.ensure_indexes.assert_not_called()
 
@@ -955,7 +952,6 @@ def _chunk_row(
 
 async def test_backfill_chunks_no_op_when_layer_disabled():
     config = CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(chunks=False),
     )
@@ -1018,8 +1014,7 @@ async def test_backfill_chunks_happy_path_rewrites_kg_and_chains_into_entities()
     kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_chunks = AsyncMock(return_value=True)
     kg_mock.write_entities = AsyncMock(return_value=True)
-    extractor_mock = MagicMock()
-    extractor_mock.extract = AsyncMock(return_value=[])
+    extractor_mock = AsyncMock(return_value=[])
 
     config = _entities_enabled_config()
 
@@ -1028,8 +1023,8 @@ async def test_backfill_chunks_happy_path_rewrites_kg_and_chains_into_entities()
               return_value=search_mock),
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.pipeline.get_extractor",
-              return_value=extractor_mock),
+        patch("knowledge_agent.ingestion.pipeline.extract_union",
+              extractor_mock),
     ):
         result = await backfill_chunks("docZ", config)
 
@@ -1061,7 +1056,6 @@ async def test_backfill_chunks_recovers_labels_from_first_row():
     kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_chunks = AsyncMock(return_value=True)
     config = CorpusConfig(
-        domain="biomedical",
         allowed_types=["Dataset"],
         layers=LayerFlags(chunks=True),
     )
@@ -1114,7 +1108,6 @@ def _entities_enabled_config(*ontology_names: str) -> CorpusConfig:
         flags_kwargs[f"ontology_{n}"] = True
         ontology_cfg[n] = OntologyConfig(matching="exact")
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(**flags_kwargs),
         entities=EntityConfig(
@@ -1127,7 +1120,6 @@ def _entities_enabled_config(*ontology_names: str) -> CorpusConfig:
 async def test_backfill_entities_no_op_when_layer_disabled():
     """entities=False -> immediate return, no client calls."""
     config = CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(chunks=True),
     )
@@ -1196,9 +1188,8 @@ async def test_backfill_entities_happy_path_extracts_and_writes():
     kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_entities = AsyncMock(return_value=True)
 
-    extractor_mock = MagicMock()
     # Two mentions in chunk 0, one in chunk 1.
-    extractor_mock.extract = AsyncMock(side_effect=[
+    extractor_mock = AsyncMock(side_effect=[
         [Mention(raw_text="A", entity_type="GENE", offset=0, confidence=None),
          Mention(raw_text="B", entity_type="GENE", offset=2, confidence=None)],
         [Mention(raw_text="C", entity_type="DISEASE", offset=0, confidence=None)],
@@ -1210,8 +1201,8 @@ async def test_backfill_entities_happy_path_extracts_and_writes():
               return_value=search_mock),
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.pipeline.get_extractor",
-              return_value=extractor_mock),
+        patch("knowledge_agent.ingestion.pipeline.extract_union",
+              extractor_mock),
     ):
         result = await backfill_entities("doc-1", config)
 
@@ -1238,9 +1229,8 @@ async def test_backfill_entities_one_chunk_extraction_failure_does_not_poison_ot
     kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_entities = AsyncMock(return_value=True)
 
-    extractor_mock = MagicMock()
     # First chunk extraction raises; second succeeds.
-    extractor_mock.extract = AsyncMock(side_effect=[
+    extractor_mock = AsyncMock(side_effect=[
         RuntimeError("model down"),
         [Mention(raw_text="X", entity_type="GENE", offset=0, confidence=None)],
     ])
@@ -1251,8 +1241,8 @@ async def test_backfill_entities_one_chunk_extraction_failure_does_not_poison_ot
               return_value=search_mock),
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.pipeline.get_extractor",
-              return_value=extractor_mock),
+        patch("knowledge_agent.ingestion.pipeline.extract_union",
+              extractor_mock),
     ):
         result = await backfill_entities("doc-1", config)
 
@@ -1276,8 +1266,7 @@ async def test_backfill_entities_chains_into_backfill_ontology_when_entities_ok(
     kg_mock.ensure_ontology_imported = AsyncMock(return_value=False)
     kg_mock.link_entities_to_ontology = AsyncMock(return_value=5)
 
-    extractor_mock = MagicMock()
-    extractor_mock.extract = AsyncMock(return_value=[
+    extractor_mock = AsyncMock(return_value=[
         Mention(raw_text="A", entity_type="GENE", offset=0, confidence=None),
     ])
 
@@ -1288,8 +1277,8 @@ async def test_backfill_entities_chains_into_backfill_ontology_when_entities_ok(
               return_value=search_mock),
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.pipeline.get_extractor",
-              return_value=extractor_mock),
+        patch("knowledge_agent.ingestion.pipeline.extract_union",
+              extractor_mock),
     ):
         result = await backfill_entities("doc-1", config)
 
@@ -1311,8 +1300,7 @@ async def test_backfill_entities_skips_ontology_when_entity_write_fails():
     kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_entities = AsyncMock(side_effect=RuntimeError("boom"))
 
-    extractor_mock = MagicMock()
-    extractor_mock.extract = AsyncMock(return_value=[])
+    extractor_mock = AsyncMock(return_value=[])
     config = _entities_enabled_config("mesh")
 
     with (
@@ -1320,8 +1308,8 @@ async def test_backfill_entities_skips_ontology_when_entity_write_fails():
               return_value=search_mock),
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.pipeline.get_extractor",
-              return_value=extractor_mock),
+        patch("knowledge_agent.ingestion.pipeline.extract_union",
+              extractor_mock),
     ):
         result = await backfill_entities("doc-1", config)
 
@@ -1336,7 +1324,6 @@ async def test_backfill_entities_skips_ontology_when_entity_write_fails():
 def _triples_enabled_config() -> CorpusConfig:
     """Minimal L8-enabled config: chunks + entities + triples."""
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(chunks=True, entities=True, triples=True),
         entities=EntityConfig(
@@ -1440,14 +1427,18 @@ async def test_backfill_triples_happy_path_extracts_and_writes():
     kg_mock.write_triples.assert_called_once_with(
         "doc-1", [("doc-1#0", [triple])]
     )
-    # Extractor got the chunk text + vocab.
+    # Extractor got the chunk text + vocab, plus per-corpus model +
+    # temperature (2026-07-02 refactor: no more settings global read).
     mock_extract.assert_called_once_with(
-        "BRCA1 inhibits TP53.", [("brca1", "GENE"), ("tp53", "GENE")]
+        "BRCA1 inhibits TP53.",
+        [("brca1", "GENE"), ("tp53", "GENE")],
+        model="claude-haiku-4-5-20251001",
+        temperature=0.0,
     )
 
 
 async def test_backfill_triples_skips_chunk_with_empty_vocab():
-    """Chunk has no L6a entities -> no LLM call, but doc still written."""
+    """Chunk has no L6 entities -> no LLM call, but doc still written."""
     search_mock = MagicMock(spec=LanceClient)
     search_mock.get_chunks_by_doc_id.return_value = [
         {"chunk_id": "doc-1#0", "text": "Methodology overview."},
@@ -1505,7 +1496,7 @@ async def test_backfill_triples_one_chunk_extraction_failure_does_not_poison_oth
         evidence_span="c inhibits d",
     )
 
-    def fake_extract(text, vocab):
+    def fake_extract(text, vocab, *, model, temperature):
         if "bad" in text:
             raise RuntimeError("boom")
         return [good_triple]
@@ -1539,8 +1530,7 @@ async def test_backfill_entities_chains_into_backfill_triples_when_triples_enabl
     }
     kg_mock.write_triples = AsyncMock(return_value=True)
 
-    extractor_mock = MagicMock()
-    extractor_mock.extract = AsyncMock(return_value=[
+    extractor_mock = AsyncMock(return_value=[
         Mention(raw_text="alpha", entity_type="GENE")
     ])
 
@@ -1551,8 +1541,8 @@ async def test_backfill_entities_chains_into_backfill_triples_when_triples_enabl
               return_value=search_mock),
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.pipeline.get_extractor",
-              return_value=extractor_mock),
+        patch("knowledge_agent.ingestion.pipeline.extract_union",
+              extractor_mock),
         patch("knowledge_agent.ingestion.pipeline.triples_extractor.extract",
               return_value=[]),
     ):
@@ -1575,8 +1565,7 @@ async def test_backfill_entities_does_not_run_triples_when_triples_off():
     ]
     kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_entities = AsyncMock(return_value=True)
-    extractor_mock = MagicMock()
-    extractor_mock.extract = AsyncMock(return_value=[])
+    extractor_mock = AsyncMock(return_value=[])
     # triples disabled in this config.
     config = _entities_enabled_config()
 
@@ -1585,8 +1574,8 @@ async def test_backfill_entities_does_not_run_triples_when_triples_off():
               return_value=search_mock),
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.pipeline.get_extractor",
-              return_value=extractor_mock),
+        patch("knowledge_agent.ingestion.pipeline.extract_union",
+              extractor_mock),
     ):
         result = await backfill_entities("doc-1", config)
 
@@ -1678,7 +1667,6 @@ def test_ingest_result_l8_fields_default_to_safe_values():
 def _cross_doc_enabled_config() -> CorpusConfig:
     """Minimal L9-enabled config: chunks + entities + cross_doc."""
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(chunks=True, entities=True, cross_doc=True),
         entities=EntityConfig(
@@ -1759,8 +1747,7 @@ async def test_backfill_entities_chains_into_backfill_cross_doc_when_enabled():
     kg_mock.write_entities = AsyncMock(return_value=True)
     kg_mock.recompute_cross_doc_edges = AsyncMock(return_value=3)
 
-    extractor_mock = MagicMock()
-    extractor_mock.extract = AsyncMock(return_value=[
+    extractor_mock = AsyncMock(return_value=[
         Mention(raw_text="alpha", entity_type="GENE")
     ])
 
@@ -1771,8 +1758,8 @@ async def test_backfill_entities_chains_into_backfill_cross_doc_when_enabled():
               return_value=search_mock),
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.pipeline.get_extractor",
-              return_value=extractor_mock),
+        patch("knowledge_agent.ingestion.pipeline.extract_union",
+              extractor_mock),
     ):
         result = await backfill_entities("doc-1", config)
 
@@ -1789,8 +1776,7 @@ async def test_backfill_entities_does_not_run_cross_doc_when_disabled():
     ]
     kg_mock = MagicMock(spec=Neo4jClient)
     kg_mock.write_entities = AsyncMock(return_value=True)
-    extractor_mock = MagicMock()
-    extractor_mock.extract = AsyncMock(return_value=[])
+    extractor_mock = AsyncMock(return_value=[])
     # cross_doc disabled.
     config = _entities_enabled_config()
 
@@ -1799,8 +1785,8 @@ async def test_backfill_entities_does_not_run_cross_doc_when_disabled():
               return_value=search_mock),
         patch("knowledge_agent.ingestion.pipeline.get_kg_client",
               return_value=kg_mock),
-        patch("knowledge_agent.ingestion.pipeline.get_extractor",
-              return_value=extractor_mock),
+        patch("knowledge_agent.ingestion.pipeline.extract_union",
+              extractor_mock),
     ):
         result = await backfill_entities("doc-1", config)
 
@@ -2085,6 +2071,10 @@ def _make_mock_kg() -> MagicMock:
         "write_entities",
     ):
         setattr(mock, write, AsyncMock(return_value=True))
+    # Default the preserve-labels lookup to "no existing doc" so tests
+    # written before this hook don't accidentally trip the preserve
+    # branch. Preserve-specific tests override per-call.
+    mock.get_focal_labels_by_doc_id = AsyncMock(return_value=(None, None))
     return mock
 
 
@@ -2102,7 +2092,7 @@ def _make_mock_kg() -> MagicMock:
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
 async def test_ingest_document_skips_openalex_writes_when_layer_off(
@@ -2121,7 +2111,6 @@ async def test_ingest_document_skips_openalex_writes_when_layer_off(
     mock_get_kg.return_value = mock_kg
 
     config = CorpusConfig(
-        domain="generic",
         allowed_types=["Paper"],
         layers=LayerFlags(openalex_papers=False, chunks=True),
     )
@@ -2150,7 +2139,7 @@ async def test_ingest_document_skips_openalex_writes_when_layer_off(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
 async def test_ingest_document_skips_chunk_writes_when_layer_off(
@@ -2169,7 +2158,6 @@ async def test_ingest_document_skips_chunk_writes_when_layer_off(
     mock_get_kg.return_value = mock_kg
 
     config = CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(openalex_papers=True, chunks=False),
     )
@@ -2196,7 +2184,7 @@ async def test_ingest_document_skips_chunk_writes_when_layer_off(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
 async def test_ingest_document_runs_all_kg_writes_when_both_layers_on(
@@ -2214,7 +2202,6 @@ async def test_ingest_document_runs_all_kg_writes_when_both_layers_on(
     mock_get_kg.return_value = mock_kg
 
     config = CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(openalex_papers=True, chunks=True),
     )
@@ -2237,7 +2224,7 @@ async def test_ingest_document_runs_all_kg_writes_when_both_layers_on(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
 async def test_ingest_document_skips_openalex_writes_when_layer_on_but_work_none(
@@ -2257,7 +2244,6 @@ async def test_ingest_document_skips_openalex_writes_when_layer_on_but_work_none
     mock_get_kg.return_value = mock_kg
 
     config = CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(openalex_papers=True, chunks=True),
     )
@@ -2284,7 +2270,7 @@ async def test_ingest_document_skips_openalex_writes_when_layer_on_but_work_none
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
 async def test_ingest_document_skips_openalex_when_sub_label_is_not_paper(
@@ -2305,7 +2291,6 @@ async def test_ingest_document_skips_openalex_when_sub_label_is_not_paper(
     mock_get_kg.return_value = mock_kg
 
     config = CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper", "Note"],
         layers=LayerFlags(openalex_papers=True, chunks=True),
     )
@@ -2349,7 +2334,164 @@ async def test_ingest_document_rejects_unsupported_extension(tmp_path: Path):
         await ingest_document(parquet_path, config, "Artifact", "Dataset")
 
 
-# ---- ingest_document L6a (entities) gating ----
+# ---- ingest_document preserve_existing_labels ----
+#
+# When the doc's focal node already exists in Neo4j AND
+# `preserve_existing_labels=True` (default), the passed main/sub_label
+# get swapped for the stored ones before write_chunks fires. When the
+# focal doesn't exist, or preserve is False, the passed labels are used.
+
+
+@patch(
+    "knowledge_agent.ingestion.pipeline.compute_doc_id",
+    return_value="doc-abc",
+)
+@patch("knowledge_agent.ingestion.pipeline.parse_document")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
+@patch(
+    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    return_value=[],
+)
+@patch(
+    "knowledge_agent.ingestion.pipeline.embed_chunks",
+    new_callable=AsyncMock, return_value=None,
+)
+@patch("knowledge_agent.ingestion.pipeline.get_kg_client")
+async def test_ingest_document_preserve_uses_stored_labels_when_focal_exists(
+    mock_get_kg,
+    _mock_embed,
+    _mock_extract_doi,
+    mock_resolve,
+    mock_parse,
+    _mock_doc_id,
+):
+    """Existing focal (:Document:Note) + call passes (Document, Paper)
+    with preserve=True → write_chunks fires with (Document, Note)."""
+    mock_parse.return_value = [_chunk(0, "hello")]
+    mock_resolve.return_value = None
+    mock_kg = _make_mock_kg()
+    # Focal already exists as :Document:Note.
+    mock_kg.get_focal_labels_by_doc_id = AsyncMock(
+        return_value=("Document", "Note"),
+    )
+    mock_get_kg.return_value = mock_kg
+
+    config = CorpusConfig(
+        allowed_types=["Paper", "Note"],
+        layers=LayerFlags(openalex_papers=False, chunks=True),
+    )
+    await ingest_document(
+        _DUMMY_PATH, config, "Document", "Paper",
+        preserve_existing_labels=True,
+    )
+
+    # Preserve branch swapped Paper -> Note before write_chunks.
+    mock_kg.write_chunks.assert_called_once()
+    call_args = mock_kg.write_chunks.call_args
+    assert call_args.args[2] == "Document"
+    assert call_args.args[3] == "Note"
+
+
+@patch(
+    "knowledge_agent.ingestion.pipeline.compute_doc_id",
+    return_value="doc-abc",
+)
+@patch("knowledge_agent.ingestion.pipeline.parse_document")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
+@patch(
+    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    return_value=[],
+)
+@patch(
+    "knowledge_agent.ingestion.pipeline.embed_chunks",
+    new_callable=AsyncMock, return_value=None,
+)
+@patch("knowledge_agent.ingestion.pipeline.get_kg_client")
+async def test_ingest_document_preserve_false_forces_passed_labels(
+    mock_get_kg,
+    _mock_embed,
+    _mock_extract_doi,
+    mock_resolve,
+    mock_parse,
+    _mock_doc_id,
+):
+    """Existing focal (:Document:Note) + preserve=False → write_chunks
+    fires with the passed (Document, Paper). Overwrite path."""
+    mock_parse.return_value = [_chunk(0, "hello")]
+    mock_resolve.return_value = None
+    mock_kg = _make_mock_kg()
+    # Focal already exists as :Document:Note — should be ignored.
+    mock_kg.get_focal_labels_by_doc_id = AsyncMock(
+        return_value=("Document", "Note"),
+    )
+    mock_get_kg.return_value = mock_kg
+
+    config = CorpusConfig(
+        allowed_types=["Paper", "Note"],
+        layers=LayerFlags(openalex_papers=False, chunks=True),
+    )
+    await ingest_document(
+        _DUMMY_PATH, config, "Document", "Paper",
+        preserve_existing_labels=False,
+    )
+
+    mock_kg.write_chunks.assert_called_once()
+    call_args = mock_kg.write_chunks.call_args
+    assert call_args.args[2] == "Document"
+    assert call_args.args[3] == "Paper"
+    # Preserve was skipped — the lookup should not have been called.
+    mock_kg.get_focal_labels_by_doc_id.assert_not_called()
+
+
+@patch(
+    "knowledge_agent.ingestion.pipeline.compute_doc_id",
+    return_value="doc-abc",
+)
+@patch("knowledge_agent.ingestion.pipeline.parse_document")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
+@patch(
+    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    return_value=[],
+)
+@patch(
+    "knowledge_agent.ingestion.pipeline.embed_chunks",
+    new_callable=AsyncMock, return_value=None,
+)
+@patch("knowledge_agent.ingestion.pipeline.get_kg_client")
+async def test_ingest_document_preserve_uses_passed_when_focal_missing(
+    mock_get_kg,
+    _mock_embed,
+    _mock_extract_doi,
+    mock_resolve,
+    mock_parse,
+    _mock_doc_id,
+):
+    """First ingest: focal doesn't exist → preserve is a no-op → the
+    passed (Document, Paper) reach write_chunks."""
+    mock_parse.return_value = [_chunk(0, "hello")]
+    mock_resolve.return_value = None
+    mock_kg = _make_mock_kg()
+    mock_kg.get_focal_labels_by_doc_id = AsyncMock(
+        return_value=(None, None),
+    )
+    mock_get_kg.return_value = mock_kg
+
+    config = CorpusConfig(
+        allowed_types=["Paper"],
+        layers=LayerFlags(openalex_papers=False, chunks=True),
+    )
+    await ingest_document(
+        _DUMMY_PATH, config, "Document", "Paper",
+        preserve_existing_labels=True,
+    )
+
+    mock_kg.write_chunks.assert_called_once()
+    call_args = mock_kg.write_chunks.call_args
+    assert call_args.args[2] == "Document"
+    assert call_args.args[3] == "Paper"
+
+
+# ---- ingest_document L6 (entities) gating ----
 
 
 def _config_with_entities(
@@ -2357,7 +2499,6 @@ def _config_with_entities(
 ) -> CorpusConfig:
     """Build a CorpusConfig with the entities layer on."""
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(
             openalex_papers=False, chunks=True, entities=True
@@ -2378,12 +2519,12 @@ def _config_with_entities(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
-@patch("knowledge_agent.ingestion.pipeline.get_extractor")
-async def test_ingest_document_runs_l6a_when_entities_layer_on(
-    mock_get_extractor,
+@patch("knowledge_agent.ingestion.pipeline.extract_union", new_callable=AsyncMock)
+async def test_ingest_document_runs_l6_when_entities_layer_on(
+    mock_extract_union,
     mock_get_kg,
     _mock_embed,
     _mock_extract_doi,
@@ -2398,20 +2539,26 @@ async def test_ingest_document_runs_l6a_when_entities_layer_on(
     mock_kg = _make_mock_kg()
     mock_get_kg.return_value = mock_kg
 
-    fake_extractor = MagicMock()
-    fake_extractor.extract = AsyncMock(return_value=[
+    mock_extract_union.return_value = [
         Mention(raw_text="BRCA1", entity_type="GENE")
-    ])
-    mock_get_extractor.return_value = fake_extractor
+    ]
 
     config = _config_with_entities(["GENE"])
     result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
-    # Dispatcher resolved the configured extractor.
-    mock_get_extractor.assert_called_once_with("llm")
-    # Extractor called once per chunk with config's entity_types.
-    fake_extractor.extract.assert_called_once_with(
-        "BRCA1 is in here.", ["GENE"]
+    # The priority-ordered union is invoked once per chunk with the
+    # ordered extractor list, the shared entity_types + mode, and the
+    # LLM model/temperature forwarded as llm_kwargs (applied only to the
+    # "llm" adapter inside extract_union).
+    mock_extract_union.assert_called_once_with(
+        "BRCA1 is in here.",
+        ["llm"],
+        ["GENE"],
+        entity_types_mode="replace",
+        llm_kwargs={
+            "model": "claude-haiku-4-5-20251001",
+            "temperature": 0.0,
+        },
     )
     # write_entities called with one (chunk_id, mentions) tuple.
     mock_kg.write_entities.assert_called_once()
@@ -2439,12 +2586,12 @@ async def test_ingest_document_runs_l6a_when_entities_layer_on(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
-@patch("knowledge_agent.ingestion.pipeline.get_extractor")
-async def test_ingest_document_skips_l6a_when_entities_layer_off(
-    mock_get_extractor,
+@patch("knowledge_agent.ingestion.pipeline.extract_union", new_callable=AsyncMock)
+async def test_ingest_document_skips_l6_when_entities_layer_off(
+    mock_extract_union,
     mock_get_kg,
     _mock_embed,
     _mock_extract_doi,
@@ -2465,7 +2612,7 @@ async def test_ingest_document_skips_l6a_when_entities_layer_off(
     )
     result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
-    mock_get_extractor.assert_not_called()
+    mock_extract_union.assert_not_called()
     mock_kg.write_entities.assert_not_called()
     # Always-on cleanup still ran.
     mock_kg.delete_entities_by_doc_id.assert_called_once()
@@ -2483,12 +2630,12 @@ async def test_ingest_document_skips_l6a_when_entities_layer_off(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
-@patch("knowledge_agent.ingestion.pipeline.get_extractor")
-async def test_ingest_document_skips_l6a_when_chunks_write_fails(
-    mock_get_extractor,
+@patch("knowledge_agent.ingestion.pipeline.extract_union", new_callable=AsyncMock)
+async def test_ingest_document_skips_l6_when_chunks_write_fails(
+    mock_extract_union,
     mock_get_kg,
     _mock_embed,
     _mock_extract_doi,
@@ -2509,7 +2656,7 @@ async def test_ingest_document_skips_l6a_when_chunks_write_fails(
     config = _config_with_entities(["GENE"])
     result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
-    mock_get_extractor.assert_not_called()
+    mock_extract_union.assert_not_called()
     mock_kg.write_entities.assert_not_called()
     assert result.kg_entities_ok is False
     assert result.kg_chunks_ok is False
@@ -2527,12 +2674,12 @@ async def test_ingest_document_skips_l6a_when_chunks_write_fails(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
-@patch("knowledge_agent.ingestion.pipeline.get_extractor")
-async def test_ingest_document_l6a_extractor_exception_skips_only_failing_chunk(
-    mock_get_extractor,
+@patch("knowledge_agent.ingestion.pipeline.extract_union", new_callable=AsyncMock)
+async def test_ingest_document_l6_extractor_exception_skips_only_failing_chunk(
+    mock_extract_union,
     mock_get_kg,
     _mock_embed,
     _mock_extract_doi,
@@ -2550,18 +2697,17 @@ async def test_ingest_document_l6a_extractor_exception_skips_only_failing_chunk(
     mock_kg = _make_mock_kg()
     mock_get_kg.return_value = mock_kg
 
-    fake_extractor = MagicMock()
-    fake_extractor.extract = AsyncMock(side_effect=[
+    # One chunk's union raises; the other returns a mention.
+    mock_extract_union.side_effect = [
         RuntimeError("backend died"),
         [Mention(raw_text="TP53", entity_type="GENE")],
-    ])
-    mock_get_extractor.return_value = fake_extractor
+    ]
 
     config = _config_with_entities(["GENE"])
     result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
     # Both chunks attempted; per-chunk failure didn't propagate.
-    assert fake_extractor.extract.call_count == 2
+    assert mock_extract_union.call_count == 2
     mock_kg.write_entities.assert_called_once()
     chunk_mentions = mock_kg.write_entities.call_args.args[1]
     assert len(chunk_mentions) == 2
@@ -2601,7 +2747,6 @@ def test_corpus_config_rejects_entities_on_without_chunks():
 def _config_with_ontology_mesh(matching: str = "exact") -> CorpusConfig:
     """Build a CorpusConfig with the MeSH ontology layer on."""
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(chunks=True, entities=True, ontology_mesh=True),
         entities=EntityConfig(extractor="llm", entity_types=["DISEASE"]),
@@ -2619,12 +2764,12 @@ def _config_with_ontology_mesh(matching: str = "exact") -> CorpusConfig:
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
-@patch("knowledge_agent.ingestion.pipeline.get_extractor")
+@patch("knowledge_agent.ingestion.pipeline.extract_union", new_callable=AsyncMock)
 async def test_ingest_document_skips_l7_when_no_ontology_layer_enabled(
-    mock_get_extractor,
+    mock_extract_union,
     mock_get_kg,
     _mock_embed,
     _mock_extract_doi,
@@ -2639,9 +2784,7 @@ async def test_ingest_document_skips_l7_when_no_ontology_layer_enabled(
     mock_kg = _make_mock_kg()
     mock_get_kg.return_value = mock_kg
 
-    fake_extractor = MagicMock()
-    fake_extractor.extract = AsyncMock(return_value=[])
-    mock_get_extractor.return_value = fake_extractor
+    mock_extract_union.return_value = []
 
     config = _config_with_entities(["GENE"])  # entities on, no ontology
     result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
@@ -2661,12 +2804,12 @@ async def test_ingest_document_skips_l7_when_no_ontology_layer_enabled(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
-@patch("knowledge_agent.ingestion.pipeline.get_extractor")
+@patch("knowledge_agent.ingestion.pipeline.extract_union", new_callable=AsyncMock)
 async def test_ingest_document_l7_skipped_when_entities_failed(
-    mock_get_extractor,
+    mock_extract_union,
     mock_get_kg,
     _mock_embed,
     _mock_extract_doi,
@@ -2674,18 +2817,16 @@ async def test_ingest_document_l7_skipped_when_entities_failed(
     mock_parse,
     _mock_doc_id,
 ):
-    """L7 layer enabled but L6a entities-write raises -> orchestrator
+    """L7 layer enabled but L6 entities-write raises -> orchestrator
     records the failure on `kg_entities_error` and L7 does NOT run
     (no entities to link)."""
     mock_parse.return_value = [_chunk(0, "text")]
     mock_resolve.return_value = None
     mock_kg = _make_mock_kg()
-    mock_kg.write_entities.side_effect = RuntimeError("boom")  # L6a write fails
+    mock_kg.write_entities.side_effect = RuntimeError("boom")  # L6 write fails
     mock_get_kg.return_value = mock_kg
 
-    fake_extractor = MagicMock()
-    fake_extractor.extract = AsyncMock(return_value=[])
-    mock_get_extractor.return_value = fake_extractor
+    mock_extract_union.return_value = []
 
     config = _config_with_ontology_mesh()
     result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
@@ -2705,12 +2846,12 @@ async def test_ingest_document_l7_skipped_when_entities_failed(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
-@patch("knowledge_agent.ingestion.pipeline.get_extractor")
+@patch("knowledge_agent.ingestion.pipeline.extract_union", new_callable=AsyncMock)
 async def test_ingest_document_l7_first_import_runs_global_link(
-    mock_get_extractor,
+    mock_extract_union,
     mock_get_kg,
     _mock_embed,
     _mock_extract_doi,
@@ -2730,11 +2871,9 @@ async def test_ingest_document_l7_first_import_runs_global_link(
     mock_kg.link_entities_to_ontology.return_value = 7
     mock_get_kg.return_value = mock_kg
 
-    fake_extractor = MagicMock()
-    fake_extractor.extract = AsyncMock(return_value=[
+    mock_extract_union.return_value = [
         Mention(raw_text="x", entity_type="DISEASE")
-    ])
-    mock_get_extractor.return_value = fake_extractor
+    ]
 
     config = _config_with_ontology_mesh()
     result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
@@ -2761,12 +2900,12 @@ async def test_ingest_document_l7_first_import_runs_global_link(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
-@patch("knowledge_agent.ingestion.pipeline.get_extractor")
+@patch("knowledge_agent.ingestion.pipeline.extract_union", new_callable=AsyncMock)
 async def test_ingest_document_l7_subsequent_ingest_links_only_this_doc(
-    mock_get_extractor,
+    mock_extract_union,
     mock_get_kg,
     _mock_embed,
     _mock_extract_doi,
@@ -2783,11 +2922,9 @@ async def test_ingest_document_l7_subsequent_ingest_links_only_this_doc(
     mock_kg.link_entities_to_ontology.return_value = 3
     mock_get_kg.return_value = mock_kg
 
-    fake_extractor = MagicMock()
-    fake_extractor.extract = AsyncMock(return_value=[
+    mock_extract_union.return_value = [
         Mention(raw_text="x", entity_type="DISEASE")
-    ])
-    mock_get_extractor.return_value = fake_extractor
+    ]
 
     config = _config_with_ontology_mesh(matching="fuzzy")
     result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
@@ -2810,12 +2947,12 @@ async def test_ingest_document_l7_subsequent_ingest_links_only_this_doc(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
-@patch("knowledge_agent.ingestion.pipeline.get_extractor")
+@patch("knowledge_agent.ingestion.pipeline.extract_union", new_callable=AsyncMock)
 async def test_ingest_document_l7_import_failure_skips_linking_returns_status(
-    mock_get_extractor,
+    mock_extract_union,
     mock_get_kg,
     _mock_embed,
     _mock_extract_doi,
@@ -2832,11 +2969,9 @@ async def test_ingest_document_l7_import_failure_skips_linking_returns_status(
     mock_kg.ensure_ontology_imported.side_effect = RuntimeError("network down")
     mock_get_kg.return_value = mock_kg
 
-    fake_extractor = MagicMock()
-    fake_extractor.extract = AsyncMock(return_value=[
+    mock_extract_union.return_value = [
         Mention(raw_text="x", entity_type="DISEASE")
-    ])
-    mock_get_extractor.return_value = fake_extractor
+    ]
 
     config = _config_with_ontology_mesh()
     result = await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
@@ -2857,12 +2992,12 @@ async def test_ingest_document_l7_import_failure_skips_linking_returns_status(
     "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
     return_value=[],
 )
-@patch("knowledge_agent.ingestion.pipeline.embed_texts", new_callable=AsyncMock, return_value=None,
+@patch("knowledge_agent.ingestion.pipeline.embed_chunks", new_callable=AsyncMock, return_value=None,
 )
 @patch("knowledge_agent.ingestion.pipeline.get_kg_client")
-@patch("knowledge_agent.ingestion.pipeline.get_extractor")
+@patch("knowledge_agent.ingestion.pipeline.extract_union", new_callable=AsyncMock)
 async def test_ingest_document_l7_runs_each_enabled_ontology_independently(
-    mock_get_extractor,
+    mock_extract_union,
     mock_get_kg,
     _mock_embed,
     _mock_extract_doi,
@@ -2880,14 +3015,11 @@ async def test_ingest_document_l7_runs_each_enabled_ontology_independently(
     mock_kg.link_entities_to_ontology.return_value = 1
     mock_get_kg.return_value = mock_kg
 
-    fake_extractor = MagicMock()
-    fake_extractor.extract = AsyncMock(return_value=[
+    mock_extract_union.return_value = [
         Mention(raw_text="x", entity_type="DISEASE")
-    ])
-    mock_get_extractor.return_value = fake_extractor
+    ]
 
     config = CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(
             chunks=True,
@@ -2935,7 +3067,6 @@ def _config_with_xrefs(
         flags_kwargs[f"ontology_{n}"] = True
         ontology_cfg[n] = OntologyConfig(matching="exact")
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(**flags_kwargs),
         entities=EntityConfig(extractor="llm"),
@@ -3015,7 +3146,6 @@ def _cross_doc_xrefs_enabled_config(
         CrossDocXrefsConfig,
     )
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(
             chunks=True,

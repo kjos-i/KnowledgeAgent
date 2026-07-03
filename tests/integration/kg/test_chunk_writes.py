@@ -192,3 +192,50 @@ async def test_write_chunks_preserves_existing_focal_labels(
         ).single()["lbls"]
     assert "Document" in labels
     assert "Paper" in labels
+
+
+# ---- get_focal_labels_by_doc_id ----
+
+
+async def test_get_focal_labels_returns_none_when_doc_missing(
+    kg_client: Any, ensure_constraints: None, clean_kg: None,
+) -> None:
+    """No focal for this doc_id → (None, None). Ingest pipeline's
+    preserve branch uses this as the 'first ingest' signal."""
+    result = await kg_client.get_focal_labels_by_doc_id("nonexistent-doc")
+    assert result == (None, None)
+
+
+async def test_get_focal_labels_returns_main_plus_sub_when_both_set(
+    kg_client: Any, ensure_constraints: None, clean_kg: None,
+) -> None:
+    """Focal created with (Document, Paper) → lookup returns exactly
+    that tuple."""
+    await kg_client.write_chunks(
+        SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper",
+    )
+    result = await kg_client.get_focal_labels_by_doc_id(SYNTHETIC_DOC_ID)
+    assert result == ("Document", "Paper")
+
+
+async def test_get_focal_labels_returns_main_only_when_no_sub(
+    kg_client: Any, ensure_constraints: None, clean_kg: None,
+) -> None:
+    """Focal created with sub_label=None → (main, None). Sub-label
+    slot is empty, main-label is still returned."""
+    await kg_client.write_chunks(
+        SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Artifact", None,
+    )
+    result = await kg_client.get_focal_labels_by_doc_id(SYNTHETIC_DOC_ID)
+    assert result == ("Artifact", None)
+
+
+async def test_get_focal_labels_rejects_empty_doc_id(
+    kg_client: Any, ensure_constraints: None,
+) -> None:
+    """Guard: empty doc_id is a programmer error, not a lookup with
+    no results. Raise rather than silently return (None, None)."""
+    import pytest
+
+    with pytest.raises(ValueError, match="no doc_id"):
+        await kg_client.get_focal_labels_by_doc_id("")

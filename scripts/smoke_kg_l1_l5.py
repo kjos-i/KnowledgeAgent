@@ -137,51 +137,51 @@ SYNTHETIC_CHUNKS = [
 ]
 
 
-def _delete_smoke_nodes(client) -> None:
+async def _delete_smoke_nodes(client) -> None:
     """Remove every smoke-test node + its relationships. Idempotent."""
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         # :Chunk nodes for this doc_id (must go before the focal so the
         # PART_OF edges don't dangle; DETACH DELETE handles it either way).
-        session.run(
+        await session.run(
             f"MATCH (c:{CHUNK_LABEL} {{doc_id: $doc_id}}) "
             f"DETACH DELETE c",
             doc_id=SYNTHETIC_DOC_ID,
         )
-        session.run(
+        await session.run(
             f"MATCH (d:{DOCUMENT_LABEL}) "
             f"WHERE d.doc_id = $doc_id "
             f"OR d.openalex_id STARTS WITH 'W999' "
             f"DETACH DELETE d",
             doc_id=SYNTHETIC_DOC_ID,
         )
-        session.run(
+        await session.run(
             f"MATCH (a:{AUTHOR_LABEL}) "
             f"WHERE a.openalex_id STARTS WITH 'A999' "
             f"DETACH DELETE a"
         )
-        session.run(
+        await session.run(
             f"MATCH (v:{VENUE_LABEL}) "
             f"WHERE v.openalex_id STARTS WITH 'S999' "
             f"DETACH DELETE v"
         )
-        session.run(
+        await session.run(
             f"MATCH (t:{TOPIC_LABEL}) "
             f"WHERE t.openalex_id STARTS WITH 'T999' "
             f"DETACH DELETE t"
         )
 
 
-def _drop_constraints(client) -> None:
+async def _drop_constraints(client) -> None:
     """Drop every constraint declared in schema.CONSTRAINT_STATEMENTS.
 
     Derives the constraint name from each CREATE statement (one word after
     `CONSTRAINT`) so this stays in sync with whatever schema.py declares.
     """
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         for stmt in CONSTRAINT_STATEMENTS:
             # Format: "CREATE CONSTRAINT <name> IF NOT EXISTS FOR ..."
             name = stmt.split("CONSTRAINT", 1)[1].strip().split()[0]
-            session.run(f"DROP CONSTRAINT {name} IF EXISTS")
+            await session.run(f"DROP CONSTRAINT {name} IF EXISTS")
 
 
 async def main() -> None:
@@ -207,7 +207,7 @@ async def main() -> None:
     print("  ensure_constraints -> ok")
 
     print("Clearing any leftover smoke nodes from previous runs...")
-    _delete_smoke_nodes(client)
+    await _delete_smoke_nodes(client)
 
     print(f"L1: writing focal document ({SYNTHETIC_DOC_ID}) + 3 citations...")
     await client.write_citations(SYNTHETIC_DOC_ID, SYNTHETIC_WORK)
@@ -258,10 +258,10 @@ async def main() -> None:
         return
 
     print("Deleting smoke nodes...")
-    _delete_smoke_nodes(client)
+    await _delete_smoke_nodes(client)
     if args.drop_constraints:
         print("Dropping schema constraints...")
-        _drop_constraints(client)
+        await _drop_constraints(client)
     print("Done.")
     await client.close()
 

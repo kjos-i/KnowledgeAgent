@@ -1,8 +1,8 @@
 # corpus.toml - per-corpus settings template.
 #
 # Each corpus folder gets its own `corpus.toml`. Copy this file in,
-# edit to match the corpus's domain + desired layers, and the ingest
-# pipeline + agent will pick it up at startup.
+# edit to match the desired layers, and the ingest pipeline + agent
+# will pick it up at startup.
 #
 # Shape lives in `src/knowledge_agent/kg/corpus_config.py`
 # (Pydantic models). Unknown fields are rejected so typos surface as
@@ -13,31 +13,123 @@
 # write-back via `tomlkit`, and matches the project's `pyproject.toml`
 # syntax.
 
-# Informational label for the corpus's domain. Display-only today (no
-# logic depends on it). Future L6+ layer modules may read it for sane
-# defaults (e.g. ontology choice). Free-form string.
-#
-# The 20-tag taxonomy each ontology / extractor declares its
-# `domain_tags` against (used by the install dialogs) covers:
-# biology, cell biology, genomics, biochemistry, chemistry, proteins,
-# medicine, pharmacology, nutrition, environment, experimental-methods,
-# general, legal, finance, agriculture, geographic, mathematics,
-# physics, humanities, computer-science. The `domain` value here is
-# free-form — typical strings are "biomedical", "cell biology",
-# "finance", "legal", "general". See
-# `kg.ontology_lifecycle.import_ontology_plan(name).summary` and
-# `entity_extractors.extractor_lifecycle.install_extractor_plan(name)
-# .summary` for the per-ontology / per-extractor domain coverage that
-# helps you choose what to enable.
-domain = "biomedical"
-
 # Sub-label names this corpus accepts at ingest time. The GUI's ingest
-# dialog populates its dropdown from this list. Case-sensitive; each
-# entry must be a known sub-label (Paper, Book, Note, Report,
+# dialog populates its sub-label dropdown from this list. Case-sensitive;
+# each entry must be a known sub-label (Paper, Book, Note, Report,
 # Presentation, Article, Correspondence, Transcript, Dataset, Code,
-# Figure, Diagram, Audio, Video). Empty list = ingest only allowed
-# without a sub-label.
+# Figure, Diagram, Audio, Video). Omit the field entirely to allow
+# every known sub-label (the default). Narrow it to restrict the
+# corpus (e.g. ["Paper"] rejects any other sub_label at ingest).
+# Explicit empty list = no sub-label allowed (files still ingest but
+# only get a top-level :Document / :Artifact label).
 allowed_types = ["Paper", "Note", "Report", "Dataset"]
+
+# ---------------------------------------------------------------------------
+# Per-corpus parser + chunker + LanceDB knobs. All fields have concrete
+# defaults matching the values that used to live in global Settings, so
+# omitting any of them keeps the previous behaviour. Change per corpus
+# when different content warrants different treatment (scanned PDFs need
+# OCR; large tables need a bigger chunk cap; bulk-load sessions want
+# LanceDB optimize deferred).
+# ---------------------------------------------------------------------------
+
+# Docling chunker choice.
+#   "hybrid"       (default) - structure- AND token-aware; respects
+#                              headings / paragraphs / tables AND splits
+#                              anything over `chunk_max_tokens`.
+#   "hierarchical"           - structure-only, no token cap. Chunks align
+#                              to document sections exactly but can be
+#                              arbitrarily large.
+# chunker_strategy = "hybrid"
+
+# HybridChunker only (ignored when chunker_strategy = "hierarchical").
+# Max tokens per chunk. Higher = broader context per chunk, fewer chunks
+# total, more storage per chunk. Changing on a corpus that already has
+# chunks yields mixed sizes across ingests until backfill is run.
+# chunk_max_tokens = 512
+
+# HybridChunker only. When true, adjacent chunks in the same section
+# that both fit under `chunk_max_tokens` are greedy-merged. False leaves
+# each structure-aligned unit as its own chunk.
+# merge_peers = true
+
+# OCR for PDF inputs. Default OFF - research papers are usually
+# born-digital (text already embedded), so OCR adds latency for no gain.
+# Turn ON for scanned / image-only PDFs.
+# enable_pdf_ocr = false
+
+# OCR for standalone image-format inputs (PNG / JPG / TIFF as the whole
+# document). Default ON - without OCR, image-only inputs produce no
+# searchable text.
+# enable_image_ocr = true
+
+# Docling PDF-render scale factor applied to PDF + standalone IMAGE
+# inputs. Higher = more detail per rendered page (better OCR fidelity on
+# small text; slower to render). Meaningful only when OCR is on.
+# images_scale = 1.0
+
+# Multimodal: extract embedded pictures from PDF / Word / PPT sources
+# during parsing. Each picture is saved as
+# `<corpus_root>/figures/<doc_id>/<i>.png` for downstream embedding +
+# display. Standalone image files (PNG / JPG / TIFF) are always
+# referenced in place regardless of this toggle. Default OFF - text-only
+# corpora skip the extra parse work.
+# extract_figures = false
+
+# Multimodal: produce figure chunks (content_type='figure') at chunking
+# time and send [caption, image] to the multimodal embedder (Voyage
+# today). Requires a multimodal-capable embedding provider. When OFF,
+# only text chunks are produced even if extract_figures = true (the
+# PNGs get saved but not embedded). Default OFF.
+# embed_images = false
+
+# Multimodal: minimum size in bytes for a saved figure PNG to be kept.
+# Files smaller than this are deleted right after being written and no
+# figure chunk is emitted. Docling can flag tiny decorative pictures
+# (page banners, logos, single-glyph icons) around 400-1000 B; the 2 KB
+# default filters those without touching real diagrams. Set to 0 to
+# disable the filter entirely and keep every picture Docling emits.
+# Applies only when extract_figures = true.
+# min_figure_bytes = 2048
+
+# When true, `ingest_document()` calls `LanceClient.ensure_indexes()`
+# after each successful write so LanceDB vector + FTS indexes stay
+# current. Turn off for bulk ingest sessions when you'd rather defer
+# index rebuild to a single optimize at the end.
+# optimize_indexes_per_ingest = true
+
+# ---------------------------------------------------------------------------
+# Per-corpus L6 LLM entity-extractor settings. Consulted ONLY when
+# "llm" is one of the [entities].extractors (below). Ignored otherwise.
+# Promoted from global Settings on 2026-07-02 so a biomedical corpus
+# can pick Sonnet-grade extraction without disturbing other corpora.
+# ---------------------------------------------------------------------------
+
+# LLM model used by the "llm" entity-extractor adapter (L6). Haiku is
+# the cost-effective default (~$0.05 per 200-chunk paper). Bump to a
+# stronger model when domain complexity or entity ambiguity warrants it.
+# entity_extractor_model = "claude-haiku-4-5-20251001"
+
+# LLM temperature for the entity extractor. 0.0 = deterministic (best
+# for structured Pydantic output). Must be in [0.0, 1.0].
+# entity_extractor_temperature = 0.0
+
+# ---------------------------------------------------------------------------
+# Per-corpus L8 LLM triples-extractor settings. Consulted ONLY when
+# layers.triples = true (below). Promoted from global Settings on
+# 2026-07-02 alongside the L6 entity-extractor pair.
+# ---------------------------------------------------------------------------
+
+# LLM model used by the L8 triples extractor. Haiku by default. Bump
+# to a stronger model when the L6 entity vocabulary is dense and the
+# LLM needs to disambiguate many candidate relations per chunk.
+# triples_extractor_model = "claude-haiku-4-5-20251001"
+
+# LLM temperature for the triples extractor. 0.0 = deterministic (best
+# for the constrained predicate vocabulary + structured Pydantic output).
+# Must be in [0.0, 1.0].
+# triples_extractor_temperature = 0.0
+
 
 # Per-knowledge-graph-layer on/off toggles.
 [layers]
@@ -53,7 +145,7 @@ openalex_papers = true
 # passages - effectively always on for retrieval use cases.
 chunks = true
 
-# L6a: chunk-level entity extraction. When ON, every chunk's text is
+# L6: chunk-level entity extraction. When ON, every chunk's text is
 # fed to the configured extractor; resulting mentions are stored as
 # :Entity nodes and :MENTIONS edges from :Chunk. Requires the
 # [entities] section below. Independent of sub-label - runs on every
@@ -94,9 +186,9 @@ ontology_fibo = false   # Financial Industry Business Ontology, modular via GitH
 # one of 15 fixed predicate edge types (INHIBITS, ACTIVATES, REGULATES,
 # INTERACTS_WITH, BINDS_TO, IS_PART_OF, IS_A, CAUSES, ASSOCIATED_WITH,
 # TREATS, MEASURED_BY, EXPRESSED_IN, LOCATED_IN, USES, COMPARED_WITH).
-# Requires entities=true (the LLM is constrained to each chunk's L6a
+# Requires entities=true (the LLM is constrained to each chunk's L6
 # entity vocabulary as the allowed subject + object set). Cost: one
-# Haiku call per chunk, similar order to L6a. Per-corpus settings
+# Haiku call per chunk, similar order to L6. Per-corpus settings
 # (model, temperature, predicate-list override) live in `config.py`
 # for now - no [triples] section needed.
 triples = false
@@ -106,7 +198,7 @@ triples = false
 # distinct :Entity nodes (N = `cross_doc.threshold`, default 2). Each
 # edge carries shared_entities, shared_count, computed_at - sort by
 # shared_count to rank "most related" docs. Requires entities=true
-# (the shared signal is L6a entities, NOT canonicals - so this layer
+# (the shared signal is L6 entities, NOT canonicals - so this layer
 # is unaffected by ontology import/delete). Pure Cypher pass, no LLM
 # cost. Recomputed per-doc on every ingest / backfill (NOT on ontology
 # import). Threshold tunable via the `[cross_doc]` section below.
@@ -148,7 +240,7 @@ xrefs = "none"
 cross_doc_xrefs = false
 
 
-# L6a entity-extraction settings. Required when `layers.entities=true`;
+# L6 entity-extraction settings. Required when `layers.entities=true`;
 # can be omitted entirely otherwise.
 #
 # IMPORTANT: the `entity_types` list at extraction time is upstream of
@@ -202,11 +294,32 @@ cross_doc_xrefs = false
 #                       the adapter always emits its full 5-label set.
 #                       Requires `entities-hunflair2` install extra.
 #                       Domain tags: medicine, biology, chemistry.
-# extractor = "llm"
+#
+# `extractors` is an ORDERED list (priority-ordered UNION). Index 0 is
+# the base/primary — it owns overlapping spans; each later extractor
+# contributes only the spans no higher-priority extractor already
+# found. This is fragmentation-free by construction (one owner per
+# span), so combining a NER with the LLM never produces competing
+# entity nodes for the same text.
+#
+#   extractors = ["llm"]                  # single extractor (common)
+#   extractors = ["hunflair2", "llm"]     # NER base + LLM fills gaps
+#
+# Recommended when combining a NER + the LLM: put the NER FIRST — its
+# high-precision domain types own overlaps, and the LLM extends
+# coverage into what the NER's fixed vocabulary can't reach. Each
+# extractor runs a full pass over every chunk, so runtime + (if the
+# LLM is included) cost scale linearly with each one added; a third
+# often adds little coverage, especially two NERs in the same domain.
+#
+# A legacy singular `extractor = "llm"` is still accepted and migrated
+# to `extractors = ["llm"]` automatically.
+# extractors = ["llm"]
 #
 # Entity-type labels this corpus extracts. Free-form list; NOT
 # validated against any project-wide enum (these are per-corpus user
-# vocabulary). Empty list = adapter default behaviour:
+# vocabulary). SHARED across all selected extractors; each interprets
+# it per its nature. Empty list = adapter default behaviour:
 #   - For "llm"           : the model categorises entities freely.
 #                           Produces an unpredictable type vocabulary
 #                           across docs unless you constrain.
@@ -216,6 +329,16 @@ cross_doc_xrefs = false
 #   - For "hunflair2"     : IGNORED. The adapter emits its fixed
 #                           5-label set regardless.
 # entity_types = ["GENE", "DISEASE", "CHEMICAL"]
+#
+# How a NON-empty `entity_types` list interacts with each adapter's own
+# DEFAULT_LABELS. "replace" (default): your list is used ALONE (the
+# adapter's defaults are dropped). "add": your list is MERGED with each
+# adapter's DEFAULT_LABELS — so you can extend the defaults with a
+# custom label without re-listing them all. Only meaningful for the
+# zero-shot GLiNER adapters (which have defaults); the LLM has none (so
+# "add" ≈ "replace" for it) and HunFlair2 ignores entity_types. Ignored
+# when `entity_types` is empty.
+# entity_types_mode = "replace"
 
 
 # L7 per-ontology settings. All fields have sensible defaults so these
@@ -244,7 +367,7 @@ cross_doc_xrefs = false
 # default threshold below. Define the section here only when you want
 # to override the default.
 #
-# `threshold`: minimum number of distinct shared L6a `:Entity` keys
+# `threshold`: minimum number of distinct shared L6 `:Entity` keys
 # required to materialise a `:RELATED_TO` edge between two docs.
 # Default 2: single-shared-entity = noise floor (common generic terms
 # like "patient", "study"); two distinct shared entities = meaningful

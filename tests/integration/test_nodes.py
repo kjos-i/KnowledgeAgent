@@ -18,7 +18,7 @@ Cypher call + Sonnet synthesizer), ~$0.01-0.02 for lancedb-only.
 Total: ~$0.40 per full integration run of this file.
 
 Setup pattern: each test ingests a sample PDF first (`L1-L5` corpus
-config — no L6a/L7/L8 so the ingest itself stays cheap), then
+config — no L6/L7/L8 so the ingest itself stays cheap), then
 invokes the agent against the resulting corpus. The kg-touching
 modes pass the corpus_config in state so cypher_builder can scope
 its schema description.
@@ -48,7 +48,6 @@ pytestmark = pytest.mark.integration
 def _minimal_corpus_config() -> CorpusConfig:
     """Cheap L1-L5 corpus — no LLM-per-chunk extraction."""
     return CorpusConfig(
-        domain="generic",
         layers=LayerFlags(
             openalex_papers=True,
             chunks=True,

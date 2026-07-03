@@ -67,7 +67,7 @@ _ONTOLOGY_NAME = "ECO"
 # install dialog without an extra factory hop.
 # ---------------------------------------------------------------------------
 
-# L6a entity_type labels with strong coverage by this ontology. Joined
+# L6 entity_type labels with strong coverage by this ontology. Joined
 # against each extractor's `emitted_labels` by the cross-link helpers
 # in kg.ontology_lifecycle to drive the install dialog's "pairs well
 # with" surface.

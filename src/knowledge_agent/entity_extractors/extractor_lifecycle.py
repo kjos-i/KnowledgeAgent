@@ -828,3 +828,394 @@ async def uninstall_extractor_execute(
         restart_required=ok,
         pip_output=output,
     )
+
+
+# ---- weight download + delete (HF hub cache) ----
+#
+# Split 2026-07-03: model weights are a separate axis from pip install.
+# `install_extractor` handles the pip package (library code + Python
+# deps). `download_extractor_weights` handles the HF-cached model files
+# (~1 GB each). Rule: no auto-download on first inference — adapters
+# raise `WeightsNotDownloadedError` if weights are missing. Users must
+# explicitly download via Library → Installs.
+
+
+class WeightsNotDownloadedError(RuntimeError):
+    """Raised by an adapter's model loader when weights are not on disk.
+
+    Ingest catches this at the per-doc L6 boundary and surfaces a
+    typed error rather than crashing the run. The GUI corpus-config
+    editor grays out extractors whose weights aren't downloaded, so
+    the user hits this error only when a race happens (config edited
+    between plan and run) or the ingest was kicked off outside the
+    GUI. Message includes a hint pointing at the Library → Installs
+    tab so recovery is a single navigation.
+    """
+
+    def __init__(
+        self, extractor_name: str, model_name: str, hint: str,
+    ) -> None:
+        super().__init__(
+            f"{extractor_name}: model {model_name!r} weights not "
+            f"downloaded. {hint}"
+        )
+        self.extractor_name = extractor_name
+        self.model_name = model_name
+
+
+def _weights_cache_dir(provenance: ModelProvenance):
+    """Return the HF hub cache directory for this extractor's model.
+
+    HF hub caches every downloaded repo under
+    `<HF_HUB_CACHE>/models--<org>--<model>/`. Splitting on "/" gives
+    us the two components. `HF_HUB_CACHE` is huggingface_hub's own
+    resolved default (honours HF_HOME + HF_HUB_CACHE env vars) —
+    reusing it means we never disagree with the library about where
+    weights actually land.
+
+    Returns None when `provenance` is None (bundled extractors have
+    no downloadable weights) or when the model name doesn't split
+    cleanly (defensive; every shipped provenance uses the canonical
+    `org/model` form).
+    """
+    from pathlib import Path
+
+    if provenance is None:
+        return None
+    parts = provenance.model_name.split("/")
+    if len(parts) != 2:
+        return None
+    org, model = parts
+    try:
+        from huggingface_hub import constants as _hf_constants
+        hub_cache = Path(_hf_constants.HF_HUB_CACHE)
+    except ImportError:
+        # huggingface_hub not installed — no weights could exist locally
+        # since nothing could download them. Fall back to the documented
+        # default so the caller can still report "not downloaded" without
+        # blowing up.
+        hub_cache = Path.home() / ".cache" / "huggingface" / "hub"
+    return hub_cache / f"models--{org}--{model}"
+
+
+def _is_weights_downloaded(provenance: ModelProvenance) -> bool:
+    """True iff the pinned revision's snapshot is materialised on disk.
+
+    HF snapshots live at `<cache_dir>/snapshots/<revision>/`. We check
+    for the specific pinned revision directory rather than "any
+    snapshot" so an older cached checkpoint doesn't masquerade as
+    ready — the adapter loads via the pinned SHA and would trigger
+    an unwanted download if the pin doesn't match.
+
+    Returns False when provenance is None (bundled) or when the cache
+    dir doesn't exist.
+    """
+    cache_dir = _weights_cache_dir(provenance)
+    if cache_dir is None or not cache_dir.exists():
+        return False
+    snapshot_dir = cache_dir / "snapshots" / provenance.pinned_revision
+    return snapshot_dir.exists()
+
+
+def _weights_size_bytes(provenance: ModelProvenance) -> int:
+    """Total on-disk bytes for this extractor's weights (0 when absent).
+
+    Sums every file under the cache dir (blobs + snapshots + refs).
+    Used by the Installs tab's status chip to show "downloaded
+    (245 MB)" per row.
+    """
+    cache_dir = _weights_cache_dir(provenance)
+    if cache_dir is None or not cache_dir.exists():
+        return 0
+    total = 0
+    for f in cache_dir.rglob("*"):
+        if f.is_file():
+            try:
+                total += f.stat().st_size
+            except OSError:
+                # Symlink target moved, permissions changed — skip.
+                continue
+    return total
+
+
+def get_weights_downloaded_bytes(extractor_name: str) -> int:
+    """Public probe: total on-disk bytes for `extractor_name`'s weights.
+
+    Returns 0 for bundled/unknown extractors and for adapters whose
+    weights haven't been downloaded. Used by the Installs tab status
+    chip. Never raises — falls back to 0 on any lookup miss so a
+    corrupt registry entry doesn't break the whole tab render.
+    """
+    entry = EXTRACTOR_REGISTRY.get(extractor_name)
+    if entry is None:
+        return 0
+    return _weights_size_bytes(entry.get("provenance"))
+
+
+def is_extractor_ready(extractor_name: str) -> bool:
+    """True iff the extractor is fully ready to run inference.
+
+    Compound: pip package installed AND weights downloaded. Bundled
+    extractors are always ready. Used by the corpus-config editor
+    to gray out entries in the extractor Dropdown.
+    """
+    entry = EXTRACTOR_REGISTRY.get(extractor_name)
+    if entry is None:
+        return False
+    if entry.get("bundled"):
+        return True
+    if not entry["is_installed_fn"]():
+        return False
+    provenance = entry.get("provenance")
+    if provenance is None:
+        # Non-bundled adapter with no weights (edge case — no shipped
+        # adapter fits this today). If we ever add one, treat as ready
+        # once the pip package is installed.
+        return True
+    return _is_weights_downloaded(provenance)
+
+
+# ---- download_extractor_weights ----
+
+
+@dataclass(frozen=True)
+class DownloadExtractorWeightsPlan:
+    """Plan for downloading an extractor's model weights.
+
+    `provenance` is None for bundled extractors (LLM) — the plan's
+    summary reports "no weights to download" and execute is a no-op.
+    `already_downloaded` short-circuits the same way. `on_disk_bytes`
+    is the current cache size; 0 when not downloaded, useful in the
+    summary when already downloaded (shows what will be redundant).
+    """
+
+    extractor_name: str
+    display_name: str
+    provenance: ModelProvenance | None
+    already_downloaded: bool
+    on_disk_bytes: int
+
+    @property
+    def summary(self) -> str:
+        if self.provenance is None:
+            return (
+                f"{self.display_name} has no downloadable weights."
+            )
+        if self.already_downloaded:
+            mb = self.on_disk_bytes / (1024 * 1024)
+            return (
+                f"{self.display_name} weights already downloaded "
+                f"({mb:.0f} MB on disk, pinned to "
+                f"{self.provenance.pinned_revision[:12]})."
+            )
+        return (
+            f"Download {self.display_name} weights: "
+            f"{self.provenance.model_name} "
+            f"(~{self.provenance.download_size_mb} MB) from "
+            f"{self.provenance.publisher} under "
+            f"{self.provenance.license}. Pinned to "
+            f"{self.provenance.pinned_revision[:12]}."
+        )
+
+
+@dataclass(frozen=True)
+class DownloadExtractorWeightsResult:
+    """Outcome of `download_extractor_weights_execute`.
+
+    `did_download` is False when the extractor had no weights (bundled)
+    or when weights were already on disk. `download_ok=False` means
+    huggingface_hub raised — `download_error` carries the message.
+    `on_disk_bytes` is the post-download size so the GUI can update
+    its status chip in one round-trip.
+    """
+
+    extractor_name: str
+    did_download: bool
+    download_ok: bool
+    download_error: str | None
+    on_disk_bytes: int
+
+
+def download_extractor_weights_plan(
+    extractor_name: str,
+) -> DownloadExtractorWeightsPlan:
+    """Build a plan for downloading the named extractor's model weights."""
+    entry = _registry_entry(extractor_name)
+    provenance = entry.get("provenance")
+    on_disk = _weights_size_bytes(provenance)
+    return DownloadExtractorWeightsPlan(
+        extractor_name=extractor_name,
+        display_name=entry["display_name"],
+        provenance=provenance,
+        already_downloaded=(
+            provenance is not None and _is_weights_downloaded(provenance)
+        ),
+        on_disk_bytes=on_disk,
+    )
+
+
+async def download_extractor_weights_execute(
+    plan: DownloadExtractorWeightsPlan,
+) -> DownloadExtractorWeightsResult:
+    """Fetch weights via huggingface_hub.snapshot_download.
+
+    Runs in a worker thread (snapshot_download is sync + blocking on
+    network + disk). Pins to `provenance.pinned_revision` — never
+    `main`.
+    """
+    if plan.provenance is None:
+        return DownloadExtractorWeightsResult(
+            extractor_name=plan.extractor_name,
+            did_download=False, download_ok=True,
+            download_error=None, on_disk_bytes=plan.on_disk_bytes,
+        )
+    if plan.already_downloaded:
+        return DownloadExtractorWeightsResult(
+            extractor_name=plan.extractor_name,
+            did_download=False, download_ok=True,
+            download_error=None, on_disk_bytes=plan.on_disk_bytes,
+        )
+
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError as exc:
+        return DownloadExtractorWeightsResult(
+            extractor_name=plan.extractor_name,
+            did_download=False, download_ok=False,
+            download_error=(
+                f"huggingface_hub not installed: {exc!r}. Install the "
+                f"pip extras for this extractor first."
+            ),
+            on_disk_bytes=plan.on_disk_bytes,
+        )
+
+    def _do_download() -> None:
+        snapshot_download(
+            repo_id=plan.provenance.model_name,
+            revision=plan.provenance.pinned_revision,
+        )
+
+    try:
+        await asyncio.to_thread(_do_download)
+    except Exception as exc:
+        logger.warning(
+            "download_extractor_weights_execute (%s) failed: %r",
+            plan.extractor_name, exc,
+        )
+        return DownloadExtractorWeightsResult(
+            extractor_name=plan.extractor_name,
+            did_download=True, download_ok=False,
+            download_error=repr(exc),
+            on_disk_bytes=_weights_size_bytes(plan.provenance),
+        )
+    return DownloadExtractorWeightsResult(
+        extractor_name=plan.extractor_name,
+        did_download=True, download_ok=True,
+        download_error=None,
+        on_disk_bytes=_weights_size_bytes(plan.provenance),
+    )
+
+
+# ---- delete_extractor_weights ----
+
+
+@dataclass(frozen=True)
+class DeleteExtractorWeightsPlan:
+    """Plan for wiping an extractor's HF-cached weights.
+
+    `weights_dir` is None for bundled / no-weights extractors — the
+    op is a no-op in that case. `is_downloaded` distinguishes "cache
+    dir exists but wrong revision" (partial download) from "nothing
+    to delete" — both currently treat delete as a no-op success; the
+    partial case is left to a future recovery op.
+    """
+
+    extractor_name: str
+    display_name: str
+    provenance: ModelProvenance | None
+    is_downloaded: bool
+    on_disk_bytes: int
+
+
+@dataclass(frozen=True)
+class DeleteExtractorWeightsResult:
+    """Outcome of `delete_extractor_weights_execute`.
+
+    `freed_bytes` is what was on disk BEFORE the wipe (equals the
+    plan's `on_disk_bytes` when the delete succeeds; 0 when nothing
+    was there). `delete_error` carries the shutil.rmtree exception
+    message when `delete_ok=False`.
+    """
+
+    extractor_name: str
+    did_delete: bool
+    delete_ok: bool
+    delete_error: str | None
+    freed_bytes: int
+
+
+def delete_extractor_weights_plan(
+    extractor_name: str,
+) -> DeleteExtractorWeightsPlan:
+    """Build a plan for deleting the named extractor's weights."""
+    entry = _registry_entry(extractor_name)
+    provenance = entry.get("provenance")
+    on_disk = _weights_size_bytes(provenance)
+    return DeleteExtractorWeightsPlan(
+        extractor_name=extractor_name,
+        display_name=entry["display_name"],
+        provenance=provenance,
+        is_downloaded=(
+            provenance is not None and _is_weights_downloaded(provenance)
+        ),
+        on_disk_bytes=on_disk,
+    )
+
+
+async def delete_extractor_weights_execute(
+    plan: DeleteExtractorWeightsPlan,
+) -> DeleteExtractorWeightsResult:
+    """Remove the HF cache dir for this extractor's model.
+
+    Bundled / no-weights extractors short-circuit as no-op successes.
+    Delete runs in a worker thread — rmtree of a multi-GB dir can
+    take seconds and blocks disk IO.
+    """
+    if plan.provenance is None:
+        return DeleteExtractorWeightsResult(
+            extractor_name=plan.extractor_name,
+            did_delete=False, delete_ok=True,
+            delete_error=None, freed_bytes=0,
+        )
+    cache_dir = _weights_cache_dir(plan.provenance)
+    if cache_dir is None or not cache_dir.exists():
+        return DeleteExtractorWeightsResult(
+            extractor_name=plan.extractor_name,
+            did_delete=False, delete_ok=True,
+            delete_error=None, freed_bytes=0,
+        )
+
+    import shutil
+
+    def _do_delete() -> None:
+        shutil.rmtree(cache_dir)
+
+    freed = plan.on_disk_bytes
+    try:
+        await asyncio.to_thread(_do_delete)
+    except Exception as exc:
+        logger.warning(
+            "delete_extractor_weights_execute (%s) failed: %r",
+            plan.extractor_name, exc,
+        )
+        return DeleteExtractorWeightsResult(
+            extractor_name=plan.extractor_name,
+            did_delete=True, delete_ok=False,
+            delete_error=repr(exc),
+            freed_bytes=0,
+        )
+    return DeleteExtractorWeightsResult(
+        extractor_name=plan.extractor_name,
+        did_delete=True, delete_ok=True,
+        delete_error=None, freed_bytes=freed,
+    )

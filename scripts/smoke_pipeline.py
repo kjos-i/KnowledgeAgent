@@ -2,7 +2,7 @@
 
 Picks the first .pdf file (alphabetically) from `test_documents/` and runs
 `ingest_document(path, config)` end-to-end: hash, parse, resolve metadata,
-embed, write to LanceDB, write to Neo4j (L1-L5 + L6a + L7 MeSH linking).
+embed, write to LanceDB, write to Neo4j (L1-L5 + L6 + L7 MeSH linking).
 Prints the `IngestResult` summary, the top-10 most-mentioned entities,
 and the top-10 entity -> MeSH canonical links.
 
@@ -11,7 +11,7 @@ exercises the whole stack - mirrors what a real biomedical paper corpus
 would have in its `corpus.toml`.
 
 Hits real services: docling (local models), OpenAlex (HTTP), Voyage (HTTP),
-Anthropic Haiku (HTTP, L6a extraction), NLM MeSH download (~600 MB, first
+Anthropic Haiku (HTTP, L6 extraction), NLM MeSH download (~600 MB, first
 run only - cached to `~/.research-literature-agent/ontology-cache/`),
 LanceDB (local files), Neo4j (local Bolt). Requires:
   - Neo4j running with NEO4J_PASSWORD set in .env
@@ -47,7 +47,7 @@ Automated counterpart (for regression catching, no inspection):
                                                  parity; idempotency
                                                  on doc_id; delete_doc
                                                  wipes both stores).
-                                                 Higher layers (L6a /
+                                                 Higher layers (L6 /
                                                  L7 / L8 / L9 / L10)
                                                  covered per-layer in
                                                  tests/integration/kg/
@@ -105,9 +105,9 @@ async def _cleanup_doc(doc_id: str) -> None:
     # Neo4j cleanup (password is now required at Settings load, so a
     # client always has credentials).
     kg_client = get_kg_client()
-    with kg_client.driver.session() as session:
+    async with kg_client.driver.session() as session:
         # Authors that authored ONLY this doc (not shared with other docs).
-        session.run(
+        await session.run(
             f"MATCH (a:{AUTHOR_LABEL})-[:{AUTHORED_REL}]->(:{DOCUMENT_LABEL} "
             f"{{doc_id: $doc_id}}) "
             f"WHERE NOT EXISTS {{ "
@@ -118,7 +118,7 @@ async def _cleanup_doc(doc_id: str) -> None:
             doc_id=doc_id,
         )
         # Shadow citations only referenced by this doc.
-        session.run(
+        await session.run(
             f"MATCH (:{DOCUMENT_LABEL} {{doc_id: $doc_id}})-[:{CITES_REL}]->"
             f"(c:{DOCUMENT_LABEL}) "
             f"WHERE c.in_corpus = false "
@@ -130,11 +130,11 @@ async def _cleanup_doc(doc_id: str) -> None:
             doc_id=doc_id,
         )
         # The focal document itself.
-        session.run(
+        await session.run(
             f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) DETACH DELETE d",
             doc_id=doc_id,
         )
-    # L6a: GC orphan :Entity nodes whose last incoming :MENTIONS edge
+    # L6: GC orphan :Entity nodes whose last incoming :MENTIONS edge
     # came from this doc's chunks. Mirrors the pipeline's
     # `delete_entities_by_doc_id` GC step so re-runs leave a clean DB.
     await kg_client.delete_entities_by_doc_id(doc_id)
@@ -142,7 +142,7 @@ async def _cleanup_doc(doc_id: str) -> None:
 
 async def main() -> None:
     parser = argparse.ArgumentParser(
-        description="L1-L5 + L6a end-to-end smoke test.",
+        description="L1-L5 + L6 end-to-end smoke test.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -185,14 +185,13 @@ async def main() -> None:
     await _cleanup_doc(doc_id)
 
     # In-memory corpus config - biomedical paper corpus with every layer
-    # on: OpenAlex (L1-L4) + chunks (L5) + entity extraction (L6a) +
+    # on: OpenAlex (L1-L4) + chunks (L5) + entity extraction (L6) +
     # MeSH ontology linking (L7). The first run with ontology_mesh=true
     # will download MeSH (~600 MB, gzipped N-Triples) and import ~30K
     # :MeSHTerm nodes; subsequent runs reuse the cached file + the
     # existing :MeSHTerm nodes in Neo4j. A real corpus would carry
     # this configuration in a `corpus.toml` alongside its data.
     config = CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(
             openalex_papers=True,
@@ -207,8 +206,7 @@ async def main() -> None:
         ontology={"mesh": OntologyConfig(matching="exact")},
     )
     print(
-        f"Config    : domain={config.domain!r}, "
-        f"allowed_types={config.allowed_types}, "
+        f"Config    : allowed_types={config.allowed_types}, "
         f"layers={config.layers.model_dump()}"
     )
     print()
@@ -252,12 +250,12 @@ async def main() -> None:
         print("No metadata resolved.")
 
     # Top-10 entities by mention count for this doc - eyeball check that
-    # L6a found sensible biomedical entities (genes / diseases / chemicals)
+    # L6 found sensible biomedical entities (genes / diseases / chemicals)
     # rather than garbage / nothing.
     if result.kg_entities_ok and result.n_entity_mentions > 0:
         kg_client = get_kg_client()
-        with kg_client.driver.session() as session:
-            records = session.run(
+        async with kg_client.driver.session() as session:
+            result_cursor = await session.run(
                 f"MATCH (e:{ENTITY_LABEL})"
                 f"<-[:{MENTIONS_REL}]-(c:{CHUNK_LABEL} "
                 f"{{doc_id: $doc_id}}) "
@@ -265,7 +263,8 @@ async def main() -> None:
                 f"count(*) AS mentions "
                 f"ORDER BY mentions DESC LIMIT 10",
                 doc_id=result.doc_id,
-            ).data()
+            )
+            records = await result_cursor.data()
         print()
         print("Top 10 entities by mention count:")
         print(f"  {'entity_type':<10s}  {'mentions':>8s}  key")
@@ -280,8 +279,8 @@ async def main() -> None:
     # which entities the linking pass managed to resolve.
     if result.kg_ontology_results.get("mesh", {}).get("n_links", 0) > 0:
         kg_client = get_kg_client()
-        with kg_client.driver.session() as session:
-            records = session.run(
+        async with kg_client.driver.session() as session:
+            result_cursor = await session.run(
                 f"MATCH (e:{ENTITY_LABEL})"
                 f"<-[:{MENTIONS_REL}]-(:{CHUNK_LABEL} "
                 f"{{doc_id: $doc_id}}) "
@@ -290,7 +289,8 @@ async def main() -> None:
                 f"       t.label AS mesh_label, r.strategy AS strategy "
                 f"ORDER BY e.key LIMIT 10",
                 doc_id=result.doc_id,
-            ).data()
+            )
+            records = await result_cursor.data()
         print()
         print("Top 10 entity -> MeSH canonical links:")
         print(

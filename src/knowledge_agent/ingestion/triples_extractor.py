@@ -1,6 +1,6 @@
 """LLM-based triple extractor for L8 (typed entity-to-entity relations).
 
-Per-chunk Anthropic-Haiku call. Reads chunk text + the L6a entity
+Per-chunk Anthropic-Haiku call. Reads chunk text + the L6 entity
 vocabulary mined from this chunk, and emits triples constrained to
 that vocabulary and to the 15 fixed predicates in
 `schema.TRIPLE_PREDICATE_RELS`.
@@ -8,9 +8,9 @@ that vocabulary and to the 15 fixed predicates in
 Key design (see [[researchliteratureagent-l8-l9-specs]] for the locked
 design rationale):
 
-  - **Constrained subject + object vocabulary.** The chunk's L6a
+  - **Constrained subject + object vocabulary.** The chunk's L6
     entity keys are passed into the prompt; the LLM is told to use ONLY
-    those keys. This keeps L6a as the single source of truth for
+    those keys. This keeps L6 as the single source of truth for
     "what entities exist" and prevents L8 from silently introducing
     new entities.
 
@@ -25,15 +25,15 @@ design rationale):
     "asserted at: '...CRISPR was used to edit BRCA1...'".
 
   - **Open vocabulary entity types are fine.** Subject/object types
-    flow through from the L6a entity vocabulary unchanged - whatever
-    L6a returned (GENE, DISEASE, PERSON, ...) is what the LLM uses.
+    flow through from the L6 entity vocabulary unchanged - whatever
+    L6 returned (GENE, DISEASE, PERSON, ...) is what the LLM uses.
 
 Cost (Haiku at 2026 pricing): one call per chunk. Input ~1000-1500
 tokens (system prompt + chunk + entity vocab). Output small. ~$0.05-
-$0.10 per 200-chunk paper. Same order as L6a.
+$0.10 per 200-chunk paper. Same order as L6.
 
 Defensive policies:
-  - Triples referencing keys not in the chunk's L6a vocab are dropped
+  - Triples referencing keys not in the chunk's L6 vocab are dropped
     + logged (LLM hallucinated an entity).
   - Triples with predicates outside the 15 are dropped + logged
     (LLM ignored the constraint).
@@ -44,7 +44,6 @@ Defensive policies:
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from knowledge_agent.config import get_settings
 from knowledge_agent.llm_factory import get_llm as _get_llm
 from knowledge_agent.llm_factory import with_retry as _with_retry
 from knowledge_agent.kg.schema import TRIPLE_PREDICATE_RELS
@@ -61,7 +60,7 @@ from knowledge_agent.kg.triples_writes import ExtractedTriple
 class _LLMTriple(BaseModel):
     """One triple as returned by the LLM's structured output.
 
-    Keys flow as lowercase already (matches the L6a vocabulary the
+    Keys flow as lowercase already (matches the L6 vocabulary the
     prompt hands the model). Predicate is a free string at the schema
     level so structured-output enforcement stays simple; we validate
     it post-hoc against TRIPLE_PREDICATE_RELS.
@@ -163,7 +162,7 @@ Rules:
 def _build_system_prompt(entity_vocab: list[tuple[str, str]]) -> str:
     """Render the prompt template with this chunk's entity vocabulary.
 
-    `entity_vocab` is `[(key, entity_type), ...]` from the L6a mentions
+    `entity_vocab` is `[(key, entity_type), ...]` from the L6 mentions
     found in this chunk. Rendered as one bullet per entity so the LLM
     sees both the key and its type.
     """
@@ -182,18 +181,22 @@ def _build_system_prompt(entity_vocab: list[tuple[str, str]]) -> str:
     )
 
 
-def _build_runnable(entity_vocab: list[tuple[str, str]]):
+def _build_runnable(
+    entity_vocab: list[tuple[str, str]],
+    model: str,
+    temperature: float,
+):
     """Build the per-call retryable structured-output runnable.
+
+    `model` + `temperature` come from the corpus's `CorpusConfig` via
+    the pipeline call site, per-corpus since 2026-07-02 (previously
+    read from global Settings).
 
     The retry wrapper sits OUTSIDE `.with_structured_output(...)` per
     LangChain's composition order: structured-output first, retry
     second.
     """
-    settings = get_settings()
-    llm = _get_llm(
-        settings.triples_extractor_model,
-        settings.triples_extractor_temperature,
-    )
+    llm = _get_llm(model, temperature)
     structured = llm.with_structured_output(_LLMTriples)
     return _with_retry(structured), _build_system_prompt(entity_vocab)
 
@@ -205,7 +208,7 @@ def _filter_and_convert_triples(
 
     Defensive `isinstance` first (same rationale as in entity
     extractor). Then drop triples whose subject/object isn't in the
-    L6a vocab (LLM hallucinated an entity) or whose predicate isn't
+    L6 vocab (LLM hallucinated an entity) or whose predicate isn't
     in the allowed 15 (LLM ignored the constraint). Caller logs
     aggregate counts via the write-side mismatch check.
     """
@@ -241,14 +244,21 @@ def _filter_and_convert_triples(
 async def extract(
     text: str,
     entity_vocab: list[tuple[str, str]],
+    *,
+    model: str,
+    temperature: float,
 ) -> list[ExtractedTriple]:
     """Extract typed triples from `text`, constrained to `entity_vocab`.
 
     Args:
       text:          chunk text content.
-      entity_vocab:  list of (key, entity_type) pairs from L6a for this
+      entity_vocab:  list of (key, entity_type) pairs from L6 for this
                      chunk. The LLM is constrained to these as subject +
                      object identities.
+      model:         LLM model identifier (per-corpus
+                     `CorpusConfig.triples_extractor_model`).
+      temperature:   LLM temperature (per-corpus
+                     `CorpusConfig.triples_extractor_temperature`).
 
     Returns:
       List of `ExtractedTriple`. Empty when the chunk has no qualifying
@@ -261,12 +271,12 @@ async def extract(
     via `with_retry` (covers transient 429s after the per-provider
     InMemoryRateLimiter does its job).
     """
-    # Fast-path: a chunk with no L6a entities can't yield any triples
-    # (since subject + object must come from L6a). Skip the LLM call.
+    # Fast-path: a chunk with no L6 entities can't yield any triples
+    # (since subject + object must come from L6). Skip the LLM call.
     if not entity_vocab:
         return []
 
-    runnable, system_prompt = _build_runnable(entity_vocab)
+    runnable, system_prompt = _build_runnable(entity_vocab, model, temperature)
     result = await runnable.ainvoke(
         [
             SystemMessage(content=system_prompt),

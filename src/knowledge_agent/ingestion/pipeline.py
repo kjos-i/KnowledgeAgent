@@ -32,12 +32,24 @@ from typing import Any
 
 from knowledge_agent.config import get_settings
 from knowledge_agent.entity_extractors import (
-    get_extractor,
+    extract_union,
     validate_entity_types,
 )
 from knowledge_agent.entity_extractors.base import Mention
+from knowledge_agent.entity_extractors.extractor_lifecycle import (
+    EXTRACTOR_REGISTRY,
+    WeightsNotDownloadedError,
+    is_extractor_ready,
+)
+from knowledge_agent.kg.reconcile import (
+    reconcile_cross_doc_to_config,
+    reconcile_cross_doc_xrefs_to_config,
+    reconcile_entities_to_config,
+    reconcile_ontologies_to_config,
+    reconcile_triples_to_config,
+)
 from knowledge_agent.errors import ErrorDetail
-from knowledge_agent.ingestion.embed import embed_texts
+from knowledge_agent.ingestion.embed import embed_chunks, embed_texts
 from knowledge_agent.ingestion.ids import compute_doc_id, make_chunk_id
 from knowledge_agent.ingestion.metadata import (
     extract_doi_candidates,
@@ -164,7 +176,7 @@ async def delete_doc(doc_id: str) -> bool:
 
     The canonical per-doc delete composition: LanceDB chunks, then KG
     L1-L4 focal :Document (with orphan GC for authors / venues / topics),
-    then KG L5 :Chunk nodes, then KG L6a entity orphan GC (which also
+    then KG L5 :Chunk nodes, then KG L6 entity orphan GC (which also
     drops L7 :CANONICAL_TO edges via DETACH DELETE).
 
     Used by:
@@ -214,7 +226,7 @@ async def delete_doc(doc_id: str) -> bool:
     return all(results)
 
 
-async def re_embed(doc_id: str) -> dict[str, Any]:
+async def re_embed(doc_id: str, config: CorpusConfig) -> dict[str, Any]:
     """Re-embed one doc's existing chunks; update LanceDB vector column.
 
     Per-doc partial op. Use when:
@@ -233,7 +245,7 @@ async def re_embed(doc_id: str) -> dict[str, Any]:
       - Delete-then-insert in LanceDB to update the vector column (LanceDB
         has no in-place column update; rewriting all doc-level fields
         is the trade-off, acceptable because re-embed is rare).
-      - Rebuilds vector index when `settings.optimize_indexes_per_ingest`
+      - Rebuilds vector index when `config.optimize_indexes_per_ingest`
         is True.
 
     Downstream NOT affected: embeddings are isolated to LanceDB; nothing
@@ -259,11 +271,13 @@ async def re_embed(doc_id: str) -> dict[str, Any]:
         return {"embed_ok": False, "lancedb_ok": False, "n_chunks": 0}
 
     n_chunks = len(chunk_rows)
-    texts = [row["text"] for row in chunk_rows]
+    # `embed_chunks` accepts dict rows (duck-typed on `text` + optional
+    # `image_ref`), so LanceDB rows go straight through. Figure rows
+    # get re-embedded via the multimodal path, text rows via text-only.
     try:
-        new_embeddings = await embed_texts(texts)
+        new_embeddings = await embed_chunks(chunk_rows)
     except Exception as exc:
-        logger.warning("re_embed (%s): embed_texts failed: %r", doc_id, exc)
+        logger.warning("re_embed (%s): embed_chunks failed: %r", doc_id, exc)
         return {"embed_ok": False, "lancedb_ok": False, "n_chunks": n_chunks}
 
     # Mutate the existing rows in place: swap embeddings, refresh
@@ -281,7 +295,7 @@ async def re_embed(doc_id: str) -> dict[str, Any]:
     except Exception as exc:
         logger.warning("re_embed (%s): LanceDB rewrite failed: %r", doc_id, exc)
         lancedb_ok = False
-    if lancedb_ok and get_settings().optimize_indexes_per_ingest:
+    if lancedb_ok and config.optimize_indexes_per_ingest:
         try:
             await search_client.ensure_indexes()
         except Exception as exc:
@@ -385,12 +399,12 @@ async def backfill_chunks(
 async def backfill_entities(
     doc_id: str, config: CorpusConfig
 ) -> dict[str, Any]:
-    """Re-extract L6a entities for one doc's existing chunks; re-link L7.
+    """Re-extract L6 entities for one doc's existing chunks; re-link L7.
 
     Per-doc partial op. Use when:
       - The corpus's `entity_types` list or `extractor` was changed and
         you want to re-extract from existing chunks.
-      - L6a was enabled in `corpus.toml` after the doc was ingested.
+      - L6 was enabled in `corpus.toml` after the doc was ingested.
 
     Preconditions:
       - Doc's chunks (L5) must already be in LanceDB; this op reads
@@ -441,14 +455,35 @@ async def backfill_entities(
         )
         return {"entities_ok": False, "n_mentions": 0, "ontology": {}}
 
-    extractor = get_extractor(config.entities.extractor)
+    extractor_names = config.entities.extractors
+    entity_types = config.entities.entity_types
+    entity_types_mode = config.entities.entity_types_mode
+    # LLM model + temperature forwarded only to the "llm" adapter inside
+    # extract_union (aligns backfill with the aingest path, which already
+    # passes per-corpus model/temperature).
+    llm_kwargs = {
+        "model": config.entity_extractor_model,
+        "temperature": config.entity_extractor_temperature,
+    }
     chunk_mentions: list[tuple[str, list[Mention]]] = []
     n_mentions = 0
     for row in chunk_rows:
         chunk_id = row["chunk_id"]
+        # Empty text = no possible entities. Skip the extractor call
+        # entirely — saves an LLM call per empty chunk. Applies to text
+        # chunks (rare) and multimodal figure chunks with no caption
+        # AND no readable OCR (also rare, but happens).
+        if not row.get("text") or not row["text"].strip():
+            chunk_mentions.append((chunk_id, []))
+            continue
         try:
-            mentions = await extractor.extract(
-                row["text"], config.entities.entity_types
+            # Priority-ordered union of all selected extractors.
+            mentions = await extract_union(
+                row["text"],
+                extractor_names,
+                entity_types,
+                entity_types_mode=entity_types_mode,
+                llm_kwargs=llm_kwargs,
             )
         except Exception as exc:
             logger.warning(
@@ -473,11 +508,11 @@ async def backfill_entities(
     cross_doc_result: dict[str, Any] = {}
     if entities_ok:
         ontology_results = await backfill_ontology(doc_id, config)
-        # L8 depends on L6a entities only, so re-running entities
+        # L8 depends on L6 entities only, so re-running entities
         # invalidates this doc's existing triples - rebuild them too.
         # No-op when layers.triples is off.
         triples_result = await backfill_triples(doc_id, config)
-        # L9 depends on L6a entities (not canonicals), so re-running
+        # L9 depends on L6 entities (not canonicals), so re-running
         # entities invalidates the doc's :RELATED_TO edges - rebuild.
         # No-op when layers.cross_doc is off.
         cross_doc_result = await backfill_cross_doc(doc_id, config)
@@ -503,7 +538,7 @@ async def backfill_ontology(
         the doc's `:CANONICAL_TO` edges rebuilt.
 
     Preconditions:
-      - Doc's entities (L6a) already in the KG; this op only LINKS, never
+      - Doc's entities (L6) already in the KG; this op only LINKS, never
         re-extracts. If entities are missing, run `backfill_entities` first.
       - Ontology layers enabled in `config.layers.ontology_*` drive which
         ontologies are linked.
@@ -569,19 +604,19 @@ async def backfill_ontology(
 async def backfill_triples(
     doc_id: str, config: CorpusConfig
 ) -> dict[str, Any]:
-    """Re-extract L8 triples for one doc from chunk text + L6a entities.
+    """Re-extract L8 triples for one doc from chunk text + L6 entities.
 
     Per-doc partial op. Use when:
       - `layers.triples` was enabled in `corpus.toml` after the doc was
         ingested and you want triples extracted from existing chunks.
-      - L6a entities were re-extracted (chained automatically from
+      - L6 entities were re-extracted (chained automatically from
         `backfill_entities`) and the triples need to follow.
       - You want to retry triple extraction after an LLM outage.
 
     Preconditions:
       - Doc's chunks (L5) must already be in LanceDB - the LLM reads
         chunk text from LanceDB rows, NOT by re-parsing the source.
-      - Doc's L6a entities (`:Entity` + `:MENTIONS`) must already be in
+      - Doc's L6 entities (`:Entity` + `:MENTIONS`) must already be in
         Neo4j - the per-chunk entity vocabulary comes from KG, NOT by
         re-running the entity extractor. If entities are missing or
         stale, run `backfill_entities` instead (it chains here).
@@ -591,7 +626,7 @@ async def backfill_triples(
       - Wipes existing L8 edges for this doc via
         `delete_triples_by_doc_id` (any predicate type, edges with
         matching `doc_id` property).
-      - Calls the LLM once per chunk that has at least one L6a entity
+      - Calls the LLM once per chunk that has at least one L6 entity
         in this doc's vocabulary. Skips chunks with zero entities (no
         possible triples).
       - Writes new typed edges via `write_triples`.
@@ -656,7 +691,12 @@ async def backfill_triples(
             chunk_triples.append((chunk_id, []))
             continue
         try:
-            triples = await triples_extractor.extract(row["text"], entity_vocab)
+            triples = await triples_extractor.extract(
+                row["text"],
+                entity_vocab,
+                model=config.triples_extractor_model,
+                temperature=config.triples_extractor_temperature,
+            )
         except Exception as exc:
             logger.warning(
                 "backfill_triples (%s): extraction failed for chunk %s: %r; skipping",
@@ -686,11 +726,11 @@ async def backfill_cross_doc(
     Per-doc partial op. Use when:
       - `layers.cross_doc` was enabled in `corpus.toml` after the doc
         was ingested and you want the cross-doc edges materialised.
-      - L6a entities for this doc were re-extracted (chained
+      - L6 entities for this doc were re-extracted (chained
         automatically from `backfill_entities`).
 
     Preconditions:
-      - Doc's L6a entities (`:Entity` + `:MENTIONS`) must already be
+      - Doc's L6 entities (`:Entity` + `:MENTIONS`) must already be
         in Neo4j - the overlap query relies on them. If entities are
         missing, run `backfill_entities` first (which chains here).
       - `config.layers.cross_doc` must be True (no-op otherwise).
@@ -736,13 +776,13 @@ async def backfill_cross_doc_xrefs(
       - `layers.cross_doc_xrefs` was enabled in `corpus.toml` after
         the doc was ingested and you want the concept-level cross-doc
         edges materialised.
-      - L7 xref edges or L6a entities for this doc were churned and
+      - L7 xref edges or L6 entities for this doc were churned and
         the L10 view needs a refresh.
 
     Preconditions (enforced by `CorpusConfig` validators upstream;
     re-checked here):
       - `config.layers.cross_doc_xrefs` must be True (no-op otherwise).
-      - Doc's L6a entities + `:CANONICAL_TO` edges must already exist —
+      - Doc's L6 entities + `:CANONICAL_TO` edges must already exist —
         the equivalence join needs them.
       - `:<X>_XREF` edges must exist in the graph (`xrefs="use"`).
         Without them, L10 collapses to L9-like identity-only behaviour
@@ -789,6 +829,7 @@ async def ingest_document(
     config: CorpusConfig,
     main_label: str,
     sub_label: str | None = None,
+    preserve_existing_labels: bool = True,
 ) -> IngestResult:
     """Native-async ingest of one document.
 
@@ -798,7 +839,7 @@ async def ingest_document(
 
       - delete_doc: LanceDB + KG side wipes run concurrently
       - L1-L4 OpenAlex writes (4 independent writes) gather concurrently
-      - L6a per-chunk entity extraction fans out via
+      - L6 per-chunk entity extraction fans out via
         `asyncio.gather` bounded by an `asyncio.Semaphore` of size
         `settings.pipeline_max_concurrent_chunks`
       - L8 per-chunk triples extraction fans out the same way
@@ -818,8 +859,15 @@ async def ingest_document(
 
     Error semantics match the sync version: per-stage try/except,
     fail-soft for individual layer writes (each populates its own
-    `*_error` field on the result), per-chunk fail-soft for L6a and
+    `*_error` field on the result), per-chunk fail-soft for L6 and
     L8 (one bad chunk doesn't poison the doc).
+
+    `preserve_existing_labels` (default True): when the doc's focal
+    node already exists in Neo4j (re-ingest / sync path), keep its
+    stored `(main_label, sub_label)` instead of applying the callers'
+    args. Set to False to force the passed labels through even on
+    re-ingest. First-ingest path is unaffected — there are no
+    existing labels to preserve.
     """
     path = Path(path)
 
@@ -849,9 +897,44 @@ async def ingest_document(
         )
     if config.layers.entities:
         assert config.entities is not None  # noqa: S101
-        validate_entity_types(
-            config.entities.extractor, config.entities.entity_types
-        )
+        # Multi-extractor: every selected adapter must pass the same
+        # kickoff checks. Loop over the ordered `extractors` list so a
+        # misconfigured or not-yet-downloaded adapter anywhere in the
+        # union fails at kickoff, not deep in per-doc extraction.
+        for ex_name in config.entities.extractors:
+            validate_entity_types(ex_name, config.entities.entity_types)
+        # Fail-safe: adapter must have pip package installed AND (if
+        # non-bundled) its pinned weights on disk. Raises at kickoff
+        # rather than deep in per-doc extraction so the ingest run
+        # doesn't half-write chunks before the L6 step blows up. The
+        # corpus-config editor already grays out unready extractors,
+        # so this fires only on race (config edited between plan +
+        # run) or CLI ingest that bypasses the GUI grayout.
+        for ex_name in config.entities.extractors:
+            if is_extractor_ready(ex_name):
+                continue
+            entry = EXTRACTOR_REGISTRY.get(ex_name, {})
+            provenance = entry.get("provenance")
+            model_name = (
+                provenance.model_name if provenance is not None
+                else "<bundled>"
+            )
+            if (
+                not entry.get("bundled")
+                and callable(entry.get("is_installed_fn"))
+                and not entry["is_installed_fn"]()
+            ):
+                hint = (
+                    "The pip package for this adapter isn't installed. "
+                    "Open Library → Installs and press Install, then "
+                    "Download weights."
+                )
+            else:
+                hint = (
+                    "Open Library → Installs and press Download "
+                    f"weights on the {ex_name} row before ingesting."
+                )
+            raise WeightsNotDownloadedError(ex_name, model_name, hint)
 
     # ---- 1. Identity ----
     doc_id = compute_doc_id(path)
@@ -861,21 +944,76 @@ async def ingest_document(
     search_client = get_search_client()
     kg_client = get_kg_client()
 
+    # ---- 1a. Reconcile all layers to config ----
+    # Ingest (main/re-ingest/sync) is the "start from scratch" path,
+    # so any layer whose flag/selection is now more restrictive must
+    # have its stale corpus-wide data wiped BEFORE this doc's re-write.
+    # Each helper is idempotent + cheap on the no-op path. Fail-hard:
+    # any Cypher failure propagates so the user sees the DB error
+    # instead of proceeding on a half-reconciled graph.
+    wiped_onts = await reconcile_ontologies_to_config(kg_client, config)
+    if wiped_onts:
+        logger.info(
+            "aingest %s: reconcile wiped disabled ontologies: %s",
+            doc_id[:12], ", ".join(wiped_onts),
+        )
+    await reconcile_entities_to_config(kg_client, config)
+    await reconcile_triples_to_config(kg_client, config)
+    await reconcile_cross_doc_to_config(kg_client, config)
+    await reconcile_cross_doc_xrefs_to_config(kg_client, config)
+
+    # ---- 1b. Preserve-existing-labels branch ----
+    # If the doc's focal node already exists in Neo4j AND the caller
+    # asked to preserve, swap the passed (main, sub) for the stored
+    # ones. Must happen BEFORE the wipe below — after the wipe the
+    # existing labels are gone. Only touches labels; every other
+    # per-doc write still uses the fresh config / chunks / etc.
+    if preserve_existing_labels:
+        stored_main, stored_sub = (
+            await kg_client.get_focal_labels_by_doc_id(doc_id)
+        )
+        if stored_main is not None and (
+            stored_main != main_label or stored_sub != sub_label
+        ):
+            logger.info(
+                "aingest %s: preserving existing labels "
+                "(:%s%s) over passed (:%s%s)",
+                doc_id[:12],
+                stored_main,
+                f":{stored_sub}" if stored_sub else "",
+                main_label,
+                f":{sub_label}" if sub_label else "",
+            )
+            main_label = stored_main
+            sub_label = stored_sub
+
     # ---- 2. Parse (CPU-bound, threaded) ----
-    chunks = await asyncio.to_thread(parse_document, path)
+    # Compute the per-doc figures directory. Multimodal-off corpora
+    # get a None here — the parser skips all figure-related work.
+    # Figures live INSIDE the LanceDB dir at `<lancedb_path>/figures/
+    # <doc_id>/` (option 1 chosen 2026-07-03) so test data is
+    # self-contained in one folder and production has figures adjacent
+    # to LanceDB's own table folders (no collision — LanceDB uses
+    # named subfolders like `chunks.lance/` for its own state).
+    figures_dir: Path | None = None
+    if config.extract_figures:
+        figures_dir = settings.lancedb_path / "figures" / doc_id
+    chunks = await asyncio.to_thread(
+        parse_document, path, config, figures_dir=figures_dir,
+    )
 
     # ---- 2b. Delete stale across BOTH stores ----
     # LanceDB wipe is independent of KG and can run concurrently.
     # The KG side mirrors pipeline.delete_doc's full sequence so a
     # re-ingest produces the same clean state as the bulk delete op.
-    # KG order is load-bearing: L8 triples MUST be wiped BEFORE L6a
+    # KG order is load-bearing: L8 triples MUST be wiped BEFORE L6
     # entity orphan GC (the GC uses plain DELETE which errors on
     # entities still connected to surviving L8 edges).
     async def _kg_wipe() -> None:
         await kg_client.delete_doc(doc_id)                # L1-L4
         await kg_client.delete_chunks_by_doc_id(doc_id)   # L5
         await kg_client.delete_triples_by_doc_id(doc_id)  # L8
-        await kg_client.delete_entities_by_doc_id(doc_id) # L6a
+        await kg_client.delete_entities_by_doc_id(doc_id) # L6
 
     await asyncio.gather(
         search_client.delete_chunks_by_doc_id(doc_id),
@@ -891,16 +1029,21 @@ async def ingest_document(
     else:
         metadata_status = "baseline"
 
-    # ---- 4. Embed (one batched Voyage call) ----
+    # ---- 4. Embed (one batched Voyage call, multimodal-aware) ----
+    # `embed_chunks` inspects each chunk's `image_ref`: figure chunks
+    # with an on-disk PNG get `[text, PIL.Image]` (or `[PIL.Image]`
+    # when the caption is empty); text chunks stay at `[text]`. All
+    # via Voyage's single `multimodal_embed` call — one shared vector
+    # space. Non-Voyage providers fall back to text-only with a warn.
     embed_ok = False
     embed_error: ErrorDetail | None = None
     embeddings: list[list[float]] | None = None
     try:
-        embeddings = await embed_texts([c.text for c in chunks])
+        embeddings = await embed_chunks(chunks)
         embed_ok = True
     except Exception as exc:
         logger.warning(
-            "aingest_document (%s): aembed_texts failed: %r", doc_id, exc
+            "aingest_document (%s): embed_chunks failed: %r", doc_id, exc
         )
         embed_error = ErrorDetail.from_exception(exc)
 
@@ -923,7 +1066,7 @@ async def ingest_document(
                 doc_id, exc,
             )
             lancedb_error = ErrorDetail.from_exception(exc)
-        if lancedb_ok and settings.optimize_indexes_per_ingest:
+        if lancedb_ok and config.optimize_indexes_per_ingest:
             try:
                 await search_client.ensure_indexes()
             except Exception as exc:
@@ -994,27 +1137,47 @@ async def ingest_document(
             )
             kg_chunks_error = ErrorDetail.from_exception(exc)
 
-    # ---- 7. L6a entity extraction — PARALLEL per-chunk fan-out ----
+    # ---- 7. L6 entity extraction — PARALLEL per-chunk fan-out ----
     kg_entities_ok = False
     kg_entities_error: ErrorDetail | None = None
     n_entity_mentions = 0
     chunk_mentions: list[tuple[str, list[Mention]]] = []
     if config.layers.entities and kg_chunks_ok:
         assert config.entities is not None  # noqa: S101
-        extractor = get_extractor(config.entities.extractor)
+        extractor_names = config.entities.extractors
         entity_types = config.entities.entity_types
+        entity_types_mode = config.entities.entity_types_mode
+        # LLM model + temperature (per-corpus CorpusConfig, promoted from
+        # Settings 2026-07-02) are forwarded ONLY to the "llm" adapter
+        # inside extract_union; other adapters ignore them.
+        llm_kwargs = {
+            "model": config.entity_extractor_model,
+            "temperature": config.entity_extractor_temperature,
+        }
         sem = asyncio.Semaphore(settings.pipeline_max_concurrent_chunks)
 
         async def _extract_entities_one(chunk):
             chunk_id = make_chunk_id(doc_id, chunk.chunk_index)
+            # Empty text = no possible entities. Skip the extractor
+            # call entirely — saves an LLM call per empty chunk. Applies
+            # to text chunks (rare) and multimodal figure chunks with
+            # no caption AND no readable OCR (also rare, but happens).
+            if not chunk.text or not chunk.text.strip():
+                return chunk_id, []
             async with sem:
                 try:
-                    mentions = await extractor.extract(
-                        chunk.text, entity_types
+                    # Priority-ordered union of all selected extractors:
+                    # base owns overlaps, later ones add only new spans.
+                    mentions = await extract_union(
+                        chunk.text,
+                        extractor_names,
+                        entity_types,
+                        entity_types_mode=entity_types_mode,
+                        llm_kwargs=llm_kwargs,
                     )
                 except Exception as exc:
                     logger.warning(
-                        "L6a: extraction failed for chunk %s: %r; "
+                        "L6: extraction failed for chunk %s: %r; "
                         "skipping",
                         chunk_id, exc,
                     )
@@ -1032,7 +1195,7 @@ async def ingest_document(
             kg_entities_ok = True
         except Exception as exc:
             logger.warning(
-                "aingest_document (%s): KG L6a write failed: %r",
+                "aingest_document (%s): KG L6 write failed: %r",
                 doc_id, exc,
             )
             kg_entities_error = ErrorDetail.from_exception(exc)
@@ -1099,7 +1262,10 @@ async def ingest_document(
             async with sem_l8:
                 try:
                     triples = await triples_extractor.extract(
-                        chunk_text_by_id[chunk_id], entity_vocab,
+                        chunk_text_by_id[chunk_id],
+                        entity_vocab,
+                        model=config.triples_extractor_model,
+                        temperature=config.triples_extractor_temperature,
                     )
                 except Exception as exc:
                     logger.warning(
@@ -1249,7 +1415,7 @@ def _build_lance_rows(
                 "char_start": None,
                 "char_end": None,
                 "content_type": chunk.content_type,
-                "image_ref": None,
+                "image_ref": chunk.image_ref,
                 "text": chunk.text,
                 "embedding": embedding,
                 # Mirror the Neo4j top-level and sub-labels. main_label

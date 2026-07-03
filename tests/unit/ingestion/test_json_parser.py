@@ -157,13 +157,21 @@ def test_malformed_json_raises_through_to_caller(tmp_path: Path):
 # ---- dispatcher integration ----
 
 
+def _dispatcher_config():
+    """CorpusConfig instance whose fields the json parser ignores."""
+    from knowledge_agent.kg.corpus_config import CorpusConfig, LayerFlags
+    return CorpusConfig(
+        allowed_types=["Paper"], layers=LayerFlags(chunks=True),
+    )
+
+
 def test_dispatcher_routes_json_to_json_parser(tmp_path: Path):
     """Verify the top-level dispatcher picks json_parser for .json files."""
     from knowledge_agent.ingestion.parse import parse_document
 
     path = tmp_path / "x.json"
     path.write_text('[{"a": 1}, {"a": 2}]', encoding="utf-8")
-    chunks = parse_document(path)
+    chunks = parse_document(path, _dispatcher_config())
     assert len(chunks) == 2
     assert all(c.content_type == "json_object" for c in chunks)
 
@@ -173,7 +181,7 @@ def test_dispatcher_routes_jsonl_to_json_parser(tmp_path: Path):
 
     path = tmp_path / "x.jsonl"
     path.write_text('{"a": 1}\n{"a": 2}\n{"a": 3}\n', encoding="utf-8")
-    chunks = parse_document(path)
+    chunks = parse_document(path, _dispatcher_config())
     assert len(chunks) == 3
 
 

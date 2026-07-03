@@ -2,12 +2,17 @@
 
 Routes an incoming file path to the right strategy module based on its
 extension. Each strategy module in this package exports `EXTENSIONS` and
-`parse(path) -> list[ParsedChunk]` (see `base.py`).
+`parse(path, ...) -> list[ParsedChunk]` (see `base.py`).
 
 `PARSER_MODULES` lists the registered strategies in dispatch-priority
 order. Modules are imported lazily on first use so heavy parser deps
 (whisper for ASR, tree-sitter for code) don't load until their format
 is actually encountered.
+
+The docling parser is the only strategy that reads per-corpus config
+today (OCR flags, chunker strategy, image scale). The dispatcher
+accepts a `CorpusConfig` and passes the relevant slice through to
+docling; other parsers ignore it.
 """
 
 import importlib
@@ -18,6 +23,7 @@ from knowledge_agent.ingestion.parsers.base import (
     ParsedChunk,
     UnsupportedFormatError,
 )
+from knowledge_agent.kg.corpus_config import CorpusConfig
 
 # Names of parser strategy modules within this package. Order is
 # dispatch priority - first match wins. As new parsers ship, append
@@ -51,8 +57,23 @@ def supported_extensions() -> set[str]:
     return exts
 
 
-def parse_document(path: Path) -> list[ParsedChunk]:
+def parse_document(
+    path: Path,
+    config: CorpusConfig,
+    *,
+    figures_dir: Path | None = None,
+) -> list[ParsedChunk]:
     """Dispatch by file extension to the matching parser module.
+
+    `config` is the ingest's `CorpusConfig` — its parser fields
+    (`enable_pdf_ocr`, `chunker_strategy`, ...) are threaded through
+    to the docling parser. Other parsers ignore it.
+
+    `figures_dir` is the per-doc directory where the docling parser
+    saves extracted PNGs when `config.extract_figures=True`. The
+    pipeline computes it as `<corpus folder>/figures/<doc_id>/` and
+    passes it through. None disables all figure-related work
+    (multimodal off). Non-docling parsers ignore this kwarg.
 
     Raises `UnsupportedFormatError` if no registered parser handles the
     extension. Errors raised by the strategy itself (docling parse
@@ -63,6 +84,9 @@ def parse_document(path: Path) -> list[ParsedChunk]:
     for module_name in PARSER_MODULES:
         module = _load(module_name)
         if ext in module.EXTENSIONS:
+            if module_name == "docling_parser":
+                docling_cfg = module.config_from_corpus(config)
+                return module.parse(path, docling_cfg, figures_dir)
             return module.parse(path)
     raise UnsupportedFormatError(
         f"No parser registered for extension {ext!r}. "

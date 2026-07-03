@@ -1,4 +1,4 @@
-"""Integration tests for `kg/entity_writes` (L6a).
+"""Integration tests for `kg/entity_writes` (L6).
 
 Exercises the entity-mention write + delete primitives against a
 real Neo4j test instance:
@@ -15,7 +15,7 @@ no extractor adapter is invoked here. The extractors themselves are
 unit-tested in `tests/unit/entity_extractors/`; this file pins the
 KG-side contract.
 
-Manual interactive counterpart: `scripts/smoke_kg_l6a_entities.py`
+Manual interactive counterpart: `scripts/smoke_kg_l6_entities.py`
 — runs each extractor against synthetic text, then writes via
 write_entities. Use the smoke when you want to see what a particular
 adapter actually emits; use this file for the KG-write contract.
@@ -33,7 +33,7 @@ import pytest
 from knowledge_agent.entity_extractors.base import Mention
 from knowledge_agent.ingestion.ids import make_chunk_id
 
-SYNTHETIC_DOC_ID = "integ-doc-l6a-001"
+SYNTHETIC_DOC_ID = "integ-doc-l6-001"
 
 pytestmark = pytest.mark.integration
 
@@ -197,7 +197,7 @@ async def test_delete_entities_preserves_entities_shared_with_other_docs(
 ) -> None:
     """When :Entity has remaining inbound :MENTIONS from OTHER docs'
     chunks, deletion of this doc's mentions must NOT GC the entity."""
-    other_doc = "integ-doc-l6a-other"
+    other_doc = "integ-doc-l6-other"
     chunk_a = _seed_chunk(kg_client, SYNTHETIC_DOC_ID, 0)
     chunk_b = _seed_chunk(kg_client, other_doc, 0)
 

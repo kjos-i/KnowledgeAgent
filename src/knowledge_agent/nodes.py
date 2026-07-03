@@ -571,8 +571,18 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
             "synthesizer: skipped (direct_retrieval; %d chunks, %d kg_hits -> sources)",
             len(chunks), len(kg_hits),
         )
+        # direct_retrieval bypasses the LLM; every retrieved chunk
+        # becomes a ChunkSource. Populate the multimodal fields
+        # (content_type / image_ref / page) inline — the RetrievedChunk
+        # already carries them (LanceDB row → _row_to_chunk).
         chunk_sources = [
-            ChunkSource(chunk_id=c.chunk_id, doc_id=c.doc_id)
+            ChunkSource(
+                chunk_id=c.chunk_id,
+                doc_id=c.doc_id,
+                content_type=c.content_type,
+                image_ref=c.image_ref,
+                page=c.page,
+            )
             for c in chunks
         ]
         kg_sources = [KGSource(hit_index=i) for i in range(len(kg_hits))]
@@ -599,6 +609,30 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
             HumanMessage(content=user_msg),
         ]
     )
+    # Post-process: enrich each ChunkSource with content_type /
+    # image_ref / page from the matching RetrievedChunk. The LLM
+    # produces ChunkSource with chunk_id + doc_id + quote (that's what
+    # it sees in the prompt); the multimodal fields aren't in the
+    # prompt so the LLM can't set them. Look them up here by chunk_id.
+    # Silently ignores LLM-hallucinated chunk_ids that don't match any
+    # retrieval hit — the ChunkSource still stands, just without the
+    # enrichment. Skip the whole copy when there's nothing to enrich
+    # (no chunk sources) so callers that identity-check the returned
+    # object see the LLM's exact output.
+    if result.chunk_sources:
+        chunk_index_by_id = {c.chunk_id: c for c in chunks}
+        result = result.model_copy(update={
+            "chunk_sources": [
+                cs.model_copy(update={
+                    "content_type": chunk_index_by_id[cs.chunk_id].content_type,
+                    "image_ref": chunk_index_by_id[cs.chunk_id].image_ref,
+                    "page": chunk_index_by_id[cs.chunk_id].page,
+                })
+                if cs.chunk_id in chunk_index_by_id
+                else cs
+                for cs in result.chunk_sources
+            ],
+        })
     logger.info(
         "synthesizer: produced %d-char answer with %d chunk sources, %d kg sources",
         len(result.answer), len(result.chunk_sources), len(result.kg_sources),

@@ -64,7 +64,7 @@ dev = [
     "pre-commit>=4,<5",
     "hypothesis>=6.100,<7",
 ]
-# L6a entity extractor backends. Only install what your corpus uses.
+# L6 entity extractor backends. Only install what your corpus uses.
 # The `llm` adapter has no extra deps (langchain-anthropic is a base
 # requirement); each NER adapter brings its own model + framework.
 # Zero-shot multilingual NER. Pinned model `urchade/gliner_multi-v2.1`

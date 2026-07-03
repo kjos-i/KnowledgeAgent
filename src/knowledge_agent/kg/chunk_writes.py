@@ -22,6 +22,7 @@ from typing import Any
 
 from knowledge_agent.ingestion.ids import make_chunk_id
 from knowledge_agent.kg.schema import (
+    ALL_SUB_LABELS,
     CHUNK_LABEL,
     MAIN_LABELS,
     PART_OF_REL,
@@ -29,6 +30,52 @@ from knowledge_agent.kg.schema import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def get_focal_labels_by_doc_id(
+    client, doc_id: str,
+) -> tuple[str | None, str | None]:
+    """Look up the focal doc node's (main_label, sub_label) if it exists.
+
+    Reads the Neo4j labels off the node whose `doc_id` matches. Returns
+    `(None, None)` when no focal doc for that `doc_id` exists yet — the
+    caller (e.g. the ingest pipeline's preserve-labels branch) uses that
+    as the "first ingest" signal.
+
+    The focal node's labels look like `[":Document", ":Paper"]` (main +
+    optional sub) or just `[":Artifact"]`. We split the returned list
+    into the one main + at most one sub. Any extra label that doesn't
+    match either group is ignored, so future auxiliary labels don't
+    break the lookup.
+
+    Raises:
+      - `ValueError` for an empty `doc_id`.
+      - The original `neo4j.exceptions.*` for Cypher / driver failures;
+        the orchestrator boundary catches and stores on the matching
+        `_error: ErrorDetail | None` result field.
+    """
+    if not doc_id:
+        raise ValueError(
+            "KG: get_focal_labels_by_doc_id called with no doc_id"
+        )
+    async with client.driver.session() as session:
+        result = await session.run(
+            "MATCH (d) WHERE d.doc_id = $doc_id "
+            "AND (d:Document OR d:Artifact) "
+            "RETURN labels(d) AS labels LIMIT 1",
+            doc_id=doc_id,
+        )
+        row = await result.single()
+    if row is None:
+        return None, None
+    labels: list[str] = list(row["labels"] or [])
+    main_label: str | None = next(
+        (lbl for lbl in labels if lbl in MAIN_LABELS), None,
+    )
+    sub_label: str | None = next(
+        (lbl for lbl in labels if lbl in ALL_SUB_LABELS), None,
+    )
+    return main_label, sub_label
 
 
 async def delete_chunks_by_doc_id(client, doc_id: str) -> None:
@@ -69,6 +116,10 @@ async def write_chunks(client,
       - section       (str | None)
       - page          (int | None)
       - content_type  (str)
+      - image_ref     (str | None) — path to the picture file for
+                       figure chunks; None for text / row / json_object
+                       / code / transcript / etc. Optional attribute
+                       for back-compat; missing = None.
 
     `main_label` is `"Document"` or `"Artifact"` - the top-level label
     applied to the focal node. `sub_label` is an optional sub-label
@@ -112,6 +163,11 @@ async def write_chunks(client,
             "section": c.section,
             "page": c.page,
             "content_type": c.content_type,
+            # `image_ref` optional on the chunk object (back-compat with
+            # older parser producers). Missing attribute → None → the
+            # SET below either sets null (no property stored) or the
+            # actual path string for figure chunks.
+            "image_ref": getattr(c, "image_ref", None),
         }
         for c in chunks
     ]
@@ -137,7 +193,8 @@ async def write_chunks(client,
             + "c.chunk_index = ch.chunk_index, "
             + "c.section = ch.section, "
             + "c.page = ch.page, "
-            + "c.content_type = ch.content_type "
+            + "c.content_type = ch.content_type, "
+            + "c.image_ref = ch.image_ref "
             + f"MERGE (c)-[:{PART_OF_REL}]->(d)",
             doc_id=doc_id,
             chunks=chunk_payload,

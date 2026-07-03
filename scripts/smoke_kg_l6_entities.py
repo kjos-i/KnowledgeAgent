@@ -1,4 +1,4 @@
-"""Smoke test for L6a entity extraction + KG writes (with manual-
+"""Smoke test for L6 entity extraction + KG writes (with manual-
 inspection pause).
 
 Exercises ONE entity-extractor adapter at a time against a synthetic
@@ -27,7 +27,7 @@ Lifecycle (matches the clear-at-start + pause + optional-cleanup-at-
 end convention — see [[feedback-smoke-test-cleanup]]):
   1. Clear any leftover smoke nodes (synthetic doc + its entities)
      from prior runs.
-  2. Write a synthetic :Document + :Chunk so the L6a write has a
+  2. Write a synthetic :Document + :Chunk so the L6 write has a
      target.
   3. Run the chosen adapter on the chunk text.
   4. Write the mentions via `client.write_entities`.
@@ -36,10 +36,10 @@ end convention — see [[feedback-smoke-test-cleanup]]):
   7. Press Enter to clean up, Ctrl+C to keep the nodes.
 
 Run from the project root:
-    python scripts/smoke_kg_l6a_entities.py                       # llm (default)
-    python scripts/smoke_kg_l6a_entities.py --adapter gliner
-    python scripts/smoke_kg_l6a_entities.py --adapter gliner_biomed
-    python scripts/smoke_kg_l6a_entities.py --adapter hunflair2
+    python scripts/smoke_kg_l6_entities.py                       # llm (default)
+    python scripts/smoke_kg_l6_entities.py --adapter gliner
+    python scripts/smoke_kg_l6_entities.py --adapter gliner_biomed
+    python scripts/smoke_kg_l6_entities.py --adapter hunflair2
 
 Automated counterpart (for regression catching, no inspection):
   tests/integration/kg/test_entity_writes.py   (KG-write contract
@@ -72,7 +72,7 @@ from knowledge_agent.kg.schema import (  # noqa: E402
 )
 
 # Synthetic doc + chunk — recognisable so cleanup is unambiguous.
-SYNTHETIC_DOC_ID = "smoke-doc-l6a-001"
+SYNTHETIC_DOC_ID = "smoke-doc-l6-001"
 SYNTHETIC_CHUNK_INDEX = 0
 SYNTHETIC_CHUNK_TEXT = (
     "Aspirin reduces the risk of myocardial infarction in patients "
@@ -93,41 +93,41 @@ _DEFAULT_TYPES_PER_ADAPTER: dict[str, tuple[str, ...]] = {
 }
 
 
-def _delete_smoke_nodes(client) -> None:
+async def _delete_smoke_nodes(client) -> None:
     """Wipe synthetic doc + its chunks + its entity orphans. Idempotent."""
     chunk_id = make_chunk_id(SYNTHETIC_DOC_ID, SYNTHETIC_CHUNK_INDEX)
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         # Drop :MENTIONS edges from this chunk's mentions, then
         # garbage-collect :Entity nodes that have no remaining
-        # :MENTIONS edges (the canonical L6a orphan-GC pattern).
-        session.run(
+        # :MENTIONS edges (the canonical L6 orphan-GC pattern).
+        await session.run(
             f"MATCH (c:{CHUNK_LABEL} {{chunk_id: $chunk_id}})"
             f"-[m:MENTIONS]->(e:{ENTITY_LABEL}) DELETE m",
             chunk_id=chunk_id,
         )
-        session.run(
+        await session.run(
             f"MATCH (e:{ENTITY_LABEL}) "
             f"WHERE NOT (e)<-[:MENTIONS]-() "
             f"DETACH DELETE e"
         )
         # Drop the chunk + the doc.
-        session.run(
+        await session.run(
             f"MATCH (c:{CHUNK_LABEL} {{doc_id: $doc_id}}) "
             f"DETACH DELETE c",
             doc_id=SYNTHETIC_DOC_ID,
         )
-        session.run(
+        await session.run(
             f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) "
             f"DETACH DELETE d",
             doc_id=SYNTHETIC_DOC_ID,
         )
 
 
-def _write_synthetic_doc_and_chunk(client) -> str:
+async def _write_synthetic_doc_and_chunk(client) -> str:
     """Create the focal :Document + one :Chunk, return chunk_id."""
     chunk_id = make_chunk_id(SYNTHETIC_DOC_ID, SYNTHETIC_CHUNK_INDEX)
-    with client.driver.session() as session:
-        session.run(
+    async with client.driver.session() as session:
+        await session.run(
             f"MERGE (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) "
             f"ON CREATE SET d.in_corpus = true, d:Paper "
             f"MERGE (c:{CHUNK_LABEL} {{chunk_id: $chunk_id}}) "
@@ -142,17 +142,18 @@ def _write_synthetic_doc_and_chunk(client) -> str:
     return chunk_id
 
 
-def _show_state(client) -> None:
+async def _show_state(client) -> None:
     """Read back the :Entity nodes + :MENTIONS edges for this chunk."""
     chunk_id = make_chunk_id(SYNTHETIC_DOC_ID, SYNTHETIC_CHUNK_INDEX)
-    with client.driver.session() as session:
-        rows = list(session.run(
+    async with client.driver.session() as session:
+        result = await session.run(
             f"MATCH (c:{CHUNK_LABEL} {{chunk_id: $chunk_id}})"
             f"-[m:MENTIONS]->(e:{ENTITY_LABEL}) "
             f"RETURN e.key AS key, e.type AS type, m.offset AS offset "
             f"ORDER BY m.offset",
             chunk_id=chunk_id,
-        ))
+        )
+        rows = await result.data()
     print(f"  :MENTIONS edges from this chunk: {len(rows)}")
     for r in rows[:20]:
         offset_str = f"@{r['offset']}" if r["offset"] is not None else "(no offset)"
@@ -181,10 +182,10 @@ async def main() -> None:
     await client.ensure_constraints()
 
     print("Clearing any leftover smoke nodes from previous runs...")
-    _delete_smoke_nodes(client)
+    await _delete_smoke_nodes(client)
 
     print(f"Writing synthetic :Document + :Chunk ({SYNTHETIC_DOC_ID})...")
-    chunk_id = _write_synthetic_doc_and_chunk(client)
+    chunk_id = await _write_synthetic_doc_and_chunk(client)
 
     print(f"Loading extractor: {args.adapter} ...")
     extractor = get_extractor(args.adapter)
@@ -208,7 +209,7 @@ async def main() -> None:
 
     print()
     print("Post-write KG state:")
-    _show_state(client)
+    await _show_state(client)
 
     print()
     print("In Neo4j Desktop -> Query, try:")
@@ -232,7 +233,7 @@ async def main() -> None:
         return
 
     print("Deleting smoke nodes...")
-    _delete_smoke_nodes(client)
+    await _delete_smoke_nodes(client)
     print("Done.")
     await client.close()
 

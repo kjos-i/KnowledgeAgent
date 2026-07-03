@@ -71,3 +71,13 @@ class Mention:
     typically do NOT expose per-entity confidence via doc.ents, so
     even NER adapters may legitimately set this to None. LLM adapters
     leave it None (no native confidence signal)."""
+
+    sources: tuple[str, ...] | None = None
+    """Which extractor adapter(s) produced this span, set by the
+    priority-ordered UNION merge in the pipeline (e.g.
+    `('hunflair2', 'llm')` when both found the span; the base owner's
+    type is kept, but every finder is recorded for provenance).
+    Individual adapters leave this None on their own output - it's
+    populated only after the union merges multiple adapters. Tuple (not
+    list) so the frozen dataclass stays hashable. Written to the
+    `:MENTIONS` edge's `sources` property by `write_entities`."""

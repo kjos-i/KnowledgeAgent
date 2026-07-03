@@ -1,5 +1,5 @@
 """KG writes for L9 cross-document synthesis - materialised
-`:RELATED_TO` edges between documents that share at least N L6a
+`:RELATED_TO` edges between documents that share at least N L6
 entities.
 
 Design (see [[researchliteratureagent-l8-l9-specs]] for the locked
@@ -8,7 +8,7 @@ rationale):
   - **Edge shape**: undirected (one edge per pair, written via MERGE
     on the undirected pattern). Properties: `shared_entities` (list
     of entity keys), `shared_count` (size), `computed_at` (timestamp).
-  - **Link signal**: shared L6a `:Entity` nodes, NOT canonicals. Two
+  - **Link signal**: shared L6 `:Entity` nodes, NOT canonicals. Two
     docs are related iff at least `threshold` distinct `:Entity` nodes
     are mentioned by chunks of both. This catches personal notes-side
     terminology that L7 wouldn't anchor, and removes the dependency
@@ -38,7 +38,7 @@ Per-doc recompute semantics:
     `:Entity` nodes (not anchored to the focal); L9 edges ARE incident
     to the focal, so DETACH DELETE handles them.
   - No "global rebuild" hook on ontology import/delete: since L9 uses
-    raw L6a entities (not canonicals), canonical churn doesn't
+    raw L6 entities (not canonicals), canonical churn doesn't
     invalidate L9 edges.
 
 `Neo4jClient` exposes the recompute as a 1-line delegate method in

@@ -68,7 +68,7 @@ imports it directly. The authoritative copy lives on
 `_MESH_PROVENANCE.domain_tags` below; this is a re-export."""
 
 
-# L6a entity_type labels with strong MeSH term coverage. Cross-link
+# L6 entity_type labels with strong MeSH term coverage. Cross-link
 # helpers (kg.ontology_lifecycle.get_canonicalization_candidates)
 # join this against each extractor's `emitted_labels` to surface the
 # "pairs well with" line in install dialogs. GENE is included even

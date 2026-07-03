@@ -1,4 +1,4 @@
-"""GLiNER zero-shot entity extractor (L6a, open vocabulary).
+"""GLiNER zero-shot entity extractor (L6, open vocabulary).
 
 KNOWN_LABELS = None: this adapter does NOT constrain the user's
 `entity_types` against any closed set. GLiNER is zero-shot — at
@@ -90,19 +90,35 @@ def _get_model():
     """Load the GLiNER model once per process.
 
     Heavy: ~1.1 GB resident (model.safetensors), ~5-15s first-call
-    load + (optional) one-time HF download. Cached for the rest of
-    the process lifetime via lru_cache. The `from gliner import GLiNER`
-    lives inside the function (not at module top-level) so the
-    dispatcher's `get_known_labels("gliner")` can answer without
-    paying the import cost.
+    load. Cached for the rest of the process lifetime via lru_cache.
+    The `from gliner import GLiNER` lives inside the function (not at
+    module top-level) so the dispatcher's `get_known_labels("gliner")`
+    can answer without paying the import cost.
+
+    NO auto-download: raises `WeightsNotDownloadedError` if the pinned
+    revision isn't on disk (2026-07-03 rule — weights are an explicit
+    user action via Library → Installs). This keeps ingest runs
+    predictable: no surprise ~1 GB HF fetch mid-corpus.
 
     Pinned revision: passes `revision=MODEL_REVISION` so the loader
     always pulls the exact SHA we vetted, regardless of upstream
     branch movement. The gliner library forwards this kwarg to the
-    HuggingFace download.
+    HuggingFace loader.
     """
     from gliner import GLiNER
 
+    from knowledge_agent.entity_extractors.extractor_lifecycle import (
+        WeightsNotDownloadedError,
+        _GLINER_PROVENANCE,
+        _is_weights_downloaded,
+    )
+
+    if not _is_weights_downloaded(_GLINER_PROVENANCE):
+        raise WeightsNotDownloadedError(
+            "gliner", MODEL_NAME,
+            "Open Library → Installs and press Download weights on "
+            "the GLiNER row before running extraction.",
+        )
     return GLiNER.from_pretrained(MODEL_NAME, revision=MODEL_REVISION)
 
 

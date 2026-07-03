@@ -108,9 +108,9 @@ async def _cleanup_doc(doc_id: str) -> None:
     await search_client.delete_chunks_by_doc_id(doc_id)
 
     kg_client = get_kg_client()
-    with kg_client.driver.session() as session:
+    async with kg_client.driver.session() as session:
         # Authors that authored ONLY this doc.
-        session.run(
+        await session.run(
             f"MATCH (a:{AUTHOR_LABEL})-[:{AUTHORED_REL}]->(:{DOCUMENT_LABEL} "
             f"{{doc_id: $doc_id}}) "
             f"WHERE NOT EXISTS {{ "
@@ -121,7 +121,7 @@ async def _cleanup_doc(doc_id: str) -> None:
             doc_id=doc_id,
         )
         # Shadow citations referenced only by this doc.
-        session.run(
+        await session.run(
             f"MATCH (:{DOCUMENT_LABEL} {{doc_id: $doc_id}})-[:{CITES_REL}]->"
             f"(c:{DOCUMENT_LABEL}) "
             f"WHERE c.in_corpus = false "
@@ -133,11 +133,11 @@ async def _cleanup_doc(doc_id: str) -> None:
             doc_id=doc_id,
         )
         # The focal document itself.
-        session.run(
+        await session.run(
             f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) DETACH DELETE d",
             doc_id=doc_id,
         )
-    # L6a: GC orphan :Entity nodes left behind if entity extraction ran.
+    # L6: GC orphan :Entity nodes left behind if entity extraction ran.
     # Mirrors the pipeline's `delete_entities_by_doc_id` GC step so
     # repeated smokes don't accumulate entity nodes.
     await kg_client.delete_entities_by_doc_id(doc_id)
@@ -232,17 +232,16 @@ async def main() -> None:
 
     if args.reset:
         print("--reset: dropping LanceDB chunks table (schema-fresh start)...")
-        get_search_client().drop_chunks_table()
+        await get_search_client().drop_chunks_table()
 
     print("Clearing any leftover smoke data for this doc_id...")
-    _cleanup_doc(doc_id)
+    await _cleanup_doc(doc_id)
 
     print("Ingesting the PDF (populates LanceDB + Neo4j)...")
     # In-memory corpus config - biomedical paper corpus with both
     # OpenAlex (L1-L4) and chunks (L5) enabled. A real corpus would
     # carry this in a `corpus.toml` alongside its data.
     config = CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(openalex_papers=True, chunks=True),
     )
@@ -292,7 +291,7 @@ async def main() -> None:
         return
 
     print("Deleting smoke data...")
-    _cleanup_doc(doc_id)
+    await _cleanup_doc(doc_id)
     print("Done.")
 
 

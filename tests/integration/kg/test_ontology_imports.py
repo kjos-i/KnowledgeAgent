@@ -18,8 +18,8 @@ The 18-ontology menu uses four distinct format paths:
 We exercise each path against the SMALLEST representative ontology
 to cap total run time. Each test marked `@pytest.mark.slow` —
 opt in via `pytest -m "integration and slow"`. First run downloads
-the ontology to `~/.research-literature-agent/ontology-cache/` (one
-of the ontology_cache_dir defaults); subsequent runs reuse it.
+the ontology to `~/.research-literature-agent/ontology-downloads/`
+(the ontology_downloads_dir default); subsequent runs reuse it.
 
 Manual interactive counterpart: `scripts/smoke_kg_l7_xrefs_l10.py`
 exercises HPO + MONDO + MeSH together with full xref backfill +

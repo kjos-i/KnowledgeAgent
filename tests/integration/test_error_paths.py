@@ -392,7 +392,6 @@ async def test_ingest_document_rejects_unsupported_extension(tmp_path: Any) -> N
     bogus = tmp_path / "data.zzz"
     bogus.write_text("hello")
     config = CorpusConfig(
-        domain="generic",
         layers=LayerFlags(openalex_papers=False, chunks=True),
     )
     with pytest.raises(ValueError, match="No parser available"):
@@ -410,7 +409,6 @@ async def test_ingest_document_rejects_invalid_main_label(tmp_path: Any) -> None
     fake = tmp_path / "data.pdf"
     fake.write_text("not really a pdf, but the extension check passes")
     config = CorpusConfig(
-        domain="generic",
         layers=LayerFlags(openalex_papers=False, chunks=True),
     )
     with pytest.raises(ValueError, match="main_label"):

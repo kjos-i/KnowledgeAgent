@@ -1,9 +1,9 @@
-"""KG writes for entities (L6a).
+"""KG writes for entities (L6).
 
 Each `:Entity` node carries the merge key + type for one extracted concept:
 `key` (lowercased text, the MERGE target), `entity_type` (LLM- or NER-
-chosen category), and `canonicalised` (always False at L6a; flips True
-when a future L6b+ ontology-linking layer matches this entity to a
+chosen category), and `canonicalised` (always False at L6; flips True
+when the L7 ontology-linking layer matches this entity to a
 canonical ID).
 
 Each `:MENTIONS` edge from a `:Chunk` to an `:Entity` records that the
@@ -157,6 +157,10 @@ async def write_entities(client,
                     "entity_type": m.entity_type,
                     "offset": m.offset,
                     "confidence": m.confidence,
+                    # Provenance: which extractor(s) found this span in the
+                    # priority-ordered union. `getattr` keeps this duck-typed
+                    # for callers/tests passing plain mention stand-ins.
+                    "sources": list(getattr(m, "sources", None) or []),
                 }
             )
 
@@ -179,7 +183,8 @@ async def write_entities(client,
             f"MATCH (c:{CHUNK_LABEL} {{chunk_id: row.chunk_id}}) "
             f"MERGE (c)-[m:{MENTIONS_REL}]->(e) "
             f"  ON CREATE SET m.offset = row.offset, "
-            f"                m.confidence = row.confidence",
+            f"                m.confidence = row.confidence, "
+            f"                m.sources = row.sources",
             rows=rows,
         )
     logger.info(

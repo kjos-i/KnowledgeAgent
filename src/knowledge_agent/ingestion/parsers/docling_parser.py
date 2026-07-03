@@ -35,11 +35,12 @@ music-only audio) produces zero useful chunks. See
 multimodal-embedding extension that would close this gap; until that
 ships, treat video as "transcript-only".
 
-OCR behaviour follows `enable_pdf_ocr` and `enable_image_ocr` in Settings:
-PDFs default to OCR off (papers are born-digital); image inputs default
-to OCR on (no text otherwise). **Video frames are NOT OCRed.** Standalone
-image files (`IMAGE` category) ARE OCRed; the path is separate from the
-video / audio pipeline.
+OCR + chunker behaviour is driven by `DoclingConfig` passed into
+`parse()` by the pipeline (values ultimately come from the corpus's
+`CorpusConfig`). PDFs default to OCR off (papers are born-digital);
+image inputs default to OCR on (no text otherwise). **Video frames
+are NOT OCRed.** Standalone image files (`IMAGE` category) ARE
+OCRed; the path is separate from the video / audio pipeline.
 
 ASR (audio + video transcription) requires the `parsers-asr` install
 extra (which transitively pulls `docling[asr]` + a Whisper Turbo model)
@@ -65,7 +66,7 @@ import logging
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from docling.chunking import HierarchicalChunker, HybridChunker
 from docling.datamodel.base_models import FormatToExtensions, InputFormat
@@ -77,11 +78,11 @@ from docling.document_converter import (
 )
 from docling_core.types.io import DocumentStream
 
-from knowledge_agent.config import get_settings
 from knowledge_agent.ingestion.parser_lifecycle import (
     ensure_bundled_ffmpeg_on_path,
 )
 from knowledge_agent.ingestion.parsers.base import ParsedChunk
+from knowledge_agent.kg.corpus_config import CorpusConfig
 
 logger = logging.getLogger(__name__)
 
@@ -150,25 +151,77 @@ def is_image_path(path: Path) -> bool:
     return path.suffix.lower().lstrip(".") in _IMAGE_EXTENSIONS
 
 
-# DocumentConverter and HybridChunker have non-trivial init cost (loading
-# tokenizer / model artifacts). Cache as process-wide singletons - first
-# parse() call pays the cost, later calls reuse them.
+class DoclingConfig(NamedTuple):
+    """Frozen, hashable slice of per-corpus fields the docling parser reads.
+
+    Keeping the parser's inputs to a small NamedTuple lets us key the
+    process-wide converter / chunker caches on their contents — parsing
+    100 files in one corpus pays the docling init cost once, and
+    switching corpora naturally invalidates via the cache key.
+    """
+
+    enable_pdf_ocr: bool
+    enable_image_ocr: bool
+    chunker_strategy: str
+    chunk_max_tokens: int
+    merge_peers: bool
+    images_scale: float
+    extract_figures: bool
+    embed_images: bool
+    min_figure_bytes: int
 
 
-@lru_cache(maxsize=1)
-def _get_converter() -> DocumentConverter:
+def config_from_corpus(cfg: CorpusConfig) -> DoclingConfig:
+    """Build a `DoclingConfig` from a `CorpusConfig`.
+
+    Small helper so callers don't have to remember which fields go in.
+    """
+    return DoclingConfig(
+        enable_pdf_ocr=cfg.enable_pdf_ocr,
+        enable_image_ocr=cfg.enable_image_ocr,
+        chunker_strategy=cfg.chunker_strategy,
+        chunk_max_tokens=cfg.chunk_max_tokens,
+        merge_peers=cfg.merge_peers,
+        images_scale=cfg.images_scale,
+        extract_figures=cfg.extract_figures,
+        embed_images=cfg.embed_images,
+        min_figure_bytes=cfg.min_figure_bytes,
+    )
+
+
+# DocumentConverter and HybridChunker have non-trivial init cost
+# (loading tokenizer / model artifacts). Cache keyed on the tuple of
+# per-corpus fields so a run over 100 files pays the docling init cost
+# once, and switching corpora invalidates naturally via the cache key.
+# `maxsize=4` keeps a handful of recent corpora warm without unbounded
+# growth if the user pivots frequently.
+
+
+@lru_cache(maxsize=4)
+def _get_converter(config: DoclingConfig) -> DocumentConverter:
     """Cached docling converter with per-format options applied.
 
-    PDFs and image inputs each get their own pipeline options so OCR can be
-    toggled independently. Other formats use docling's defaults.
+    PDFs and image inputs each get their own pipeline options so OCR
+    can be toggled independently. `images_scale` applies to both (it
+    controls the render scale docling uses before OCR / figure
+    extraction). Other formats use docling's defaults.
     """
-    settings = get_settings()
-
     pdf_opts = PdfPipelineOptions()
-    pdf_opts.do_ocr = settings.enable_pdf_ocr
+    pdf_opts.do_ocr = config.enable_pdf_ocr
+    pdf_opts.images_scale = config.images_scale
+    # When extract_figures is on, tell Docling to keep decoded PIL
+    # images on each PictureItem so `parse()` below can save them as
+    # PNGs. Without this flag Docling still identifies picture
+    # bounding boxes but does not retain the image bytes.
+    pdf_opts.generate_picture_images = config.extract_figures
 
     image_opts = PdfPipelineOptions()
-    image_opts.do_ocr = settings.enable_image_ocr
+    image_opts.do_ocr = config.enable_image_ocr
+    image_opts.images_scale = config.images_scale
+    # Standalone image inputs also route through PdfPipelineOptions
+    # inside Docling; extraction toggle mirrors PDFs so a corpus with
+    # extract_figures=True treats both source types uniformly.
+    image_opts.generate_picture_images = config.extract_figures
 
     return DocumentConverter(
         allowed_formats=list(SUPPORTED_FORMATS),
@@ -179,21 +232,74 @@ def _get_converter() -> DocumentConverter:
     )
 
 
-@lru_cache(maxsize=1)
-def _get_chunker() -> HybridChunker | HierarchicalChunker:
-    """Cached chunker, picked by `settings.chunker_strategy`.
+@lru_cache(maxsize=4)
+def _get_chunker(config: DoclingConfig) -> HybridChunker | HierarchicalChunker:
+    """Cached chunker, picked by `config.chunker_strategy`.
 
-    HybridChunker reads `chunk_max_tokens`. HierarchicalChunker ignores
-    token limits by design - chunks align to document structure only.
+    HybridChunker reads `chunk_max_tokens` and `merge_peers`.
+    HierarchicalChunker ignores both by design — chunks align to
+    document structure only, no token cap, no merging.
+
+    Note on the noisy transformers warning during ingest:
+        `[transformers] Token indices sequence length is longer than the
+        specified maximum sequence length for this model (N > 512).
+        Running this sequence through the model will result in indexing
+        errors`
+    HybridChunker's default tokenizer is `sentence-transformers/all-MiniLM-L6-v2`
+    (BertTokenizer, model_max_length=512). When a single doc item — a long
+    paragraph, a big table row, etc. — exceeds 512 tokens, the tokenizer
+    fires that stock HuggingFace warning at the token-COUNT step. It is
+    misleading in our context: the sentence-transformer model is never
+    actually run. HybridChunker uses the tokenizer only to count tokens,
+    then hands over-length items to `semchunk` which correctly splits
+    them down to `chunk_max_tokens`. Verified from Docling source
+    ([docling_core/transforms/chunker/hybrid_chunker.py] _split_using_plain_text
+    + segment). Emitted chunks ARE properly capped — no silent
+    truncation, no quality loss. Not surfaced in the GUI. Left
+    unsuppressed to keep the transformers logger untouched for future
+    warnings that might actually matter.
     """
-    settings = get_settings()
-    if settings.chunker_strategy == "hierarchical":
+    if config.chunker_strategy == "hierarchical":
         return HierarchicalChunker()
-    return HybridChunker(max_tokens=settings.chunk_max_tokens)
+    return HybridChunker(
+        max_tokens=config.chunk_max_tokens,
+        merge_peers=config.merge_peers,
+    )
 
 
-def parse(path: Path) -> list[ParsedChunk]:
+def parse(
+    path: Path,
+    config: DoclingConfig,
+    figures_dir: Path | None = None,
+) -> list[ParsedChunk]:
     """Parse one document file via docling and return its chunks in order.
+
+    `config` carries the per-corpus fields docling actually reads
+    (OCR flags, chunker strategy, image scale, figure toggles). Passed
+    from the ingest pipeline, which has the `CorpusConfig` in scope.
+
+    `figures_dir` is the per-doc directory where extracted PNGs land
+    (`<corpus folder>/figures/<doc_id>/`). Required when
+    `config.extract_figures=True` for PDF / Word / PPT / Office inputs;
+    ignored for standalone image files (they reference the source path
+    in place). None disables all figure-related work regardless of the
+    config flags.
+
+    Multimodal chunk emission (option A, locked 2026-07-03):
+      - PDF / Word / PPT with `extract_figures=True` + `embed_images=True`
+        + `figures_dir` given: after the normal text chunker, walk
+        `doc.pictures`, save each as `<i>.png` in `figures_dir`, and
+        emit one figure ParsedChunk per saved picture. The figure
+        chunk's `text` is the PDF's structured caption (empty string
+        if no caption element exists — image-region OCR text has
+        already been merged into text chunks by Docling's native OCR
+        pass, so we do NOT re-OCR the picture here).
+      - Standalone image inputs (PNG / JPG / TIFF): the image IS the
+        document. When `embed_images=True`, emit ONE figure ParsedChunk
+        with `text = doc.export_to_text()` (Docling's whole-doc OCR
+        output) and `image_ref = <absolute path to the source file>`
+        (no copy). Standalone image chunks are produced regardless of
+        `extract_figures` — the file is already on disk.
 
     For alias extensions (see `_ALIAS_EXTENSIONS`, e.g. `.tsv`), the file
     bytes are wrapped in a `DocumentStream` with the name spoofed to the
@@ -204,8 +310,8 @@ def parse(path: Path) -> list[ParsedChunk]:
     everything downstream, so failures should bubble up to the caller
     (`pipeline.py`) which decides what to do (skip the file, retry, etc.).
     """
-    converter = _get_converter()
-    chunker = _get_chunker()
+    converter = _get_converter(config)
+    chunker = _get_chunker(config)
 
     source: str | DocumentStream
     ext = path.suffix.lower().lstrip(".")
@@ -219,8 +325,49 @@ def parse(path: Path) -> list[ParsedChunk]:
         source = str(path)
 
     result = converter.convert(source=source)
+    doc = result.document
+
     chunks: list[ParsedChunk] = []
-    for index, chunk in enumerate(chunker.chunk(result.document)):
+    index = 0
+
+    # ---- Standalone image input branch ----
+    # The image IS the document. Docling's OCR already ran (per
+    # image_opts.do_ocr = config.enable_image_ocr). No text chunker
+    # pass — a standalone image has no paragraph structure to chunk;
+    # `export_to_text()` returns the full OCR content as one string.
+    # Emit exactly one figure ParsedChunk when `embed_images=True`;
+    # otherwise emit one text chunk carrying the OCR text (matches the
+    # pre-multimodal behavior).
+    if is_image_path(path):
+        ocr_text = doc.export_to_text().strip() if doc else ""
+        if config.embed_images:
+            chunks.append(
+                ParsedChunk(
+                    chunk_index=index,
+                    text=ocr_text,
+                    section=None,
+                    page=None,
+                    content_type="figure",
+                    image_ref=str(path.resolve()),
+                )
+            )
+        else:
+            chunks.append(
+                ParsedChunk(
+                    chunk_index=index,
+                    text=ocr_text,
+                    section=None,
+                    page=None,
+                    content_type="text",
+                )
+            )
+        logger.info(
+            "parsed standalone image %s -> 1 chunk", path.name,
+        )
+        return chunks
+
+    # ---- Structured document branch (PDF / Word / PPT / Office / HTML / MD / etc.) ----
+    for chunk in chunker.chunk(doc):
         chunks.append(
             ParsedChunk(
                 chunk_index=index,
@@ -230,7 +377,87 @@ def parse(path: Path) -> list[ParsedChunk]:
                 content_type="text",
             )
         )
-    logger.info("parsed %s -> %d chunks", path.name, len(chunks))
+        index += 1
+
+    # ---- Figure extraction + figure chunks (multimodal opt-in) ----
+    # `extract_figures` alone saves the PNGs (useful for later
+    # backfill / display). `embed_images` gates figure ParsedChunk
+    # emission — the two flags are independent so a corpus can hold
+    # image files on disk without yet feeding them to the multimodal
+    # embedder.
+    if config.extract_figures and figures_dir is not None:
+        pictures = list(getattr(doc, "pictures", []) or [])
+        if pictures:
+            figures_dir.mkdir(parents=True, exist_ok=True)
+        for i, picture in enumerate(pictures):
+            try:
+                image = picture.get_image(doc)
+            except Exception as exc:
+                logger.warning(
+                    "docling picture %d: get_image failed: %r; "
+                    "skipping",
+                    i, exc,
+                )
+                continue
+            if image is None:
+                continue
+            out = figures_dir / f"{i}.png"
+            try:
+                image.save(out)
+            except OSError as exc:
+                logger.warning(
+                    "docling picture %d: save to %s failed: %r; "
+                    "skipping",
+                    i, out, exc,
+                )
+                continue
+            if config.min_figure_bytes > 0:
+                try:
+                    size_bytes = out.stat().st_size
+                except OSError:
+                    size_bytes = 0
+                if size_bytes < config.min_figure_bytes:
+                    logger.info(
+                        "docling picture %d: %d B < min_figure_bytes=%d; "
+                        "dropping",
+                        i, size_bytes, config.min_figure_bytes,
+                    )
+                    try:
+                        out.unlink()
+                    except OSError:
+                        pass
+                    continue
+            if config.embed_images:
+                caption_text = ""
+                try:
+                    caption_text = (picture.caption_text(doc) or "").strip()
+                except Exception:
+                    caption_text = ""
+                page_no = None
+                try:
+                    prov = getattr(picture, "prov", None) or []
+                    if prov:
+                        page_no = int(getattr(prov[0], "page_no", None) or 0) or None
+                except (AttributeError, TypeError, ValueError):
+                    page_no = None
+                chunks.append(
+                    ParsedChunk(
+                        chunk_index=index,
+                        text=caption_text,
+                        section=None,
+                        page=page_no,
+                        content_type="figure",
+                        image_ref=str(out),
+                    )
+                )
+                index += 1
+
+    logger.info(
+        "parsed %s -> %d chunks (%d figure)",
+        path.name,
+        len(chunks),
+        sum(1 for c in chunks if c.content_type == "figure"),
+    )
     return chunks
 
 

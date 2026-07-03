@@ -18,7 +18,7 @@ from pathlib import Path
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
-from knowledge_agent.models import AgentAnswer
+from knowledge_agent.models import AgentAnswer, ChunkSource
 
 
 class SaveError(Exception):
@@ -58,10 +58,24 @@ def render_answer_markdown(answer: AgentAnswer, query: str) -> str:
         lines.append("### Chunk sources")
         lines.append("")
         for i, c in enumerate(answer.chunk_sources, start=1):
-            lines.append(f"**[{i}]** doc: `{c.doc_id}` · chunk: `{c.chunk_id}`")
+            lines.append(_format_chunk_source_line(i, c))
+            if c.content_type == "figure" and c.image_ref:
+                # Embed the figure as a Markdown image so the saved .md
+                # opens with the picture visible (offline reading of
+                # cited figures). Absolute path so it resolves without
+                # needing to be next to the .md.
+                lines.append("")
+                lines.append(f"![figure {i}]({c.image_ref})")
             if c.quote:
                 lines.append("")
-                lines.append(f"> {c.quote}")
+                # For figure chunks the quote IS the caption / OCR text
+                # — label it as such so the reader knows what it is.
+                label = (
+                    "caption / OCR"
+                    if c.content_type == "figure"
+                    else "quote"
+                )
+                lines.append(f"> _{label}:_ {c.quote}")
             lines.append("")
 
     if answer.kg_sources:
@@ -74,6 +88,36 @@ def render_answer_markdown(answer: AgentAnswer, query: str) -> str:
                 lines.append(f"> {k.quote}")
             lines.append("")
     return "\n".join(lines)
+
+
+def _format_chunk_source_line(index: int, c: ChunkSource) -> str:
+    """Return the top line for one chunk source in the answer's Sources
+    section — different shapes for text vs. figure per the multimodal
+    citation format locked 2026-07-03.
+
+    Format table:
+      - **Text chunk (or content_type=None):**
+        `**[i]** doc: <doc_id> · chunk: <chunk_id>`
+      - **Figure extracted from PDF / Word / PPT** (content_type='figure'
+        AND `page` set): `**[i]** Figure at page P of <doc_id>`
+      - **Standalone image figure** (content_type='figure' AND no `page`):
+        `**[i]** Image: <doc_id>`
+
+    Doc title would render here in place of the doc_id if the
+    synthesizer populated it — for now the doc_id is what's on the
+    ChunkSource. Behavior falls back gracefully when
+    `content_type` / `page` are missing (older ChunkSource shapes).
+    """
+    if c.content_type == "figure":
+        if c.page is not None:
+            return (
+                f"**[{index}]** Figure at page {c.page} of "
+                f"`{c.doc_id}` · chunk: `{c.chunk_id}`"
+            )
+        return (
+            f"**[{index}]** Image: `{c.doc_id}` · chunk: `{c.chunk_id}`"
+        )
+    return f"**[{index}]** doc: `{c.doc_id}` · chunk: `{c.chunk_id}`"
 
 
 _SLUG_NONALNUM = re.compile(r"[^a-z0-9]+")

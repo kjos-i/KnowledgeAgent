@@ -13,6 +13,10 @@ test_entity_extractors_llm.py. We verify:
     from the vocab (the LLM only returns keys, not types).
   - Defensive fallback when structured output returns something
     unexpected.
+
+Model + temperature are per-corpus kwargs threaded through the
+extractor call — 2026-07-02 refactor removed the get_settings() global
+read. Tests pass them explicitly.
 """
 
 from unittest.mock import MagicMock, patch, AsyncMock
@@ -23,6 +27,12 @@ from knowledge_agent.ingestion.triples_extractor import (
     _LLMTriples,
 )
 from knowledge_agent.kg.triples_writes import ExtractedTriple
+
+
+# Constants for the model + temperature kwargs. Value doesn't matter
+# except in `test_extract_propagates_model_and_temperature_to_get_llm`.
+_TEST_MODEL = "claude-haiku"
+_TEST_TEMPERATURE = 0.0
 
 
 def _mock_llm_returning(structured_output):
@@ -41,31 +51,20 @@ def _mock_llm_returning(structured_output):
     return mock_llm
 
 
-def _patch_llm_and_settings(mock_llm):
-    """Common patch setup - returns the patcher context managers as a tuple."""
-    return (
-        patch(
-            "knowledge_agent.ingestion.triples_extractor._get_llm",
-            return_value=mock_llm,
-        ),
-        patch(
-            "knowledge_agent.ingestion.triples_extractor.get_settings"
-        ),
-    )
-
-
 # ---- Fast-path: empty vocab ----
 
 
 async def test_extract_empty_vocab_returns_empty_without_llm_call():
-    """No L6a entities = no possible triples. Don't waste an LLM call."""
+    """No L6 entities = no possible triples. Don't waste an LLM call."""
     mock_llm = _mock_llm_returning(_LLMTriples(triples=[]))
     mock_structured = mock_llm.with_structured_output.return_value
     with patch(
         "knowledge_agent.ingestion.triples_extractor._get_llm",
         return_value=mock_llm,
     ):
-        result = await triples_extractor.extract("some text", [])
+        result = await triples_extractor.extract(
+            "some text", [], model=_TEST_MODEL, temperature=_TEST_TEMPERATURE,
+        )
 
     assert result == []
     mock_structured.ainvoke.assert_not_called()
@@ -114,13 +113,15 @@ async def test_extract_maps_valid_triple_to_extracted_triple():
         ]
     )
     mock_llm = _mock_llm_returning(output)
-    a, b = _patch_llm_and_settings(mock_llm)
-    with a, b as mock_settings:
-        mock_settings.return_value.triples_extractor_model = "claude-haiku"
-        mock_settings.return_value.triples_extractor_temperature = 0.0
+    with patch(
+        "knowledge_agent.ingestion.triples_extractor._get_llm",
+        return_value=mock_llm,
+    ):
         result = await triples_extractor.extract(
             "BRCA1 inhibits TP53 expression.",
             [("brca1", "GENE"), ("tp53", "GENE")],
+            model=_TEST_MODEL,
+            temperature=_TEST_TEMPERATURE,
         )
 
     assert result == [
@@ -148,12 +149,15 @@ async def test_extract_drops_triple_with_subject_not_in_vocab():
         ]
     )
     mock_llm = _mock_llm_returning(output)
-    a, b = _patch_llm_and_settings(mock_llm)
-    with a, b as mock_settings:
-        mock_settings.return_value.triples_extractor_model = "claude-haiku"
-        mock_settings.return_value.triples_extractor_temperature = 0.0
+    with patch(
+        "knowledge_agent.ingestion.triples_extractor._get_llm",
+        return_value=mock_llm,
+    ):
         result = await triples_extractor.extract(
-            "text", [("brca1", "GENE"), ("tp53", "GENE")]
+            "text",
+            [("brca1", "GENE"), ("tp53", "GENE")],
+            model=_TEST_MODEL,
+            temperature=_TEST_TEMPERATURE,
         )
 
     assert result == []
@@ -171,11 +175,16 @@ async def test_extract_drops_triple_with_object_not_in_vocab():
         ]
     )
     mock_llm = _mock_llm_returning(output)
-    a, b = _patch_llm_and_settings(mock_llm)
-    with a, b as mock_settings:
-        mock_settings.return_value.triples_extractor_model = "claude-haiku"
-        mock_settings.return_value.triples_extractor_temperature = 0.0
-        result = await triples_extractor.extract("text", [("brca1", "GENE")])
+    with patch(
+        "knowledge_agent.ingestion.triples_extractor._get_llm",
+        return_value=mock_llm,
+    ):
+        result = await triples_extractor.extract(
+            "text",
+            [("brca1", "GENE")],
+            model=_TEST_MODEL,
+            temperature=_TEST_TEMPERATURE,
+        )
 
     assert result == []
 
@@ -193,12 +202,15 @@ async def test_extract_drops_triple_with_unknown_predicate():
         ]
     )
     mock_llm = _mock_llm_returning(output)
-    a, b = _patch_llm_and_settings(mock_llm)
-    with a, b as mock_settings:
-        mock_settings.return_value.triples_extractor_model = "claude-haiku"
-        mock_settings.return_value.triples_extractor_temperature = 0.0
+    with patch(
+        "knowledge_agent.ingestion.triples_extractor._get_llm",
+        return_value=mock_llm,
+    ):
         result = await triples_extractor.extract(
-            "text", [("brca1", "GENE"), ("tp53", "GENE")]
+            "text",
+            [("brca1", "GENE"), ("tp53", "GENE")],
+            model=_TEST_MODEL,
+            temperature=_TEST_TEMPERATURE,
         )
 
     assert result == []
@@ -217,34 +229,36 @@ async def test_extract_fills_entity_types_from_vocab_lookup():
         ]
     )
     mock_llm = _mock_llm_returning(output)
-    a, b = _patch_llm_and_settings(mock_llm)
-    with a, b as mock_settings:
-        mock_settings.return_value.triples_extractor_model = "claude-haiku"
-        mock_settings.return_value.triples_extractor_temperature = 0.0
+    with patch(
+        "knowledge_agent.ingestion.triples_extractor._get_llm",
+        return_value=mock_llm,
+    ):
         result = await triples_extractor.extract(
             "Aspirin treats headache.",
             [("aspirin", "CHEMICAL"), ("headache", "DISEASE")],
+            model=_TEST_MODEL,
+            temperature=_TEST_TEMPERATURE,
         )
 
     assert result[0].subject_entity_type == "CHEMICAL"
     assert result[0].object_entity_type == "DISEASE"
 
 
-async def test_extract_uses_settings_model_and_temperature():
+async def test_extract_propagates_model_and_temperature_to_get_llm():
+    """Extractor forwards the per-corpus model + temperature kwargs
+    verbatim to `_get_llm` (which builds the ChatAnthropic client)."""
     output = _LLMTriples(triples=[])
     mock_llm = _mock_llm_returning(output)
-    with (
-        patch(
-            "knowledge_agent.ingestion.triples_extractor._get_llm",
-            return_value=mock_llm,
-        ) as mock_get_llm,
-        patch(
-            "knowledge_agent.ingestion.triples_extractor.get_settings"
-        ) as mock_settings,
-    ):
-        mock_settings.return_value.triples_extractor_model = "test-model"
-        mock_settings.return_value.triples_extractor_temperature = 0.4
-        await triples_extractor.extract("text", [("a", "GENE"), ("b", "GENE")])
+    with patch(
+        "knowledge_agent.ingestion.triples_extractor._get_llm",
+        return_value=mock_llm,
+    ) as mock_get_llm:
+        await triples_extractor.extract(
+            "text",
+            [("a", "GENE"), ("b", "GENE")],
+            model="test-model",
+            temperature=0.4,
+        )
 
     mock_get_llm.assert_called_once_with("test-model", 0.4)
 
@@ -252,11 +266,16 @@ async def test_extract_uses_settings_model_and_temperature():
 async def test_extract_binds_llmtriples_as_structured_output_schema():
     output = _LLMTriples(triples=[])
     mock_llm = _mock_llm_returning(output)
-    a, b = _patch_llm_and_settings(mock_llm)
-    with a, b as mock_settings:
-        mock_settings.return_value.triples_extractor_model = "claude-haiku"
-        mock_settings.return_value.triples_extractor_temperature = 0.0
-        await triples_extractor.extract("text", [("a", "GENE"), ("b", "GENE")])
+    with patch(
+        "knowledge_agent.ingestion.triples_extractor._get_llm",
+        return_value=mock_llm,
+    ):
+        await triples_extractor.extract(
+            "text",
+            [("a", "GENE"), ("b", "GENE")],
+            model=_TEST_MODEL,
+            temperature=_TEST_TEMPERATURE,
+        )
 
     mock_llm.with_structured_output.assert_called_once_with(_LLMTriples)
 
@@ -268,12 +287,15 @@ async def test_extract_defensive_fallback_on_non_llmtriples_result():
     mock_structured.with_retry = MagicMock(return_value=mock_structured)
     mock_llm = MagicMock()
     mock_llm.with_structured_output = MagicMock(return_value=mock_structured)
-    a, b = _patch_llm_and_settings(mock_llm)
-    with a, b as mock_settings:
-        mock_settings.return_value.triples_extractor_model = "claude-haiku"
-        mock_settings.return_value.triples_extractor_temperature = 0.0
+    with patch(
+        "knowledge_agent.ingestion.triples_extractor._get_llm",
+        return_value=mock_llm,
+    ):
         result = await triples_extractor.extract(
-            "text", [("a", "GENE"), ("b", "GENE")]
+            "text",
+            [("a", "GENE"), ("b", "GENE")],
+            model=_TEST_MODEL,
+            temperature=_TEST_TEMPERATURE,
         )
 
     assert result == []
@@ -282,13 +304,15 @@ async def test_extract_defensive_fallback_on_non_llmtriples_result():
 async def test_extract_returns_empty_when_llm_returns_no_triples():
     output = _LLMTriples(triples=[])
     mock_llm = _mock_llm_returning(output)
-    a, b = _patch_llm_and_settings(mock_llm)
-    with a, b as mock_settings:
-        mock_settings.return_value.triples_extractor_model = "claude-haiku"
-        mock_settings.return_value.triples_extractor_temperature = 0.0
+    with patch(
+        "knowledge_agent.ingestion.triples_extractor._get_llm",
+        return_value=mock_llm,
+    ):
         result = await triples_extractor.extract(
             "Plain text with no relations.",
             [("brca1", "GENE"), ("tp53", "GENE")],
+            model=_TEST_MODEL,
+            temperature=_TEST_TEMPERATURE,
         )
 
     assert result == []

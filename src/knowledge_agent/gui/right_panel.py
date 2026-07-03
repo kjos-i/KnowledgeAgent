@@ -126,6 +126,7 @@ class RightPanel:
         if mode == MODE_LATEST:
             return LatestView(
                 self.app.last_answer, self.app.last_query or "",
+                page=self.app.page,
             ).build()
         if mode == MODE_FILE:
             if self.app.loaded_file is None:

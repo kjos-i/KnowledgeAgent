@@ -11,10 +11,10 @@ cached under `~/.cache/huggingface/`). Subsequent runs reuse the
 cache. Total disk on first full integration run: ~3-4 GB.
 
 The LLM adapter is exercised indirectly via the pipeline + agent
-integration tests (`test_pipeline.py` runs L6a with `extractor=llm`
+integration tests (`test_pipeline.py` runs L6 with `extractor=llm`
 when entities are enabled); it doesn't need a separate test here.
 
-Manual interactive counterpart: `scripts/smoke_kg_l6a_entities.py
+Manual interactive counterpart: `scripts/smoke_kg_l6_entities.py
 --adapter <name>` exercises each adapter against the synthetic
 biomedical text + writes via `write_entities`.
 

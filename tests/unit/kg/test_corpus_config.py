@@ -43,10 +43,9 @@ def test_layer_flags_defaults():
 
 
 def test_corpus_config_defaults():
-    """Default config: generic domain, default layer flags, no entities
-    section, empty ontology dict."""
+    """Default config: default layer flags, no entities section, empty
+    ontology dict."""
     config = CorpusConfig()
-    assert config.domain == "generic"
     assert config.layers.openalex_papers is False
     assert config.layers.chunks is True
     assert config.layers.entities is False
@@ -62,23 +61,21 @@ def test_load_corpus_config_full_toml(tmp_path: Path):
     """All fields specified - parsed verbatim."""
     toml_path = tmp_path / "corpus.toml"
     toml_path.write_text(
-        'domain = "biomedical"\n'
         "[layers]\n"
         "openalex_papers = true\n"
         "chunks = true\n"
     )
     config = load_corpus_config(toml_path)
-    assert config.domain == "biomedical"
     assert config.layers.openalex_papers is True
     assert config.layers.chunks is True
 
 
 def test_load_corpus_config_omitted_fields_use_defaults(tmp_path: Path):
-    """Only `domain` set - layers stay at their defaults."""
+    """Only `allowed_types` set - layers stay at their defaults."""
     toml_path = tmp_path / "corpus.toml"
-    toml_path.write_text('domain = "legal"\n')
+    toml_path.write_text('allowed_types = []\n')
     config = load_corpus_config(toml_path)
-    assert config.domain == "legal"
+    assert config.allowed_types == []
     assert config.layers.openalex_papers is False  # default
     assert config.layers.chunks is True  # default
 
@@ -97,7 +94,6 @@ def test_load_corpus_config_empty_toml_returns_defaults(tmp_path: Path):
     toml_path = tmp_path / "corpus.toml"
     toml_path.write_text("")
     config = load_corpus_config(toml_path)
-    assert config.domain == "generic"
     assert config.layers.openalex_papers is False
     assert config.layers.chunks is True
 
@@ -107,20 +103,18 @@ def test_load_corpus_config_comment_only_toml_returns_defaults(tmp_path: Path):
     toml_path = tmp_path / "corpus.toml"
     toml_path.write_text("# just a comment, no data\n\n# another comment\n")
     config = load_corpus_config(toml_path)
-    assert config.domain == "generic"
+    assert config.layers.chunks is True
 
 
 def test_load_corpus_config_layers_off_for_legal_corpus(tmp_path: Path):
     """Realistic non-paper-corpus example: chunks on, openalex off."""
     toml_path = tmp_path / "corpus.toml"
     toml_path.write_text(
-        'domain = "legal"\n'
         "[layers]\n"
         "openalex_papers = false\n"
         "chunks = true\n"
     )
     config = load_corpus_config(toml_path)
-    assert config.domain == "legal"
     assert config.layers.openalex_papers is False
     assert config.layers.chunks is True
 
@@ -139,8 +133,8 @@ def test_load_corpus_config_unknown_top_level_field_raises(tmp_path: Path):
     """extra='forbid' catches typos at the top level."""
     toml_path = tmp_path / "corpus.toml"
     toml_path.write_text(
-        'domain = "biomedical"\n'
-        'domian = "typo"\n'  # typo of 'domain'
+        'allowed_types = []\n'
+        'alowed_types = []\n'  # typo of 'allowed_types'
     )
     with pytest.raises(ValidationError):
         load_corpus_config(toml_path)
@@ -178,7 +172,7 @@ def test_load_corpus_config_invalid_toml_syntax_raises(tmp_path: Path):
     """Malformed TOML surfaces tomlkit.exceptions.ParseError,
     not a silent default."""
     toml_path = tmp_path / "corpus.toml"
-    toml_path.write_text("domain = \n")  # missing value
+    toml_path.write_text("allowed_types = \n")  # missing value
     with pytest.raises(ParseError):
         load_corpus_config(toml_path)
 
@@ -201,10 +195,20 @@ def test_load_corpus_config_top_level_scalar_raises(tmp_path: Path):
 # ---- allowed_types validation ----
 
 
-def test_corpus_config_allowed_types_defaults_to_empty():
-    """No declared types -> empty list -> ingest can still produce
-    sub-label-less nodes, but any sub_label arg will be rejected."""
+def test_corpus_config_allowed_types_defaults_to_all_sub_labels():
+    """No declared types -> every known sub-label allowed. A fresh
+    corpus can be tagged with any of them; users narrow the list to
+    restrict a corpus (e.g. `['Paper']` for paper-only)."""
+    from knowledge_agent.kg.schema import ALL_SUB_LABELS
     config = CorpusConfig()
+    assert set(config.allowed_types) == set(ALL_SUB_LABELS)
+
+
+def test_corpus_config_allowed_types_explicit_empty_is_preserved():
+    """Explicit empty list means the user opted OUT of sub-label tagging
+    — ingest still works (files just get :Document or :Artifact) but
+    any sub_label arg gets rejected."""
+    config = CorpusConfig(allowed_types=[])
     assert config.allowed_types == []
 
 
@@ -235,7 +239,7 @@ def test_load_corpus_config_rejects_wrong_case_sub_label(tmp_path: Path):
         load_corpus_config(toml_path)
 
 
-# ---- entities (L6a) section ----
+# ---- entities (L6) section ----
 
 
 def test_entity_config_extractor_required():
@@ -274,6 +278,75 @@ def test_entity_config_rejects_unknown_field():
         EntityConfig(extractor="llm", entiti_types=["GENE"])  # type: ignore[call-arg]
 
 
+# ---- multi-extractor contract (priority-ordered union) ----
+
+
+def test_entity_config_migrates_legacy_singular_extractor():
+    """A legacy `extractor='llm'` maps onto `extractors=['llm']` so old
+    corpus.toml files + call sites keep working."""
+    config = EntityConfig(extractor="llm")
+    assert config.extractors == ["llm"]
+
+
+def test_entity_config_accepts_ordered_extractors_list():
+    """`extractors` preserves order (index 0 = base/primary)."""
+    config = EntityConfig(extractors=["hunflair2", "llm"])
+    assert config.extractors == ["hunflair2", "llm"]
+
+
+def test_entity_config_extractor_property_returns_primary():
+    """The back-compat `extractor` property is `extractors[0]`."""
+    config = EntityConfig(extractors=["hunflair2", "llm"])
+    assert config.extractor == "hunflair2"
+
+
+def test_entity_config_both_keys_prefers_extractors():
+    """When both the legacy singular and the new list are given, the
+    list wins and the singular is dropped (extra='forbid' happy)."""
+    config = EntityConfig(extractor="llm", extractors=["gliner"])  # type: ignore[call-arg]
+    assert config.extractors == ["gliner"]
+
+
+def test_entity_config_empty_extractors_rejected():
+    """An empty extractor list is invalid - at least one is required."""
+    with pytest.raises(ValidationError):
+        EntityConfig(extractors=[])
+
+
+def test_entity_config_missing_extractors_rejected():
+    """Neither `extractor` nor `extractors` -> ValidationError."""
+    with pytest.raises(ValidationError):
+        EntityConfig()  # type: ignore[call-arg]
+
+
+def test_entity_config_entity_types_mode_defaults_replace():
+    """`entity_types_mode` defaults to 'replace' (preserves the pre-
+    multi-extractor behaviour where a typed list overrides defaults)."""
+    config = EntityConfig(extractors=["llm"])
+    assert config.entity_types_mode == "replace"
+
+
+def test_entity_config_entity_types_mode_accepts_add():
+    """'add' is the other valid mode (merge typed list with defaults)."""
+    config = EntityConfig(extractors=["gliner"], entity_types_mode="add")
+    assert config.entity_types_mode == "add"
+
+
+def test_entity_config_entity_types_mode_rejects_unknown():
+    """Only 'replace' / 'add' are valid modes."""
+    with pytest.raises(ValidationError):
+        EntityConfig(extractors=["llm"], entity_types_mode="merge")  # type: ignore[arg-type]
+
+
+def test_entity_config_dump_uses_extractors_not_singular():
+    """Serialization emits the new `extractors` field (so saved configs
+    persist in the new format), not the legacy `extractor`."""
+    config = EntityConfig(extractor="llm")
+    dumped = config.model_dump()
+    assert "extractors" in dumped
+    assert "extractor" not in dumped
+
+
 def test_load_corpus_config_entities_section_parsed(tmp_path: Path):
     """Happy path: [entities] section parses into EntityConfig."""
     toml_path = tmp_path / "corpus.toml"
@@ -297,7 +370,7 @@ def test_load_corpus_config_entities_section_optional_when_layer_off(
     """layers.entities=false (the default) -> [entities] section can be
     omitted entirely. `config.entities` stays None."""
     toml_path = tmp_path / "corpus.toml"
-    toml_path.write_text('domain = "biomedical"\n')
+    toml_path.write_text('allowed_types = []\n')
     config = load_corpus_config(toml_path)
     assert config.layers.entities is False
     assert config.entities is None

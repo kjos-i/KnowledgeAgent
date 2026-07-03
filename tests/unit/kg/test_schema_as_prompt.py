@@ -71,7 +71,6 @@ def _full_config() -> CorpusConfig:
     """Every layer enabled + every sub-label allowed - the maximal prompt.
     Used by every existing drift / checklist test."""
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=_ALL_SUBS,
         layers=LayerFlags(
             openalex_papers=True, chunks=True, entities=True
@@ -85,7 +84,6 @@ def _full_config() -> CorpusConfig:
 def _openalex_only_config() -> CorpusConfig:
     """L1-L4 only - chunks layer off. Paper allowed to keep OpenAlex active."""
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(openalex_papers=True, chunks=False),
     )
@@ -94,7 +92,6 @@ def _openalex_only_config() -> CorpusConfig:
 def _chunks_only_config() -> CorpusConfig:
     """L5 only - openalex layer off (non-paper corpus, e.g. legal)."""
     return CorpusConfig(
-        domain="legal",
         allowed_types=["Note"],  # one sub-label so :Note appears in the prompt
         layers=LayerFlags(openalex_papers=False, chunks=True),
     )
@@ -299,7 +296,6 @@ def test_relationships_header_omitted_when_no_relationships_active():
     """When both layers are off, no edges exist - the 'Relationships:'
     header should be omitted entirely rather than dangle."""
     bare_config = CorpusConfig(
-        domain="generic",
         layers=LayerFlags(openalex_papers=False, chunks=False),
     )
     prompt = format_schema_for_prompt(bare_config)
@@ -319,7 +315,6 @@ def test_prompt_includes_artifact_top_level_label():
 def test_prompt_lists_only_allowed_sub_labels():
     """Sub-labels appear only when in `allowed_types`."""
     config = CorpusConfig(
-        domain="mixed",
         allowed_types=["Paper", "Dataset"],  # subset
         layers=LayerFlags(openalex_papers=True, chunks=True),
     )
@@ -339,7 +334,6 @@ def test_openalex_section_omitted_when_paper_not_in_allowed_types():
     cannot fire (the gate is layer AND Paper-allowed), so :Author /
     :Venue / :Topic should not appear in the prompt."""
     config = CorpusConfig(
-        domain="notes_only",
         allowed_types=["Note"],
         layers=LayerFlags(openalex_papers=True, chunks=True),
     )
@@ -349,7 +343,7 @@ def test_openalex_section_omitted_when_paper_not_in_allowed_types():
     assert f":{TOPIC_LABEL}" not in prompt
 
 
-# ---- L6a entity layer ----
+# ---- L6 entity layer ----
 
 
 def test_prompt_lists_all_expected_entity_properties():
@@ -376,7 +370,6 @@ def test_entities_off_omits_entity_label_and_mentions_edge():
     """`:Entity` + `:MENTIONS` drop entirely when the entities layer is
     off (default config)."""
     config = CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(openalex_papers=True, chunks=True),
         # entities defaults to False; no [entities] section needed.
@@ -393,7 +386,6 @@ def test_entities_on_lists_configured_entity_types_in_block():
     """The Entity block surfaces the corpus's configured entity_types so
     the LLM knows what values it can scope queries to."""
     config = CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(chunks=True, entities=True),
         entities=EntityConfig(
@@ -411,7 +403,6 @@ def test_entities_on_with_empty_entity_types_flags_open_vocab():
     open (not a fixed list), so it knows to inspect data rather than
     assume types."""
     config = CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(chunks=True, entities=True),
         entities=EntityConfig(extractor="llm", entity_types=[]),
@@ -426,7 +417,6 @@ def test_entities_on_with_empty_entity_types_flags_open_vocab():
 
 def _config_with_mesh() -> CorpusConfig:
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(
             chunks=True, entities=True, ontology_mesh=True
@@ -438,7 +428,6 @@ def _config_with_mesh() -> CorpusConfig:
 
 def _config_with_mesh_and_go() -> CorpusConfig:
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(
             chunks=True,
@@ -521,7 +510,6 @@ def test_canonical_to_block_lists_strategy_and_confidence():
 
 def _config_with_triples() -> CorpusConfig:
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(chunks=True, entities=True, triples=True),
         entities=EntityConfig(extractor="llm", entity_types=["GENE"]),
@@ -591,7 +579,6 @@ def test_triples_block_shows_pipe_syntax_for_multi_predicate_match():
 
 def _config_with_cross_doc() -> CorpusConfig:
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(chunks=True, entities=True, cross_doc=True),
         entities=EntityConfig(extractor="llm", entity_types=["GENE"]),
@@ -645,7 +632,6 @@ def _config_with_xrefs(mode: str) -> CorpusConfig:
     one ontology enabled (so the corpus is realistic)."""
     from knowledge_agent.kg.corpus_config import OntologyConfig
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(
             chunks=True,
@@ -723,7 +709,6 @@ def _config_with_cross_doc_xrefs() -> CorpusConfig:
     chain)."""
     from knowledge_agent.kg.corpus_config import OntologyConfig
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(
             chunks=True,

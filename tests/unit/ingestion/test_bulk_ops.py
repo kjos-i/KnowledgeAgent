@@ -408,7 +408,6 @@ async def test_ingest_folder_plan_returns_empty_plan_for_empty_folder(tmp_path):
 
 def _config() -> CorpusConfig:
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(chunks=True),
     )
@@ -709,9 +708,13 @@ async def test_sync_execute_edited_bucket_deletes_old_then_ingests_new():
         buckets=_buckets(edited=[(disk, old)]),
     )
     search_mock = MagicMock()
+    kg_mock = MagicMock()
+    kg_mock.get_focal_labels_by_doc_id = AsyncMock(return_value=(None, None))
     with (
         patch("knowledge_agent.ingestion.bulk_ops.get_search_client",
               return_value=search_mock),
+        patch("knowledge_agent.ingestion.bulk_ops.get_kg_client",
+              return_value=kg_mock),
         patch("knowledge_agent.ingestion.bulk_ops.pipeline.delete_doc") as del_mock,
         patch("knowledge_agent.ingestion.bulk_ops.pipeline.ingest_document") as ing_mock,
     ):
@@ -721,6 +724,70 @@ async def test_sync_execute_edited_bucket_deletes_old_then_ingests_new():
     del_mock.assert_called_once_with("d-old")
     ing_mock.assert_called_once()
     assert result.n_edited_succeeded == 1
+
+
+async def test_sync_execute_edited_preserves_labels_from_old_doc():
+    """EDITED with preserve=True: read old labels from KG BEFORE the
+    delete, carry them into the fresh ingest even though the new
+    content has a new content-hash doc_id."""
+    old = _ix("d-old", stored_path="/p.pdf")
+    disk = _disk("/p.pdf", "d-new")
+    plan = SyncPlan(
+        folder=Path("/tmp"), main_label="Document", sub_label="Paper",
+        buckets=_buckets(edited=[(disk, old)]),
+    )
+    search_mock = MagicMock()
+    kg_mock = MagicMock()
+    # Old doc was labelled :Document:Note. Sync-time dropdown says Paper.
+    # Preserve should win.
+    kg_mock.get_focal_labels_by_doc_id = AsyncMock(
+        return_value=("Document", "Note"),
+    )
+    with (
+        patch("knowledge_agent.ingestion.bulk_ops.get_search_client",
+              return_value=search_mock),
+        patch("knowledge_agent.ingestion.bulk_ops.get_kg_client",
+              return_value=kg_mock),
+        patch("knowledge_agent.ingestion.bulk_ops.pipeline.delete_doc"),
+        patch("knowledge_agent.ingestion.bulk_ops.pipeline.ingest_document") as ing_mock,
+    ):
+        await sync_execute(plan, _config())
+
+    ing_mock.assert_called_once()
+    call_args = ing_mock.call_args
+    assert call_args.args[2] == "Document"
+    assert call_args.args[3] == "Note"
+    # And the read happened BEFORE the passed dropdown values propagated.
+    kg_mock.get_focal_labels_by_doc_id.assert_called_once_with("d-old")
+
+
+async def test_sync_execute_edited_overwrites_labels_when_preserve_false():
+    """EDITED with preserve=False: passed (main, sub) reach ingest,
+    no KG label read happens (short-circuit)."""
+    old = _ix("d-old", stored_path="/p.pdf")
+    disk = _disk("/p.pdf", "d-new")
+    plan = SyncPlan(
+        folder=Path("/tmp"), main_label="Document", sub_label="Paper",
+        buckets=_buckets(edited=[(disk, old)]),
+    )
+    search_mock = MagicMock()
+    with (
+        patch("knowledge_agent.ingestion.bulk_ops.get_search_client",
+              return_value=search_mock),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.get_kg_client",
+        ) as kg_factory_mock,
+        patch("knowledge_agent.ingestion.bulk_ops.pipeline.delete_doc"),
+        patch("knowledge_agent.ingestion.bulk_ops.pipeline.ingest_document") as ing_mock,
+    ):
+        await sync_execute(plan, _config(), preserve_existing_labels=False)
+
+    ing_mock.assert_called_once()
+    call_args = ing_mock.call_args
+    assert call_args.args[2] == "Document"
+    assert call_args.args[3] == "Paper"
+    # Short-circuit — KG client factory shouldn't even have been consulted.
+    kg_factory_mock.assert_not_called()
 
 
 async def test_sync_execute_orphan_bucket_deletes_each_doc_id():
@@ -1116,7 +1183,7 @@ async def test_bulk_re_embed_execute_counts_successes_and_failures():
         "knowledge_agent.ingestion.bulk_ops.pipeline.re_embed",
         side_effect=side,
     ):
-        result = await bulk_re_embed_execute(plan)
+        result = await bulk_re_embed_execute(plan, _config())
 
     assert result.n_succeeded == 1
     assert result.n_failed == 2
@@ -1188,9 +1255,15 @@ async def test_bulk_backfill_entities_execute_counts_entities_ok_as_success():
         {"entities_ok": True, "n_mentions": 5, "ontology": {}},
         {"entities_ok": False, "n_mentions": 0, "ontology": {}},
     ]
-    with patch(
-        "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_entities",
-        side_effect=side,
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_entities",
+            side_effect=side,
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.reconcile_entities_to_config",
+            new_callable=AsyncMock,
+        ),
     ):
         result = await bulk_backfill_entities_execute(plan, _config())
 
@@ -1213,9 +1286,15 @@ async def test_bulk_backfill_ontology_execute_counts_any_import_ok_as_success():
         },
         {},  # no ontologies enabled - no-op success
     ]
-    with patch(
-        "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_ontology",
-        side_effect=side,
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_ontology",
+            side_effect=side,
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.reconcile_ontologies_to_config",
+            new_callable=AsyncMock,
+        ),
     ):
         result = await bulk_backfill_ontology_execute(plan, _config())
 
@@ -1259,9 +1338,15 @@ async def test_bulk_backfill_triples_execute_counts_triples_ok_as_success():
         {"triples_ok": True, "n_triples": 0},   # no relations found - still success
         {"triples_ok": False, "n_triples": 0},  # Cypher / LLM failure
     ]
-    with patch(
-        "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_triples",
-        side_effect=side,
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_triples",
+            side_effect=side,
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.reconcile_triples_to_config",
+            new_callable=AsyncMock,
+        ),
     ):
         result = await bulk_backfill_triples_execute(plan, _config())
 
@@ -1279,9 +1364,15 @@ async def test_bulk_backfill_triples_execute_catches_per_doc_exceptions():
         RuntimeError("boom"),
         {"triples_ok": True, "n_triples": 3},
     ]
-    with patch(
-        "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_triples",
-        side_effect=side,
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_triples",
+            side_effect=side,
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.reconcile_triples_to_config",
+            new_callable=AsyncMock,
+        ),
     ):
         result = await bulk_backfill_triples_execute(plan, _config())
 
@@ -1293,8 +1384,14 @@ async def test_bulk_backfill_triples_execute_catches_per_doc_exceptions():
 
 async def test_bulk_backfill_triples_execute_returns_result_dataclass():
     plan = BulkBackfillPlan(target_doc_ids=(), layer_name="triples")
-    with patch(
-        "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_triples"
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_triples"
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.reconcile_triples_to_config",
+            new_callable=AsyncMock,
+        ),
     ):
         result = await bulk_backfill_triples_execute(plan, _config())
     assert isinstance(result, BulkBackfillResult)
@@ -1325,9 +1422,15 @@ async def test_bulk_backfill_cross_doc_execute_counts_cross_doc_ok_as_success():
         {"cross_doc_ok": True, "n_edges": 0},   # no overlap met threshold - still success
         {"cross_doc_ok": False, "n_edges": 0},  # Cypher failure
     ]
-    with patch(
-        "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_cross_doc",
-        side_effect=side,
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_cross_doc",
+            side_effect=side,
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.reconcile_cross_doc_to_config",
+            new_callable=AsyncMock,
+        ),
     ):
         result = await bulk_backfill_cross_doc_execute(plan, _config())
 
@@ -1345,9 +1448,15 @@ async def test_bulk_backfill_cross_doc_execute_catches_per_doc_exceptions():
         RuntimeError("boom"),
         {"cross_doc_ok": True, "n_edges": 2},
     ]
-    with patch(
-        "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_cross_doc",
-        side_effect=side,
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_cross_doc",
+            side_effect=side,
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.reconcile_cross_doc_to_config",
+            new_callable=AsyncMock,
+        ),
     ):
         result = await bulk_backfill_cross_doc_execute(plan, _config())
 
@@ -1358,8 +1467,14 @@ async def test_bulk_backfill_cross_doc_execute_catches_per_doc_exceptions():
 
 async def test_bulk_backfill_cross_doc_execute_returns_result_dataclass():
     plan = BulkBackfillPlan(target_doc_ids=(), layer_name="cross_doc")
-    with patch(
-        "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_cross_doc"
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_cross_doc"
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.reconcile_cross_doc_to_config",
+            new_callable=AsyncMock,
+        ),
     ):
         result = await bulk_backfill_cross_doc_execute(plan, _config())
     assert isinstance(result, BulkBackfillResult)
@@ -1367,7 +1482,7 @@ async def test_bulk_backfill_cross_doc_execute_returns_result_dataclass():
 
 async def test_bulk_re_embed_execute_returns_result_dataclass():
     plan = BulkReEmbedPlan(target_doc_ids=(), total_chunks=0)
-    result = await bulk_re_embed_execute(plan)
+    result = await bulk_re_embed_execute(plan, _config())
     assert isinstance(result, BulkReEmbedResult)
 
 
@@ -1406,7 +1521,6 @@ def _config_xrefs(
         "cross_doc_xrefs": cross_doc_xrefs,
     }
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(**flags_kwargs),
         entities=EntityConfig(extractor="llm"),

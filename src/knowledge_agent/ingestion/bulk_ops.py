@@ -42,6 +42,13 @@ from knowledge_agent.kg import (
 )
 from knowledge_agent.kg.client import get_kg_client
 from knowledge_agent.kg.corpus_config import CorpusConfig
+from knowledge_agent.kg.reconcile import (
+    reconcile_cross_doc_to_config,
+    reconcile_cross_doc_xrefs_to_config,
+    reconcile_entities_to_config,
+    reconcile_ontologies_to_config,
+    reconcile_triples_to_config,
+)
 from knowledge_agent.kg.ontology_linking import ONTOLOGY_REGISTRY
 from knowledge_agent.kg.schema import ONTOLOGY_SUB_LABELS
 from knowledge_agent.search.client import get_search_client
@@ -335,8 +342,14 @@ async def bulk_re_embed_plan() -> BulkReEmbedPlan:
     )
 
 
-async def bulk_re_embed_execute(plan: BulkReEmbedPlan) -> BulkReEmbedResult:
+async def bulk_re_embed_execute(
+    plan: BulkReEmbedPlan, config: CorpusConfig,
+) -> BulkReEmbedResult:
     """Iterate `plan.target_doc_ids`; call `pipeline.re_embed`.
+
+    `config` is threaded through so per-doc re-embed reads the
+    corpus's `optimize_indexes_per_ingest` flag (whether to rebuild
+    the vector index after each write).
 
     A doc whose embed call fails (Voyage outage, etc.) is counted as
     failed and skipped; the loop keeps going so transient failures on
@@ -348,7 +361,7 @@ async def bulk_re_embed_execute(plan: BulkReEmbedPlan) -> BulkReEmbedResult:
 
     for doc_id in plan.target_doc_ids:
         try:
-            result = await pipeline.re_embed(doc_id)
+            result = await pipeline.re_embed(doc_id, config)
             if result.get("embed_ok") and result.get("lancedb_ok"):
                 n_succeeded += 1
             else:
@@ -455,14 +468,21 @@ async def bulk_backfill_chunks_execute(
 
 
 async def bulk_backfill_entities_plan() -> BulkBackfillPlan:
-    """List every indexed doc for the bulk KG L6a+ rebuild op."""
+    """List every indexed doc for the bulk KG L6+ rebuild op."""
     return await _bulk_backfill_plan("entities")
 
 
 async def bulk_backfill_entities_execute(
     plan: BulkBackfillPlan, config: CorpusConfig,
 ) -> BulkBackfillResult:
-    """Iterate targets; call `await pipeline.backfill_entities(doc_id, config)`."""
+    """Iterate targets; call `await pipeline.backfill_entities(doc_id, config)`.
+
+    Reconciles entities-to-config at the top: wipes all :Entity
+    corpus-wide if `layers.entities=false`, or wipes entities of
+    types no longer in `config.entities.entity_types` when the layer
+    is on but the type list narrowed. Fail-hard on wipe error.
+    """
+    await reconcile_entities_to_config(get_kg_client(), config)
     n_succeeded = 0
     n_failed = 0
     failures: list[tuple[str, str]] = []
@@ -500,11 +520,17 @@ async def bulk_backfill_ontology_execute(
 ) -> BulkBackfillResult:
     """Iterate targets; call `await pipeline.backfill_ontology(doc_id, config)`.
 
+    Reconciles ontologies-to-config at the top: any ontology no
+    longer in `config._enabled_ontology_layers()` but still present
+    in the KG has its term nodes wiped (DETACH DELETE cascades to
+    :CANONICAL_TO and xref edges). Fail-hard on wipe error.
+
     Success criterion: at least one enabled ontology successfully
     imported AND produced canonical links. A doc with zero enabled
     ontologies (`config._enabled_ontology_layers()` empty) counts as a
     no-op success (no failure to report).
     """
+    await reconcile_ontologies_to_config(get_kg_client(), config)
     n_succeeded = 0
     n_failed = 0
     failures: list[tuple[str, str]] = []
@@ -551,14 +577,18 @@ async def bulk_backfill_triples_execute(
 ) -> BulkBackfillResult:
     """Iterate targets; call `await pipeline.backfill_triples(doc_id, config)`.
 
+    Reconciles triples-to-config at the top: wipes all triple edges
+    corpus-wide if `layers.triples=false`. Fail-hard on wipe error.
+
     Success criterion: the per-doc `triples_ok` flag is True. A doc
     that yielded zero triples still counts as success - empty output
-    is a valid outcome when L6a found no entities to relate.
+    is a valid outcome when L6 found no entities to relate.
 
     `n_triples == 0 AND triples_ok == True` IS a success (the LLM
     found nothing worth extracting), not a failure - distinct from
     `triples_ok == False` which means a write/Cypher error.
     """
+    await reconcile_triples_to_config(get_kg_client(), config)
     n_succeeded = 0
     n_failed = 0
     failures: list[tuple[str, str]] = []
@@ -596,11 +626,16 @@ async def bulk_backfill_cross_doc_execute(
 ) -> BulkBackfillResult:
     """Iterate targets; call `await pipeline.backfill_cross_doc(doc_id, config)`.
 
+    Reconciles cross-doc-to-config at the top: wipes all :RELATED_TO
+    edges corpus-wide if `layers.cross_doc=false`. Fail-hard on wipe
+    error.
+
     Success criterion: `cross_doc_ok=True`. A doc that ends up with
     zero `:RELATED_TO` edges (no other doc met the threshold) is
     still a success - empty output is a valid outcome, distinct from
     `cross_doc_ok=False` which means the recompute Cypher crashed.
     """
+    await reconcile_cross_doc_to_config(get_kg_client(), config)
     n_succeeded = 0
     n_failed = 0
     failures: list[tuple[str, str]] = []
@@ -888,8 +923,17 @@ async def add_plan(
     )
 
 
-async def add_execute(plan: AddPlan, config: CorpusConfig) -> AddResult:
-    """Ingest each file in `plan.new_items`. Per-file fail-soft."""
+async def add_execute(
+    plan: AddPlan,
+    config: CorpusConfig,
+    preserve_existing_labels: bool = True,
+) -> AddResult:
+    """Ingest each file in `plan.new_items`. Per-file fail-soft.
+
+    `preserve_existing_labels` is passed through to `ingest_document`.
+    Semantically a no-op here because `add_plan` filters to new-only
+    docs, but plumbed through for uniformity with sync / ingest_folder.
+    """
     n_succeeded = 0
     n_failed = 0
     failures: list[tuple[str, str]] = []
@@ -898,6 +942,7 @@ async def add_execute(plan: AddPlan, config: CorpusConfig) -> AddResult:
         try:
             await pipeline.ingest_document(
                 item.path, config, plan.main_label, plan.sub_label,
+                preserve_existing_labels=preserve_existing_labels,
             )
             n_succeeded += 1
         except Exception as exc:
@@ -1049,7 +1094,11 @@ async def sync_plan(
     )
 
 
-async def sync_execute(plan: SyncPlan, config: CorpusConfig) -> SyncResult:
+async def sync_execute(
+    plan: SyncPlan,
+    config: CorpusConfig,
+    preserve_existing_labels: bool = True,
+) -> SyncResult:
     """Apply changes per bucket: ingest NEW, patch MOVED, replace EDITED,
     delete ORPHAN.
 
@@ -1060,6 +1109,14 @@ async def sync_execute(plan: SyncPlan, config: CorpusConfig) -> SyncResult:
     The caller MUST have shown the orphan confirmation dialog before
     invoking this - sync_execute will delete every orphan in
     `plan.buckets.orphan` without further prompting.
+
+    `preserve_existing_labels` (default True): when the EDITED bucket
+    replaces a doc whose content changed, look up its old
+    `(main_label, sub_label)` from Neo4j BEFORE the delete and pass
+    those to the fresh ingest — the doc's category (Paper / Note /...)
+    doesn't change when its content edits. Read must precede the
+    delete because the new content has a new content-hash doc_id, so
+    `ingest_document`'s own preserve check would find nothing.
     """
     n_new_ingested = 0
     n_new_failed = 0
@@ -1071,11 +1128,13 @@ async def sync_execute(plan: SyncPlan, config: CorpusConfig) -> SyncResult:
 
     search_client = get_search_client()
 
-    # NEW: full ingest via Layer 2.
+    # NEW: full ingest via Layer 2. New doc_ids never have prior
+    # labels, so `preserve_existing_labels` is a semantic no-op here.
     for disk in plan.buckets.new:
         try:
             await pipeline.ingest_document(
                 disk.path, config, plan.main_label, plan.sub_label,
+                preserve_existing_labels=preserve_existing_labels,
             )
             n_new_ingested += 1
         except Exception as exc:
@@ -1101,11 +1160,30 @@ async def sync_execute(plan: SyncPlan, config: CorpusConfig) -> SyncResult:
             )
 
     # EDITED: delete the old doc_id, ingest the new content.
+    # The new content produces a fresh content-hash doc_id, so
+    # `ingest_document`'s built-in preserve lookup can't help — we
+    # read the old labels here + carry them into the fresh ingest.
+    # `kg_client` obtained lazily so plans with no EDITED items or
+    # preserve=False don't touch the KG driver.
+    kg_client_for_edited = get_kg_client() if (
+        preserve_existing_labels and plan.buckets.edited
+    ) else None
     for disk, old in plan.buckets.edited:
         try:
+            if kg_client_for_edited is not None:
+                old_main, old_sub = (
+                    await kg_client_for_edited
+                    .get_focal_labels_by_doc_id(old.doc_id)
+                )
+                use_main = old_main or plan.main_label
+                use_sub = old_sub if old_main else plan.sub_label
+            else:
+                use_main = plan.main_label
+                use_sub = plan.sub_label
             await pipeline.delete_doc(old.doc_id)
             await pipeline.ingest_document(
-                disk.path, config, plan.main_label, plan.sub_label,
+                disk.path, config, use_main, use_sub,
+                preserve_existing_labels=False,
             )
             n_edited_succeeded += 1
         except Exception as exc:
@@ -1135,7 +1213,9 @@ async def sync_execute(plan: SyncPlan, config: CorpusConfig) -> SyncResult:
 
 
 async def ingest_folder_execute(
-    plan: IngestFolderPlan, config: CorpusConfig,
+    plan: IngestFolderPlan,
+    config: CorpusConfig,
+    preserve_existing_labels: bool = True,
 ) -> IngestFolderResult:
     """Iterate `plan.items`; call `pipeline.ingest_document` per file.
 
@@ -1148,6 +1228,11 @@ async def ingest_folder_execute(
     `config` is read at execute time, not stored in the plan. If the
     user changes corpus settings between plan and execute, the new
     settings apply.
+
+    `preserve_existing_labels` (default True): when a file in the folder
+    is already indexed (same content-hash `doc_id`), keep its stored
+    labels rather than overwriting with `plan.main_label` /
+    `plan.sub_label`. Passed through to `ingest_document`.
     """
     n_succeeded = 0
     n_failed = 0
@@ -1157,6 +1242,7 @@ async def ingest_folder_execute(
         try:
             await pipeline.ingest_document(
                 item.path, config, plan.main_label, plan.sub_label,
+                preserve_existing_labels=preserve_existing_labels,
             )
             n_succeeded += 1
         except Exception as exc:
@@ -1457,14 +1543,24 @@ async def recompute_cross_doc_xrefs_plan(
 
 async def recompute_cross_doc_xrefs_execute(
     plan: RecomputeCrossDocXrefsPlan,
+    config: CorpusConfig | None = None,
 ) -> RecomputeCrossDocXrefsResult:
-    """Perform the L10 rebuild promised by `plan`."""
+    """Perform the L10 rebuild promised by `plan`.
+
+    When `config` is passed AND `layers.cross_doc_xrefs=false`, the
+    reconcile wipes existing :RELATED_BY_XREF edges corpus-wide before
+    returning `layer_skipped=True`. Without `config` (legacy callers)
+    the old skip-without-wipe behavior is preserved.
+    """
     if not plan.enabled:
+        if config is not None:
+            await reconcile_cross_doc_xrefs_to_config(
+                get_kg_client(), config,
+            )
         return RecomputeCrossDocXrefsResult(
             layer_skipped=True,
             n_edges_written=None,
         )
-
     kg_client = get_kg_client()
     try:
         n = await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(

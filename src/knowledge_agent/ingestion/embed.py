@@ -24,6 +24,9 @@ The 2026-06-29 async refactor made `embed_texts` async; the sync
 version was deleted in Day 8 cleanup.
 """
 
-from knowledge_agent.embedder_factory import embed_texts as embed_texts
+from knowledge_agent.embedder_factory import (
+    embed_chunks as embed_chunks,
+    embed_texts as embed_texts,
+)
 
-__all__ = ["embed_texts"]
+__all__ = ["embed_chunks", "embed_texts"]

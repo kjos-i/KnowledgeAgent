@@ -45,35 +45,60 @@ logger = logging.getLogger(__name__)
 APP_ID = "knowledge-agent"
 
 # Keyring identifiers stored in the OS credential store and shown in
-# Settings forms. Order is the display order in the Settings form.
-API_KEY_NAMES = ("anthropic", "openai", "google", "voyage", "neo4j")
+# Settings → Keys. Order is the display order in the Settings form.
+# Neo4j password is NOT in this list — it's stored per-corpus under
+# `neo4j-{corpus_name}` and managed via the Library tab (Create New
+# Dataset writes it; corpus-switch handler reads it). See
+# `get_corpus_password` / `set_corpus_password` below.
+API_KEY_NAMES = ("anthropic", "openai", "google", "voyage")
 
 # Human-readable labels for the Settings form — decoupled from the
-# keyring identifier so "neo4j" renders as "Neo4j password" rather than
-# "neo4j API key".
+# keyring identifier so labels can differ from keyring names.
 SECRET_DISPLAY_LABELS = {
     "anthropic": "Anthropic API key",
     "openai": "OpenAI API key",
     "google": "Google API key",
     "voyage": "Voyage API key",
-    "neo4j": "Neo4j password",
 }
 
 # Keyring identifier -> env var the agent's config layer reads.
 # Bridging keyring -> env lets pydantic-settings pick them up (env
 # overrides .env). Mirrors the env-var names declared on Settings in
-# `config.py`.
+# `config.py`. NEO4J_PASSWORD is bridged separately by the Library's
+# corpus-switch handler (per-corpus password → env).
 KEYRING_TO_ENV = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
     "google": "GOOGLE_API_KEY",
     "voyage": "VOYAGE_API_KEY",
-    "neo4j": "NEO4J_PASSWORD",
 }
 
 
 class ConfigError(Exception):
     """Raised when persistent settings can't be read or written."""
+
+
+class CorpusEntry(BaseModel):
+    """One row in the corpus registry — everything needed to switch to
+    a corpus.
+
+    Neo4j password does NOT live here — it goes in the OS keyring
+    under `f"neo4j-{name}"` so it never touches disk in plain text.
+    The corpus registry itself is written to `settings.json` (non-
+    secret), which is why URI / user / paths are safe here.
+
+    `corpus_config_path` points at the corpus's `corpus.toml` — the
+    file that carries the corpus's ontology toggles, layer flags,
+    entity extractor, etc.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str = Field(min_length=1, description="Display name in picker.")
+    neo4j_uri: str = Field(description="Bolt endpoint for this corpus's DBMS.")
+    neo4j_user: str = Field(default="neo4j", description="DB user.")
+    lancedb_path: Path = Field(description="Directory for LanceDB files.")
+    corpus_config_path: Path = Field(description="Path to corpus.toml.")
 
 
 class GuiConfig(BaseModel):
@@ -378,9 +403,29 @@ class GuiConfig(BaseModel):
     corpus_config_path: Path | None = Field(
         default=None,
         description=(
-            "Path to the active corpus's `corpus.toml`. None means the "
-            "user hasn't picked one yet — agent calls that need a "
-            "CorpusConfig will surface a banner asking them to set it."
+            "Path to the active corpus's `corpus.toml`. Mirror of the "
+            "active `CorpusEntry.corpus_config_path` — updated by the "
+            "corpus-switch handler. Agent calls read this to load the "
+            "corpus's TOML at query time."
+        ),
+    )
+    # Per-corpus registry. Each entry holds the storage-level info the
+    # GUI needs to switch corpora. The active corpus's URI/user/path/
+    # corpus.toml-path are mirrored to the top-level fields above so
+    # the existing bridges (apply_connection_to_env) keep working.
+    corpora: list["CorpusEntry"] = Field(
+        default_factory=list,
+        description=(
+            "Registered corpora. Added via Library → Create New Dataset. "
+            "The active one is identified by `active_corpus_name`."
+        ),
+    )
+    active_corpus_name: str | None = Field(
+        default=None,
+        description=(
+            "Name of the active corpus (matches a `CorpusEntry.name`). "
+            "None means no corpus is registered / selected — first-run "
+            "state before the user creates one."
         ),
     )
 
@@ -414,6 +459,17 @@ class GuiConfig(BaseModel):
             "to `LANCEDB_PATH` at GUI startup. None resolves to "
             "`<user_data_dir>/lancedb` at apply time so the platform-"
             "conventional location wins."
+        ),
+    )
+    ontology_downloads_dir: Path | None = Field(
+        default=None,
+        description=(
+            "Directory where downloaded ontology source files live "
+            "(MeSH RDF, GO OBO, ChEBI, etc.). Bridged to "
+            "`ONTOLOGY_DOWNLOADS_DIR` at GUI startup. None keeps the "
+            "backend Settings default "
+            "(`~/.research-literature-agent/ontology-downloads`). "
+            "Editable via Library → Installs."
         ),
     )
 
@@ -507,6 +563,21 @@ def get_api_key(name: str) -> str | None:
     except keyring.errors.KeyringError as exc:
         logger.warning("keyring read failed for %r: %r", name, exc)
         return None
+
+
+def get_corpus_password(corpus_name: str) -> str | None:
+    """Read a corpus-scoped Neo4j password from the keyring.
+
+    Key namespace: `f"neo4j-{corpus_name}"`. Distinct from the
+    top-level `"neo4j"` entry so each corpus's DBMS can have its
+    own password.
+    """
+    return get_api_key(f"neo4j-{corpus_name}")
+
+
+def set_corpus_password(corpus_name: str, value: str) -> None:
+    """Write a corpus-scoped Neo4j password. Empty deletes."""
+    set_api_key(f"neo4j-{corpus_name}", value)
 
 
 def set_api_key(name: str, value: str) -> None:
@@ -649,5 +720,23 @@ def apply_connection_to_env(cfg: "GuiConfig") -> None:
         os.environ["LANCEDB_PATH"] = str(
             Path(user_data_dir(APP_ID, appauthor=False)) / "lancedb"
         )
+
+
+def apply_ontology_downloads_dir_to_env(cfg: "GuiConfig") -> None:
+    """Bridge `GuiConfig.ontology_downloads_dir` to `ONTOLOGY_DOWNLOADS_DIR`.
+
+    None (the default) — env var is DELETED so backend Settings falls
+    back to its own default (`~/.research-literature-agent/ontology-
+    downloads`). Set — env var carries the user's chosen path so
+    `get_settings().ontology_downloads_dir` sees it.
+
+    Call after `disable_env_file()` alongside the other apply_*_to_env
+    at GUI startup, AND after any successful save from the Installs
+    tab so the change takes effect in-process without a restart.
+    """
+    if cfg.ontology_downloads_dir is None:
+        os.environ.pop("ONTOLOGY_DOWNLOADS_DIR", None)
+    else:
+        os.environ["ONTOLOGY_DOWNLOADS_DIR"] = str(cfg.ontology_downloads_dir)
 
 

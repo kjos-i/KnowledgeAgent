@@ -20,7 +20,7 @@ ontology-specific surfaces beyond ModelProvenance:
 
   - `domain_tags`: 20-tag taxonomy slots this ontology covers. Drives
     the wizard's "suggested ontologies for your corpus" rendering.
-  - `covers_labels`: L6a entity_type labels (DISEASE, CHEMICAL, GENE,
+  - `covers_labels`: L6 entity_type labels (DISEASE, CHEMICAL, GENE,
     ...) this ontology has strong term coverage for. The cross-link
     helpers in `ontology_lifecycle.py` join this against each
     extractor's `emitted_labels` to produce the "pairs well with"

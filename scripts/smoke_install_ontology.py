@@ -28,11 +28,9 @@ download+parse path (that's a real network call); unit tests in
 `tests/unit/kg/test_ontology_*_writes.py` cover the parsing logic
 with mocked file inputs.
 
-REQUIRES Neo4j Desktop running with the test or real instance
-configured in `.env`. The smoke uses the active database; consider
-running against the test instance via `python -c
-"from knowledge_agent.config import load_test_env; load_test_env()"`
-before launching for safety.
+REQUIRES the smoke-test Neo4j instance running. This script calls
+`load_test_env()` up front so ontology nodes land in the TEST database
+(never the real corpus's Neo4j), matching every other smoke.
 
 Run from the project root:
     python scripts/smoke_install_ontology.py
@@ -43,6 +41,14 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
+
+# Switch the process to the smoke-test Neo4j instance BEFORE any import
+# that triggers `get_settings()`. Mirrors the other smokes so the
+# ontology import writes :MeSHTerm/:ECOTerm/etc. nodes to the TEST
+# database, never the real corpus.
+from knowledge_agent.config import load_test_env
+
+load_test_env()
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 

@@ -20,7 +20,7 @@ Workflow (mirrors what a user does in the Library tab):
   5. `bulk_ops.bulk_resolve_openalex_plan` -> execute. Verifies the
      metadata-stage iteration.
   6. `bulk_ops.delete_doc_plan(doc_id)` -> execute. Verifies the
-     unified delete (LanceDB + KG L1-L4 + L5 + L6a).
+     unified delete (LanceDB + KG L1-L4 + L5 + L6).
   7. `ontology_lifecycle.delete_ontology_plan("mesh")` -> execute.
      Verifies the surgical wipe path.
 
@@ -87,7 +87,6 @@ TEST_DOCS = Path(__file__).resolve().parent.parent / "test_documents"
 def _biomedical_config() -> CorpusConfig:
     """Same shape as the smoke_pipeline.py corpus - all KG layers on."""
     return CorpusConfig(
-        domain="biomedical",
         allowed_types=["Paper"],
         layers=LayerFlags(
             openalex_papers=True,
@@ -116,7 +115,7 @@ async def _clear_at_start(doc_id: str) -> None:
     data clear unconditionally at start. We drop the chunks table
     (schema-tolerant - the next write recreates it from current
     schema), and run the unified `pipeline.delete_doc` for the test
-    doc_id (LanceDB chunks + KG L1-L4 / L5 / L6a / L7 edges that hang
+    doc_id (LanceDB chunks + KG L1-L4 / L5 / L6 / L7 edges that hang
     off them). MeSH terms stay imported - they're reference data, not
     smoke output.
     """

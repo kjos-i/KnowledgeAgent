@@ -53,7 +53,7 @@ from knowledge_agent.kg.ontology_helpers import (
     _owl_id_extractor,
     ensure_cached,
     extract_terms_owl,
-    get_cache_dir,
+    get_downloads_dir,
     delete_ontology_terms,
     is_ontology_imported,
     write_ontology_terms,
@@ -104,7 +104,7 @@ _ONTOLOGY_NAME = "FIBO"
 # install dialog without an extra factory hop.
 # ---------------------------------------------------------------------------
 
-# L6a entity_type labels with strong coverage by this ontology. Joined
+# L6 entity_type labels with strong coverage by this ontology. Joined
 # against each extractor's `emitted_labels` by the cross-link helpers
 # in kg.ontology_lifecycle to drive the install dialog's "pairs well
 # with" surface.
@@ -269,7 +269,7 @@ async def _walk_and_cache_fibo(*, paths: list[str] | None = None) -> Path:
         cache_filename = f"{FIBO_CACHE_SUBDIR}/{repo_path}"
         await ensure_cached(url, cache_filename)
 
-    return get_cache_dir() / FIBO_CACHE_SUBDIR
+    return get_downloads_dir() / FIBO_CACHE_SUBDIR
 
 
 # ---------------------------------------------------------------------------

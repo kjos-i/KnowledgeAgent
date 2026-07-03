@@ -1,4 +1,4 @@
-"""GLiNER-BioMed zero-shot biomedical entity extractor (L6a, open vocabulary).
+"""GLiNER-BioMed zero-shot biomedical entity extractor (L6, open vocabulary).
 
 KNOWN_LABELS = None: same shape as the general `gliner` adapter — this
 is also a zero-shot model, no closed label set. Whatever `entity_types`
@@ -85,16 +85,20 @@ def _get_model():
     """Load the GLiNER-BioMed model once per process.
 
     Heavy: ~1.1 GB resident (pytorch_model.bin), ~10-20s first-call
-    load + (optional) one-time HF download. Cached for the rest of
-    the process lifetime via lru_cache. The `from gliner import GLiNER`
-    lives inside the function (not at module top-level) so the
-    dispatcher's `get_known_labels("gliner_biomed")` can answer without
-    paying the import cost.
+    load. Cached for the rest of the process lifetime via lru_cache.
+    The `from gliner import GLiNER` lives inside the function (not at
+    module top-level) so the dispatcher's
+    `get_known_labels("gliner_biomed")` can answer without paying the
+    import cost.
+
+    NO auto-download: raises `WeightsNotDownloadedError` if the pinned
+    revision isn't on disk (2026-07-03 rule — weights are an explicit
+    user action via Library → Installs).
 
     Pinned revision: passes `revision=MODEL_REVISION` so the loader
     always pulls the exact SHA we vetted, regardless of upstream
     branch movement. The gliner library forwards this kwarg to the
-    HuggingFace download.
+    HuggingFace loader.
 
     Pickle format: this checkpoint has no .safetensors file — loading
     inevitably uses pickle deserialisation. Install dialog warns the
@@ -102,6 +106,18 @@ def _get_model():
     """
     from gliner import GLiNER
 
+    from knowledge_agent.entity_extractors.extractor_lifecycle import (
+        WeightsNotDownloadedError,
+        _GLINER_BIOMED_PROVENANCE,
+        _is_weights_downloaded,
+    )
+
+    if not _is_weights_downloaded(_GLINER_BIOMED_PROVENANCE):
+        raise WeightsNotDownloadedError(
+            "gliner_biomed", MODEL_NAME,
+            "Open Library → Installs and press Download weights on "
+            "the GLiNER-BioMed row before running extraction.",
+        )
     return GLiNER.from_pretrained(MODEL_NAME, revision=MODEL_REVISION)
 
 

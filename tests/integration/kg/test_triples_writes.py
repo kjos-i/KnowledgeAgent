@@ -200,12 +200,12 @@ async def test_delete_triples_removes_only_target_doc_edges(
     assert n_other == 3
 
 
-async def test_get_entities_by_chunk_returns_l6a_vocabulary(
+async def test_get_entities_by_chunk_returns_l6_vocabulary(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
-    """The L8 backfill helper reads back this doc's L6a vocabulary
+    """The L8 backfill helper reads back this doc's L6 vocabulary
     grouped by chunk_id. Useful so backfill_triples doesn't need to
-    re-run L6a — it consults the existing :Entity nodes."""
+    re-run L6 — it consults the existing :Entity nodes."""
     chunk_id = _seed_chunk_and_entities(
         kg_client, SYNTHETIC_DOC_ID, SYNTHETIC_ENTITIES
     )

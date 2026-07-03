@@ -14,7 +14,7 @@ Covers every bulk_op exposed to the GUI:
 
   Backfill (per-layer re-run of pipeline stages):
     - bulk_backfill_chunks (L5)
-    - bulk_backfill_entities (L6a — uses LLM extractor)
+    - bulk_backfill_entities (L6 — uses LLM extractor)
     - bulk_backfill_ontology (L7 — pre-seeded ontology terms to
       avoid the heavy ~600 MB MeSH download in CI)
     - bulk_backfill_triples (L8 — uses LLM extractor)
@@ -34,7 +34,7 @@ real ontology imports.
 
 **LLM cost surface (real Anthropic Haiku calls — DO COST MONEY):**
 
-  - `test_bulk_backfill_entities_*` — runs L6a entity extraction
+  - `test_bulk_backfill_entities_*` — runs L6 entity extraction
     against the LLM adapter, one call per chunk of the 1 ingested PDF.
   - `test_bulk_backfill_triples_*` — runs L8 triple extraction
     against the LLM adapter, one call per chunk.
@@ -116,7 +116,6 @@ def _minimal_corpus_config() -> CorpusConfig:
     """Same L1-L5-only corpus as `test_pipeline.py` — keeps cost
     bounded."""
     return CorpusConfig(
-        domain="generic",
         layers=LayerFlags(
             openalex_papers=True,
             chunks=True,
@@ -324,9 +323,8 @@ async def test_delete_doc_execute_wipes_both_stores(
 
 
 def _entities_corpus_config() -> CorpusConfig:
-    """L1-L5 + L6a entities via LLM extractor (cheap)."""
+    """L1-L5 + L6 entities via LLM extractor (cheap)."""
     return CorpusConfig(
-        domain="generic",
         layers=LayerFlags(
             openalex_papers=True,
             chunks=True,
@@ -345,7 +343,7 @@ def _entities_corpus_config() -> CorpusConfig:
 
 
 def _triples_corpus_config() -> CorpusConfig:
-    """L1-L5 + L6a + L8 (triples). Triples extractor uses LLM."""
+    """L1-L5 + L6 + L8 (triples). Triples extractor uses LLM."""
     cfg = _entities_corpus_config()
     return cfg.model_copy(
         update={
@@ -357,7 +355,7 @@ def _triples_corpus_config() -> CorpusConfig:
 
 
 def _cross_doc_corpus_config() -> CorpusConfig:
-    """L1-L5 + L6a + L9 cross_doc. Cross-doc is pure Cypher (cheap).
+    """L1-L5 + L6 + L9 cross_doc. Cross-doc is pure Cypher (cheap).
 
     Must set `cross_doc=CrossDocConfig()` explicitly because
     `model_copy(update=...)` bypasses the model validator that
@@ -374,7 +372,7 @@ def _cross_doc_corpus_config() -> CorpusConfig:
 
 
 def _mesh_corpus_config() -> CorpusConfig:
-    """L1-L5 + L6a + L7 (MeSH ontology). Tests pre-seed :MeSHTerm
+    """L1-L5 + L6 + L7 (MeSH ontology). Tests pre-seed :MeSHTerm
     nodes so ensure_ontology_imported sees the layer as imported
     and skips the ~600 MB download."""
     cfg = _entities_corpus_config()
@@ -496,7 +494,7 @@ async def test_bulk_backfill_chunks_succeeds_after_chunks_layer_enabled(
 
 
 # ---------------------------------------------------------------------------
-# bulk_backfill_entities (L6a — uses LLM extractor)
+# bulk_backfill_entities (L6 — uses LLM extractor)
 # ---------------------------------------------------------------------------
 
 
@@ -508,7 +506,7 @@ async def test_bulk_backfill_entities_creates_entity_nodes(
     sample_pdf: Path,
 ) -> None:
     """Ingest with entities=False, then enable entities and backfill.
-    The L6a pass writes :Entity nodes + :MENTIONS edges. Cost: one
+    The L6 pass writes :Entity nodes + :MENTIONS edges. Cost: one
     Haiku call per chunk via the LLM adapter."""
     iplan = await ingest_folder_plan(fresh_corpus_dir, "Document", "Paper")
     base = _minimal_corpus_config()  # entities=False at ingest time
@@ -543,11 +541,11 @@ async def test_bulk_backfill_ontology_links_entities_to_pre_seeded_mesh_terms(
     lance_client: Any,
     clean_both_stores: None,
 ) -> None:
-    """Ingest with entities=True so L6a entities exist, pre-seed a
+    """Ingest with entities=True so L6 entities exist, pre-seed a
     few :MeSHTerm nodes so `is_imported` returns True (no download),
     then backfill_ontology runs the linking pass. Asserts at least
     one :CANONICAL_TO edge gets created."""
-    # Ingest with entities ON so L6a entities exist for linking.
+    # Ingest with entities ON so L6 entities exist for linking.
     iplan = await ingest_folder_plan(fresh_corpus_dir, "Document", "Paper")
     entities_cfg = _entities_corpus_config()
     await ingest_folder_execute(iplan, entities_cfg)
@@ -586,13 +584,13 @@ async def test_bulk_backfill_ontology_links_entities_to_pre_seeded_mesh_terms(
 # ---------------------------------------------------------------------------
 
 
-async def test_bulk_backfill_triples_succeeds_after_l6a_present(
+async def test_bulk_backfill_triples_succeeds_after_l6_present(
     fresh_corpus_dir: Path,
     kg_client: Any,
     lance_client: Any,
     clean_both_stores: None,
 ) -> None:
-    """L8 backfill requires L6a entities. Ingest with entities=True,
+    """L8 backfill requires L6 entities. Ingest with entities=True,
     then run triples backfill. Cost: one Haiku call per chunk that
     has entities."""
     iplan = await ingest_folder_plan(fresh_corpus_dir, "Document", "Paper")

@@ -809,3 +809,32 @@ def test_sql_literal_int_unquoted():
 def test_sql_literal_bool_lowercase():
     assert _sql_literal(True) == "true"
     assert _sql_literal(False) == "false"
+
+
+async def test_fts_search_passes_content_type_and_image_ref_through():
+    """LanceDB row's `content_type` and `image_ref` land on
+    RetrievedChunk. Multimodal: retrieval side of the round trip so the
+    synthesizer can enrich ChunkSource / GUI can render thumbnails."""
+    fig_row = {
+        **_chunk_row("c1", "caption"),
+        "content_type": "figure",
+        "image_ref": "/corpus/figures/doc1/0.png",
+        "_score": 5.0,
+    }
+    txt_row = {
+        **_chunk_row("c2", "body para"),
+        "content_type": "text",
+        "image_ref": None,
+        "_score": 4.0,
+    }
+    qb = _RecordingQueryBuilder(rows_to_return=[fig_row, txt_row])
+    table = RecordingTable(query_builder=qb)
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    client = _client_with_conn(_configured_settings(), conn)
+
+    hits = await client.fts_search("q", top_k=5)
+
+    assert hits[0].content_type == "figure"
+    assert hits[0].image_ref == "/corpus/figures/doc1/0.png"
+    assert hits[1].content_type == "text"
+    assert hits[1].image_ref is None

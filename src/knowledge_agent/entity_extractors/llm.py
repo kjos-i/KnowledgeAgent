@@ -1,4 +1,4 @@
-"""Anthropic-Haiku entity extractor (L6a, open vocabulary).
+"""Anthropic-Haiku entity extractor (L6, open vocabulary).
 
 KNOWN_LABELS = None: this adapter does NOT constrain the user's
 `entity_types` against any closed set. Whatever labels the corpus puts
@@ -24,7 +24,6 @@ mirroring `nodes._get_llm`.
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from knowledge_agent.config import get_settings
 from knowledge_agent.entity_extractors.base import Mention
 from knowledge_agent.llm_factory import get_llm as _get_llm
 from knowledge_agent.llm_factory import with_retry as _with_retry
@@ -149,29 +148,39 @@ def _mentions_to_list(result: object) -> list[Mention]:
     ]
 
 
-def _build_runnable(entity_types: list[str]):
+def _build_runnable(entity_types: list[str], model: str, temperature: float):
     """Build the per-call retryable structured-output runnable.
+
+    `model` + `temperature` come from the corpus's `CorpusConfig` via
+    the pipeline call site, per-corpus since 2026-07-02 (previously
+    read from global Settings).
 
     The retry wrapper sits OUTSIDE `.with_structured_output(...)` per
     LangChain's composition order: structured-output first, retry
     second.
     """
-    settings = get_settings()
-    llm = _get_llm(
-        settings.entity_extractor_model,
-        settings.entity_extractor_temperature,
-    )
+    llm = _get_llm(model, temperature)
     structured = llm.with_structured_output(_ExtractedMentions)
     return _with_retry(structured), _build_system_prompt(entity_types)
 
 
-async def extract(text: str, entity_types: list[str]) -> list[Mention]:
+async def extract(
+    text: str,
+    entity_types: list[str],
+    *,
+    model: str,
+    temperature: float,
+) -> list[Mention]:
     """Extract entity mentions from `text`.
 
     Args:
       text:         the chunk's raw text content.
       entity_types: empty list -> LLM categorises freely (open vocab).
                     Non-empty list -> LLM constrained to those types.
+      model:        LLM model identifier (per-corpus
+                    `CorpusConfig.entity_extractor_model`).
+      temperature:  LLM temperature (per-corpus
+                    `CorpusConfig.entity_extractor_temperature`).
 
     Returns:
       List of `Mention` with `offset` and `confidence` always None.
@@ -181,7 +190,7 @@ async def extract(text: str, entity_types: list[str]) -> list[Mention]:
     via `with_retry` (covers transient 429s after the per-provider
     InMemoryRateLimiter does its job).
     """
-    runnable, system_prompt = _build_runnable(entity_types)
+    runnable, system_prompt = _build_runnable(entity_types, model, temperature)
     result = await runnable.ainvoke(
         [
             SystemMessage(content=system_prompt),

@@ -7,7 +7,7 @@ per-layer write functions as async methods.
 Per-layer write modules:
   - L1 + L2 + L3 + L4 -> `kg/openalex_writes.py` (OpenAlex-derived writes)
   - L5 (chunks)       -> `kg/chunk_writes.py`
-  - L6a (entities)    -> `kg/entity_writes.py`   (raw entity extraction)
+  - L6 (entities)    -> `kg/entity_writes.py`   (raw entity extraction)
   - L7 (ontologies)   -> `kg/ontology_<name>_writes.py` (one module per
                                                          ontology: MeSH, GO,
                                                          ChEBI, ...). Each
@@ -188,6 +188,20 @@ class Neo4jClient:
         propagate). Delegates to `chunk_writes.delete_chunks_by_doc_id`.
         """
         return await chunk_writes.delete_chunks_by_doc_id(self, doc_id)
+
+    async def get_focal_labels_by_doc_id(
+        self, doc_id: str,
+    ) -> tuple[str | None, str | None]:
+        """Read the focal doc node's `(main_label, sub_label)`.
+
+        Returns `(None, None)` when the doc doesn't exist yet — used by
+        the ingest pipeline's `preserve_existing_labels` branch to keep
+        an already-ingested doc's labels stable across re-ingest / sync.
+
+        Raises on failure (empty `doc_id` → ValueError; Cypher failures
+        propagate). Delegates to `chunk_writes.get_focal_labels_by_doc_id`.
+        """
+        return await chunk_writes.get_focal_labels_by_doc_id(self, doc_id)
     async def write_chunks(
         self,
         doc_id: str,
@@ -210,10 +224,10 @@ class Neo4jClient:
         """
         return await chunk_writes.write_chunks(self, doc_id, chunks, main_label, sub_label)
 
-    # ---- entity writes (L6a) - implementations in `entity_writes.py` ----
+    # ---- entity writes (L6) - implementations in `entity_writes.py` ----
 
     async def delete_entities_by_doc_id(self, doc_id: str) -> None:
-        """L6a: drop :MENTIONS edges from this doc's chunks + GC orphan
+        """L6: drop :MENTIONS edges from this doc's chunks + GC orphan
         :Entity nodes. Idempotent.
 
         Mirrors the orphan-GC step in `openalex_writes.delete_doc`. The
@@ -229,7 +243,7 @@ class Neo4jClient:
         doc_id: str,
         chunk_mentions: list[tuple[str, list[Mention]]],
     ) -> None:
-        """L6a: :Entity nodes + :MENTIONS edges for one document.
+        """L6: :Entity nodes + :MENTIONS edges for one document.
 
         `chunk_mentions` is `[(chunk_id, [Mention, ...]), ...]` produced
         by the pipeline's per-chunk extraction loop. Each Mention's
@@ -247,11 +261,11 @@ class Neo4jClient:
     async def get_entities_by_chunk(
         self, doc_id: str
     ) -> dict[str, list[tuple[str, str]]]:
-        """L8 backfill helper: read this doc's L6a entity vocabulary
+        """L8 backfill helper: read this doc's L6 entity vocabulary
         grouped by chunk_id. Returns `{chunk_id: [(key, type), ...]}`.
 
         Used by `pipeline.backfill_triples` so backfill can run without
-        re-running L6a - reuses the entities already in Neo4j.
+        re-running L6 - reuses the entities already in Neo4j.
 
         Raises on failure (empty doc_id → ValueError; Cypher failures
         propagate). Delegates to `triples_writes.get_entities_by_chunk`.

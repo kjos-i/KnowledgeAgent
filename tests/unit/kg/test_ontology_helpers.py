@@ -2,7 +2,7 @@
 
 Three concerns covered, with three test families:
   1. `OntologyTerm` dataclass — shape, frozen-ness, hashability.
-  2. Cache + download — `get_cache_dir` + `ensure_cached`, with the
+  2. Downloads + fetch — `get_downloads_dir` + `ensure_cached`, with the
      central `_http_client.stream` async context manager patched to
      avoid real network calls.
   3. Term extraction — `extract_terms_skos` exercised against a real
@@ -53,7 +53,7 @@ from knowledge_agent.kg.ontology_helpers import (
     extract_terms_obo,
     extract_terms_owl,
     extract_terms_skos,
-    get_cache_dir,
+    get_downloads_dir,
     read_rdf,
     write_ontology_terms,
 )
@@ -103,20 +103,20 @@ def test_ontology_term_hashable_and_value_equal():
     assert {a, b} == {a}
 
 
-# ---- get_cache_dir + ensure_cached ----
+# ---- get_downloads_dir + ensure_cached ----
 
 
-def test_get_cache_dir_creates_directory(tmp_path: Path):
-    """Cache directory is created on first call. Subsequent calls find
-    it ready."""
-    target = tmp_path / "ontology-cache"
+def test_get_downloads_dir_creates_directory(tmp_path: Path):
+    """Downloads directory is created on first call. Subsequent calls
+    find it ready."""
+    target = tmp_path / "ontology-downloads"
     assert not target.exists()
     with patch(
         "knowledge_agent.kg.ontology_helpers.get_settings"
     ) as mock_settings:
-        mock_settings.return_value.ontology_cache_dir = target
-        cache = get_cache_dir()
-    assert cache == target
+        mock_settings.return_value.ontology_downloads_dir = target
+        downloads = get_downloads_dir()
+    assert downloads == target
     assert target.is_dir()
 
 
@@ -135,7 +135,7 @@ async def test_ensure_cached_returns_existing_file(tmp_path: Path):
             "knowledge_agent.kg.ontology_helpers._http_client.stream"
         ) as mock_stream,
     ):
-        mock_settings.return_value.ontology_cache_dir = target
+        mock_settings.return_value.ontology_downloads_dir = target
         result = await ensure_cached("https://example.com/mesh.nt", "mesh.nt")
 
     assert result == existing
@@ -155,7 +155,7 @@ async def test_ensure_cached_downloads_when_missing(tmp_path: Path):
         ) as mock_settings,
         _patch_http_stream(chunks=[b"chunk1", b"chunk2", b"chunk3"]),
     ):
-        mock_settings.return_value.ontology_cache_dir = target
+        mock_settings.return_value.ontology_downloads_dir = target
         result = await ensure_cached("https://example.com/go.obo", "go.obo")
 
     assert result == target / "go.obo"
@@ -175,7 +175,7 @@ async def test_ensure_cached_atomic_writes_via_tmp(tmp_path: Path):
         ) as mock_settings,
         _patch_http_stream(chunks=[b"hello"]),
     ):
-        mock_settings.return_value.ontology_cache_dir = target
+        mock_settings.return_value.ontology_downloads_dir = target
         await ensure_cached("https://example.com/x.nt", "x.nt")
 
     assert (target / "x.nt").exists()
@@ -197,7 +197,7 @@ async def test_ensure_cached_cleans_up_tmp_on_failure(tmp_path: Path):
         _patch_http_stream(chunks=[b"partial"], raise_mid=True),
         pytest.raises(RuntimeError, match="connection reset"),
     ):
-        mock_settings.return_value.ontology_cache_dir = target
+        mock_settings.return_value.ontology_downloads_dir = target
         await ensure_cached("https://example.com/x.nt", "x.nt")
 
     # No final file, no .tmp left behind.
@@ -219,7 +219,7 @@ async def test_ensure_cached_force_redownloads(tmp_path: Path):
         ) as mock_settings,
         _patch_http_stream(chunks=[b"new content"]),
     ):
-        mock_settings.return_value.ontology_cache_dir = target
+        mock_settings.return_value.ontology_downloads_dir = target
         result = await ensure_cached(
             "https://example.com/mesh.nt", "mesh.nt", force=True
         )

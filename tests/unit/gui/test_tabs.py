@@ -16,14 +16,15 @@ from knowledge_agent.gui.tabs.library_tab import LibraryTab
 from knowledge_agent.gui.tabs.search_tab import SearchTab
 
 
-def test_library_tab_stub_mentions_slice_3(fake_app: MagicMock):
+def test_library_tab_delegates_to_library_view(fake_app: MagicMock):
+    """LibraryTab is a thin wrapper — `.build()` returns whatever
+    `LibraryView.build()` returns (the Slice 3 Tabs shell)."""
     tab = LibraryTab(fake_app)
     ctl = tab.build()
-    assert isinstance(ctl, ft.Column)
-    # Body is the empty-state container.
-    body = ctl.controls[1]
-    text = body.content
-    assert "slice 3" in text.value.lower()
+    # Slice 3 landed: LibraryView returns a Tabs shell. Just verify
+    # something builds without asserting an exact type — the view
+    # shape is exercised in the LibraryView tests, not here.
+    assert ctl is not None
 
 
 def test_evaluation_tab_stub_mentions_eval_harness(fake_app: MagicMock):
@@ -36,19 +37,14 @@ def test_evaluation_tab_stub_mentions_eval_harness(fake_app: MagicMock):
 def test_search_tab_composes_chat_panel_and_right_panel_in_row(
     fake_app: MagicMock,
 ):
-    """SearchTab is a 40/60 Row composition; chat takes the narrower
-    left column, the right panel (result + buttons) takes the wider
-    right column."""
+    """SearchTab returns a Row via `ResizableSplit`: left pane +
+    drag handle + right pane. The exact widget structure is 3
+    controls (two Containers around a draggable divider)."""
     fake_app.chat_panel = ChatPanel(fake_app)
     fake_app.right_panel = RightPanel(fake_app)
 
     tab = SearchTab(fake_app)
     ctl = tab.build()
     assert isinstance(ctl, ft.Row)
-    assert len(ctl.controls) == 2
-    chat_container, right_container = ctl.controls
-    assert isinstance(chat_container, ft.Container)
-    assert isinstance(right_container, ft.Container)
-    # 40 : 60 ratio → chat takes the narrower left column.
-    assert chat_container.expand == 40
-    assert right_container.expand == 60
+    # ResizableSplit: [left pane, drag handle, right pane] = 3 controls.
+    assert len(ctl.controls) == 3

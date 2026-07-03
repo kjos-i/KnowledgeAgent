@@ -52,7 +52,7 @@ src/knowledge_agent/
 │   ├── cypher_safety.py      # Read-only validation, LIMIT wrapping
 │   ├── openalex_writes.py    # L1-L4: papers, authors, citations, topics
 │   ├── chunks_writes.py      # L5: per-chunk :Chunk nodes
-│   ├── entity_writes.py      # L6a: extracted entities
+│   ├── entity_writes.py      # L6: extracted entities
 │   ├── ontology_*_writes.py  # L7: 18 ontology importers (one file per ontology)
 │   ├── ontology_helpers.py   # Shared pronto + rdflib + Neo4j-write primitives
 │   ├── ontology_xrefs.py     # L7 xref edges (MONDO ↔ MeSH, etc.)
@@ -63,7 +63,7 @@ src/knowledge_agent/
 │   ├── ontology_provenance.py # OntologyProvenance dataclass
 │   └── corpus_config.py      # Per-corpus toml schema
 │
-├── entity_extractors/        # NER adapters (L6a)
+├── entity_extractors/        # NER adapters (L6)
 │   ├── base.py               # Mention dataclass + adapter contract
 │   ├── dispatcher.py         # Routes corpus.toml extractor=... to adapter
 │   ├── llm.py                # Anthropic Haiku (or active LLM provider)
@@ -115,7 +115,7 @@ When the user (or a bulk op) ingests one document:
               topics, venues
                           │                            │
                           ▼                            ▼
-                                  KG L6a (NER)
+                                  KG L6 (NER)
                           per-chunk :MENTIONS to :Entity
                           (LLM or GLiNER or HunFlair2)
                                        │
@@ -202,7 +202,7 @@ A recurring pattern. Each lifecycle file owns a registry of installable things +
 | File | Manages | Registry size |
 |---|---|---|
 | [kg/ontology_lifecycle.py](src/knowledge_agent/kg/ontology_lifecycle.py) | L7 ontology import / link / delete | 18 ontologies |
-| [entity_extractors/extractor_lifecycle.py](src/knowledge_agent/entity_extractors/extractor_lifecycle.py) | L6a NER extractor pip install | 4 extractors |
+| [entity_extractors/extractor_lifecycle.py](src/knowledge_agent/entity_extractors/extractor_lifecycle.py) | L6 NER extractor pip install | 4 extractors |
 | [ingestion/parser_lifecycle.py](src/knowledge_agent/ingestion/parser_lifecycle.py) | parsers-asr / parsers-code extras | 2 extras |
 | [llm_lifecycle.py](src/knowledge_agent/llm_lifecycle.py) | 4 LLM providers + Ollama model pulls | 4 providers + 4 models |
 | [embedder_lifecycle.py](src/knowledge_agent/embedder_lifecycle.py) | 4 embedder providers + HF model downloads | 4 providers + 4 models |
@@ -239,13 +239,13 @@ Per-corpus settings (which layers are on, which extractor, which ontologies) liv
 Shipped 2026-06-30. The entire I/O surface is `async def` end to end — no sync wrapper layer.
 
 - **All `Neo4jClient` + `LanceClient` methods are `async def` on the native async drivers.** Neo4j uses `AsyncGraphDatabase` + `AsyncSession`; LanceDB uses `lancedb.connect_async` + `AsyncTable` / `AsyncQuery`. Every Cypher round-trip and every Lance read/write stays on the event loop — no `asyncio.to_thread` thread-pool dispatch in the hot path.
-- **`pipeline.ingest_document` and `bulk_ops.*` are `async def`.** Per-chunk extraction in L6a and L8 fans out via `asyncio.gather` bounded by `asyncio.Semaphore(settings.pipeline_max_concurrent_chunks)` — this is the wall-clock win.
+- **`pipeline.ingest_document` and `bulk_ops.*` are `async def`.** Per-chunk extraction in L6 and L8 fans out via `asyncio.gather` bounded by `asyncio.Semaphore(settings.pipeline_max_concurrent_chunks)` — this is the wall-clock win.
 - **Embedder calls (`embed_texts`) are `async def`.** Voyage uses `asyncio.to_thread` over its sync SDK; OpenAI / Google / HuggingFace use LangChain's native `.aembed_documents()` / `.aembed_query()`.
 - **LLM calls (`init_chat_model` runnables) use `.ainvoke()`** with an `InMemoryRateLimiter` wired into the factory and `.with_retry()` for `RunnableRetry` backoff.
 - **Only sync escape hatch:** entry points (smoke scripts, the GUI's main loop) wrap `asyncio.run(main())` at the boundary. Inside the library everything is native async.
 - **Pytest config:** `asyncio_mode = "auto"` (pytest-asyncio). Every `async def test_*` runs transparently — no `@pytest.mark.asyncio` decorators in the suite.
 
-The performance shape: a single PDF with ~50 chunks at L6a goes from `O(50 * t_extract)` sequential to `O(50/8 * t_extract)` parallel — ~5-8× wall-clock improvement on extraction-bound workloads. KG writes still bottleneck at the Neo4j driver pool (`settings.neo4j_max_connection_pool_size`, default 100).
+The performance shape: a single PDF with ~50 chunks at L6 goes from `O(50 * t_extract)` sequential to `O(50/8 * t_extract)` parallel — ~5-8× wall-clock improvement on extraction-bound workloads. KG writes still bottleneck at the Neo4j driver pool (`settings.neo4j_max_connection_pool_size`, default 100).
 
 ---
 
@@ -277,7 +277,7 @@ Smoke scripts in [scripts/](scripts/) are the human-supervised counterpart: inst
 
 ## Key architectural decisions (locked)
 
-- **Layered KG with corpus-level toggles.** Each L1-L10 layer is independently on/off per corpus. Off-by-default for layers that cost LLM tokens (L6a/L8).
+- **Layered KG with corpus-level toggles.** Each L1-L10 layer is independently on/off per corpus. Off-by-default for layers that cost LLM tokens (L6/L8).
 - **Provider symmetry.** All 4 LLM providers + all 4 embedder providers are extras; no provider is privileged. First-launch wizard picks. Settings + factories enforce lazy validation.
 - **Lifecycle pattern for all installable things.** Plan/execute dataclasses with `summary` property for the GUI. Five instances and counting.
 - **Typed errors at orchestrator boundaries.** No silent failures; every result dataclass exposes its `*_error: ErrorDetail | None` fields.

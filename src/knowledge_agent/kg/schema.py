@@ -116,7 +116,7 @@ VENUE_LABEL = "Venue"
 TOPIC_LABEL = "Topic"
 CHUNK_LABEL = "Chunk"
 
-# L6a: chunk-level entity mentions. Each :Entity is the deduped node
+# L6: chunk-level entity mentions. Each :Entity is the deduped node
 # for a (lowercased text, entity_type) pair. The original spelling
 # from the source text is NOT stored on the node - for NER extractions
 # it stays recoverable from the chunk text via the :MENTIONS.offset
@@ -183,7 +183,7 @@ PUBLISHED_IN_REL = "PUBLISHED_IN"
 ABOUT_TOPIC_REL = "ABOUT_TOPIC"
 PART_OF_REL = "PART_OF"
 
-# L6a: (:Chunk)-[:MENTIONS {offset, confidence}]->(:Entity). offset +
+# L6: (:Chunk)-[:MENTIONS {offset, confidence}]->(:Entity). offset +
 # confidence are nullable on the edge - NER adapters populate them,
 # LLM adapter leaves them null.
 MENTIONS_REL = "MENTIONS"
@@ -309,7 +309,7 @@ USES_REL = "USES"
 COMPARED_WITH_REL = "COMPARED_WITH"
 
 # L9: cross-document synthesis - materialised edge between two document
-# (or artifact) nodes that share at least N L6a entities. Undirected
+# (or artifact) nodes that share at least N L6 entities. Undirected
 # (one edge per pair, written via MERGE on the undirected pattern).
 # Properties: `shared_entities` (list of entity keys), `shared_count`
 # (size), `computed_at` (timestamp). Recomputed per-doc on ingest /
@@ -386,7 +386,7 @@ CONSTRAINT_STATEMENTS: tuple[str, ...] = (
     f"FOR (t:{TOPIC_LABEL}) REQUIRE t.openalex_id IS UNIQUE",
     f"CREATE CONSTRAINT chunk_chunk_id IF NOT EXISTS "
     f"FOR (c:{CHUNK_LABEL}) REQUIRE c.chunk_id IS UNIQUE",
-    # L6a: composite NODE KEY enforces (key, entity_type) globally unique
+    # L6: composite NODE KEY enforces (key, entity_type) globally unique
     # AND non-null on both fields. Same word with different types
     # (e.g. "apple" as GENE vs as COMPANY) stays correctly distinct.
     f"CREATE CONSTRAINT entity_key_node_key IF NOT EXISTS "

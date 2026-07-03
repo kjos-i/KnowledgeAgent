@@ -86,20 +86,20 @@ class OntologyTerm:
 
 
 # ---------------------------------------------------------------------------
-# Cache directory + download utilities.
+# Downloads directory + download utilities.
 # ---------------------------------------------------------------------------
 
 
-def get_cache_dir() -> Path:
-    """Return the ontology cache directory, creating it if missing.
+def get_downloads_dir() -> Path:
+    """Return the ontology downloads directory, creating it if missing.
 
-    Resolves from `Settings.ontology_cache_dir` (defaults to
-    `~/.research-literature-agent/ontology-cache/`). The directory is
-    created on first call - safe to call repeatedly.
+    Resolves from `Settings.ontology_downloads_dir` (defaults to
+    `~/.research-literature-agent/ontology-downloads/`). The directory
+    is created on first call — safe to call repeatedly.
     """
-    cache = get_settings().ontology_cache_dir
-    cache.mkdir(parents=True, exist_ok=True)
-    return cache
+    downloads = get_settings().ontology_downloads_dir
+    downloads.mkdir(parents=True, exist_ok=True)
+    return downloads
 
 
 async def ensure_cached(
@@ -122,10 +122,10 @@ async def ensure_cached(
     file). Raises `httpx.HTTPError` on network failure; the caller
     (per-ontology write module) decides whether to surface the error.
     """
-    cache = get_cache_dir()
-    dest = cache / filename
+    downloads = get_downloads_dir()
+    dest = downloads / filename
     if dest.exists() and not force:
-        logger.info("ontology cache hit: %s", dest)
+        logger.info("ontology download hit: %s", dest)
         return dest
 
     # `filename` may include nested directory components for ontologies that
@@ -205,7 +205,7 @@ __all__ = [
     # Leaf concerns owned by this file
     "OntologyTerm",
     "ensure_cached",
-    "get_cache_dir",
+    "get_downloads_dir",
     # Pronto family (re-exported from ontology_pronto)
     "extract_terms_obo",
     "read_obo",

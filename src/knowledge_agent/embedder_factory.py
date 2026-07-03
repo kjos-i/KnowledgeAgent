@@ -176,6 +176,122 @@ def _voyage_call(
     return result.embeddings
 
 
+def _voyage_multimodal_call(
+    items: list[tuple[str, str | None]],
+    input_type: str,
+) -> list[list[float]]:
+    """Native-client Voyage call for chunks that may carry an image.
+
+    `items` is a list of `(text, image_ref)` pairs — one per chunk,
+    aligned 1:1 with the output vectors. For each item:
+
+      - Both `text` and `image_ref` present → input `[text, PIL.Image]`
+        (caption-anchored multimodal — the shape RAA verified works
+        against `voyage-multimodal-3`).
+      - Only `text` present (image_ref is None or empty) → input
+        `[text]` (text-only through the same multimodal API — same
+        shape as the pre-multimodal `_voyage_call` above).
+      - Only `image_ref` present (empty text — rare: PDF figure with
+        no caption AND no OCR'd text) → input `[PIL.Image]`.
+
+    Image bytes are loaded from disk via PIL. `image_ref` may be an
+    absolute path (standalone image inputs; RAA's model) or a path
+    inside the corpus folder (`<corpus folder>/figures/<doc_id>/<i>.png`
+    — extracted PDF/Word/PPT pictures).
+    """
+    from PIL import Image
+
+    settings = get_settings()
+    client = _build_voyage_client()
+    inputs: list[list[Any]] = []
+    for text, image_ref in items:
+        payload: list[Any] = []
+        if text:
+            payload.append(text)
+        if image_ref:
+            payload.append(Image.open(image_ref).convert("RGB"))
+        if not payload:
+            # Empty text AND no image — degenerate case (shouldn't
+            # reach here in normal ingest). Fall back to empty text
+            # so the row still gets a vector.
+            payload.append("")
+        inputs.append(payload)
+    result = client.multimodal_embed(
+        inputs=inputs,
+        model=settings.embedding_model,
+        input_type=input_type,
+    )
+    return result.embeddings
+
+
+async def embed_chunks(
+    chunks: list[Any],
+    input_type: str = "document",
+) -> list[list[float]]:
+    """Embed chunks that may carry image_ref (multimodal-aware wrapper).
+
+    Duck-typed input: each element must have `text` and (optionally)
+    `image_ref` attributes/keys — matches `ParsedChunk` objects and
+    LanceDB row dicts.
+
+    Voyage path (multimodal-capable): text chunks embed as `[text]`;
+    figure chunks (image_ref present + non-empty) embed as
+    `[text, PIL.Image]` — one shared vector space via
+    `multimodal_embed`. Empty text with image loads as `[PIL.Image]`.
+
+    Non-Voyage providers (OpenAI / Google / HuggingFace): these
+    embedders are text-only today. Chunks with image_ref are embedded
+    from their text field alone — a warning logs once per call. To
+    actually embed images with these providers, add multimodal support
+    to the LangChain adapter path (out of scope for the current pass).
+
+    Failures propagate; the orchestrator boundary catches. Empty
+    input returns `[]` with no API call.
+    """
+    if not chunks:
+        return []
+
+    def _text_of(c: Any) -> str:
+        v = getattr(c, "text", None)
+        if v is None and isinstance(c, dict):
+            v = c.get("text")
+        return v or ""
+
+    def _image_ref_of(c: Any) -> str | None:
+        v = getattr(c, "image_ref", None)
+        if v is None and isinstance(c, dict):
+            v = c.get("image_ref")
+        return v if v else None
+
+    settings = get_settings()
+    provider = settings.embedding_provider
+    _validate_embedder_config(provider)
+
+    if provider == "voyage":
+        items = [(_text_of(c), _image_ref_of(c)) for c in chunks]
+        return await asyncio.to_thread(
+            _voyage_multimodal_call, items, input_type,
+        )
+
+    # Non-Voyage: text-only. Warn once if any chunk has image_ref.
+    if any(_image_ref_of(c) for c in chunks):
+        logger.warning(
+            "embedder provider %r does not support multimodal input; "
+            "figure chunks will be embedded from their text field only",
+            provider,
+        )
+    texts = [_text_of(c) for c in chunks]
+    model = _active_model_for(provider)
+    embedder = _build_langchain_embedder(provider, model)
+    if input_type == "query":
+        return list(
+            await asyncio.gather(
+                *(embedder.aembed_query(t) for t in texts)
+            )
+        )
+    return await embedder.aembed_documents(texts)
+
+
 async def embed_texts(
     texts: list[str], input_type: str = "document"
 ) -> list[list[float]]:

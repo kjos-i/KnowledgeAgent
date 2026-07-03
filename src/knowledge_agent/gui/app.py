@@ -54,6 +54,7 @@ from knowledge_agent.gui.config_store import (
     apply_embedding_to_env,
     apply_keys_to_env,
     apply_llm_to_env,
+    apply_ontology_downloads_dir_to_env,
     apply_retrieval_to_env,
     get_api_key,
     load_config,
@@ -348,7 +349,7 @@ class GuiApp:
             else None
         )
         try:
-            chosen = await self.file_picker.get_directory_path_async(
+            chosen = await self.file_picker.get_directory_path(
                 dialog_title=dialog_title,
                 initial_directory=initial,
             )
@@ -413,7 +414,7 @@ class GuiApp:
     async def on_open_result(self, e: ft.Event) -> None:
         """Open the file picker, load the chosen `.md` into the File view."""
         try:
-            files = await self.file_picker.pick_files_async(
+            files = await self.file_picker.pick_files(
                 dialog_title="Open saved answer",
                 file_type=ft.FilePickerFileType.CUSTOM,
                 allowed_extensions=["md"],
@@ -459,6 +460,7 @@ class GuiApp:
         apply_retrieval_to_env(self.gui_config)
         apply_llm_to_env(self.gui_config)
         apply_embedding_to_env(self.gui_config)
+        apply_ontology_downloads_dir_to_env(self.gui_config)
         get_settings.cache_clear()
 
         # Register FilePicker as a service (Flet 1.0+ API).
@@ -515,13 +517,11 @@ class GuiApp:
 
         self.page.add(tabs)
 
-        # FilePicker is a service in Flet 1.0+ — append AFTER the page
-        # has content so the service registry is ready.
-        try:
-            self.page.services.append(self.file_picker)
-        except AttributeError:
-            # Older Flet (pre-1.0): fall back to the private registry.
-            self.page._services.register_service(self.file_picker)  # type: ignore[attr-defined]
+        # Register FilePicker as a service AFTER the page has content
+        # so the service registry's internal update can push through
+        # to the frontend correctly. Flet 0.85's public path is
+        # `page._services.register_service(picker)`.
+        self.page._services.register_service(self.file_picker)  # type: ignore[attr-defined]
 
 
 def _page_factory(page: ft.Page) -> None:

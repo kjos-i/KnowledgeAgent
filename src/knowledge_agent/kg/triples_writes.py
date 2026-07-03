@@ -25,8 +25,8 @@ Provenance + edge-collapse policy:
     triple, not just THAT it exists.
 
 Subject + object must already exist as `:Entity` nodes (the LLM is
-prompted with the chunk's L6a entity vocabulary). If a triple references
-a missing entity (extractor bug, L6a/L8 race), the inner MATCH yields
+prompted with the chunk's L6 entity vocabulary). If a triple references
+a missing entity (extractor bug, L6/L8 race), the inner MATCH yields
 no rows and the CREATE silently no-ops for that row - logged via the
 mismatch count.
 
@@ -62,7 +62,7 @@ class ExtractedTriple:
 
     Subject and object are `(key, entity_type)` composite identities
     matching `:Entity` NODE KEY. Both `_key` fields MUST already be
-    lowercased (matches how L6a stores entity keys); the extractor is
+    lowercased (matches how L6 stores entity keys); the extractor is
     expected to lowercase before constructing.
 
     `predicate` must be one of `schema.TRIPLE_PREDICATE_RELS`. Out-of-
@@ -88,9 +88,9 @@ async def get_entities_by_chunk(client, doc_id: str
 ) -> dict[str, list[tuple[str, str]]]:
     """Return `{chunk_id: [(entity_key, entity_type), ...], ...}` for a doc.
 
-    Used by `pipeline.backfill_triples` to rebuild each chunk's L6a
+    Used by `pipeline.backfill_triples` to rebuild each chunk's L6
     entity vocabulary from the existing graph state (rather than
-    re-running L6a). Each entity contributes one (key, entity_type)
+    re-running L6). Each entity contributes one (key, entity_type)
     tuple per chunk that mentions it.
 
     Returns an empty dict when the doc has no
@@ -177,7 +177,7 @@ async def write_triples(client,
         by the empty-target invariant. CREATE is also faster and
         produces clean "one edge per assertion" semantics.
 
-    If the subject or object entity doesn't exist (L6a/L8 race, or LLM
+    If the subject or object entity doesn't exist (L6/L8 race, or LLM
     referenced an out-of-vocabulary key), the inner MATCH yields no
     rows and the CREATE silently no-ops for that row. Counted via the
     final session.run result_summary (Neo4j reports the actual created

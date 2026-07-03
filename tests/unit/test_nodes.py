@@ -40,7 +40,6 @@ from knowledge_agent.nodes import (
 # in the schema renderer live in test_schema_as_prompt.py; here we just
 # need a valid config for cypher_builder to do its work.
 _TEST_CONFIG = CorpusConfig(
-    domain="test",
     layers=LayerFlags(openalex_papers=True, chunks=True),
 )
 
@@ -1005,6 +1004,86 @@ def test_synthesizer_llm_branch_passes_kg_hits_to_user_message():
     # And the LLM's structured output flowed back through unchanged.
     assert result["final_answer"] is answer_obj
     assert result["final_answer"].kg_sources[0].hit_index == 0
+
+
+def test_synthesizer_direct_populates_multimodal_fields_on_chunk_sources():
+    """Direct-retrieval bypass: every RetrievedChunk becomes a
+    ChunkSource. content_type / image_ref / page must be threaded
+    through so the GUI can render the figure gallery."""
+    fig_chunk = RetrievedChunk(
+        chunk_id="doc#0", doc_id="doc", text="caption",
+        content_type="figure",
+        image_ref="/corpus/figures/doc/0.png",
+        page=4,
+    )
+    txt_chunk = RetrievedChunk(
+        chunk_id="doc#1", doc_id="doc", text="body text",
+        content_type="text", image_ref=None,
+    )
+    with patch(
+        "knowledge_agent.nodes.get_settings"
+    ) as mock_settings:
+        mock_settings.return_value.direct_retrieval = True
+        result = asyncio.run(synthesizer_node({
+            "query": "q",
+            "retrieved_chunks": [fig_chunk, txt_chunk],
+        }))
+    sources = result["final_answer"].chunk_sources
+    assert len(sources) == 2
+    # Figure ChunkSource carries the multimodal fields end-to-end.
+    assert sources[0].content_type == "figure"
+    assert sources[0].image_ref == "/corpus/figures/doc/0.png"
+    assert sources[0].page == 4
+    # Text ChunkSource has None on multimodal fields.
+    assert sources[1].content_type == "text"
+    assert sources[1].image_ref is None
+
+
+def test_synthesizer_llm_path_enriches_chunk_sources_from_retrieval():
+    """LLM produces ChunkSource with only chunk_id + doc_id + quote
+    (that's what it sees in the prompt). Post-processing must enrich
+    each source's content_type / image_ref / page by looking up the
+    matching RetrievedChunk by chunk_id."""
+    # LLM's raw output — no multimodal fields set.
+    llm_answer = AgentAnswer(
+        answer="See figure [1].",
+        chunk_sources=[
+            ChunkSource(chunk_id="doc#0", doc_id="doc", quote="caption text"),
+            ChunkSource(chunk_id="doc#hallucinated", doc_id="doc"),
+        ],
+    )
+    mock_llm = _mock_llm_returning(llm_answer)
+    # Retrieval hits — carries the multimodal metadata to enrich from.
+    fig_chunk = RetrievedChunk(
+        chunk_id="doc#0", doc_id="doc", text="caption text",
+        content_type="figure",
+        image_ref="/corpus/figures/doc/0.png",
+        page=3,
+    )
+    with (
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
+    ):
+        mock_settings.return_value.direct_retrieval = False
+        mock_settings.return_value.synthesizer_model = "claude-sonnet"
+        mock_settings.return_value.synthesizer_temperature = 0.0
+        result = asyncio.run(synthesizer_node({
+            "query": "q",
+            "retrieved_chunks": [fig_chunk],
+        }))
+    sources = result["final_answer"].chunk_sources
+    assert len(sources) == 2
+    # Matching chunk_id: enriched from RetrievedChunk.
+    assert sources[0].chunk_id == "doc#0"
+    assert sources[0].content_type == "figure"
+    assert sources[0].image_ref == "/corpus/figures/doc/0.png"
+    assert sources[0].page == 3
+    # Quote from the LLM preserved (not overwritten).
+    assert sources[0].quote == "caption text"
+    # Hallucinated chunk_id: falls through unchanged (no crash).
+    assert sources[1].chunk_id == "doc#hallucinated"
+    assert sources[1].content_type is None
+    assert sources[1].image_ref is None
 
 
 # ---- _format_chunks_for_prompt ----

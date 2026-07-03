@@ -69,37 +69,37 @@ ALPHA_UNIQUE: list[tuple[str, str]] = [("glut4", "protein")]
 BETA_UNIQUE: list[tuple[str, str]] = [("hba1c", "biomarker")]
 
 
-def _delete_smoke_nodes(client) -> None:
+async def _delete_smoke_nodes(client) -> None:
     """Drop both synthetic docs + chunks + their entity orphans +
     :RELATED_TO edges between them. Idempotent."""
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         # :RELATED_TO is undirected by convention; one query covers both.
-        session.run(
+        await session.run(
             f"MATCH (d1:{DOCUMENT_LABEL})-[r:RELATED_TO]-(d2:{DOCUMENT_LABEL}) "
             f"WHERE d1.doc_id IN $ids AND d2.doc_id IN $ids "
             f"DELETE r",
             ids=[DOC_ALPHA, DOC_BETA],
         )
         # Drop :MENTIONS from these docs' chunks, then orphan-GC entities.
-        session.run(
+        await session.run(
             f"MATCH (d:{DOCUMENT_LABEL})<-[:PART_OF]-"
             f"(c:{CHUNK_LABEL})-[m:MENTIONS]->(e:{ENTITY_LABEL}) "
             f"WHERE d.doc_id IN $ids DELETE m",
             ids=[DOC_ALPHA, DOC_BETA],
         )
-        session.run(
+        await session.run(
             f"MATCH (e:{ENTITY_LABEL}) "
             f"WHERE NOT (e)<-[:MENTIONS]-() "
             f"DETACH DELETE e"
         )
         # Drop chunks + docs.
-        session.run(
+        await session.run(
             f"MATCH (c:{CHUNK_LABEL}) "
             f"WHERE c.doc_id IN $ids "
             f"DETACH DELETE c",
             ids=[DOC_ALPHA, DOC_BETA],
         )
-        session.run(
+        await session.run(
             f"MATCH (d:{DOCUMENT_LABEL}) "
             f"WHERE d.doc_id IN $ids "
             f"DETACH DELETE d",
@@ -107,14 +107,14 @@ def _delete_smoke_nodes(client) -> None:
         )
 
 
-def _seed_doc(
+async def _seed_doc(
     client, doc_id: str, entities: list[tuple[str, str]]
 ) -> str:
     """Write a synthetic :Document + one :Chunk + :MENTIONS edges to
     each entity. Returns chunk_id."""
     chunk_id = make_chunk_id(doc_id, 0)
-    with client.driver.session() as session:
-        session.run(
+    async with client.driver.session() as session:
+        await session.run(
             f"MERGE (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) "
             f"ON CREATE SET d.in_corpus = true, d:Paper "
             f"MERGE (c:{CHUNK_LABEL} {{chunk_id: $chunk_id}}) "
@@ -126,7 +126,7 @@ def _seed_doc(
             chunk_id=chunk_id,
         )
         for key, etype in entities:
-            session.run(
+            await session.run(
                 f"MERGE (e:{ENTITY_LABEL} {{key: $key, type: $type}}) "
                 f"WITH e "
                 f"MATCH (c:{CHUNK_LABEL} {{chunk_id: $chunk_id}}) "
@@ -140,17 +140,18 @@ def _seed_doc(
     return chunk_id
 
 
-def _show_state(client) -> None:
+async def _show_state(client) -> None:
     """Read back the :RELATED_TO edge between the two synthetic docs."""
-    with client.driver.session() as session:
-        rows = list(session.run(
+    async with client.driver.session() as session:
+        result = await session.run(
             f"MATCH (a:{DOCUMENT_LABEL} {{doc_id: $a_id}})"
             f"-[r:RELATED_TO]-(b:{DOCUMENT_LABEL} {{doc_id: $b_id}}) "
             f"RETURN r.shared_count AS n, r.shared_keys AS keys, "
             f"r.computed_at AS ts",
             a_id=DOC_ALPHA,
             b_id=DOC_BETA,
-        ))
+        )
+        rows = await result.data()
     if not rows:
         print("  no :RELATED_TO edge found between the two docs")
         return
@@ -180,11 +181,11 @@ async def main() -> None:
     await client.ensure_constraints()
 
     print("Clearing any leftover smoke nodes from previous runs...")
-    _delete_smoke_nodes(client)
+    await _delete_smoke_nodes(client)
 
     print(f"Seeding two synthetic docs sharing {len(SHARED_ENTITIES)} entities...")
-    alpha_chunk = _seed_doc(client, DOC_ALPHA, SHARED_ENTITIES + ALPHA_UNIQUE)
-    beta_chunk = _seed_doc(client, DOC_BETA, SHARED_ENTITIES + BETA_UNIQUE)
+    alpha_chunk = await _seed_doc(client, DOC_ALPHA, SHARED_ENTITIES + ALPHA_UNIQUE)
+    beta_chunk = await _seed_doc(client, DOC_BETA, SHARED_ENTITIES + BETA_UNIQUE)
     print(f"  alpha doc: {DOC_ALPHA} (chunk {alpha_chunk[:24]}..., "
           f"{len(SHARED_ENTITIES) + len(ALPHA_UNIQUE)} entities)")
     print(f"  beta doc : {DOC_BETA} (chunk {beta_chunk[:24]}..., "
@@ -210,7 +211,7 @@ async def main() -> None:
 
     print()
     print("Post-recompute KG state:")
-    _show_state(client)
+    await _show_state(client)
 
     print()
     print("In Neo4j Desktop -> Query, try:")
@@ -235,7 +236,7 @@ async def main() -> None:
         return
 
     print("Deleting smoke nodes...")
-    _delete_smoke_nodes(client)
+    await _delete_smoke_nodes(client)
     print("Done.")
     await client.close()
 

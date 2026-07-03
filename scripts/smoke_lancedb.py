@@ -31,9 +31,17 @@ import argparse
 import asyncio
 from datetime import datetime
 
-from knowledge_agent.config import get_settings
-from knowledge_agent.search.client import get_search_client
-from knowledge_agent.search.schema import CHUNKS_TABLE
+# Switch the process to the smoke-test LanceDB path (lancedb_test) BEFORE
+# any import that triggers `get_settings()`. Mirrors the other smokes so
+# this script writes synthetic chunks to the test store, never the real
+# corpus's `./lance_data`.
+from knowledge_agent.config import load_test_env
+
+load_test_env()
+
+from knowledge_agent.config import get_settings  # noqa: E402
+from knowledge_agent.search.client import get_search_client  # noqa: E402
+from knowledge_agent.search.schema import CHUNKS_TABLE  # noqa: E402
 
 SYNTHETIC_DOC_ID = "smoke-doc-001"
 

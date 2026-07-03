@@ -1,7 +1,7 @@
 """L7 linking pass - connect :Entity nodes to canonical ontology terms.
 
 After an ontology has been imported (its `:MeSHTerm` / `:GOTerm` nodes
-+ hierarchy edges live in Neo4j) AND L6a has written `:Entity` nodes
++ hierarchy edges live in Neo4j) AND L6 has written `:Entity` nodes
 from chunk text, this module wires the two together. For each entity
 it looks up its `key` against an in-memory label+synonym index built
 from the imported ontology, and writes `(:Entity)-[:CANONICAL_TO]->
@@ -106,6 +106,8 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_mesh_writes.delete_imported,
         "download_size_mb": ontology_mesh_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_mesh_writes._MESH_PROVENANCE,
+        "download_url": ontology_mesh_writes.MESH_DOWNLOAD_URL,
+        "download_filename": ontology_mesh_writes.MESH_CACHE_FILENAME,
     },
     "go": {
         "term_label": GO_TERM_LABEL,
@@ -114,6 +116,8 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_go_writes.delete_imported,
         "download_size_mb": ontology_go_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_go_writes._GO_PROVENANCE,
+        "download_url": ontology_go_writes.GO_DOWNLOAD_URL,
+        "download_filename": ontology_go_writes.GO_CACHE_FILENAME,
     },
     "hpo": {
         "term_label": HPO_TERM_LABEL,
@@ -122,6 +126,8 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_hpo_writes.delete_imported,
         "download_size_mb": ontology_hpo_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_hpo_writes._HPO_PROVENANCE,
+        "download_url": ontology_hpo_writes.HPO_DOWNLOAD_URL,
+        "download_filename": ontology_hpo_writes.HPO_CACHE_FILENAME,
     },
     "uberon": {
         "term_label": UBERON_TERM_LABEL,
@@ -130,6 +136,8 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_uberon_writes.delete_imported,
         "download_size_mb": ontology_uberon_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_uberon_writes._UBERON_PROVENANCE,
+        "download_url": ontology_uberon_writes.UBERON_DOWNLOAD_URL,
+        "download_filename": ontology_uberon_writes.UBERON_CACHE_FILENAME,
     },
     "mondo": {
         "term_label": MONDO_TERM_LABEL,
@@ -138,6 +146,8 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_mondo_writes.delete_imported,
         "download_size_mb": ontology_mondo_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_mondo_writes._MONDO_PROVENANCE,
+        "download_url": ontology_mondo_writes.MONDO_DOWNLOAD_URL,
+        "download_filename": ontology_mondo_writes.MONDO_CACHE_FILENAME,
     },
     "chebi": {
         "term_label": CHEBI_TERM_LABEL,
@@ -146,6 +156,8 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_chebi_writes.delete_imported,
         "download_size_mb": ontology_chebi_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_chebi_writes._CHEBI_PROVENANCE,
+        "download_url": ontology_chebi_writes.CHEBI_DOWNLOAD_URL,
+        "download_filename": ontology_chebi_writes.CHEBI_CACHE_FILENAME,
     },
     "eco": {
         "term_label": ECO_TERM_LABEL,
@@ -154,6 +166,8 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_eco_writes.delete_imported,
         "download_size_mb": ontology_eco_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_eco_writes._ECO_PROVENANCE,
+        "download_url": ontology_eco_writes.ECO_DOWNLOAD_URL,
+        "download_filename": ontology_eco_writes.ECO_CACHE_FILENAME,
     },
     "so": {
         "term_label": SO_TERM_LABEL,
@@ -162,6 +176,8 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_so_writes.delete_imported,
         "download_size_mb": ontology_so_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_so_writes._SO_PROVENANCE,
+        "download_url": ontology_so_writes.SO_DOWNLOAD_URL,
+        "download_filename": ontology_so_writes.SO_CACHE_FILENAME,
     },
     "pr": {
         "term_label": PR_TERM_LABEL,
@@ -170,6 +186,8 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_pr_writes.delete_imported,
         "download_size_mb": ontology_pr_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_pr_writes._PR_PROVENANCE,
+        "download_url": ontology_pr_writes.PR_DOWNLOAD_URL,
+        "download_filename": ontology_pr_writes.PR_CACHE_FILENAME,
     },
     "cl": {
         "term_label": CL_TERM_LABEL,
@@ -178,6 +196,8 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_cl_writes.delete_imported,
         "download_size_mb": ontology_cl_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_cl_writes._CL_PROVENANCE,
+        "download_url": ontology_cl_writes.CL_DOWNLOAD_URL,
+        "download_filename": ontology_cl_writes.CL_CACHE_FILENAME,
     },
     "po": {
         "term_label": PO_TERM_LABEL,
@@ -186,6 +206,8 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_po_writes.delete_imported,
         "download_size_mb": ontology_po_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_po_writes._PO_PROVENANCE,
+        "download_url": ontology_po_writes.PO_DOWNLOAD_URL,
+        "download_filename": ontology_po_writes.PO_CACHE_FILENAME,
     },
     "foodon": {
         "term_label": FOODON_TERM_LABEL,
@@ -194,6 +216,8 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_foodon_writes.delete_imported,
         "download_size_mb": ontology_foodon_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_foodon_writes._FOODON_PROVENANCE,
+        "download_url": ontology_foodon_writes.FOODON_DOWNLOAD_URL,
+        "download_filename": ontology_foodon_writes.FOODON_CACHE_FILENAME,
     },
     "envo": {
         "term_label": ENVO_TERM_LABEL,
@@ -202,6 +226,8 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_envo_writes.delete_imported,
         "download_size_mb": ontology_envo_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_envo_writes._ENVO_PROVENANCE,
+        "download_url": ontology_envo_writes.ENVO_DOWNLOAD_URL,
+        "download_filename": ontology_envo_writes.ENVO_CACHE_FILENAME,
     },
     "ncbitaxon": {
         "term_label": NCBITAXON_TERM_LABEL,
@@ -210,6 +236,8 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_ncbitaxon_writes.delete_imported,
         "download_size_mb": ontology_ncbitaxon_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_ncbitaxon_writes._NCBITAXON_PROVENANCE,
+        "download_url": ontology_ncbitaxon_writes.NCBITAXON_DOWNLOAD_URL,
+        "download_filename": ontology_ncbitaxon_writes.NCBITAXON_CACHE_FILENAME,
     },
     "obi": {
         "term_label": OBI_TERM_LABEL,
@@ -218,6 +246,8 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_obi_writes.delete_imported,
         "download_size_mb": ontology_obi_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_obi_writes._OBI_PROVENANCE,
+        "download_url": ontology_obi_writes.OBI_DOWNLOAD_URL,
+        "download_filename": ontology_obi_writes.OBI_CACHE_FILENAME,
     },
     "efo": {
         "term_label": EFO_TERM_LABEL,
@@ -226,6 +256,8 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_efo_writes.delete_imported,
         "download_size_mb": ontology_efo_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_efo_writes._EFO_PROVENANCE,
+        "download_url": ontology_efo_writes.EFO_DOWNLOAD_URL,
+        "download_filename": ontology_efo_writes.EFO_CACHE_FILENAME,
     },
     "dron": {
         "term_label": DRON_TERM_LABEL,
@@ -234,6 +266,8 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_dron_writes.delete_imported,
         "download_size_mb": ontology_dron_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_dron_writes._DRON_PROVENANCE,
+        "download_url": ontology_dron_writes.DRON_DOWNLOAD_URL,
+        "download_filename": ontology_dron_writes.DRON_CACHE_FILENAME,
     },
     "fibo": {
         "term_label": FIBO_TERM_LABEL,
@@ -242,6 +276,12 @@ ONTOLOGY_REGISTRY: dict[str, dict[str, Any]] = {
         "delete_fn": ontology_fibo_writes.delete_imported,
         "download_size_mb": ontology_fibo_writes.DOWNLOAD_SIZE_MB,
         "provenance": ontology_fibo_writes._FIBO_PROVENANCE,
+        # FIBO is multi-file: ~70 RDF files walked from a GitHub API
+        # listing. Uses a custom download_fn instead of a single URL,
+        # and a subdir instead of a single filename for the delete
+        # side. `download_subdir` matches `FIBO_CACHE_SUBDIR`.
+        "download_fn": ontology_fibo_writes._walk_and_cache_fibo,
+        "download_subdir": ontology_fibo_writes.FIBO_CACHE_SUBDIR,
     },
 }
 

@@ -10,14 +10,30 @@ We don't actually CALL extract() here - that's covered per-adapter in
 test_entity_extractors_llm.py and the per-adapter test modules.
 """
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 
 from knowledge_agent.entity_extractors import (
     Mention,
+    effective_entity_types,
+    extract_union,
     get_extractor,
     get_known_labels,
     validate_entity_types,
 )
+
+_GET_EXTRACTOR = "knowledge_agent.entity_extractors.get_extractor"
+
+
+def _fake(mentions=(), default_labels=None):
+    """A stand-in extractor module: async `extract` returning `mentions`,
+    plus an optional `DEFAULT_LABELS` constant."""
+    ns = SimpleNamespace(extract=AsyncMock(return_value=list(mentions)))
+    if default_labels is not None:
+        ns.DEFAULT_LABELS = tuple(default_labels)
+    return ns
 
 
 # ---- public re-exports ----
@@ -177,3 +193,123 @@ def test_validate_entity_types_unknown_adapter_propagates_value_error():
     the API."""
     with pytest.raises(ValueError, match="not_a_real_adapter"):
         validate_entity_types("not_a_real_adapter", ["X"])
+
+
+# ---- effective_entity_types (entity_types_mode) ----
+
+
+def test_effective_entity_types_replace_is_passthrough():
+    """'replace' mode returns the user's list unchanged."""
+    assert effective_entity_types("gliner", ["GENE"], "replace") == ["GENE"]
+
+
+def test_effective_entity_types_empty_is_passthrough_regardless_of_mode():
+    """Empty list -> adapter falls back to its own defaults, so mode is
+    irrelevant and we pass the empty list straight through."""
+    assert effective_entity_types("gliner", [], "add") == []
+    assert effective_entity_types("gliner", [], "replace") == []
+
+
+def test_effective_entity_types_add_merges_adapter_defaults(monkeypatch):
+    """'add' mode = user's list + the adapter's DEFAULT_LABELS, deduped,
+    user labels first."""
+    monkeypatch.setattr(
+        _GET_EXTRACTOR, lambda n: _fake(default_labels=("PERSON", "ORG")),
+    )
+    assert effective_entity_types("gliner", ["GENE"], "add") == [
+        "GENE", "PERSON", "ORG",
+    ]
+
+
+def test_effective_entity_types_add_dedupes(monkeypatch):
+    """A user label already in the defaults isn't duplicated."""
+    monkeypatch.setattr(
+        _GET_EXTRACTOR, lambda n: _fake(default_labels=("GENE", "ORG")),
+    )
+    assert effective_entity_types("gliner", ["GENE"], "add") == ["GENE", "ORG"]
+
+
+def test_effective_entity_types_add_no_defaults_equals_replace(monkeypatch):
+    """An adapter with no DEFAULT_LABELS (LLM, HunFlair2): 'add' == the
+    user's list (nothing to merge)."""
+    monkeypatch.setattr(_GET_EXTRACTOR, lambda n: _fake())  # no DEFAULT_LABELS
+    assert effective_entity_types("llm", ["GENE"], "add") == ["GENE"]
+
+
+# ---- extract_union (priority-ordered union) ----
+
+
+async def test_extract_union_empty_names_returns_empty():
+    """No extractors selected -> no work, empty result."""
+    assert await extract_union("text", [], []) == []
+
+
+async def test_extract_union_single_extractor_stamps_its_source(monkeypatch):
+    """One extractor: every surviving mention records that one adapter."""
+    monkeypatch.setattr(
+        _GET_EXTRACTOR,
+        lambda n: _fake([Mention(raw_text="Aspirin", entity_type="CHEMICAL")]),
+    )
+    out = await extract_union("t", ["ner"], [])
+    assert len(out) == 1
+    assert out[0].sources == ("ner",)
+
+
+async def test_extract_union_base_owns_overlapping_span(monkeypatch):
+    """Same span from two adapters -> base (index 0) keeps its type;
+    every finder is recorded in sources."""
+    ner = _fake([Mention(raw_text="Aspirin", entity_type="CHEMICAL")])
+    llm = _fake([Mention(raw_text="aspirin", entity_type="DRUG")])
+    mods = {"ner": ner, "llm": llm}
+    monkeypatch.setattr(_GET_EXTRACTOR, lambda n: mods[n])
+
+    out = await extract_union("t", ["ner", "llm"], [])
+    assert len(out) == 1
+    assert out[0].entity_type == "CHEMICAL"  # base wins the type
+    assert out[0].sources == ("ner", "llm")  # both recorded
+
+
+async def test_extract_union_later_extractor_adds_new_spans(monkeypatch):
+    """The gap-filler contributes spans the base didn't find."""
+    ner = _fake([Mention(raw_text="BRCA1", entity_type="GENE")])
+    llm = _fake([Mention(raw_text="EGFR", entity_type="GENE")])
+    mods = {"ner": ner, "llm": llm}
+    monkeypatch.setattr(_GET_EXTRACTOR, lambda n: mods[n])
+
+    out = await extract_union("t", ["ner", "llm"], [])
+    by_key = {m.raw_text: m for m in out}
+    assert set(by_key) == {"BRCA1", "EGFR"}
+    assert by_key["BRCA1"].sources == ("ner",)
+    assert by_key["EGFR"].sources == ("llm",)
+
+
+async def test_extract_union_normalizes_span_for_overlap(monkeypatch):
+    """Overlap detection is case + whitespace insensitive, so surface
+    variants of the same span merge onto one node."""
+    ner = _fake([Mention(raw_text="T cells", entity_type="CELL")])
+    llm = _fake([Mention(raw_text="  t   cells ", entity_type="CELLTYPE")])
+    mods = {"ner": ner, "llm": llm}
+    monkeypatch.setattr(_GET_EXTRACTOR, lambda n: mods[n])
+
+    out = await extract_union("t", ["ner", "llm"], [])
+    assert len(out) == 1
+    assert out[0].entity_type == "CELL"  # base owner
+    assert out[0].sources == ("ner", "llm")
+
+
+async def test_extract_union_forwards_llm_kwargs_only_to_llm(monkeypatch):
+    """model/temperature go ONLY to the 'llm' adapter; other adapters
+    are called with just (text, effective_types)."""
+    ner = _fake([])
+    llm = _fake([])
+    mods = {"ner": ner, "llm": llm}
+    monkeypatch.setattr(_GET_EXTRACTOR, lambda n: mods[n])
+
+    await extract_union(
+        "t", ["ner", "llm"], ["GENE"],
+        llm_kwargs={"model": "m", "temperature": 0.0},
+    )
+    ner.extract.assert_awaited_once_with("t", ["GENE"])
+    llm.extract.assert_awaited_once_with(
+        "t", ["GENE"], model="m", temperature=0.0,
+    )

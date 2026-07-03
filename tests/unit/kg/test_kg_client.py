@@ -202,7 +202,7 @@ async def test_ensure_constraints_applies_all_statements():
     # 27 constraints: document_doc_id, document_openalex_id,
     # document_doi, artifact_doc_id, author_openalex_id,
     # venue_openalex_id, topic_openalex_id, chunk_chunk_id,
-    # entity_key_node_key (L6a), mesh_term_id, go_term_id,
+    # entity_key_node_key (L6), mesh_term_id, go_term_id,
     # hpo_term_id, uberon_term_id, mondo_term_id, chebi_term_id,
     # eco_term_id, so_term_id, pr_term_id, cl_term_id, po_term_id,
     # foodon_term_id, envo_term_id, ncbitaxon_term_id, obi_term_id,

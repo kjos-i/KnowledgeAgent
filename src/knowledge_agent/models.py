@@ -114,6 +114,25 @@ class RetrievedChunk(BaseModel):
     source_url: str | None = Field(default=None)
     section: str | None = Field(default=None)
     page: int | None = Field(default=None)
+    # ---- multimodal fields (nullable; only set for figure chunks) ----
+    content_type: str | None = Field(
+        default=None,
+        description=(
+            "LanceDB row's content_type: 'text', 'figure', 'row', "
+            "'json_object', 'code', 'transcript', etc. Populated by "
+            "the retriever from the LanceDB row so the synthesizer / "
+            "GUI can distinguish figure chunks from text chunks."
+        ),
+    )
+    image_ref: str | None = Field(
+        default=None,
+        description=(
+            "LanceDB row's image_ref — path to the picture file for "
+            "figure chunks. Absolute for standalone image inputs; "
+            "corpus-folder path for extracted PDF/Word/PPT pictures. "
+            "None on text chunks."
+        ),
+    )
 
 
 class KGHit(BaseModel):
@@ -157,6 +176,35 @@ class ChunkSource(BaseModel):
         description=(
             "Optional short verbatim quote from the chunk that anchors the "
             "citation. Useful for the GUI to show the supporting text."
+        ),
+    )
+    content_type: str | None = Field(
+        default=None,
+        description=(
+            "Optional chunk content type: 'text' (default), 'figure' "
+            "(multimodal picture citation), 'row', 'json_object', "
+            "'code', 'transcript', etc. None means the caller (usually "
+            "the synthesizer) didn't populate it — the GUI falls back "
+            "to text-chunk render. Populated by the synthesizer from "
+            "the retrieval hit's row metadata."
+        ),
+    )
+    image_ref: str | None = Field(
+        default=None,
+        description=(
+            "For figure chunks: path to the picture file. Absolute "
+            "path for standalone image inputs; corpus-folder path "
+            "(`<corpus folder>/figures/<doc_id>/<i>.png`) for pictures "
+            "extracted from PDF / Word / PPT. None for text chunks."
+        ),
+    )
+    page: int | None = Field(
+        default=None,
+        description=(
+            "Optional page number for figure chunks extracted from "
+            "PDFs / Word / PPT — used by the citation format "
+            "'[Figure N, page P of DocTitle]'. None for text chunks "
+            "or when the source didn't expose a page number."
         ),
     )
 

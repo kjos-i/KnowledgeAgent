@@ -77,7 +77,7 @@ def _client_with_driver(driver: RecordingDriver) -> Neo4jClient:
     return client
 
 
-DOC_ID = "test-doc-l6a"
+DOC_ID = "test-doc-l6"
 
 
 # ---- write_entities: input validation + exception propagation ----
@@ -221,6 +221,41 @@ async def test_write_entities_llm_mentions_carry_none_offset_and_confidence():
     rows = params["rows"]
     assert rows[0]["offset"] is None
     assert rows[0]["confidence"] is None
+
+
+async def test_write_entities_carries_union_sources_onto_edge():
+    """A mention stamped with `sources` (which extractor(s) found it in
+    the priority-ordered union) writes those onto the :MENTIONS edge,
+    and the Cypher sets `m.sources`."""
+    driver = await _run_write(
+        [
+            (
+                "c0",
+                [
+                    Mention(
+                        raw_text="Aspirin",
+                        entity_type="CHEMICAL",
+                        sources=("hunflair2", "llm"),
+                    )
+                ],
+            )
+        ]
+    )
+    cypher, params = driver.sessions[0].calls[0]
+    rows = params["rows"]
+    assert rows[0]["sources"] == ["hunflair2", "llm"]
+    assert "m.sources = row.sources" in cypher
+
+
+async def test_write_entities_sources_defaults_empty_when_unset():
+    """A plain mention with no `sources` (e.g. a hand-built one) writes an
+    empty list, not null - keeps the edge property shape consistent."""
+    driver = await _run_write(
+        [("c0", [Mention(raw_text="brca1", entity_type="GENE")])]
+    )
+    _cypher, params = driver.sessions[0].calls[0]
+    rows = params["rows"]
+    assert rows[0]["sources"] == []
 
 
 async def test_write_entities_uses_chunk_id_to_link_mentions_edge():

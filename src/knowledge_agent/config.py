@@ -197,17 +197,21 @@ class Settings(BaseSettings):
         ),
     )
 
-    # ----- Ontology cache (L7). Source ontology files (MeSH RDF, GO OBO,
-    # ChEBI, etc.) are downloaded once and reused across ingestion runs.
-    ontology_cache_dir: Path = Field(
-        default=Path.home() / ".research-literature-agent" / "ontology-cache",
+    # ----- Ontology downloads (L7). Source ontology files (MeSH RDF, GO
+    # OBO, ChEBI, etc.) are downloaded once and reused across ingestion runs.
+    ontology_downloads_dir: Path = Field(
+        default=(
+            Path.home() / ".research-literature-agent" / "ontology-downloads"
+        ),
         description=(
-            "Directory for cached ontology source files. Each enabled L7 "
-            "ontology layer downloads its file here on first use; subsequent "
-            "ingestions reuse the cached copy. Cache is safe to delete - "
-            "files re-download on next ingest. Default sits under the user "
-            "home directory (not in the repo); override via ONTOLOGY_CACHE_DIR "
-            "for a custom location."
+            "Directory for downloaded ontology source files. Each enabled "
+            "L7 ontology layer downloads its file here on first use; "
+            "subsequent ingestions reuse the local copy. Safe to delete — "
+            "files re-download on next ingest. Default sits under the "
+            "user home directory (not in the repo); override via "
+            "ONTOLOGY_DOWNLOADS_DIR for a custom location. Renamed from "
+            "ontology_cache_dir on 2026-07-02 — 'cache' was misleading "
+            "given the size (100s of MB) and lifetime (persistent)."
         ),
     )
 
@@ -525,7 +529,7 @@ class Settings(BaseSettings):
     entity_extractor_model: str = Field(
         default="claude-haiku-4-5-20251001",
         description=(
-            "Model used by the LLM entity-extractor adapter (L6a). Haiku is "
+            "Model used by the LLM entity-extractor adapter (L6). Haiku is "
             "cheap + fast - one call per chunk, the input is short and the "
             "task is straightforward span extraction. ~$0.05 per 200-chunk "
             "paper at current Haiku pricing. Only consulted when "
@@ -747,7 +751,7 @@ class Settings(BaseSettings):
         description=(
             "Max chunks the ingest pipeline processes in parallel within "
             "a single document. asyncio.Semaphore bound on the per-chunk "
-            "fan-out (embedding + L6a entity extraction + L8 triples "
+            "fan-out (embedding + L6 entity extraction + L8 triples "
             "extraction). Higher = faster but more concurrent LLM calls "
             "(bumps up against rate limits)."
         ),

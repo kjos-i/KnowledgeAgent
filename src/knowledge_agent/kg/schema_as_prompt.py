@@ -351,7 +351,7 @@ _PART_OF_BLOCK = f"""\
 
 
 def _entity_block(config: CorpusConfig) -> str:
-    """:Entity block (L6a). Lists the corpus's configured `entity_types`
+    """:Entity block (L6). Lists the corpus's configured `entity_types`
     so the LLM scopes Cypher to the labels actually present. Empty list
     in config = open vocabulary (entity_type values are LLM-chosen
     SCREAMING_SNAKE_CASE); the block flags that explicitly."""
@@ -378,7 +378,7 @@ def _entity_block(config: CorpusConfig) -> str:
         "                           string matching (already case-insensitive).\n"
         "    entity_type   (str)  : category label (e.g. GENE, DISEASE, CHEMICAL).\n"
         "    canonicalised (bool) : true = linked to a canonical ontology (L6b+);\n"
-        "                           false = raw extracted mention only (L6a default).\n"
+        "                           false = raw extracted mention only (L6 default).\n"
         f"  {types_clause}"
     )
 
@@ -650,7 +650,7 @@ _RELATED_TO_BLOCK = f"""\
     nodes (default threshold). UNDIRECTED - match in either direction:
       MATCH (d)-[:{RELATED_TO_REL}]-(other) ...
     Rebuilt per-doc on every ingest / backfill; reflects the current
-    L6a entity overlap.
+    L6 entity overlap.
     Edge properties:
       shared_entities (list) : entity keys (lowercased) shared by both endpoints.
       shared_count    (int)  : size of shared_entities; >= 2. Higher = stronger

@@ -13,6 +13,7 @@ import pytest
 from knowledge_agent import embedder_factory
 from knowledge_agent.embedder_factory import (
     clear_cache,
+    embed_chunks,
     embed_texts,
 )
 from knowledge_agent.llm_factory import ConfigError
@@ -192,3 +193,147 @@ async def test_huggingface_dispatch_no_api_key_needed():
         # No api key on settings — HF runs locally.
         result = await embed_texts(["x"], input_type="document")
     assert result == [[0.5, 0.5]]
+
+
+# ---- multimodal (embed_chunks + _voyage_multimodal_call) ----
+
+
+class _FakeChunk:
+    """Minimal duck for ParsedChunk / LanceDB row shape."""
+
+    def __init__(self, text: str = "", image_ref: str | None = None):
+        self.text = text
+        self.image_ref = image_ref
+
+
+def _fake_pil_open(path):
+    """Replace PIL.Image.open with a marker so tests don't touch disk."""
+
+    class _M:
+        def __init__(self, p):
+            self.path = p
+
+        def convert(self, mode):
+            return self
+
+    return _M(path)
+
+
+async def test_embed_chunks_empty_returns_empty_no_api_call():
+    """Empty input short-circuits before any get_settings call."""
+    assert await embed_chunks([]) == []
+
+
+async def test_embed_chunks_voyage_multimodal_builds_mixed_inputs(tmp_path):
+    """Voyage path: figure with text → [text, image]; figure with empty
+    text → [image]; text-only chunk → [text]. Each aligned 1:1."""
+    settings = _FakeSettings(
+        embedding_provider="voyage", voyage_api_key="pa-stub"
+    )
+    fake_client = MagicMock()
+    fake_client.multimodal_embed.return_value = MagicMock(
+        embeddings=[[0.1], [0.2], [0.3]]
+    )
+    fig1 = tmp_path / "1.png"
+    fig1.write_bytes(b"fake-png-bytes")
+    fig2 = tmp_path / "2.png"
+    fig2.write_bytes(b"fake-png-bytes")
+
+    chunks = [
+        _FakeChunk(text="caption", image_ref=str(fig1)),  # figure + caption
+        _FakeChunk(text="", image_ref=str(fig2)),         # figure + empty text
+        _FakeChunk(text="hello"),                         # plain text chunk
+    ]
+    with (
+        patch(
+            "knowledge_agent.embedder_factory.get_settings",
+            return_value=settings,
+        ),
+        patch(
+            "knowledge_agent.embedder_factory._build_voyage_client",
+            return_value=fake_client,
+        ),
+        patch(
+            "PIL.Image.open", side_effect=_fake_pil_open,
+        ),
+    ):
+        result = await embed_chunks(chunks)
+
+    assert result == [[0.1], [0.2], [0.3]]
+    fake_client.multimodal_embed.assert_called_once()
+    inputs = fake_client.multimodal_embed.call_args.kwargs["inputs"]
+    # inputs[0]: figure with caption → [text, image] (2 items)
+    assert len(inputs[0]) == 2
+    assert inputs[0][0] == "caption"
+    # inputs[1]: figure with empty text → [image] (1 item, PIL image)
+    assert len(inputs[1]) == 1
+    # inputs[2]: plain text chunk → [text] (1 item, string)
+    assert inputs[2] == ["hello"]
+
+
+async def test_embed_chunks_non_voyage_warns_on_figure(caplog):
+    """Non-Voyage providers can't do multimodal — figure chunks embed
+    from text only and a warning fires once per call."""
+    settings = _FakeSettings(
+        embedding_provider="openai",
+        openai_api_key="sk-openai",
+    )
+    fake_embedder = MagicMock()
+    fake_embedder.aembed_documents = AsyncMock(return_value=[[0.9], [0.8]])
+    chunks = [
+        _FakeChunk(text="figure caption", image_ref="/tmp/pic.png"),
+        _FakeChunk(text="plain text"),
+    ]
+    with (
+        patch(
+            "knowledge_agent.embedder_factory.get_settings",
+            return_value=settings,
+        ),
+        patch(
+            "knowledge_agent.embedder_factory._build_langchain_embedder",
+            return_value=fake_embedder,
+        ),
+        caplog.at_level("WARNING"),
+    ):
+        result = await embed_chunks(chunks)
+
+    assert result == [[0.9], [0.8]]
+    # LangChain embedder gets ONLY text (image_ref ignored).
+    fake_embedder.aembed_documents.assert_called_once_with(
+        ["figure caption", "plain text"],
+    )
+    # Warning surfaced once per call, naming the provider.
+    warnings = [
+        r for r in caplog.records
+        if r.levelname == "WARNING"
+        and "does not support multimodal" in r.getMessage()
+    ]
+    assert len(warnings) == 1
+    assert "openai" in warnings[0].getMessage()
+
+
+async def test_embed_chunks_accepts_dict_rows_from_lancedb():
+    """re_embed feeds LanceDB row dicts to `embed_chunks`; must
+    duck-type on `text` + `image_ref` keys."""
+    settings = _FakeSettings(
+        embedding_provider="voyage", voyage_api_key="pa-stub"
+    )
+    fake_client = MagicMock()
+    fake_client.multimodal_embed.return_value = MagicMock(
+        embeddings=[[0.7]]
+    )
+    rows = [{"text": "row text", "image_ref": None}]
+    with (
+        patch(
+            "knowledge_agent.embedder_factory.get_settings",
+            return_value=settings,
+        ),
+        patch(
+            "knowledge_agent.embedder_factory._build_voyage_client",
+            return_value=fake_client,
+        ),
+    ):
+        result = await embed_chunks(rows)
+    assert result == [[0.7]]
+    inputs = fake_client.multimodal_embed.call_args.kwargs["inputs"]
+    assert inputs == [["row text"]]

@@ -225,6 +225,19 @@ def test_split_oversized_breaks_long_text_on_line_boundaries():
 # ---- dispatcher integration ----
 
 
+def _dispatcher_config():
+    """CorpusConfig instance whose fields the code parser ignores.
+
+    parse_document takes a CorpusConfig even though non-docling
+    parsers don't read from it; we pass a minimal instance so the
+    signature is satisfied.
+    """
+    from knowledge_agent.kg.corpus_config import CorpusConfig, LayerFlags
+    return CorpusConfig(
+        allowed_types=["Paper"], layers=LayerFlags(chunks=True),
+    )
+
+
 def test_dispatcher_routes_py_to_code_parser(tmp_path: Path):
     """End-to-end: the top-level parse_document picks code_parser."""
     from knowledge_agent.ingestion.parse import parse_document
@@ -239,7 +252,7 @@ def test_dispatcher_routes_py_to_code_parser(tmp_path: Path):
         children=[_FakeNode("function_definition", 0, len(source))],
     )
     with _patch_parser(root):
-        chunks = parse_document(path)
+        chunks = parse_document(path, _dispatcher_config())
 
     assert len(chunks) == 1
     assert chunks[0].content_type == "code"
@@ -258,7 +271,7 @@ def test_dispatcher_routes_ts_to_code_parser(tmp_path: Path):
         children=[_FakeNode("function_declaration", 0, len(source))],
     )
     with _patch_parser(root):
-        chunks = parse_document(path)
+        chunks = parse_document(path, _dispatcher_config())
 
     assert len(chunks) == 1
 

@@ -4,7 +4,7 @@ end-to-end against the real stores.
 This is the heaviest integration tier file: each test exercises
 docling parsing + Voyage embeddings + OpenAlex resolution + LanceDB
 write + Neo4j L1-L5 write at minimum. To keep cost predictable, all
-tests use a corpus config with the higher layers (L6a entities, L7
+tests use a corpus config with the higher layers (L6 entities, L7
 ontology linking, L8 triples, L9 cross-doc) OFF — those are tested
 in isolation by the per-layer integration tests + manually verified
 in `scripts/smoke_pipeline.py`.
@@ -38,12 +38,11 @@ pytestmark = pytest.mark.integration
 def _minimal_corpus_config() -> CorpusConfig:
     """Corpus config with L1-L5 + LanceDB on, everything else OFF.
 
-    Keeps the integration tests cheap: no L6a (no LLM-per-chunk
+    Keeps the integration tests cheap: no L6 (no LLM-per-chunk
     extraction cost), no L7 (no ~600 MB MeSH download), no L8/L9/L10.
     The per-layer integration tests cover those flags individually.
     """
     return CorpusConfig(
-        domain="generic",
         layers=LayerFlags(
             openalex_papers=True,
             chunks=True,
@@ -103,7 +102,7 @@ async def test_ingest_document_full_l1_l5_path(
     assert result.kg_topics_ok is True
     # KG L5 chunks.
     assert result.kg_chunks_ok is True
-    # L6a OFF → False but no error.
+    # L6 OFF → False but no error.
     assert result.kg_entities_ok is False
     # L8-L10 OFF.
     assert result.kg_triples_ok is False

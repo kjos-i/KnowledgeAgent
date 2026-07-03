@@ -1,14 +1,14 @@
 """Smoke test for L8 typed-relation triples (with manual-inspection
 pause).
 
-L8 layers entity-to-entity edges on top of L6a mentions: for each
-chunk that has L6a entities, the LLM is shown the chunk text + the
+L8 layers entity-to-entity edges on top of L6 mentions: for each
+chunk that has L6 entities, the LLM is shown the chunk text + the
 extracted entity vocabulary and asked to emit `(subject, predicate,
 object)` triples constrained to a fixed predicate vocabulary (the 15
 edge types in `schema.TRIPLE_PREDICATE_RELS`). Out-of-vocabulary
 predicates are dropped per row.
 
-This smoke pre-seeds a synthetic :Chunk + L6a entities, runs the L8
+This smoke pre-seeds a synthetic :Chunk + L6 entities, runs the L8
 extractor on the synthetic chunk text, and writes the resulting
 triples via `client.write_triples`. The graph state is then surfaced
 for manual inspection.
@@ -83,7 +83,7 @@ SYNTHETIC_CHUNK_TEXT = (
 # Pre-seeded entity vocabulary for this chunk. The triples extractor
 # is shown these as the allowed subject/object identifiers; predicates
 # come from the constrained vocabulary in schema.TRIPLE_PREDICATE_RELS.
-# Format: (lowercased_key, entity_type) — matches how L6a stores the
+# Format: (lowercased_key, entity_type) — matches how L6 stores the
 # :Entity composite key.
 SYNTHETIC_ENTITIES: list[tuple[str, str]] = [
     ("metformin", "drug"),
@@ -94,48 +94,48 @@ SYNTHETIC_ENTITIES: list[tuple[str, str]] = [
 ]
 
 
-def _delete_smoke_nodes(client) -> None:
+async def _delete_smoke_nodes(client) -> None:
     """Drop synthetic doc + chunk + entities + L8 edges. Idempotent."""
     chunk_id = make_chunk_id(SYNTHETIC_DOC_ID, SYNTHETIC_CHUNK_INDEX)
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         # Drop L8 edges sourced by this doc. The pipe-union covers all
         # 15 predicate types.
         rel_union = "|".join(TRIPLE_PREDICATE_RELS)
-        session.run(
+        await session.run(
             f"MATCH ()-[r:{rel_union}]->() "
             f"WHERE r.doc_id = $doc_id "
             f"DELETE r",
             doc_id=SYNTHETIC_DOC_ID,
         )
         # Drop :MENTIONS from this chunk, then orphan-GC :Entity.
-        session.run(
+        await session.run(
             f"MATCH (c:{CHUNK_LABEL} {{chunk_id: $chunk_id}})"
             f"-[m:MENTIONS]->(e:{ENTITY_LABEL}) DELETE m",
             chunk_id=chunk_id,
         )
-        session.run(
+        await session.run(
             f"MATCH (e:{ENTITY_LABEL}) "
             f"WHERE NOT (e)<-[:MENTIONS]-() "
             f"DETACH DELETE e"
         )
         # Drop chunk + doc.
-        session.run(
+        await session.run(
             f"MATCH (c:{CHUNK_LABEL} {{doc_id: $doc_id}}) DETACH DELETE c",
             doc_id=SYNTHETIC_DOC_ID,
         )
-        session.run(
+        await session.run(
             f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) DETACH DELETE d",
             doc_id=SYNTHETIC_DOC_ID,
         )
 
 
-def _seed_l5_and_l6a(client) -> str:
+async def _seed_l5_and_l6(client) -> str:
     """Write synthetic :Document + :Chunk + :Entity nodes (pre-L8
     state). Returns the chunk_id."""
     chunk_id = make_chunk_id(SYNTHETIC_DOC_ID, SYNTHETIC_CHUNK_INDEX)
-    with client.driver.session() as session:
+    async with client.driver.session() as session:
         # Focal + chunk.
-        session.run(
+        await session.run(
             f"MERGE (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) "
             f"ON CREATE SET d.in_corpus = true, d:Paper "
             f"MERGE (c:{CHUNK_LABEL} {{chunk_id: $chunk_id}}) "
@@ -148,7 +148,7 @@ def _seed_l5_and_l6a(client) -> str:
         )
         # Entities + :MENTIONS edges (one per entity, start_char=0 stub).
         for key, etype in SYNTHETIC_ENTITIES:
-            session.run(
+            await session.run(
                 f"MERGE (e:{ENTITY_LABEL} {{key: $key, type: $type}}) "
                 f"WITH e "
                 f"MATCH (c:{CHUNK_LABEL} {{chunk_id: $chunk_id}}) "
@@ -162,17 +162,18 @@ def _seed_l5_and_l6a(client) -> str:
     return chunk_id
 
 
-def _show_state(client) -> None:
+async def _show_state(client) -> None:
     """Read back the L8 edges sourced by this doc + summarise by predicate."""
     rel_union = "|".join(TRIPLE_PREDICATE_RELS)
-    with client.driver.session() as session:
-        rows = list(session.run(
+    async with client.driver.session() as session:
+        result = await session.run(
             f"MATCH (s:{ENTITY_LABEL})-[r:{rel_union}]->(o:{ENTITY_LABEL}) "
             f"WHERE r.doc_id = $doc_id "
             f"RETURN type(r) AS predicate, s.key AS subject, "
             f"o.key AS object ORDER BY predicate, subject",
             doc_id=SYNTHETIC_DOC_ID,
-        ))
+        )
+        rows = await result.data()
     print(f"  L8 edges sourced by this doc: {len(rows)}")
     by_predicate: dict[str, int] = {}
     for r in rows:
@@ -199,10 +200,10 @@ async def main() -> None:
     await client.ensure_constraints()
 
     print("Clearing any leftover smoke nodes from previous runs...")
-    _delete_smoke_nodes(client)
+    await _delete_smoke_nodes(client)
 
-    print(f"Seeding L5 + L6a state ({SYNTHETIC_DOC_ID})...")
-    chunk_id = _seed_l5_and_l6a(client)
+    print(f"Seeding L5 + L6 state ({SYNTHETIC_DOC_ID})...")
+    chunk_id = await _seed_l5_and_l6(client)
     print(f"  doc_id  : {SYNTHETIC_DOC_ID}")
     print(f"  chunk_id: {chunk_id}")
     print(f"  entities: {len(SYNTHETIC_ENTITIES)}")
@@ -224,7 +225,7 @@ async def main() -> None:
 
     print()
     print("Post-write KG state:")
-    _show_state(client)
+    await _show_state(client)
 
     print()
     print("In Neo4j Desktop -> Query, try:")
@@ -248,7 +249,7 @@ async def main() -> None:
         return
 
     print("Deleting smoke nodes...")
-    _delete_smoke_nodes(client)
+    await _delete_smoke_nodes(client)
     print("Done.")
     await client.close()
 

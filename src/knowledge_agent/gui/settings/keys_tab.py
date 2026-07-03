@@ -1,8 +1,13 @@
-"""Settings → Keys sub-tab — API + database secrets.
+"""Settings → Keys sub-tab — provider API keys.
 
-Five keyring-backed fields: Anthropic, OpenAI, Google, Voyage API keys
-plus the Neo4j password. The user fills only the ones the active
-providers actually need; no provider is privileged.
+Four keyring-backed fields: Anthropic, OpenAI, Google, Voyage API
+keys. The user fills only the ones the active providers actually
+need; no provider is privileged.
+
+Neo4j password does NOT live here — it's per-corpus (stored under
+`neo4j-{corpus_name}` in the keyring) and managed via the Library
+tab (Create New Dataset writes it on corpus creation; the
+Select Dataset corpus-switch handler pushes it to env).
 
 Save UX:
   - On blur (matches the sibling app). Clicking in + out of a field
@@ -49,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 
 class KeysTab:
-    """API keys + Neo4j password — all keyring-backed, save-on-blur."""
+    """Provider API keys — all keyring-backed, save-on-blur."""
 
     def __init__(self, app: GuiApp) -> None:
         self.app = app
@@ -96,12 +101,13 @@ class KeysTab:
             controls=[
                 view_header("Keys"),
                 ft.Text(
-                    "API keys + Neo4j password. Stored in your OS "
-                    "keyring (Windows Credential Manager / macOS "
-                    "Keychain / Linux Secret Service), never written "
-                    "to disk in plain text. Fill in only the ones the "
-                    "providers you use need. Leave blank to keep the "
-                    "existing value.",
+                    "Provider API keys. Stored in your OS keyring "
+                    "(Windows Credential Manager / macOS Keychain / "
+                    "Linux Secret Service), never written to disk in "
+                    "plain text. Fill only what the providers you use "
+                    "need. Leave blank to keep the existing value. "
+                    "Neo4j passwords are per-corpus — set them via "
+                    "Library → Create New Dataset.",
                     size=11,
                     color=ft.Colors.GREY_500,
                 ),

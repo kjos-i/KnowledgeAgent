@@ -38,10 +38,13 @@ that registry, no changes here.
 """
 
 import logging
+import shutil
 from dataclasses import dataclass
+from pathlib import Path
 
 from knowledge_agent.errors import ErrorDetail
 from knowledge_agent.kg.client import get_kg_client
+from knowledge_agent.kg.ontology_helpers import ensure_cached, get_downloads_dir
 from knowledge_agent.kg.ontology_linking import ONTOLOGY_REGISTRY
 from knowledge_agent.kg.ontology_provenance import OntologyProvenance
 from knowledge_agent.kg.ontology_xrefs import (
@@ -49,6 +52,40 @@ from knowledge_agent.kg.ontology_xrefs import (
     count_xref_edges,
 )
 from knowledge_agent.kg.schema import ONTOLOGY_SUB_LABELS
+
+
+def _safe_downloads_dir() -> Path | None:
+    """Downloads dir with the same fallback pattern used by the GUI's
+    `_sync_downloads_dir`: try `get_settings()`, then the Settings
+    field default, then None.
+
+    Needed because `get_downloads_dir()` propagates `ValidationError`
+    when `Settings()` can't construct (typically because
+    `neo4j_password` isn't set at Installs-tab-open time — it's stored
+    per-corpus, not globally). The Installs tab reads on-disk state
+    BEFORE any corpus is loaded, so we can't rely on Settings being
+    constructible. This helper gives disk-probes a working directory
+    reference even in that window; the download / delete-download
+    execute ops still use `get_downloads_dir()` (which will succeed
+    once the user is far enough along to actually press the button).
+    """
+    try:
+        return get_downloads_dir()
+    except Exception:
+        pass
+    from knowledge_agent.config import Settings
+    model_field = Settings.model_fields.get("ontology_downloads_dir")
+    if model_field is None:
+        return None
+    default = model_field.default
+    if default is None:
+        return None
+    default = Path(default)
+    try:
+        default.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    return default
 
 # Re-export so callers continue to do
 # `from knowledge_agent.kg.ontology_lifecycle import OntologyProvenance`.
@@ -752,7 +789,7 @@ class InstallCrossDocXrefsPlan:
       - `n_existing_l10_edges`: live count of `:RELATED_BY_XREF`
         edges currently in the graph. Tells the user how much L10
         work has accumulated so far.
-      - `entities_layer_on`: dependency check — L10 needs L6a
+      - `entities_layer_on`: dependency check — L10 needs L6
         entities. The `CorpusConfig` validator already enforces this
         at flip time, but the plan still reports the live state for
         transparency.
@@ -990,3 +1027,319 @@ def get_extractor_candidates(
     # Sort by overlap size (desc) then name (asc) for determinism.
     candidates.sort(key=lambda item: (-len(item[1]), item[0]))
     return tuple(candidates)
+
+
+# ---------------------------------------------------------------------------
+# Download / delete-download ops (disk-only, no Neo4j touch).
+#
+# Split 2026-07-03: `import_ontology_execute` (above) still does the
+# full download + parse + Neo4j-write path because ingest orchestrates
+# it via `ensure_ontology_imported`. The Installs tab needs a DIFFERENT
+# pair of ops — pure disk actions so the user can pre-download an
+# ontology file without triggering graph writes, or wipe the on-disk
+# cache without touching Neo4j. Node writes remain ingest's job.
+# ---------------------------------------------------------------------------
+
+
+def _ontology_download_paths(entry: dict) -> list[Path]:
+    """Return the on-disk paths this ontology's download occupies.
+
+    Single-file ontologies return `[<downloads_dir>/<filename>]`. FIBO
+    returns every `.rdf` file under `<downloads_dir>/fibo/**`. Missing
+    files are still returned so the caller can decide (a caller that
+    wants total size sums live-existing bytes only; a caller that wants
+    to delete filters by `path.exists()`).
+
+    Uses `_safe_downloads_dir()` so a Settings-construction failure at
+    Installs-tab-open time (before a corpus is loaded, so
+    `neo4j_password` isn't set) doesn't propagate to the probe.
+    """
+    downloads = _safe_downloads_dir()
+    if downloads is None:
+        return []
+    if "download_filename" in entry:
+        return [downloads / entry["download_filename"]]
+    if "download_subdir" in entry:
+        subdir = downloads / entry["download_subdir"]
+        if not subdir.exists():
+            return []
+        return [p for p in subdir.rglob("*") if p.is_file()]
+    return []
+
+
+def get_ontology_download_bytes(ontology_name: str) -> int:
+    """Public probe: total on-disk bytes for `ontology_name`'s files.
+
+    Returns 0 for unknown entries and for ontologies whose files
+    haven't been downloaded. Used by the Installs tab status chip.
+    Never raises — silent 0 on lookup miss OR Settings-construction
+    failure (see `_safe_downloads_dir`).
+    """
+    entry = ONTOLOGY_REGISTRY.get(ontology_name)
+    if entry is None:
+        return 0
+    total = 0
+    for path in _ontology_download_paths(entry):
+        try:
+            if path.is_file():
+                total += path.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def is_ontology_downloaded(ontology_name: str) -> bool:
+    """Public probe: is the ontology's file(s) present on disk?
+
+    Single-file: True iff the exact filename exists. Multi-file (FIBO):
+    True iff the subdir has at least one file. Returns False for
+    unknown ontologies OR when `Settings()` can't construct (Installs
+    tab opens before a corpus is loaded, so `neo4j_password` isn't set
+    — see `_safe_downloads_dir`).
+    """
+    entry = ONTOLOGY_REGISTRY.get(ontology_name)
+    if entry is None:
+        return False
+    downloads = _safe_downloads_dir()
+    if downloads is None:
+        return False
+    if "download_filename" in entry:
+        return (downloads / entry["download_filename"]).exists()
+    if "download_subdir" in entry:
+        subdir = downloads / entry["download_subdir"]
+        return subdir.exists() and any(subdir.rglob("*.rdf"))
+    return False
+
+
+# ---- download_ontology_download (disk only) ----
+
+
+@dataclass(frozen=True)
+class DownloadOntologyDownloadPlan:
+    """Plan for downloading an ontology's source file(s) to disk.
+
+    Distinct from `ImportOntologyPlan` — this op TOUCHES DISK ONLY,
+    no Neo4j write. Ingest is responsible for the graph write path
+    via `ensure_ontology_imported`.
+
+    `provenance` reused from the registry for the summary block —
+    same shape as import_ontology_plan so the dialog can show
+    publisher / license / size before the user commits.
+    """
+
+    ontology_name: str
+    already_downloaded: bool
+    on_disk_bytes: int
+    provenance: OntologyProvenance | None
+    download_size_mb: int
+
+    @property
+    def summary(self) -> str:
+        if self.already_downloaded:
+            mb = self.on_disk_bytes / (1024 * 1024)
+            return (
+                f"{self.ontology_name} already downloaded "
+                f"({mb:.1f} MB on disk)."
+            )
+        if self.provenance is None:
+            return (
+                f"Download {self.ontology_name} source file "
+                f"(~{self.download_size_mb} MB)."
+            )
+        p = self.provenance
+        return (
+            f"Download {p.full_name} ({p.ontology_name}) — "
+            f"{p.download_size_mb} MB {p.file_format} from "
+            f"{p.publisher} under {p.license}."
+        )
+
+
+@dataclass(frozen=True)
+class DownloadOntologyDownloadResult:
+    """Outcome of `download_ontology_download_execute`.
+
+    `did_download` is False when the file was already on disk.
+    `download_ok=False` means the HTTP fetch raised; `download_error`
+    carries the exception message. `on_disk_bytes` is the post-download
+    total so the GUI can update its status chip in one round-trip.
+    """
+
+    ontology_name: str
+    did_download: bool
+    download_ok: bool
+    download_error: str | None
+    on_disk_bytes: int
+
+
+def download_ontology_download_plan(
+    ontology_name: str,
+) -> DownloadOntologyDownloadPlan:
+    """Build a plan for downloading the named ontology's file(s) to disk."""
+    if ontology_name not in ONTOLOGY_REGISTRY:
+        raise ValueError(
+            f"download_ontology_download_plan: unknown ontology "
+            f"{ontology_name!r}. Known: {sorted(ONTOLOGY_REGISTRY)}."
+        )
+    entry = ONTOLOGY_REGISTRY[ontology_name]
+    return DownloadOntologyDownloadPlan(
+        ontology_name=ontology_name,
+        already_downloaded=is_ontology_downloaded(ontology_name),
+        on_disk_bytes=get_ontology_download_bytes(ontology_name),
+        provenance=entry.get("provenance"),
+        download_size_mb=entry["download_size_mb"],
+    )
+
+
+async def download_ontology_download_execute(
+    plan: DownloadOntologyDownloadPlan,
+) -> DownloadOntologyDownloadResult:
+    """Fetch the ontology's source file(s) to `ontology_downloads_dir`.
+
+    Idempotent — files already present are not re-fetched. Neo4j is
+    NOT touched; the ingest pipeline handles node writes when a corpus
+    with this ontology enabled runs.
+
+    Single-file ontologies (17 of 18): `ensure_cached(url, filename)`.
+    FIBO: dispatches to `_walk_and_cache_fibo` which walks ~70 RDF
+    files from the GitHub API. Either raises on network / IO failure —
+    caught here at the orchestrator boundary so the user-facing result
+    still carries `download_ok=False` rather than the raw exception.
+    """
+    if plan.already_downloaded:
+        return DownloadOntologyDownloadResult(
+            ontology_name=plan.ontology_name,
+            did_download=False, download_ok=True,
+            download_error=None, on_disk_bytes=plan.on_disk_bytes,
+        )
+    entry = ONTOLOGY_REGISTRY[plan.ontology_name]
+    try:
+        if "download_fn" in entry:
+            # FIBO — multi-file walk.
+            await entry["download_fn"]()
+        else:
+            await ensure_cached(
+                entry["download_url"], entry["download_filename"],
+            )
+    except Exception as exc:
+        logger.warning(
+            "download_ontology_download_execute (%s) failed: %r",
+            plan.ontology_name, exc,
+        )
+        return DownloadOntologyDownloadResult(
+            ontology_name=plan.ontology_name,
+            did_download=True, download_ok=False,
+            download_error=repr(exc),
+            on_disk_bytes=get_ontology_download_bytes(plan.ontology_name),
+        )
+    return DownloadOntologyDownloadResult(
+        ontology_name=plan.ontology_name,
+        did_download=True, download_ok=True,
+        download_error=None,
+        on_disk_bytes=get_ontology_download_bytes(plan.ontology_name),
+    )
+
+
+# ---- delete_ontology_download (disk only) ----
+
+
+@dataclass(frozen=True)
+class DeleteOntologyDownloadPlan:
+    """Plan for wiping an ontology's on-disk source file(s).
+
+    Distinct from `DeleteOntologyPlan` — that op DETACH DELETEs the
+    Neo4j term nodes; THIS op wipes the disk cache. Both are safe to
+    run independently.
+    """
+
+    ontology_name: str
+    is_downloaded: bool
+    on_disk_bytes: int
+
+    @property
+    def summary(self) -> str:
+        if not self.is_downloaded:
+            return (
+                f"{self.ontology_name} has no downloaded file(s) "
+                f"— nothing to delete."
+            )
+        mb = self.on_disk_bytes / (1024 * 1024)
+        return (
+            f"Delete {self.ontology_name} source file(s) from disk "
+            f"({mb:.1f} MB will be freed). Neo4j term nodes stay."
+        )
+
+
+@dataclass(frozen=True)
+class DeleteOntologyDownloadResult:
+    """Outcome of `delete_ontology_download_execute`.
+
+    `did_delete` is False when there was nothing on disk. `delete_ok`
+    is False when the file/directory unlink failed. `freed_bytes` is
+    the on-disk size BEFORE the wipe.
+    """
+
+    ontology_name: str
+    did_delete: bool
+    delete_ok: bool
+    delete_error: str | None
+    freed_bytes: int
+
+
+def delete_ontology_download_plan(
+    ontology_name: str,
+) -> DeleteOntologyDownloadPlan:
+    """Build a plan for wiping the named ontology's on-disk files."""
+    if ontology_name not in ONTOLOGY_REGISTRY:
+        raise ValueError(
+            f"delete_ontology_download_plan: unknown ontology "
+            f"{ontology_name!r}. Known: {sorted(ONTOLOGY_REGISTRY)}."
+        )
+    return DeleteOntologyDownloadPlan(
+        ontology_name=ontology_name,
+        is_downloaded=is_ontology_downloaded(ontology_name),
+        on_disk_bytes=get_ontology_download_bytes(ontology_name),
+    )
+
+
+async def delete_ontology_download_execute(
+    plan: DeleteOntologyDownloadPlan,
+) -> DeleteOntologyDownloadResult:
+    """Remove the ontology's on-disk file(s).
+
+    Single-file: `path.unlink()`. FIBO: `shutil.rmtree` on the subdir.
+    Neo4j is NOT touched. If the user also wants graph nodes wiped
+    they run `delete_ontology_execute` (the separate op) OR let ingest
+    with all ontologies disabled do the wipe (future feature).
+    """
+    if not plan.is_downloaded:
+        return DeleteOntologyDownloadResult(
+            ontology_name=plan.ontology_name,
+            did_delete=False, delete_ok=True,
+            delete_error=None, freed_bytes=0,
+        )
+    entry = ONTOLOGY_REGISTRY[plan.ontology_name]
+    freed = plan.on_disk_bytes
+    try:
+        if "download_filename" in entry:
+            path = get_downloads_dir() / entry["download_filename"]
+            if path.exists():
+                path.unlink()
+        elif "download_subdir" in entry:
+            subdir = get_downloads_dir() / entry["download_subdir"]
+            if subdir.exists():
+                shutil.rmtree(subdir)
+    except Exception as exc:
+        logger.warning(
+            "delete_ontology_download_execute (%s) failed: %r",
+            plan.ontology_name, exc,
+        )
+        return DeleteOntologyDownloadResult(
+            ontology_name=plan.ontology_name,
+            did_delete=True, delete_ok=False,
+            delete_error=repr(exc), freed_bytes=0,
+        )
+    return DeleteOntologyDownloadResult(
+        ontology_name=plan.ontology_name,
+        did_delete=True, delete_ok=True,
+        delete_error=None, freed_bytes=freed,
+    )
