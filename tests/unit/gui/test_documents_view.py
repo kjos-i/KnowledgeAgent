@@ -9,6 +9,10 @@ without a running loop).
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
 import flet as ft
 
 from knowledge_agent.gui.library.documents_view import (
@@ -151,6 +155,58 @@ def test_reingest_missing_file_sets_status(fake_app):
         {"doc_id": "d1", "title": "T", "source_path": "/no/such/file_xyz.pdf"}
     )
     assert "not found" in dv.op_status.value.lower()
+
+
+def test_do_reingest_happy_path_runs_pipeline_and_reloads(fake_app):
+    """The confirmed re-ingest loads the corpus config, re-runs the full
+    pipeline on the one source file (preserving its labels), then reloads
+    the list and clears the busy flag."""
+    dv = _view(fake_app)
+    dv.app.gui_config.corpus_config_path = "/corpus/corpus.toml"  # non-None
+    row = {
+        "doc_id": "d1",
+        "title": "Aspirin and the heart",
+        "source_path": "/papers/aspirin.pdf",
+        "main_label": "Document",
+        "sub_label": "Paper",
+    }
+    fake_config = object()
+    with (
+        patch(
+            "knowledge_agent.kg.corpus_config.load_corpus_config",
+            return_value=fake_config,
+        ),
+        patch(
+            "knowledge_agent.ingestion.pipeline.ingest_document",
+            new=AsyncMock(),
+        ) as ingest,
+        patch.object(dv, "reload", new=AsyncMock()) as reload,
+    ):
+        asyncio.run(dv._do_reingest(row))
+
+    ingest.assert_awaited_once()
+    args, kwargs = ingest.call_args
+    assert args[0] == Path("/papers/aspirin.pdf")
+    assert args[1] is fake_config
+    assert args[2] == "Document"
+    assert args[3] == "Paper"
+    assert kwargs["preserve_existing_labels"] is True
+    reload.assert_awaited_once()  # list refreshed after the re-ingest
+    assert dv._op_busy is False  # busy flag cleared on success
+    assert "re-ingested" in dv.op_status.value.lower()
+
+
+def test_do_reingest_no_active_corpus_short_circuits(fake_app):
+    """No corpus_config_path → bail before touching the pipeline."""
+    dv = _view(fake_app)
+    dv.app.gui_config.corpus_config_path = None
+    with patch(
+        "knowledge_agent.ingestion.pipeline.ingest_document",
+        new=AsyncMock(),
+    ) as ingest:
+        asyncio.run(dv._do_reingest({"source_path": "/papers/x.pdf", "title": "X"}))
+    ingest.assert_not_awaited()
+    assert "no active corpus" in dv.op_status.value.lower()
 
 
 def test_no_resolve_all_controls_in_table(fake_app):

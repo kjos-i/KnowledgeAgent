@@ -10,7 +10,7 @@ that end-to-end path in later slices.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from knowledge_agent.gui.app import GuiApp, _LoadedFile
 from knowledge_agent.gui.config_store import GuiConfig
@@ -246,3 +246,75 @@ async def test_save_chat_empty_chat_appends_system_message(fake_page: MagicMock)
     await app.on_save_chat(MagicMock())
     msg = app.chat_panel.append_system.call_args.args[0]
     assert "empty" in msg.lower()
+
+
+# ---- on_send: input-mode routing (the chat-router gating) ----
+#
+# on_send chains chat-router + agent graph. These two pin the branching
+# the input-mode redesign hinges on: the router runs ONLY in
+# conversational mode, and direct modes go straight to the graph. The
+# collaborators (provider-key check, corpus load, diag, graph, router)
+# are stubbed; `_invoke_state_for_input_mode` itself is covered in
+# test_app_input_mode.
+
+
+async def test_on_send_direct_cypher_skips_router_and_invokes_graph(fake_page: MagicMock):
+    """Direct-Cypher mode bypasses the chat router entirely and invokes
+    the graph with the user's text as `user_cypher` + KG-forced mode."""
+    app = _make_app(fake_page)
+    app.busy = False
+    app.messages = []
+    app.gui_config.input_mode = "direct_cypher"
+    cypher = "MATCH (n) RETURN n LIMIT 5"
+    app.chat_panel.get_input_text = MagicMock(return_value=cypher)
+
+    fake_graph = MagicMock()
+    fake_graph.ainvoke = AsyncMock(return_value={})  # no final_answer branch
+    with (
+        patch.object(app, "_missing_active_provider_key", return_value=None),
+        patch.object(app, "_load_corpus_config", return_value=MagicMock()),
+        patch.object(app, "_diag"),
+        patch("knowledge_agent.gui.app.get_chat_router") as get_router,
+        patch("knowledge_agent.gui.app.graph", fake_graph),
+    ):
+        await app.on_send(MagicMock())
+
+    get_router.assert_not_called()  # router skipped in direct modes
+    fake_graph.ainvoke.assert_awaited_once()
+    state = fake_graph.ainvoke.call_args.args[0]
+    assert state["user_cypher"] == cypher
+    assert state["retrieval_mode"] == "neo4j_only"
+
+
+async def test_on_send_conversational_runs_router_and_gates_retrieval(fake_page: MagicMock):
+    """Conversational mode runs the chat router; when it decides NOT to
+    retrieve (ready_to_retrieve=False), the graph is never invoked."""
+    app = _make_app(fake_page)
+    app.busy = False
+    app.messages = []
+    app.gui_config.input_mode = "conversational"
+    app.chat_panel.get_input_text = MagicMock(return_value="tell me about aspirin")
+
+    router = MagicMock()
+    router.ainvoke = AsyncMock(
+        return_value=MagicMock(
+            response="Could you clarify?",
+            ready_to_retrieve=False,
+            search_query="",
+        )
+    )
+    fake_graph = MagicMock()
+    fake_graph.ainvoke = AsyncMock(return_value={})
+    with (
+        patch.object(app, "_missing_active_provider_key", return_value=None),
+        patch.object(app, "_load_corpus_config", return_value=MagicMock()),
+        patch.object(app, "_diag"),
+        patch("knowledge_agent.gui.app.get_chat_router", return_value=router) as get_router,
+        patch("knowledge_agent.gui.app.graph", fake_graph),
+    ):
+        await app.on_send(MagicMock())
+
+    get_router.assert_called_once()  # router ran in conversational mode
+    router.ainvoke.assert_awaited_once()
+    fake_graph.ainvoke.assert_not_awaited()  # not ready → no retrieval leg
+    app.chat_panel.append_assistant.assert_called_once_with("Could you clarify?")

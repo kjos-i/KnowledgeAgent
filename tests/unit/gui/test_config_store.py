@@ -22,6 +22,8 @@ from knowledge_agent.gui.config_store import (
     ConfigError,
     GuiConfig,
     apply_keys_to_env,
+    apply_llm_to_env,
+    apply_retrieval_to_env,
     get_api_key,
     load_config,
     save_config,
@@ -38,6 +40,47 @@ def test_default_config_has_safe_defaults():
     assert cfg.input_mode == "conversational"
     assert cfg.direct_retrieve is False
     assert cfg.keep_loaded_file_on_clear is True
+
+
+def test_default_config_router_and_info_icon_fields():
+    """GUI-only additions: the chat router's curated default model + the
+    global info-icon toggle default (on = teaching-program-friendly)."""
+    cfg = GuiConfig()
+    assert cfg.chat_router_model == "claude-haiku-4-5-20251001"
+    assert cfg.show_info_icons is True
+
+
+# ---- env bridges: GUI-only fields must NOT reach the backend ----
+
+
+def test_apply_retrieval_bridges_direct_retrieve_not_input_mode(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """`direct_retrieve` reaches the backend via DIRECT_RETRIEVAL. But
+    `input_mode` is a GUI-only routing decision (consumed by app.on_send,
+    not backend Settings) → NOT bridged. The removed `skip_query_builder`
+    likewise leaves no SKIP_QUERY_BUILDER var."""
+    # Isolate every env mutation to a throwaway copy.
+    monkeypatch.setattr(os, "environ", dict(os.environ))
+    apply_retrieval_to_env(GuiConfig(direct_retrieve=True, input_mode="direct_cypher"))
+    assert os.environ["DIRECT_RETRIEVAL"] == "true"
+    assert "INPUT_MODE" not in os.environ
+    assert "SKIP_QUERY_BUILDER" not in os.environ
+
+
+def test_apply_llm_does_not_bridge_chat_router(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The chat router is a GUI-only supervisor stand-in — the backend
+    graph is the tool it will call, so the router's model must not leak
+    into backend env. `apply_llm_to_env` bridges the 4 graph-node models
+    but NO CHAT_ROUTER_* var."""
+    monkeypatch.setattr(os, "environ", dict(os.environ))
+    apply_llm_to_env(GuiConfig(chat_router_model="claude-opus-4-8"))
+    # The graph nodes DO bridge (sanity that the function ran).
+    assert os.environ["MODE_CLASSIFIER_MODEL"]
+    assert "CHAT_ROUTER_MODEL" not in os.environ
+    assert "CHAT_ROUTER_TEMPERATURE" not in os.environ
 
 
 def test_top_k_rejects_zero():

@@ -184,6 +184,36 @@ def test_agent_direct_retrieval_skips_synthesizer(
     assert len(answer.chunk_sources) > 0
 
 
+def test_agent_direct_cypher_passes_user_cypher_through_verbatim(
+    seeded_corpus: str,
+) -> None:
+    """Direct-Cypher input mode: `user_cypher` in state is run verbatim.
+
+    cypher_builder does NOT rewrite it (no LLM call) — the final state's
+    `cypher_query` equals the exact Cypher we passed. The neo4j_retriever's
+    read-only rails still apply, and the seeded :Document node yields a
+    row the synthesizer turns into a structured answer with kg_sources.
+    """
+    user_cypher = "MATCH (d:Document) RETURN d.doc_id AS doc_id LIMIT 5"
+    state = asyncio.run(
+        graph.ainvoke(
+            {
+                "query": "which documents are in the corpus?",
+                "retrieval_mode": "neo4j_only",
+                "user_cypher": user_cypher,
+            }
+        )
+    )
+
+    # Verbatim passthrough — the whole point of Direct-Cypher mode.
+    assert state.get("cypher_query") == user_cypher
+    answer = state.get("final_answer")
+    assert answer is not None
+    assert isinstance(answer, AgentAnswer)
+    # The seeded corpus has at least one :Document → at least one KG row.
+    assert len(answer.kg_sources) > 0
+
+
 # ---------------------------------------------------------------------------
 # Modes 2-6 — kg-touching modes.
 #

@@ -24,6 +24,8 @@ from knowledge_agent.kg.corpus_config import (
     EntityConfig,
     LayerFlags,
     OntologyConfig,
+    corpus_figures_dir,
+    corpus_folder,
     load_corpus_config,
 )
 
@@ -885,3 +887,35 @@ def test_cross_doc_xrefs_false_skips_dependency_check():
         layers=LayerFlags(chunks=True, cross_doc_xrefs=False),
     )
     assert config.layers.cross_doc_xrefs is False
+
+
+# ---- figures directory (multimodal path derivation) ----
+#
+# The B2 rework moved figures from INSIDE lancedb to BESIDE it, at
+# `<corpus>/figures/<doc_id>/`. These pin that location so a regression
+# back to the old `<lancedb>/figures/` layout is caught.
+
+
+def test_corpus_folder_is_toml_parent(tmp_path):
+    toml = tmp_path / "mycorpus" / "corpus.toml"
+    assert corpus_folder(toml) == tmp_path / "mycorpus"
+
+
+def test_corpus_figures_dir_is_sibling_of_lancedb(tmp_path):
+    """Figures live at `<corpus>/figures/<doc_id>/` — a sibling of
+    `<corpus>/lancedb/`, NOT nested inside the LanceDB directory."""
+    toml = tmp_path / "mycorpus" / "corpus.toml"
+    d = corpus_figures_dir(toml, "doc-123")
+    assert d == tmp_path / "mycorpus" / "figures" / "doc-123"
+    # Explicitly NOT under a lancedb/ segment (the pre-2026-07-04 layout).
+    assert "lancedb" not in d.parts
+
+
+def test_corpus_figures_dir_created_idempotently(tmp_path):
+    """The dir is mkdir'd on call (parents + exist_ok) so callers can
+    write PNGs immediately; a second call on the same doc_id is a no-op."""
+    toml = tmp_path / "c" / "corpus.toml"
+    d1 = corpus_figures_dir(toml, "d1")
+    assert d1.is_dir()
+    d2 = corpus_figures_dir(toml, "d1")  # must not raise
+    assert d1 == d2
