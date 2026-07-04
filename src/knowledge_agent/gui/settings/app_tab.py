@@ -78,6 +78,7 @@ class AppTab:
         self.restore_last_corpus_checkbox: ft.Checkbox | None = None
         self.keep_loaded_checkbox: ft.Checkbox | None = None
         self.debug_mode_checkbox: ft.Checkbox | None = None
+        self.show_info_icons_checkbox: ft.Checkbox | None = None
         self.chips_row: ft.Row | None = None
         self.rerun_button: ft.Button | None = None
         self.active_corpus_text: ft.Text | None = None
@@ -106,6 +107,11 @@ class AppTab:
             label="Keep loaded file when clearing chat",
             value=self.app.gui_config.keep_loaded_file_on_clear,
             on_change=self.on_keep_loaded_changed,
+        )
+        self.show_info_icons_checkbox = ft.Checkbox(
+            label="Show (i) help icons",
+            value=self.app.gui_config.show_info_icons,
+            on_change=self.on_show_info_icons_changed,
         )
 
         # Block 2: Diagnostics.
@@ -208,6 +214,7 @@ class AppTab:
                 ft.Text("App behaviour", weight=ft.FontWeight.BOLD),
                 self.restore_last_corpus_checkbox,
                 self.keep_loaded_checkbox,
+                self.show_info_icons_checkbox,
                 ft.Divider(),
                 # ---- Block 2: Diagnostics ------------------------------
                 ft.Text("Diagnostics", weight=ft.FontWeight.BOLD),
@@ -274,6 +281,25 @@ class AppTab:
             else "next startup will begin with no corpus selected"
         )
         self.app.page.update()
+
+    def on_show_info_icons_changed(self, e: ft.Event) -> None:
+        """Persist show_info_icons + flip every (i) help icon live."""
+        if self.status is None or self.show_info_icons_checkbox is None:
+            return
+        previous = self.app.gui_config.show_info_icons
+        self.app.gui_config.show_info_icons = bool(self.show_info_icons_checkbox.value)
+        try:
+            save_config(self.app.gui_config)
+        except ConfigError as exc:
+            self.app.gui_config.show_info_icons = previous
+            self.show_info_icons_checkbox.value = previous
+            self.status.value = f"could not save: {exc}"
+            self.app.page.update()
+            return
+        self.status.value = (
+            "help icons shown" if self.app.gui_config.show_info_icons else "help icons hidden"
+        )
+        self.app.set_info_icons_visible(self.app.gui_config.show_info_icons)
 
     def on_keep_loaded_changed(self, e: ft.Event) -> None:
         """Persist keep_loaded_file_on_clear, with rollback on save failure."""

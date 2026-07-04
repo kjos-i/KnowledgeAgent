@@ -276,8 +276,9 @@ _CROSS_STORE_MODES = ("lancedb_then_neo4j", "neo4j_then_lancedb")
 async def cypher_builder_node(state: AgentState) -> dict[str, Any]:
     """Write a Cypher query from the user's question + the KG schema.
 
-    Sibling of `query_builder_node` but for the Neo4j side. No skip toggle:
-    natural language can't run as Cypher, so there's no raw-query fallback.
+    Sibling of `query_builder_node` but for the Neo4j side. No query-rewrite
+    skip (natural language can't run as Cypher) - but `state["user_cypher"]`
+    (Direct-Cypher input mode) is passed through verbatim; see below.
 
     Mode-aware behaviour:
     - Modes `lancedb_then_neo4j` + `neo4j_then_lancedb`: the system prompt
@@ -286,7 +287,16 @@ async def cypher_builder_node(state: AgentState) -> dict[str, Any]:
     - Mode `lancedb_then_neo4j` (Lance ran first): the user message
       prepends a "context from LanceDB" block with the retrieved chunks so
       the LLM can reference their doc_ids directly in its Cypher.
+
+    Direct-Cypher mode: when `state["user_cypher"]` is set, it's passed
+    through verbatim (no LLM call) - the read-only rails still apply in
+    the neo4j_retriever.
     """
+    user_cypher = state.get("user_cypher")
+    if user_cypher:
+        logger.info("cypher_builder: skipped (using user-supplied Cypher verbatim)")
+        return {"cypher_query": user_cypher}
+
     settings = get_settings()
     mode = effective_mode(state, settings)
 

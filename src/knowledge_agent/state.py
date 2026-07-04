@@ -72,6 +72,12 @@ class AgentState(TypedDict, total=False):
     is skipped - the agent returns retrieved chunks without a synthesised
     answer."""
 
+    user_cypher: str | None
+    """Per-invocation raw Cypher supplied by the user (Direct-Cypher input
+    mode). When set, `cypher_builder` passes it through verbatim instead of
+    generating Cypher from the query. Read-only constraints are still
+    enforced by the neo4j_retriever at execution time."""
+
     # ---- intermediate fields (set by nodes during graph execution) ----
 
     routed_mode: str | None

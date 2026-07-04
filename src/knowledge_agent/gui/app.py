@@ -111,6 +111,7 @@ class GuiApp:
     evaluation_tab: EvaluationTab = field(init=False)
     file_picker: ft.FilePicker = field(init=False)
     _send_task: asyncio.Task | None = field(default=None, init=False)
+    _info_icons: list[ft.IconButton] = field(default_factory=list, init=False)
 
     # ----- diagnostic chatter ----------------------------------------------
 
@@ -124,6 +125,18 @@ class GuiApp:
         """
         if self.gui_config.debug_mode:
             self.chat_panel.append_system(msg)
+
+    # ----- info-icon registry ----------------------------------------------
+
+    def register_info_icon(self, button: ft.IconButton) -> None:
+        """Track an `(i)` help icon so `set_info_icons_visible` can flip it."""
+        self._info_icons.append(button)
+
+    def set_info_icons_visible(self, visible: bool) -> None:
+        """Show/hide every registered (i) help icon at once (live)."""
+        for button in self._info_icons:
+            button.visible = visible
+        self.page.update()
 
     # ----- API-key preflight ------------------------------------------------
 
@@ -221,7 +234,8 @@ class GuiApp:
         try:
             try:
                 router = get_chat_router(
-                    temperature=self.gui_config.chat_router_temperature,
+                    self.gui_config.chat_router_model,
+                    self.gui_config.chat_router_temperature,
                 )
             except Exception as exc:
                 self.chat_panel.append_system(
@@ -251,9 +265,13 @@ class GuiApp:
                 return
 
             mode = self.gui_config.retrieval_mode
-            self._diag(f"retrieving (mode={mode}) ...")
+            # The RFA-style router distils the conversation into a
+            # standalone search query when it fires; use it (fall back to
+            # the raw message if it left `search_query` empty).
+            retrieval_query = (output.search_query or "").strip() or text
+            self._diag(f"retrieving (mode={mode}, query={retrieval_query!r}) ...")
             invoke_state: dict[str, Any] = {
-                "query": text,
+                "query": retrieval_query,
                 "corpus_config": corpus_config,
                 "top_k": self.gui_config.top_k,
                 "skip_query_builder": self.gui_config.skip_query_builder,

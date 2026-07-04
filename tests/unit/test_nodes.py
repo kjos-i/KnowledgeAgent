@@ -207,6 +207,16 @@ def test_query_builder_calls_llm_with_structured_output():
 # ---- cypher_builder_node ----
 
 
+def test_cypher_builder_passes_through_user_cypher_verbatim():
+    """Direct-Cypher mode: state['user_cypher'] is returned verbatim as
+    cypher_query with NO LLM call and without needing corpus_config (the
+    read-only rails apply later, in the neo4j_retriever)."""
+    result = asyncio.run(
+        cypher_builder_node({"query": "ignored", "user_cypher": "MATCH (n) RETURN n LIMIT 5"})
+    )
+    assert result == {"cypher_query": "MATCH (n) RETURN n LIMIT 5"}
+
+
 def test_cypher_builder_calls_llm_with_structured_output():
     rewrite = CypherQueryRewrite(cypher_query="MATCH (d:Document) RETURN d LIMIT 5")
     mock_llm = _mock_llm_returning(rewrite)

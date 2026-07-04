@@ -152,6 +152,10 @@ class GuiConfig(BaseModel):
     )
 
     # ---- chat router --------------------------------------------------
+    chat_router_model: str = Field(
+        default="claude-haiku-4-5-20251001",
+        description="Model used by the GUI chat-router (supervisor stand-in).",
+    )
     chat_router_temperature: float = Field(
         default=0.0,
         ge=0.0,
@@ -379,6 +383,14 @@ class GuiConfig(BaseModel):
     )
 
     # ---- app behaviour ------------------------------------------------
+    show_info_icons: bool = Field(
+        default=True,
+        description=(
+            "Show the small (i) help icons throughout the GUI. On = a "
+            "teaching-mode UI with contextual help on settings + features; "
+            "off = hide every icon for a clean, expert UI."
+        ),
+    )
     keep_loaded_file_on_clear: bool = Field(
         default=True,
         description=(

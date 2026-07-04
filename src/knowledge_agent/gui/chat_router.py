@@ -19,36 +19,46 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from knowledge_agent.config import get_settings
 from knowledge_agent.llm_factory import get_llm
 
 CHAT_SYSTEM_PROMPT = """\
-You are a research literature assistant. The user asks questions that
-are answered from a corpus of research papers indexed in a hybrid
-retrieval store (vector + BM25 over chunks) and a knowledge graph
-(citations, authors, venues, topics, entities, triples). You decide,
-each turn, whether to retrieve from the corpus or to reply without
-retrieving.
+You are a research-literature assistant with a corpus of research
+papers indexed in a hybrid retrieval store (vector + BM25 over paper
+chunks) and a knowledge graph (citations, authors, venues, topics,
+entities, triples). You are the conversational layer above the
+retrieval pipeline: each turn you decide whether to answer directly or
+run a retrieval, and when you retrieve you formulate the search query
+the rest of the pipeline runs. (Think of yourself as a stand-in for a
+supervisor agent that will one day drive this tool.)
 
-Each turn you produce two fields:
+Each turn you produce three fields:
 - `response`: what to say to the user (concise).
 - `ready_to_retrieve`: bool — whether to run a retrieval this turn.
+- `search_query`: when `ready_to_retrieve` is True, a single
+  self-contained search query distilled from the WHOLE conversation —
+  resolve pronouns ("it", "those", "that paper"), fold in details the
+  user gave in earlier turns, and phrase it as a clear standalone
+  question. Do NOT just echo the user's raw words. Leave it EMPTY when
+  not retrieving.
 
-Set `ready_to_retrieve=True` when the user has asked a substantive
-question that the corpus + graph could answer (the common case).
-Briefly acknowledge that you're looking it up in `response`.
+Set `ready_to_retrieve=True` when the user has a substantive question
+the corpus + graph could answer AND it is specific enough to search.
+Briefly acknowledge in `response` that you're looking it up, and put
+the distilled query in `search_query`.
 
-Set `ready_to_retrieve=False` only when retrieval doesn't apply:
-- The message is greeting/meta/chit-chat ("hi", "thanks", "what can
-  you do?").
-- The question is too vague or ambiguous to retrieve usefully → ask
-  ONE focused clarifying question.
+Set `ready_to_retrieve=False` (and leave `search_query` empty) when:
+- The message is greeting / meta / chit-chat ("hi", "thanks", "what
+  can you do?").
+- The question is too vague or ambiguous to search usefully → ask ONE
+  focused clarifying question in `response`.
 - The user is discussing or following up on the previous answer
   without asking something new that needs fresh retrieval.
 
-Guidelines: be brief, no long preambles, ask at most one clarifying
-question at a time, and prefer retrieving when in doubt about a
-genuine question.
+Do NOT try to choose which store to search (vector vs graph) — the
+pipeline classifies that downstream. Your job is the conversation plus
+a clean, self-contained query. Be brief, ask at most one clarifying
+question at a time, and prefer retrieving when a genuine question is
+clear.
 """
 
 CHAT_ROUTER_TIMEOUT_SECONDS = 30
@@ -61,21 +71,30 @@ class ChatTurnOutput(BaseModel):
     ready_to_retrieve: bool = Field(
         description=("True when this turn should run a retrieval over the corpus.")
     )
+    search_query: str = Field(
+        default="",
+        description=(
+            "When ready_to_retrieve is True, a single self-contained search "
+            "query distilled from the whole conversation (pronouns resolved, "
+            "earlier context folded in). Empty when not retrieving."
+        ),
+    )
 
 
 @lru_cache(maxsize=8)
-def get_chat_router(temperature: float = 0.0) -> Any:
+def get_chat_router(model: str, temperature: float = 0.0) -> Any:
     """Return the cached chat-router Runnable (LLM + structured-output).
 
-    Lazy + cached so the module imports without API keys (test
-    discovery). Uses the project's `llm_factory.get_llm` so the router
-    runs under whichever provider the user has configured — works on
-    Anthropic, OpenAI, Google, or Ollama identically.
+    `model` + `temperature` are the router's OWN config, passed in by the
+    GUI from `GuiConfig`. The router is a GUI-only stand-in for a future
+    supervisor agent, so its model choice lives in the GUI, NOT in the
+    backend Settings (which is the graph/tool's config — the tool must not
+    carry a piece of its own caller). Builds on the shared
+    `llm_factory.get_llm`, which routes to whichever provider the user
+    configured (Anthropic / OpenAI / Google / Ollama).
 
-    Keyed by temperature so different temperatures get distinct cached
-    clients. The chat router uses `mode_classifier_model` (the cheap
-    tier) — routing is a light decision task.
+    Keyed by (model, temperature) so changing either yields a distinct
+    cached client.
     """
-    settings = get_settings()
-    llm = get_llm(settings.mode_classifier_model, temperature)
+    llm = get_llm(model, temperature)
     return llm.with_structured_output(ChatTurnOutput)

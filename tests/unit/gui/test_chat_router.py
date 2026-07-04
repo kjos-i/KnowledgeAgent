@@ -24,12 +24,32 @@ def test_chat_turn_output_has_response_and_ready_to_retrieve_fields():
     assert out.ready_to_retrieve is True
 
 
+def test_chat_turn_output_search_query_defaults_empty_and_is_settable():
+    """search_query is empty when not retrieving; the RFA-style router
+    fills it with a distilled query when ready_to_retrieve is True."""
+    assert ChatTurnOutput(response="hi", ready_to_retrieve=False).search_query == ""
+    out = ChatTurnOutput(
+        response="looking it up",
+        ready_to_retrieve=True,
+        search_query="effects of CRISPR on X",
+    )
+    assert out.search_query == "effects of CRISPR on X"
+
+
 def test_system_prompt_mentions_both_retrieval_stores():
     """KA uses LanceDB (hybrid) + Neo4j (graph). The router must know
     both exist so it doesn't ask follow-ups like 'I can only answer
     text questions' when a graph question arrives."""
     assert "hybrid" in CHAT_SYSTEM_PROMPT.lower()
     assert "graph" in CHAT_SYSTEM_PROMPT.lower()
+
+
+def test_system_prompt_instructs_distilled_search_query():
+    """RFA-style: the router must produce a self-contained search_query
+    distilled from the conversation, not just gate yes/no."""
+    low = CHAT_SYSTEM_PROMPT.lower()
+    assert "search_query" in low
+    assert "self-contained" in low or "distilled" in low
 
 
 def test_get_chat_router_is_cached_by_temperature():
@@ -39,21 +59,14 @@ def test_get_chat_router_is_cached_by_temperature():
     fake_llm = MagicMock()
     fake_runnable = MagicMock(name="bound_runnable")
     fake_llm.with_structured_output.return_value = fake_runnable
-    fake_settings = MagicMock(mode_classifier_model="claude-haiku-4-5-20251001")
 
     get_chat_router.cache_clear()
-    with (
-        patch(
-            "knowledge_agent.gui.chat_router.get_llm",
-            return_value=fake_llm,
-        ) as mock_get,
-        patch(
-            "knowledge_agent.gui.chat_router.get_settings",
-            return_value=fake_settings,
-        ),
-    ):
-        first = get_chat_router(0.0)
-        second = get_chat_router(0.0)
+    with patch(
+        "knowledge_agent.gui.chat_router.get_llm",
+        return_value=fake_llm,
+    ) as mock_get:
+        first = get_chat_router("claude-haiku-4-5-20251001", 0.0)
+        second = get_chat_router("claude-haiku-4-5-20251001", 0.0)
 
     assert first is second
     # The factory was only called once even though we asked for the
@@ -66,20 +79,13 @@ def test_get_chat_router_dispatches_via_llm_factory():
     so it works under whichever provider the user has configured."""
     fake_llm = MagicMock()
     fake_llm.with_structured_output.return_value = MagicMock()
-    fake_settings = MagicMock(mode_classifier_model="claude-haiku-4-5-20251001")
 
     get_chat_router.cache_clear()
-    with (
-        patch(
-            "knowledge_agent.gui.chat_router.get_llm",
-            return_value=fake_llm,
-        ) as mock_get,
-        patch(
-            "knowledge_agent.gui.chat_router.get_settings",
-            return_value=fake_settings,
-        ),
-    ):
-        get_chat_router(0.0)
+    with patch(
+        "knowledge_agent.gui.chat_router.get_llm",
+        return_value=fake_llm,
+    ) as mock_get:
+        get_chat_router("claude-haiku-4-5-20251001", 0.0)
 
     mock_get.assert_called_once_with("claude-haiku-4-5-20251001", 0.0)
     fake_llm.with_structured_output.assert_called_once_with(ChatTurnOutput)
