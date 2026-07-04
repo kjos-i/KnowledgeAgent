@@ -12,10 +12,12 @@ Same UX pattern as the LLM sub-tab, simpler scope:
      user can type a custom model name to override.
   4. Voyage rate limit — Optional[float] (empty = no limit).
 
-Switching the active provider in slice 2 will eventually trigger
-the lifecycle's dimension guard (slice 4): if the new provider's
-default dim doesn't match the LanceDB chunks-table schema, the
-switch fails. Per-call dim guard isn't surfaced here yet — slice 4.
+Switching the active provider runs a dimension guard: if the
+corpus already holds chunks at a different vector dimension than
+the new provider's default, the switch is DESTRUCTIVE (the LanceDB
+chunks table pins the dim at creation) and requires a hard confirm.
+The confirm dialog points the user at the Re-embed bulk operation
+to rebuild the corpus under the new provider.
 
 Active provider's Uninstall is disabled (same rule as LLM tab) —
 switch to another first.
@@ -34,6 +36,7 @@ from knowledge_agent.embedder_lifecycle import (
     EMBEDDER_PROVIDER_REGISTRY,
     install_embedder_provider_execute,
     install_embedder_provider_plan,
+    switch_embedder_plan,
     uninstall_embedder_provider_execute,
     uninstall_embedder_provider_plan,
 )
@@ -369,15 +372,74 @@ class EmbeddingTab:
     def on_active_provider_changed(self, e: ft.Event) -> None:
         """Switch the active embedding provider; refresh model dropdown.
 
-        On switch, restore the per-provider model field's stored value
-        as the new active `embedding_model`. Refresh the dropdown's
-        options to the new provider's curated menu. Same rollback
-        shape as the LLM tab.
+        C3 dimension guard: the LanceDB chunks table pins its vector
+        dimension at creation. If the corpus already holds chunks at a
+        dimension that differs from the new provider's default, the
+        switch is DESTRUCTIVE — the existing chunks can't be reused and
+        must be re-ingested. Ask the backend (`switch_embedder_plan`)
+        whether that's the case; if so, require a hard confirm before
+        applying, and point the user at the Re-embed bulk operation.
+
+        Non-destructive switches (no corpus, empty corpus, or matching
+        dim) apply straight through with the same rollback shape as the
+        LLM tab.
         """
         if self.active_provider_radio is None or self.model_field is None:
             return
         new_value = self.active_provider_radio.value
         if new_value == self.app.gui_config.embedding_provider:
+            return
+        previous_provider = self.app.gui_config.embedding_provider
+        # Ask the backend whether this switch would strand existing chunks
+        # at a mismatched dim. If LanceDB is unreachable the plan can't
+        # read the corpus dim and reports no mismatch — fall through to a
+        # plain switch (a separate LanceDB-down banner covers that case).
+        try:
+            plan = switch_embedder_plan(new_value)
+        except Exception as exc:
+            # Telemetry only; a plan failure must not block the switch.
+            logger.warning(
+                "switch_embedder_plan(%s) failed (%r); switching without dim guard",
+                new_value,
+                exc,
+            )
+            plan = None
+        if plan is not None and plan.dim_mismatch:
+            self._show_confirm(
+                title="Embedding dimension change",
+                body=(
+                    f"{plan.summary}\n\nAfter switching, run the Re-embed bulk "
+                    f"operation (Library → Bulk operations) to re-ingest the "
+                    f"existing chunks under {new_value}."
+                ),
+                confirm_label="Switch anyway",
+                on_confirm=lambda: self._apply_provider_switch(new_value),
+                on_cancel=lambda: self._revert_provider_radio(previous_provider),
+            )
+            return
+        self._apply_provider_switch(new_value)
+
+    def _revert_provider_radio(self, provider: str) -> None:
+        """Snap the active-provider radio back to `provider`.
+
+        Used when the user cancels a destructive dim-change switch: Flet
+        already moved the radio to the new value on click, so we restore
+        it to match the (unchanged) committed provider.
+        """
+        if self.active_provider_radio is None:
+            return
+        self.active_provider_radio.value = provider
+        self.app.page.update()
+
+    def _apply_provider_switch(self, new_value: str) -> None:
+        """Commit the active-provider switch and refresh the dropdown.
+
+        Mirrors the new provider's per-provider model into the active
+        `embedding_model`, persists, and repopulates the model options.
+        Rolls back config + radio on commit failure. Shared by the plain
+        path and the confirmed dim-change path.
+        """
+        if self.active_provider_radio is None or self.model_field is None:
             return
         previous_provider = self.app.gui_config.embedding_provider
         previous_active_model = self.app.gui_config.embedding_model
@@ -408,13 +470,23 @@ class EmbeddingTab:
         self.status.color = ft.Colors.GREY_400 if ok else ft.Colors.RED_300
         self.app.page.update()
 
-    def _show_confirm(self, *, title: str, body: str, confirm_label: str, on_confirm: Any) -> None:
+    def _show_confirm(
+        self,
+        *,
+        title: str,
+        body: str,
+        confirm_label: str,
+        on_confirm: Any,
+        on_cancel: Any = None,
+    ) -> None:
         def _go(_e: ft.Event) -> None:
             self.app.page.pop_dialog()
             on_confirm()
 
         def _cancel(_e: ft.Event) -> None:
             self.app.page.pop_dialog()
+            if on_cancel is not None:
+                on_cancel()
 
         dialog = ft.AlertDialog(
             modal=True,
