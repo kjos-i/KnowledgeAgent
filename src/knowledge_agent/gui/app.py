@@ -219,15 +219,6 @@ class GuiApp:
         self.chat_panel.append_user(text)
 
         try:
-            # Direct-retrieve branch: bypass chat router + synthesizer
-            # entirely (future slice will route this differently).
-            if self.gui_config.direct_retrieve:
-                self.chat_panel.append_system(
-                    "direct_retrieve toggle is enabled but the bypass "
-                    "path isn't wired yet — falling through to the "
-                    "normal graph (slice 2 wires it)."
-                )
-
             try:
                 router = get_chat_router(
                     temperature=self.gui_config.chat_router_temperature,
@@ -266,6 +257,7 @@ class GuiApp:
                 "corpus_config": corpus_config,
                 "top_k": self.gui_config.top_k,
                 "skip_query_builder": self.gui_config.skip_query_builder,
+                "direct_retrieval": self.gui_config.direct_retrieve,
                 "retrieval_mode": mode,
             }
             try:
@@ -284,18 +276,21 @@ class GuiApp:
 
             self.last_answer = answer
             self.last_query = text
-            self.messages.append(
-                AIMessage(
-                    content=(
-                        f"(Answered from {len(answer.chunk_sources)} chunk "
-                        f"+ {len(answer.kg_sources)} KG sources.)"
-                    )
+            n_chunk = len(answer.chunk_sources)
+            n_kg = len(answer.kg_sources)
+            if self.gui_config.direct_retrieve:
+                history_note = (
+                    f"(Retrieved {n_chunk} raw chunk + {n_kg} KG sources; synthesizer skipped.)"
                 )
-            )
-            self.chat_panel.append_system(
-                f"answer ready — {len(answer.chunk_sources)} chunk "
-                f"+ {len(answer.kg_sources)} KG sources. See display panel."
-            )
+                status = (
+                    f"direct retrieve — {n_chunk} raw chunk + {n_kg} KG "
+                    f"sources (synthesizer skipped). See display panel."
+                )
+            else:
+                history_note = f"(Answered from {n_chunk} chunk + {n_kg} KG sources.)"
+                status = f"answer ready — {n_chunk} chunk + {n_kg} KG sources. See display panel."
+            self.messages.append(AIMessage(content=history_note))
+            self.chat_panel.append_system(status)
             # Refresh the right panel so the new answer shows in Latest.
             if self.right_panel.current_mode == MODE_LATEST:
                 self.right_panel.switch_mode(MODE_LATEST)

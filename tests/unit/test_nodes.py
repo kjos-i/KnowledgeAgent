@@ -906,6 +906,22 @@ def test_synthesizer_direct_populates_multimodal_fields_on_chunk_sources():
     assert sources[1].image_ref is None
 
 
+def test_synthesizer_direct_carries_chunk_text_in_quote():
+    """Direct-retrieval has no LLM to pick an anchoring quote, so each
+    ChunkSource carries the chunk's full text in `quote` - that raw text
+    IS what the UI shows in direct mode."""
+    chunks = [
+        RetrievedChunk(chunk_id="doc#0", doc_id="doc", text="first chunk body"),
+        RetrievedChunk(chunk_id="doc#1", doc_id="doc", text="second chunk body"),
+    ]
+    with patch("knowledge_agent.nodes.get_settings") as mock_settings:
+        mock_settings.return_value.direct_retrieval = True
+        result = asyncio.run(synthesizer_node({"query": "q", "retrieved_chunks": chunks}))
+    sources = result["final_answer"].chunk_sources
+    assert sources[0].quote == "first chunk body"
+    assert sources[1].quote == "second chunk body"
+
+
 def test_synthesizer_llm_path_enriches_chunk_sources_from_retrieval():
     """LLM produces ChunkSource with only chunk_id + doc_id + quote
     (that's what it sees in the prompt). Post-processing must enrich

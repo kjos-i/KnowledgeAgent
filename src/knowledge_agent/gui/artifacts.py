@@ -45,7 +45,15 @@ def render_answer_markdown(answer: AgentAnswer, query: str) -> str:
     lines.append("")
     lines.append("---")
     lines.append("")
-    lines.append(answer.answer)
+    if answer.answer.strip():
+        lines.append(answer.answer)
+    else:
+        # direct_retrieval leaves the answer empty (synthesizer skipped)
+        # — say so instead of rendering a blank body; the raw retrieved
+        # chunks follow in the Sources section.
+        lines.append(
+            "_(direct retrieve — synthesizer skipped; raw retrieved chunks are listed below)_"
+        )
     lines.append("")
     lines.append("---")
     lines.append("")

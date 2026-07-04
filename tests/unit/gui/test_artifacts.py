@@ -61,6 +61,20 @@ def test_render_answer_includes_question_and_body():
     assert md.startswith("# Knowledge Agent Answer")
 
 
+def test_render_answer_empty_body_shows_direct_retrieve_note():
+    """direct_retrieval leaves answer='' - the renderer shows a clear
+    note instead of a blank body (the raw chunks follow in Sources)."""
+    md = render_answer_markdown(_answer("", chunks=1), "q")
+    assert "direct retrieve" in md.lower()
+    assert "synthesizer skipped" in md.lower()
+
+
+def test_render_answer_nonempty_body_has_no_direct_note():
+    md = render_answer_markdown(_answer("real synthesized answer"), "q")
+    assert "synthesizer skipped" not in md.lower()
+    assert "real synthesized answer" in md
+
+
 def test_render_answer_with_no_sources_shows_none():
     md = render_answer_markdown(_answer("body"), "q")
     assert "_(none)_" in md

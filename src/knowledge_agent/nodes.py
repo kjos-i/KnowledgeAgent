@@ -555,8 +555,9 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
 
     Honours `state["direct_retrieval"]` (per-invocation) and
     `settings.direct_retrieval` (default). When True, no LLM call -
-    the chunks and kg hits become ChunkSource/KGSource entries with
-    empty answer text.
+    the chunks and kg hits become ChunkSource/KGSource entries (each
+    chunk's full text carried in `quote` so callers can show the raw
+    retrieved chunks) with empty answer text.
     """
     settings = get_settings()
     chunks: list[RetrievedChunk] = state.get("retrieved_chunks") or []
@@ -583,6 +584,10 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
                 content_type=c.content_type,
                 image_ref=c.image_ref,
                 page=c.page,
+                # direct_retrieval has no LLM to pick an anchoring quote,
+                # so carry the chunk's full text — this IS the raw content
+                # the user asked to see (figure chunks carry caption/OCR).
+                quote=c.text,
             )
             for c in chunks
         ]
