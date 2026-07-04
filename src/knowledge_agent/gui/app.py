@@ -200,6 +200,49 @@ class GuiApp:
 
     # ----- Send + chat-router + graph --------------------------------------
 
+    def _invoke_state_for_input_mode(
+        self,
+        input_mode: str,
+        text: str,
+        corpus_config: CorpusConfig,
+        search_query: str | None,
+    ) -> dict[str, Any]:
+        """Build the graph invoke-state for the selected input mode.
+
+        - conversational: the router's distilled `search_query` (fallback to
+          the raw text); the query-builder runs; retrieval mode = user's
+          choice.
+        - direct_query: raw text straight to vector/hybrid (skip the
+          query-builder); mode forced to lancedb_only.
+        - direct_cypher: raw text run as user Cypher against the KG; mode
+          forced to neo4j_only.
+        """
+        base: dict[str, Any] = {
+            "corpus_config": corpus_config,
+            "top_k": self.gui_config.top_k,
+            "direct_retrieval": self.gui_config.direct_retrieve,
+        }
+        if input_mode == "direct_query":
+            return {
+                **base,
+                "query": text,
+                "skip_query_builder": True,
+                "retrieval_mode": "lancedb_only",
+            }
+        if input_mode == "direct_cypher":
+            return {
+                **base,
+                "query": text,
+                "user_cypher": text,
+                "retrieval_mode": "neo4j_only",
+            }
+        return {
+            **base,
+            "query": (search_query or "").strip() or text,
+            "skip_query_builder": False,
+            "retrieval_mode": self.gui_config.retrieval_mode,
+        }
+
     async def on_send(self, e: ft.Event) -> None:
         """Submit the input — chat-router decides whether to clarify or retrieve."""
         if self.busy:
@@ -232,52 +275,52 @@ class GuiApp:
         self.chat_panel.append_user(text)
 
         try:
-            try:
-                router = get_chat_router(
-                    self.gui_config.chat_router_model,
-                    self.gui_config.chat_router_temperature,
-                )
-            except Exception as exc:
-                self.chat_panel.append_system(
-                    f"could not initialize chat router (check provider config): {exc}"
-                )
-                self.messages.pop()
-                return
+            input_mode = self.gui_config.input_mode
+            search_query: str | None = None
+            if input_mode == "conversational":
+                # Run the chat router: it decides when to retrieve + distils
+                # the query. Direct modes skip it (you / a supervisor drive).
+                try:
+                    router = get_chat_router(
+                        self.gui_config.chat_router_model,
+                        self.gui_config.chat_router_temperature,
+                    )
+                except Exception as exc:
+                    self.chat_panel.append_system(
+                        f"could not initialize chat router (check provider config): {exc}"
+                    )
+                    self.messages.pop()
+                    return
 
-            try:
-                output: ChatTurnOutput = await router.ainvoke(
-                    [
-                        SystemMessage(content=CHAT_SYSTEM_PROMPT),
-                        *self.messages,
-                    ]
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.warning("chat-router failed: %r", exc)
-                self.chat_panel.append_system(f"chat-router error: {exc}")
-                self.messages.pop()
-                return
+                try:
+                    output: ChatTurnOutput = await router.ainvoke(
+                        [
+                            SystemMessage(content=CHAT_SYSTEM_PROMPT),
+                            *self.messages,
+                        ]
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.warning("chat-router failed: %r", exc)
+                    self.chat_panel.append_system(f"chat-router error: {exc}")
+                    self.messages.pop()
+                    return
 
-            self.messages.append(AIMessage(content=output.response))
-            self.chat_panel.append_assistant(output.response)
-            if not output.ready_to_retrieve:
-                return
+                self.messages.append(AIMessage(content=output.response))
+                self.chat_panel.append_assistant(output.response)
+                if not output.ready_to_retrieve:
+                    return
+                search_query = output.search_query
 
-            mode = self.gui_config.retrieval_mode
-            # The RFA-style router distils the conversation into a
-            # standalone search query when it fires; use it (fall back to
-            # the raw message if it left `search_query` empty).
-            retrieval_query = (output.search_query or "").strip() or text
-            self._diag(f"retrieving (mode={mode}, query={retrieval_query!r}) ...")
-            invoke_state: dict[str, Any] = {
-                "query": retrieval_query,
-                "corpus_config": corpus_config,
-                "top_k": self.gui_config.top_k,
-                "skip_query_builder": self.gui_config.skip_query_builder,
-                "direct_retrieval": self.gui_config.direct_retrieve,
-                "retrieval_mode": mode,
-            }
+            invoke_state = self._invoke_state_for_input_mode(
+                input_mode, text, corpus_config, search_query
+            )
+            self._diag(
+                f"retrieving (input_mode={input_mode}, "
+                f"mode={invoke_state.get('retrieval_mode')}, "
+                f"query={invoke_state['query']!r}) ..."
+            )
             try:
                 final_state = await graph.ainvoke(invoke_state)
             except asyncio.CancelledError:

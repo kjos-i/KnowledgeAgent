@@ -135,11 +135,15 @@ class GuiConfig(BaseModel):
             "mode-classifier LLM; the others force a specific mode."
         ),
     )
-    skip_query_builder: bool = Field(
-        default=False,
+    input_mode: Literal["conversational", "direct_query", "direct_cypher"] = Field(
+        default="conversational",
         description=(
-            "When True, the query-builder LLM is skipped and the raw "
-            "user message is used as the search query. Faster + cheaper."
+            "How your chat input is interpreted. 'conversational' = the "
+            "chat router refines intent and decides when to search; "
+            "'direct_query' = your text goes straight to vector/hybrid "
+            "search (no router, no query-builder); 'direct_cypher' = your "
+            "text runs as raw Cypher against the knowledge graph (power "
+            "users; read-only queries only)."
         ),
     )
     direct_retrieve: bool = Field(
@@ -661,7 +665,6 @@ def apply_retrieval_to_env(cfg: GuiConfig) -> None:
     os.environ["MMR_LAMBDA"] = str(cfg.mmr_lambda)
     os.environ["MMR_CANDIDATE_MULTIPLIER"] = str(cfg.mmr_candidate_multiplier)
     os.environ["KG_MAX_ROWS"] = str(cfg.kg_max_rows)
-    os.environ["SKIP_QUERY_BUILDER"] = str(cfg.skip_query_builder).lower()
     os.environ["DIRECT_RETRIEVAL"] = str(cfg.direct_retrieve).lower()
 
 

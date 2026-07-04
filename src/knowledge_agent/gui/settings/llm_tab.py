@@ -9,7 +9,8 @@ Layout (top to bottom):
   3. Ollama base URL — TextField (relevant when Ollama is active).
   4. Per-node models + temperatures — model TextField + temperature
      Slider for each of: mode_classifier, query_builder,
-     cypher_builder, synthesizer.
+     cypher_builder, synthesizer. Plus a separate "Chat router" row
+     for the GUI-only chat-router model + temperature.
   5. Per-provider rate limits + retries — 4 Optional[float] fields
      + llm_max_retries int.
 
@@ -37,6 +38,7 @@ from knowledge_agent.gui._styles import (
     PANEL_BG,
     centered_label,
 )
+from knowledge_agent.gui._widgets.info_icon import info_icon
 from knowledge_agent.gui.config_store import (
     ConfigError,
     apply_llm_to_env,
@@ -188,6 +190,10 @@ class LlmTab:
             ("query_builder", cfg.query_builder_temperature),
             ("cypher_builder", cfg.cypher_builder_temperature),
             ("synthesizer", cfg.synthesizer_temperature),
+            # The GUI chat-router isn't a graph node, but it reuses the same
+            # model-dropdown + temp-slider construction + handlers. Rendered
+            # in its own "Chat router" section below (not the node loop).
+            ("chat_router", cfg.chat_router_temperature),
         ):
             self.node_model_fields[node_name] = ft.Dropdown(
                 label=f"{node_name} model",
@@ -315,6 +321,32 @@ class LlmTab:
                         "synthesizer",
                     )
                 ],
+                ft.Divider(),
+                # ---- Chat router (GUI-only conversational layer) -------
+                ft.Row(
+                    controls=[
+                        ft.Text("Chat router", weight=ft.FontWeight.BOLD),
+                        info_icon(
+                            self.app,
+                            title="Chat router",
+                            text=(
+                                "The conversational layer above the retrieval "
+                                "graph: it reads the running conversation, "
+                                "decides when to search, and distils a clean, "
+                                "self-contained query from what you've said "
+                                "(resolving 'it' / 'those' / earlier context) "
+                                "before handing off to retrieval. It's a "
+                                "stand-in for a future supervisor agent, so it "
+                                "lives in the GUI, not the backend graph. A "
+                                "cheap, fast model is usually enough - routing "
+                                "is a light task."
+                            ),
+                        ),
+                    ],
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                self._render_node_block("chat_router"),
                 ft.Divider(),
                 # ---- Rate limits + retries -----------------------------
                 ft.Text(
@@ -537,11 +569,18 @@ class LlmTab:
         defaults = LLM_PROVIDER_REGISTRY[new_value]["default_models"]
         for node in _QUERY_NODES:
             setattr(self.app.gui_config, f"{node}_model", defaults[node])
+        # Chat router is GUI-only (no backend registry entry) — reset it to
+        # the new provider's cheapest curated model, GUI-side.
+        router_models = LLM_AVAILABLE_MODELS.get(new_value, ())
+        previous_router_model = self.app.gui_config.chat_router_model
+        if router_models:
+            self.app.gui_config.chat_router_model = router_models[0]
         if not self._commit(f"active LLM provider: {new_value}"):
             # Rollback both the provider AND the model fields.
             self.app.gui_config.llm_provider = previous_provider
             for node, prev_model in previous_models.items():
                 setattr(self.app.gui_config, f"{node}_model", prev_model)
+            self.app.gui_config.chat_router_model = previous_router_model
             self.active_provider_radio.value = previous_provider
             self.app.page.update()
             return
@@ -556,6 +595,11 @@ class LlmTab:
                 continue
             dropdown.options = list(new_options)
             dropdown.value = defaults[node]
+        router_dropdown = self.node_model_fields.get("chat_router")
+        if router_dropdown is not None:
+            router_dropdown.options = list(new_options)
+            if router_models:
+                router_dropdown.value = router_models[0]
         self._sync_provider_rows()
         self.app.page.update()
 

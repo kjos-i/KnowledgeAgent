@@ -35,7 +35,7 @@ def test_default_config_has_safe_defaults():
     cfg = GuiConfig()
     assert cfg.top_k == 5
     assert cfg.retrieval_mode == "auto"
-    assert cfg.skip_query_builder is False
+    assert cfg.input_mode == "conversational"
     assert cfg.direct_retrieve is False
     assert cfg.keep_loaded_file_on_clear is True
 

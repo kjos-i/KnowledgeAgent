@@ -1,6 +1,6 @@
 """Settings → Retrieval sub-tab — search-side defaults.
 
-12 fields total, grouped into 5 visual sections:
+11 fields total, grouped into 5 visual sections:
 
   1. Mode — `retrieval_mode` (6 agent-level topologies) +
      `lancedb_search_mode` (LanceDB-internal mode).
@@ -11,8 +11,9 @@
      `Settings._validate_retrieval_windows`).
   4. Diversity (MMR) — `mmr_lambda` (slider), `mmr_candidate_multiplier`.
   5. KG — `kg_max_rows`.
-  6. Router / skip toggles — `chat_router_temperature` (slider),
-     `skip_query_builder`, `direct_retrieve`.
+  6. Input mode + synthesis — `input_mode` radio (Conversational /
+     Direct query / Direct Cypher) + `direct_retrieve` (synthesizer
+     skip). The chat-router temperature + model live on the LLM tab.
 
 Auto-save pattern (RA-mirror): every control commits its own change.
 TextFields validate-then-persist on blur with snap-back on bad input.
@@ -33,6 +34,7 @@ import flet as ft
 
 from knowledge_agent.config import reset_after_key_change
 from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, PANEL_BG
+from knowledge_agent.gui._widgets.info_icon import info_icon
 from knowledge_agent.gui.config_store import (
     ConfigError,
     apply_retrieval_to_env,
@@ -67,7 +69,7 @@ _LANCEDB_MODE_LABELS: list[tuple[str, str]] = [
 
 
 class RetrievalTab:
-    """Retrieval defaults — 12 fields with auto-save + RRF ordering check."""
+    """Retrieval defaults — 11 fields with auto-save + RRF ordering check."""
 
     def __init__(self, app: GuiApp) -> None:
         self.app = app
@@ -84,9 +86,7 @@ class RetrievalTab:
         self.mmr_lambda_value_text: ft.Text | None = None
         self.mmr_multiplier_field: ft.TextField | None = None
         self.kg_max_rows_field: ft.TextField | None = None
-        self.chat_router_temp_slider: ft.Slider | None = None
-        self.chat_router_temp_value_text: ft.Text | None = None
-        self.skip_query_builder_checkbox: ft.Checkbox | None = None
+        self.input_mode_radio: ft.RadioGroup | None = None
         self.direct_retrieve_checkbox: ft.Checkbox | None = None
         self._create_controls()
         # Initial MMR enable/disable based on the loaded lancedb mode.
@@ -186,27 +186,36 @@ class RetrievalTab:
             on_change=self._on_mmr_lambda_slide,
             on_change_end=self.on_mmr_lambda_committed,
         )
-        self.chat_router_temp_value_text = ft.Text(
-            _fmt_float(cfg.chat_router_temperature),
-            size=12,
-            color=ft.Colors.WHITE,
-            width=42,
-        )
-        self.chat_router_temp_slider = ft.Slider(
-            value=cfg.chat_router_temperature,
-            min=0.0,
-            max=1.0,
-            divisions=20,
-            on_change=self._on_chat_router_temp_slide,
-            on_change_end=self.on_chat_router_temp_committed,
+        self.input_mode_radio = ft.RadioGroup(
+            value=cfg.input_mode,
+            on_change=self.on_input_mode_changed,
+            content=ft.Column(
+                spacing=2,
+                controls=[
+                    ft.Radio(
+                        value="conversational",
+                        label=(
+                            "Conversational — the chat router refines intent "
+                            "and decides when to search"
+                        ),
+                    ),
+                    ft.Radio(
+                        value="direct_query",
+                        label=(
+                            "Direct query — your text goes straight to "
+                            "vector/hybrid search (no router)"
+                        ),
+                    ),
+                    ft.Radio(
+                        value="direct_cypher",
+                        label=(
+                            "Direct Cypher — run your text as raw Cypher on the knowledge graph"
+                        ),
+                    ),
+                ],
+            ),
         )
 
-        # Checkboxes.
-        self.skip_query_builder_checkbox = ft.Checkbox(
-            label=("Skip query-builder LLM — use the raw message as the search query"),
-            value=cfg.skip_query_builder,
-            on_change=self.on_skip_query_builder_changed,
-        )
         self.direct_retrieve_checkbox = ft.Checkbox(
             label=("Direct retrieval — skip synthesizer, show raw chunks / rows"),
             value=cfg.direct_retrieve,
@@ -268,17 +277,33 @@ class RetrievalTab:
                 ft.Text("Knowledge graph", weight=ft.FontWeight.BOLD),
                 self.kg_max_rows_field,
                 ft.Divider(),
-                # ---- Router + skip toggles -----------------------------
-                ft.Text(
-                    "Chat router + skip toggles",
-                    weight=ft.FontWeight.BOLD,
+                # ---- Input mode + synthesis ----------------------------
+                ft.Row(
+                    controls=[
+                        ft.Text("Input mode", weight=ft.FontWeight.BOLD),
+                        info_icon(
+                            self.app,
+                            title="Input mode",
+                            text=(
+                                "How your chat input is handled:\n\n"
+                                "- Conversational: the chat router reads the "
+                                "conversation, refines your intent, and "
+                                "decides when to search. The normal chat "
+                                "experience.\n\n"
+                                "- Direct query: skips the router and the "
+                                "query-builder - your exact text is the "
+                                "search query, run over vector/hybrid "
+                                "search.\n\n"
+                                "- Direct Cypher: power users - your text is "
+                                "run as raw Cypher against the Neo4j "
+                                "knowledge graph (read-only queries only)."
+                            ),
+                        ),
+                    ],
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
-                _slider_row(
-                    "Chat router temperature",
-                    self.chat_router_temp_slider,
-                    self.chat_router_temp_value_text,
-                ),
-                self.skip_query_builder_checkbox,
+                self.input_mode_radio,
                 self.direct_retrieve_checkbox,
                 # ---- Shared status text --------------------------------
                 self.status,
@@ -553,44 +578,18 @@ class RetrievalTab:
                 self.mmr_lambda_value_text.value = _fmt_float(previous)
             self.app.page.update()
 
-    def _on_chat_router_temp_slide(self, e: ft.Event) -> None:
-        if self.chat_router_temp_slider is None or self.chat_router_temp_value_text is None:
+    def on_input_mode_changed(self, e: ft.Event) -> None:
+        """Persist the input mode (Conversational / Direct query / Direct Cypher)."""
+        if self.input_mode_radio is None:
             return
-        self.chat_router_temp_value_text.value = _fmt_float(
-            self.chat_router_temp_slider.value,
-        )
-        self.app.page.update()
-
-    def on_chat_router_temp_committed(self, e: ft.Event) -> None:
-        if self.chat_router_temp_slider is None:
-            return
-        new_value = float(self.chat_router_temp_slider.value)
-        if abs(new_value - self.app.gui_config.chat_router_temperature) < 1e-6:
-            return
-        previous = self.app.gui_config.chat_router_temperature
-        self.app.gui_config.chat_router_temperature = new_value
-        if not self._commit(f"chat router temperature: {new_value:.2f}"):
-            self.app.gui_config.chat_router_temperature = previous
-            self.chat_router_temp_slider.value = previous
-            if self.chat_router_temp_value_text is not None:
-                self.chat_router_temp_value_text.value = _fmt_float(previous)
+        previous = self.app.gui_config.input_mode
+        self.app.gui_config.input_mode = self.input_mode_radio.value
+        if not self._commit(f"input mode: {self.app.gui_config.input_mode}"):
+            self.app.gui_config.input_mode = previous
+            self.input_mode_radio.value = previous
             self.app.page.update()
 
     # ----- Checkbox handlers -----------------------------------------------
-
-    def on_skip_query_builder_changed(self, e: ft.Event) -> None:
-        if self.skip_query_builder_checkbox is None:
-            return
-        previous = self.app.gui_config.skip_query_builder
-        self.app.gui_config.skip_query_builder = bool(self.skip_query_builder_checkbox.value)
-        if not self._commit(
-            "skip query-builder on"
-            if self.app.gui_config.skip_query_builder
-            else "skip query-builder off"
-        ):
-            self.app.gui_config.skip_query_builder = previous
-            self.skip_query_builder_checkbox.value = previous
-            self.app.page.update()
 
     def on_direct_retrieve_changed(self, e: ft.Event) -> None:
         if self.direct_retrieve_checkbox is None:
