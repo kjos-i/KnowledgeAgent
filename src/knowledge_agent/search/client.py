@@ -235,18 +235,24 @@ class LanceClient:
         await table.update(where=f"doc_id = '{doc_id}'", values=fields)
 
     async def list_indexed_docs(self) -> list[dict[str, Any]]:
-        """One entry per unique `doc_id` with doc-level metadata + count.
+        """One entry per unique `doc_id` with doc-level metadata + counts.
 
-        Used by `bulk_ops.sync_plan` to compare the corpus index against
-        files on disk. Projects only the doc-level columns we need
-        (`source_path`, `title`, `metadata_status`) via lancedb's
-        native search builder - no `pylance` dependency required.
+        Used by `bulk_ops.sync_plan` (compare corpus index vs files on
+        disk) AND the Library → Documents browser. Projects the
+        doc-level columns both need via lancedb's native search builder
+        - no `pylance` dependency required.
 
-        Aggregates per-`doc_id` in Python after the projection:
-        keeps the first chunk row's metadata + counts chunks. At
-        moderate corpus scale (10K-100K chunks across 100s-1000s of
-        docs) this is fast; at much larger scale we'd want a native
-        groupby (deferred until needed).
+        Per-`doc_id` fields returned: `source_path`, `title`,
+        `sub_label` (doc type), `main_label`, `metadata_status`,
+        `ingested_at`, the editable metadata-cache columns (`doi`,
+        `year`, `authors_display`, `venue`, `source_url`, `language` -
+        consumed by the Documents browser's Edit modal), plus
+        `n_chunks` (total chunk rows) and `n_figures` (rows with
+        `content_type = 'figure'`). Aggregated in
+        Python after the projection - keeps the first chunk row's
+        metadata + counts. At moderate corpus scale (10K-100K chunks
+        across 100s-1000s of docs) this is fast; a native groupby is
+        deferred until larger scale needs it.
 
         Returns empty list when the chunks table doesn't yet exist (fresh
         corpus / post-clear state) OR has no rows. LanceDB / disk read
@@ -259,7 +265,22 @@ class LanceClient:
         query = (
             table.query()
             .select(
-                ["doc_id", "source_path", "title", "metadata_status"]
+                [
+                    "doc_id",
+                    "source_path",
+                    "title",
+                    "sub_label",
+                    "main_label",
+                    "metadata_status",
+                    "ingested_at",
+                    "content_type",
+                    "doi",
+                    "year",
+                    "authors_display",
+                    "venue",
+                    "source_url",
+                    "language",
+                ]
             )
             .limit(_LANCEDB_SCAN_LIMIT)
         )
@@ -267,6 +288,7 @@ class LanceClient:
 
         seen: dict[str, dict[str, Any]] = {}
         counts: dict[str, int] = {}
+        figure_counts: dict[str, int] = {}
         for r in rows:
             did = r["doc_id"]
             if did not in seen:
@@ -274,12 +296,28 @@ class LanceClient:
                     "doc_id": did,
                     "source_path": r.get("source_path"),
                     "title": r.get("title"),
+                    "sub_label": r.get("sub_label"),
+                    "main_label": r.get("main_label"),
                     "metadata_status": r.get("metadata_status"),
+                    "ingested_at": r.get("ingested_at"),
+                    "doi": r.get("doi"),
+                    "year": r.get("year"),
+                    "authors_display": r.get("authors_display"),
+                    "venue": r.get("venue"),
+                    "source_url": r.get("source_url"),
+                    "language": r.get("language"),
                 }
             counts[did] = counts.get(did, 0) + 1
+            if r.get("content_type") == "figure":
+                figure_counts[did] = figure_counts.get(did, 0) + 1
 
         return [
-            {**d, "n_chunks": counts[d["doc_id"]]} for d in seen.values()
+            {
+                **d,
+                "n_chunks": counts[d["doc_id"]],
+                "n_figures": figure_counts.get(d["doc_id"], 0),
+            }
+            for d in seen.values()
         ]
 
     async def get_chunks_by_doc_id(

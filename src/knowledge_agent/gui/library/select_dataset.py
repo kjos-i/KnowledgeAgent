@@ -32,8 +32,10 @@ Does NOT delete the actual Neo4j DBMS / LanceDB folder / corpus.toml
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+from collections import Counter
 from typing import TYPE_CHECKING
 
 import flet as ft
@@ -54,6 +56,7 @@ from knowledge_agent.gui.config_store import (
 from knowledge_agent.gui.library.documents_view import DocumentsView
 from knowledge_agent.gui.views._frame import view_header
 from knowledge_agent.kg.corpus_config import CorpusConfig, load_corpus_config
+from knowledge_agent.search.client import get_search_client
 
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
@@ -115,6 +118,14 @@ class SelectDatasetTab:
         self.info_ontologies: ft.Text | None = None
         self.info_extractor: ft.Text | None = None
         self.info_xrefs: ft.Text | None = None
+        self.info_breakdown: ft.Text | None = None
+        self.info_chunking: ft.Text | None = None
+        self.info_ocr: ft.Text | None = None
+        self.info_figures: ft.Text | None = None
+        self.info_embedder: ft.Text | None = None
+        self.info_llm: ft.Text | None = None
+        # Strong refs to in-flight count-fetch tasks (they self-discard).
+        self._bg_tasks: set[asyncio.Task] = set()
 
         self.documents = DocumentsView(app)
         self._create_controls()
@@ -164,6 +175,12 @@ class SelectDatasetTab:
             "", size=12, color=ft.Colors.GREY_300,
         )
         self.info_xrefs = ft.Text("", size=12, color=ft.Colors.GREY_300)
+        self.info_breakdown = ft.Text("", size=12, color=ft.Colors.GREY_400)
+        self.info_chunking = ft.Text("", size=12, color=ft.Colors.GREY_300)
+        self.info_ocr = ft.Text("", size=12, color=ft.Colors.GREY_300)
+        self.info_figures = ft.Text("", size=12, color=ft.Colors.GREY_300)
+        self.info_embedder = ft.Text("", size=12, color=ft.Colors.GREY_300)
+        self.info_llm = ft.Text("", size=12, color=ft.Colors.GREY_300)
 
         self.info_container = ft.Container(
             padding=12,
@@ -181,6 +198,7 @@ class SelectDatasetTab:
                     _kv_row("corpus.toml", self.info_toml),
                     ft.Divider(height=1),
                     _kv_row("Counts", self.info_counts),
+                    _kv_row("Status", self.info_breakdown),
                     ft.Row(
                         controls=[
                             ft.Text(
@@ -195,6 +213,13 @@ class SelectDatasetTab:
                     _kv_row("Ontologies", self.info_ontologies),
                     _kv_row("Extractor", self.info_extractor),
                     _kv_row("Xrefs", self.info_xrefs),
+                    ft.Divider(height=1),
+                    _kv_row("Chunking", self.info_chunking),
+                    _kv_row("OCR", self.info_ocr),
+                    _kv_row("Figures", self.info_figures),
+                    ft.Divider(height=1),
+                    _kv_row("Embedder", self.info_embedder),
+                    _kv_row("LLM", self.info_llm),
                 ],
             ),
         )
@@ -343,6 +368,9 @@ class SelectDatasetTab:
         self._populate_ontologies(cfg)
         self._populate_extractor(cfg)
         self._populate_xrefs(cfg)
+        self._populate_ingest_settings(cfg)
+        self._populate_models()
+        self._schedule_counts()
 
     def _info_empty_state(self) -> None:
         """When there's no active corpus, blank out all the fields."""
@@ -350,6 +378,8 @@ class SelectDatasetTab:
             self.info_name, self.info_uri, self.info_user,
             self.info_lancedb, self.info_toml,
             self.info_ontologies, self.info_extractor, self.info_xrefs,
+            self.info_breakdown, self.info_chunking, self.info_ocr,
+            self.info_figures, self.info_embedder, self.info_llm,
         ):
             if text is not None:
                 text.value = "—"
@@ -408,11 +438,20 @@ class SelectDatasetTab:
         if cfg is None or cfg.entities is None:
             self.info_extractor.value = "not configured"
             return
-        types = cfg.entities.entity_types
-        types_note = (
-            f" · types: {', '.join(types)}" if types else ""
-        )
-        self.info_extractor.value = f"{cfg.entities.extractor}{types_note}"
+        ents = cfg.entities
+        extractors = list(getattr(ents, "extractors", None) or [])
+        if not extractors:
+            # Fall back to the legacy singular field for old configs.
+            single = getattr(ents, "extractor", None)
+            extractors = [single] if single else []
+        parts = [", ".join(extractors) or "—"]
+        mode = getattr(ents, "entity_types_mode", None)
+        if mode:
+            parts.append(f"mode: {mode}")
+        types = ents.entity_types
+        if types:
+            parts.append(f"types: {', '.join(types)}")
+        self.info_extractor.value = " · ".join(parts)
 
     def _populate_xrefs(self, cfg: CorpusConfig | None) -> None:
         if self.info_xrefs is None:
@@ -421,6 +460,115 @@ class SelectDatasetTab:
             self.info_xrefs.value = "—"
             return
         self.info_xrefs.value = cfg.layers.xrefs
+
+    def _populate_ingest_settings(self, cfg: CorpusConfig | None) -> None:
+        """Summarise the per-corpus chunk / OCR / figure settings from the
+        loaded corpus.toml (all sync — no DB read)."""
+        if cfg is None:
+            for t in (self.info_chunking, self.info_ocr, self.info_figures):
+                if t is not None:
+                    t.value = "—"
+            return
+
+        def g(name: str, default: object = "?") -> object:
+            return getattr(cfg, name, default)
+
+        if self.info_chunking is not None:
+            self.info_chunking.value = (
+                f"{g('chunker_strategy')} · max {g('chunk_max_tokens')} tok "
+                f"· merge_peers {_onoff(bool(g('merge_peers', False)))}"
+            )
+        if self.info_ocr is not None:
+            self.info_ocr.value = (
+                f"pdf {_onoff(bool(g('enable_pdf_ocr', False)))} · "
+                f"image {_onoff(bool(g('enable_image_ocr', False)))}"
+            )
+        if self.info_figures is not None:
+            self.info_figures.value = (
+                f"extract {_onoff(bool(g('extract_figures', False)))} · "
+                f"scale {g('images_scale')} · min {g('min_figure_bytes')} B"
+            )
+
+    def _populate_models(self) -> None:
+        """Show the active embedder (provider · model · dims) + the LLM
+        provider from global Settings. Read-only; failure → '—'.
+
+        The LLM uses per-role models (synthesizer, cypher_builder, …), so
+        only the provider is summarised — role models live in Settings."""
+        try:
+            from knowledge_agent.config import get_settings
+            s = get_settings()
+        except Exception as exc:
+            logger.info(
+                "SelectDataset: get_settings failed (%r); models —", exc
+            )
+            for t in (self.info_embedder, self.info_llm):
+                if t is not None:
+                    t.value = "—"
+            return
+        if self.info_embedder is not None:
+            self.info_embedder.value = (
+                f"{s.embedding_provider} · {s.embedding_model} · "
+                f"{s.embedding_dims}-dim"
+            )
+        if self.info_llm is not None:
+            self.info_llm.value = str(s.llm_provider)
+
+    # ----- async counts (docs/chunks from LanceDB, mentions from Neo4j) ---
+
+    def _spawn(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
+    def _schedule_counts(self) -> None:
+        """Kick off the async count fetch when a loop is running (guarded
+        so build() stays test-safe with no running loop)."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._spawn(self._reload_counts())
+
+    async def _reload_counts(self) -> None:
+        """Fill the Counts line (docs/chunks from LanceDB, mentions from
+        Neo4j) + the metadata-status breakdown. Each source degrades to
+        '—' independently, so one failure doesn't blank the rest."""
+        if self.info_counts is None:
+            return
+        docs_str = "—"
+        chunks_str = "—"
+        breakdown = "—"
+        try:
+            rows = await get_search_client().list_indexed_docs()
+        except Exception as exc:
+            logger.warning("SelectDataset: list_indexed_docs failed: %r", exc)
+            rows = None
+        if rows is not None:
+            docs_str = str(len(rows))
+            chunks_str = str(sum(int(r.get("n_chunks") or 0) for r in rows))
+            counts = Counter(
+                (r.get("metadata_status") or "unknown") for r in rows
+            )
+            breakdown = (
+                " · ".join(f"{k}: {v}" for k, v in sorted(counts.items()))
+                or "—"
+            )
+        mentions_str = "—"
+        try:
+            from knowledge_agent.kg.client import get_kg_client
+            mentions_str = str(await get_kg_client().count_mentions())
+        except Exception as exc:
+            logger.info(
+                "SelectDataset: count_mentions failed (%r); showing —", exc
+            )
+        self.info_counts.value = (
+            f"docs: {docs_str} · chunks: {chunks_str} · "
+            f"mentions: {mentions_str}"
+        )
+        if self.info_breakdown is not None:
+            self.info_breakdown.value = breakdown
+        self.app.page.update()
 
     # ----- switch handler --------------------------------------------------
 
@@ -721,3 +869,8 @@ def _badge(label: str, *, on: bool) -> ft.Control:
             ),
         ),
     )
+
+
+def _onoff(v: bool) -> str:
+    """Compact on/off label for a boolean corpus setting."""
+    return "on" if v else "off"

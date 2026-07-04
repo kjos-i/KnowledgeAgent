@@ -50,6 +50,7 @@ from knowledge_agent.gui.config_store import (
     KEYRING_TO_ENV,
     ConfigError,
     GuiConfig,
+    apply_active_corpus_password_to_env,
     apply_connection_to_env,
     apply_embedding_to_env,
     apply_keys_to_env,
@@ -457,6 +458,11 @@ class GuiApp:
         self.gui_config = load_config()
         apply_keys_to_env()
         apply_connection_to_env(self.gui_config)
+        # Bridge the active corpus's Neo4j password (keyring -> env) so
+        # backend reads work on launch, not only after a manual corpus
+        # re-select. No-op (pops the var) when the active corpus has no
+        # stored password.
+        apply_active_corpus_password_to_env(self.gui_config)
         apply_retrieval_to_env(self.gui_config)
         apply_llm_to_env(self.gui_config)
         apply_embedding_to_env(self.gui_config)

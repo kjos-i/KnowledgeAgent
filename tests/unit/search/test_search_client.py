@@ -369,8 +369,8 @@ async def test_list_indexed_docs_aggregates_unique_doc_ids():
 
 
 async def test_list_indexed_docs_projects_only_doc_level_columns():
-    """Heavy embedding + text columns are NOT loaded - only the 4 we need
-    are pushed down via the search builder's `select()` call."""
+    """Heavy embedding + text columns are NOT loaded - only the doc-level
+    columns we need are pushed down via the search builder's `select()`."""
     qb = _RecordingQueryBuilder(rows_to_return=[])
     table = RecordingTable(query_builder=qb)
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
@@ -378,11 +378,89 @@ async def test_list_indexed_docs_projects_only_doc_level_columns():
 
     await client.list_indexed_docs()
     assert qb.last_columns == [
-        "doc_id", "source_path", "title", "metadata_status",
+        "doc_id",
+        "source_path",
+        "title",
+        "sub_label",
+        "main_label",
+        "metadata_status",
+        "ingested_at",
+        "content_type",
+        "doi",
+        "year",
+        "authors_display",
+        "venue",
+        "source_url",
+        "language",
     ]
+    # Heavy columns must NOT be in the projection.
+    assert "text" not in qb.last_columns
+    assert "embedding" not in qb.last_columns
     # Limit must be passed too (search builder requires one) - check the
     # value is large enough to cover any realistic corpus.
     assert qb.last_limit is not None and qb.last_limit >= 1_000_000
+
+
+async def test_list_indexed_docs_returns_type_date_and_figure_count():
+    """The extended projection surfaces sub_label (type), ingested_at
+    (date), and an n_figures count (content_type='figure' rows)."""
+    qb = _RecordingQueryBuilder(
+        rows_to_return=[
+            {
+                "doc_id": "d1", "source_path": "/x/1.pdf", "title": "T1",
+                "sub_label": "Paper", "main_label": "Document",
+                "metadata_status": "enriched", "ingested_at": "2026-07-03",
+                "content_type": "text",
+            },
+            {
+                "doc_id": "d1", "source_path": "/x/1.pdf", "title": "T1",
+                "sub_label": "Paper", "main_label": "Document",
+                "metadata_status": "enriched", "ingested_at": "2026-07-03",
+                "content_type": "figure",
+            },
+        ]
+    )
+    table = RecordingTable(query_builder=qb)
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    client = _client_with_conn(_configured_settings(), conn)
+
+    docs = await client.list_indexed_docs()
+    d1 = {d["doc_id"]: d for d in docs}["d1"]
+    assert d1["sub_label"] == "Paper"
+    assert d1["main_label"] == "Document"
+    assert d1["ingested_at"] == "2026-07-03"
+    assert d1["n_chunks"] == 2
+    assert d1["n_figures"] == 1
+
+
+async def test_list_indexed_docs_returns_editable_metadata_fields():
+    """The Documents-browser Edit modal prefills from these doc-level
+    columns, so the aggregation must surface them per doc_id."""
+    qb = _RecordingQueryBuilder(
+        rows_to_return=[
+            {
+                "doc_id": "d1", "source_path": "/x/1.pdf", "title": "T1",
+                "sub_label": "Paper", "main_label": "Document",
+                "metadata_status": "enriched", "ingested_at": "2026-07-03",
+                "content_type": "text", "doi": "10.1/x", "year": 2020,
+                "authors_display": "Jane Doe; John Smith",
+                "venue": "Science", "source_url": "https://doi.org/10.1/x",
+                "language": "en",
+            },
+        ]
+    )
+    table = RecordingTable(query_builder=qb)
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    client = _client_with_conn(_configured_settings(), conn)
+
+    docs = await client.list_indexed_docs()
+    d1 = {d["doc_id"]: d for d in docs}["d1"]
+    assert d1["doi"] == "10.1/x"
+    assert d1["year"] == 2020
+    assert d1["authors_display"] == "Jane Doe; John Smith"
+    assert d1["venue"] == "Science"
+    assert d1["source_url"] == "https://doi.org/10.1/x"
+    assert d1["language"] == "en"
 
 
 async def test_list_indexed_docs_empty_table_returns_empty_list():

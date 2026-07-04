@@ -793,6 +793,20 @@ class Neo4jClient:
         Delegates to `ontology_linking.count_canonical_links`.
         """
         return await ontology_linking.count_canonical_links(self, ontology_name)
+    async def count_mentions(self) -> int:
+        """Count `:MENTIONS` edges (chunk → entity) across the graph.
+
+        Powers the Library → Select corpus card's `mentions` figure.
+        Returns 0 when no entities have been extracted (L6 off, or a
+        fresh corpus). Cypher / driver failures propagate (typed-errors
+        contract); the GUI caller catches and shows `—`.
+        """
+        async with self.driver.session() as session:
+            result = await session.run(
+                "MATCH ()-[r:MENTIONS]->() RETURN count(r) AS n"
+            )
+            record = await result.single()
+            return int(record["n"]) if record else 0
     async def ensure_ontology_imported(
         self,
         ontology_name: str,

@@ -1,0 +1,142 @@
+"""Tests for the Library → Select corpus card (`SelectDatasetTab`).
+
+Exercise the pure sync populators (extractor / ingest-settings / models /
+empty-state) directly — no Flet render, no DB, no event loop. The async
+count fetch (`_reload_counts`) is guarded off without a running loop, so
+these never touch LanceDB/Neo4j.
+"""
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from knowledge_agent.gui.library.select_dataset import (
+    SelectDatasetTab,
+    _onoff,
+)
+
+
+def _tab(fake_app) -> SelectDatasetTab:
+    return SelectDatasetTab(fake_app)
+
+
+# ---- _onoff ----
+
+
+def test_onoff():
+    assert _onoff(True) == "on"
+    assert _onoff(False) == "off"
+
+
+# ---- extractor (multi-extractor summary) ----
+
+
+def test_populate_extractor_multi(fake_app):
+    tab = _tab(fake_app)
+    cfg = SimpleNamespace(
+        entities=SimpleNamespace(
+            extractors=["llm", "gliner"],
+            entity_types_mode="add",
+            entity_types=["Gene", "Disease"],
+        )
+    )
+    tab._populate_extractor(cfg)
+    v = tab.info_extractor.value
+    assert "llm, gliner" in v
+    assert "mode: add" in v
+    assert "Gene, Disease" in v
+
+
+def test_populate_extractor_legacy_singular(fake_app):
+    tab = _tab(fake_app)
+    # Old config: no `extractors` list, only the singular `extractor`.
+    ents = SimpleNamespace(entity_types=[], entity_types_mode="replace")
+    ents.extractor = "llm"
+    tab._populate_extractor(SimpleNamespace(entities=ents))
+    assert "llm" in tab.info_extractor.value
+
+
+def test_populate_extractor_not_configured(fake_app):
+    tab = _tab(fake_app)
+    tab._populate_extractor(SimpleNamespace(entities=None))
+    assert tab.info_extractor.value == "not configured"
+
+
+# ---- ingest settings ----
+
+
+def test_populate_ingest_settings(fake_app):
+    tab = _tab(fake_app)
+    cfg = SimpleNamespace(
+        chunker_strategy="hybrid", chunk_max_tokens=512, merge_peers=True,
+        enable_pdf_ocr=False, enable_image_ocr=True,
+        extract_figures=True, images_scale=2.0, min_figure_bytes=2048,
+    )
+    tab._populate_ingest_settings(cfg)
+    assert "hybrid" in tab.info_chunking.value
+    assert "512" in tab.info_chunking.value
+    assert "merge_peers on" in tab.info_chunking.value
+    assert "pdf off" in tab.info_ocr.value
+    assert "image on" in tab.info_ocr.value
+    assert "extract on" in tab.info_figures.value
+    assert "2048" in tab.info_figures.value
+
+
+def test_populate_ingest_settings_none(fake_app):
+    tab = _tab(fake_app)
+    tab._populate_ingest_settings(None)
+    assert tab.info_chunking.value == "—"
+    assert tab.info_ocr.value == "—"
+    assert tab.info_figures.value == "—"
+
+
+# ---- models (global settings) ----
+
+
+def test_populate_models(fake_app, monkeypatch):
+    fake_settings = SimpleNamespace(
+        embedding_provider="huggingface",
+        embedding_model="bge-small",
+        embedding_dims=384,
+        llm_provider="anthropic",
+    )
+    monkeypatch.setattr(
+        "knowledge_agent.config.get_settings", lambda: fake_settings
+    )
+    tab = _tab(fake_app)
+    tab._populate_models()
+    assert "huggingface" in tab.info_embedder.value
+    assert "bge-small" in tab.info_embedder.value
+    assert "384-dim" in tab.info_embedder.value
+    assert tab.info_llm.value == "anthropic"
+
+
+def test_populate_models_failure_shows_dash(fake_app, monkeypatch):
+    def boom():
+        raise RuntimeError("no settings")
+
+    monkeypatch.setattr("knowledge_agent.config.get_settings", boom)
+    tab = _tab(fake_app)
+    tab._populate_models()
+    assert tab.info_embedder.value == "—"
+    assert tab.info_llm.value == "—"
+
+
+# ---- empty state + schedule guard ----
+
+
+def test_info_empty_state_blanks_new_controls(fake_app):
+    tab = _tab(fake_app)
+    tab._info_empty_state()
+    for ctrl in (
+        tab.info_breakdown, tab.info_chunking, tab.info_ocr,
+        tab.info_figures, tab.info_embedder, tab.info_llm,
+    ):
+        assert ctrl.value == "—"
+    assert tab.info_counts.value == "docs: — · chunks: — · mentions: —"
+
+
+def test_schedule_counts_noop_without_loop(fake_app):
+    """No running loop (unit test) → schedule must not spawn or raise."""
+    tab = _tab(fake_app)
+    tab._schedule_counts()
+    assert tab._bg_tasks == set()

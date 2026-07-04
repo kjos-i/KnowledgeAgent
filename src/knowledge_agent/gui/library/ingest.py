@@ -30,6 +30,8 @@ hint pointing at Create New.
 """
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import flet as ft
@@ -70,10 +72,27 @@ class IngestTab:
         self.file_browse_button: ft.Button | None = None
         self.ingest_file_button: ft.Button | None = None
 
+        # Progress + busy state, shared across the 4 ingest actions.
+        self.progress_ring: ft.ProgressRing | None = None
+        self._busy = False
+        self._bg_tasks: set[asyncio.Task] = set()
+        # Bulk-ops: Skip-manually-edited toggle for bulk_resolve_openalex
+        # (relocated here from the Documents table).
+        self.skip_manual_checkbox: ft.Checkbox | None = None
+
         self._create_controls()
 
     def _create_controls(self) -> None:
         self.status = ft.Text("", size=11, color=ft.Colors.GREY_400)
+        self.progress_ring = ft.ProgressRing(
+            width=16, height=16, stroke_width=2, visible=False,
+        )
+        self.skip_manual_checkbox = ft.Checkbox(
+            label="Skip manually edited",
+            value=True,
+            tooltip="When resolving all, leave docs with status 'manual' "
+                    "untouched (protects your hand-edits).",
+        )
         self.active_corpus_label = ft.Text(
             "", size=13, weight=ft.FontWeight.BOLD,
         )
@@ -86,12 +105,10 @@ class IngestTab:
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
             expand=True,
-            disabled=True,  # Phase 6 wires this + Browse.
         )
         self.folder_browse_button = ft.Button(
             content=centered_label("Browse"),
             on_click=self._on_folder_browse_clicked,
-            disabled=True,
         )
         self.ingest_folder_button = ft.Button(
             content=centered_label("Ingest folder"),
@@ -114,12 +131,10 @@ class IngestTab:
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
             expand=True,
-            disabled=True,
         )
         self.file_browse_button = ft.Button(
             content=centered_label("Browse"),
             on_click=self._on_file_browse_clicked,
-            disabled=True,
         )
         self.ingest_file_button = ft.Button(
             content=centered_label("Ingest single file"),
@@ -209,11 +224,10 @@ class IngestTab:
 
                     ft.Divider(),
 
-                    self.status,
-                    ft.Text(
-                        "Pre-flight preview + progress + results land "
-                        "with the pickers in phase 6.",
-                        size=11, color=ft.Colors.GREY_500, italic=True,
+                    ft.Row(
+                        controls=[self.progress_ring, self.status],
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
 
                     ft.Divider(),
@@ -228,8 +242,8 @@ class IngestTab:
                     ),
                     ft.Text(
                         "Retroactive per-layer refreshes for the "
-                        "already-ingested corpus. Buttons stubbed until "
-                        "phase 6 wires the dialogs.",
+                        "already-ingested corpus — re-run one layer "
+                        "without re-ingesting the files.",
                         size=11, color=ft.Colors.GREY_500, italic=True,
                     ),
                     self._build_bulk_ops_panel(),
@@ -418,9 +432,9 @@ class IngestTab:
 
     def _build_bulk_ops_panel(self) -> ft.Control:
         """Flat per-layer bulk-ops list — one small header per layer,
-        buttons directly below it. Every button is stubbed until
-        phase-6 wires the plan / execute dialogs; see
-        `ingestion.bulk_ops` for the underlying async primitives."""
+        buttons directly below it. Each button runs its
+        `ingestion.bulk_ops` plan → confirm → execute flow via
+        `_on_bulk_op_clicked`."""
         def op_button(op_name: str) -> ft.Control:
             return ft.Button(
                 content=centered_label(op_name),
@@ -443,6 +457,8 @@ class IngestTab:
             "openalex_papers (L1–L4)",
             ["bulk_resolve_openalex"],
         ))
+        if self.skip_manual_checkbox is not None:
+            controls.append(self.skip_manual_checkbox)
         controls.extend(layer_group(
             "Chunks (L5)",
             ["bulk_backfill_chunks", "bulk_re_embed"],
@@ -474,21 +490,268 @@ class IngestTab:
         return ft.Column(spacing=8, controls=controls)
 
     def _on_bulk_op_clicked(self, op_name: str) -> None:
-        """Placeholder handler — phase-6 wires the plan → confirm →
-        execute dialog for `op_name`."""
-        if self.status is not None:
-            self.status.value = (
-                f"{op_name}: dialog + execution land in phase 6."
-            )
-            self.app.page.update()
+        """Validate + save config, then run bulk op `op_name`:
+        plan → confirm dialog → execute (with a spinner)."""
+        if self._busy:
+            return
+        error = self.config_editor.try_save_and_get_error()
+        if error is not None:
+            self._show_invalid_config_dialog(op_name, error)
+            return
+        if not self._loop_running():
+            return
+        self._spawn(self._run_bulk_op(op_name))
+
+    async def _run_bulk_op(self, op_name: str) -> None:
+        from knowledge_agent.ingestion import bulk_ops
+        from knowledge_agent.kg.corpus_config import load_corpus_config
+
+        cfg_path = self.app.gui_config.corpus_config_path
+        if cfg_path is None:
+            self._set_status("No active corpus.")
+            return
+        try:
+            config = load_corpus_config(cfg_path)
+        except Exception as exc:
+            self._set_status(f"could not load corpus.toml: {exc}")
+            return
+
+        # clear_xref_edges needs the user to pick WHICH ontology first.
+        if op_name == "clear_xref_edges":
+            self._prompt_clear_xref_ontology()
+            return
+
+        # op_name -> (plan_fn, execute_fn, plan_arg, execute_takes_config).
+        # Dispatch through variables (not named calls) so the async-lint
+        # guard doesn't flag the executor factory below.
+        table = {
+            "bulk_backfill_chunks": (
+                bulk_ops.bulk_backfill_chunks_plan,
+                bulk_ops.bulk_backfill_chunks_execute, "none", True),
+            "bulk_re_embed": (
+                bulk_ops.bulk_re_embed_plan,
+                bulk_ops.bulk_re_embed_execute, "none", True),
+            "bulk_backfill_entities": (
+                bulk_ops.bulk_backfill_entities_plan,
+                bulk_ops.bulk_backfill_entities_execute, "none", True),
+            "bulk_backfill_ontology": (
+                bulk_ops.bulk_backfill_ontology_plan,
+                bulk_ops.bulk_backfill_ontology_execute, "none", True),
+            "bulk_backfill_triples": (
+                bulk_ops.bulk_backfill_triples_plan,
+                bulk_ops.bulk_backfill_triples_execute, "none", True),
+            "bulk_backfill_cross_doc": (
+                bulk_ops.bulk_backfill_cross_doc_plan,
+                bulk_ops.bulk_backfill_cross_doc_execute, "none", True),
+            "backfill_xrefs": (
+                bulk_ops.backfill_xrefs_plan,
+                bulk_ops.backfill_xrefs_execute, "config", True),
+            "recompute_cross_doc_xrefs": (
+                bulk_ops.recompute_cross_doc_xrefs_plan,
+                bulk_ops.recompute_cross_doc_xrefs_execute, "config", True),
+            "bulk_resolve_openalex": (
+                bulk_ops.bulk_resolve_openalex_plan,
+                bulk_ops.bulk_resolve_openalex_execute, "skip_manual", False),
+        }
+        entry = table.get(op_name)
+        if entry is None:
+            self._set_status(f"{op_name}: not wired.")
+            return
+        plan_fn, exec_fn, plan_arg, exec_config = entry
+        try:
+            if plan_arg == "config":
+                plan = await plan_fn(config)
+            elif plan_arg == "skip_manual":
+                skip = (
+                    bool(self.skip_manual_checkbox.value)
+                    if self.skip_manual_checkbox is not None else True
+                )
+                plan = await plan_fn(skip_manual=skip)
+            else:
+                plan = await plan_fn()
+        except Exception as exc:
+            self._set_status(f"{op_name}: could not plan — {exc}")
+            return
+
+        if exec_config:
+            def executor(pf=exec_fn, p=plan, c=config):
+                return pf(p, c)
+        else:
+            def executor(pf=exec_fn, p=plan):
+                return pf(p)
+
+        self._show_ingest_confirm(
+            op_name, plan.summary,
+            lambda: self._spawn(self._execute_bulk_op(op_name, executor)),
+        )
+
+    def _prompt_clear_xref_ontology(self) -> None:
+        """Ask which ontology's xref edges to clear, then plan + confirm."""
+        dropdown = ft.Dropdown(
+            label="Ontology",
+            options=[
+                ft.DropdownOption(key=key, text=text)
+                for key, text in _ONTOLOGY_DISPLAY.items()
+            ],
+        )
+
+        def _cancel(_ev: ft.Event) -> None:
+            self.app.page.pop_dialog()
+
+        def _go(_ev: ft.Event) -> None:
+            name = dropdown.value
+            self.app.page.pop_dialog()
+            if not name:
+                self._set_status("Pick an ontology to clear.")
+                return
+            self._spawn(self._run_clear_xref(name))
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Clear xref edges"),
+            content=ft.Column(
+                tight=True, spacing=8,
+                controls=[
+                    ft.Text(
+                        "Which ontology's cross-ontology xref edges "
+                        "should be cleared?",
+                        size=12,
+                    ),
+                    dropdown,
+                ],
+            ),
+            actions=[
+                ft.TextButton("Cancel", on_click=_cancel),
+                ft.Button(content=centered_label("Continue"), on_click=_go),
+            ],
+        )
+        self.app.page.show_dialog(dialog)
+        self.app.page.update()
+
+    async def _run_clear_xref(self, ontology_name: str) -> None:
+        from knowledge_agent.ingestion import bulk_ops
+        try:
+            plan = await bulk_ops.clear_xref_edges_plan(ontology_name)
+        except Exception as exc:
+            self._set_status(f"clear_xref_edges: could not plan — {exc}")
+            return
+        exec_fn = bulk_ops.clear_xref_edges_execute
+
+        def executor(pf=exec_fn, p=plan):
+            return pf(p)
+
+        self._show_ingest_confirm(
+            "clear_xref_edges", plan.summary,
+            lambda: self._spawn(
+                self._execute_bulk_op("clear_xref_edges", executor)
+            ),
+        )
+
+    async def _execute_bulk_op(self, op_name: str, executor) -> None:
+        self._set_busy(True, f"{op_name}: working…")
+        try:
+            result = await executor()
+        except Exception as exc:
+            self._set_busy(False, f"{op_name} failed: {exc}")
+            return
+        self._set_busy(
+            False,
+            f"{op_name} done: {self._fmt_bulk_result(result)}. "
+            f"Refresh Select to see changes.",
+        )
+
+    @staticmethod
+    def _fmt_bulk_result(result: object) -> str:
+        """Generic result summary: every int field + a failure count.
+        Works across all the bulk_ops `*Result` dataclasses without
+        hard-coding each one's fields."""
+        from dataclasses import asdict, is_dataclass
+        if not is_dataclass(result):
+            return "done"
+        parts: list[str] = []
+        for key, val in asdict(result).items():
+            if key == "failures":
+                if val:
+                    parts.append(f"{len(val)} failures")
+            elif isinstance(val, int):  # bool is an int subclass — fine
+                parts.append(f"{key}={val}")
+        return ", ".join(parts) if parts else "done"
 
     # ----- handlers -------------------------------------------------------
 
+    # ---- async plumbing ----
+
+    def _loop_running(self) -> bool:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+        return True
+
+    def _spawn(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
+    def _set_status(self, msg: str) -> None:
+        if self.status is not None:
+            self.status.value = msg
+            self.app.page.update()
+
+    def _set_busy(self, busy: bool, msg: str | None = None) -> None:
+        """Toggle the spinner + disable every action button during a run
+        so a second ingest can't start on top of one in flight."""
+        self._busy = busy
+        if self.progress_ring is not None:
+            self.progress_ring.visible = busy
+        for btn in (
+            self.ingest_folder_button, self.reingest_button,
+            self.sync_button, self.ingest_file_button,
+            self.folder_browse_button, self.file_browse_button,
+        ):
+            if btn is not None:
+                btn.disabled = busy
+        if msg is not None and self.status is not None:
+            self.status.value = msg
+        self.app.page.update()
+
+    # ---- pickers ----
+
     def _on_folder_browse_clicked(self, e: ft.Event) -> None:
-        pass
+        if self._busy or not self._loop_running():
+            return
+        self._spawn(self._pick_folder())
+
+    async def _pick_folder(self) -> None:
+        try:
+            chosen = await self.app.file_picker.get_directory_path(
+                dialog_title="Pick a folder to ingest",
+            )
+        except Exception as exc:
+            self._set_status(f"folder picker error: {exc}")
+            return
+        if chosen and self.folder_field is not None:
+            self.folder_field.value = chosen
+            self.app.page.update()
 
     def _on_file_browse_clicked(self, e: ft.Event) -> None:
-        pass
+        if self._busy or not self._loop_running():
+            return
+        self._spawn(self._pick_file())
+
+    async def _pick_file(self) -> None:
+        try:
+            files = await self.app.file_picker.pick_files(
+                dialog_title="Pick a file to ingest",
+            )
+        except Exception as exc:
+            self._set_status(f"file picker error: {exc}")
+            return
+        if files and files[0].path and self.file_field is not None:
+            self.file_field.value = files[0].path
+            self.app.page.update()
+
+    # ---- action buttons ----
 
     def _on_ingest_folder_clicked(self, e: ft.Event) -> None:
         self._start_action("Ingest folder")
@@ -503,27 +766,185 @@ class IngestTab:
         self._start_action("Ingest single file")
 
     def _start_action(self, action: str) -> None:
-        """Validate current editor state + save corpus.toml, then
-        (phase 6) kick off the pipeline for `action` with the Labels
-        section's per-run args.
+        """Validate + save the config, then run `action` on the picked
+        folder/file: plan → confirm dialog → execute (with a spinner).
 
         Validation failure surfaces as a warning dialog with the
-        pydantic message.
+        pydantic message; no pipeline runs.
         """
+        if self._busy:
+            return
         error = self.config_editor.try_save_and_get_error()
         if error is not None:
             self._show_invalid_config_dialog(action, error)
             return
+        if not self._loop_running():
+            return
+        self._spawn(self._run_action(action))
+
+    async def _run_action(self, action: str) -> None:
+        """Load the saved config, build the plan for `action`, and show a
+        confirm dialog whose OK button kicks off the execute."""
+        from knowledge_agent.ingestion import bulk_ops
+        from knowledge_agent.kg.corpus_config import load_corpus_config
+
         main, sub, overwrite = self.config_editor.get_ingest_args()
-        if self.status is not None:
-            sub_str = sub if sub is not None else "(none)"
-            self.status.value = (
-                f"{action}: config saved. "
-                f"main={main}, sub={sub_str}, "
-                f"overwrite_labels={overwrite}. "
-                f"Pipeline wiring lands in phase 6."
+        cfg_path = self.app.gui_config.corpus_config_path
+        if cfg_path is None:
+            self._set_status("No active corpus.")
+            return
+        try:
+            config = load_corpus_config(cfg_path)
+        except Exception as exc:
+            self._set_status(f"could not load corpus.toml: {exc}")
+            return
+
+        if action == "Ingest single file":
+            self._plan_single_file(config, main, sub, overwrite)
+            return
+
+        folder_str = (
+            (self.folder_field.value or "").strip()
+            if self.folder_field is not None else ""
+        )
+        if not folder_str:
+            self._set_status("Pick a folder first (Browse).")
+            return
+        folder = Path(folder_str)
+
+        try:
+            if action == "Ingest folder":
+                plan = await bulk_ops.add_plan(folder, main, sub)
+                empty = plan.n_new == 0
+            elif action == "Re-ingest":
+                plan = await bulk_ops.ingest_folder_plan(folder, main, sub)
+                empty = plan.n_files == 0
+            else:  # Sync
+                plan = await bulk_ops.sync_plan(folder, main, sub)
+                empty = (
+                    plan.n_new + plan.n_moved
+                    + plan.n_edited + plan.n_orphans
+                ) == 0
+        except Exception as exc:
+            self._set_status(f"{action}: could not plan — {exc}")
+            return
+
+        if empty:
+            self._set_status(f"{action}: nothing to do in {folder}.")
+            return
+
+        self._show_ingest_confirm(
+            action, plan.summary,
+            lambda: self._spawn(
+                self._execute_action(action, plan, config, overwrite)
+            ),
+        )
+
+    def _plan_single_file(
+        self, config: object, main: str, sub: str | None, overwrite: bool,
+    ) -> None:
+        path_str = (
+            (self.file_field.value or "").strip()
+            if self.file_field is not None else ""
+        )
+        if not path_str:
+            self._set_status("Pick a file first (Browse).")
+            return
+        path = Path(path_str)
+        if not path.is_file():
+            self._set_status(f"not a file: {path}")
+            return
+        self._show_ingest_confirm(
+            "Ingest single file",
+            f"Ingest '{path.name}' into the active corpus?",
+            lambda: self._spawn(
+                self._execute_single_file(
+                    path, config, main, sub, overwrite,
+                )
+            ),
+        )
+
+    def _show_ingest_confirm(
+        self, action: str, summary: str, on_confirm,
+    ) -> None:
+        def _cancel(_ev: ft.Event) -> None:
+            self.app.page.pop_dialog()
+
+        def _ok(_ev: ft.Event) -> None:
+            self.app.page.pop_dialog()
+            on_confirm()
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text(action),
+            content=ft.Text(summary, size=12, selectable=True),
+            actions=[
+                ft.TextButton("Cancel", on_click=_cancel),
+                ft.Button(content=centered_label(action), on_click=_ok),
+            ],
+        )
+        self.app.page.show_dialog(dialog)
+        self.app.page.update()
+
+    async def _execute_action(
+        self, action: str, plan: object, config: object, overwrite: bool,
+    ) -> None:
+        from knowledge_agent.ingestion import bulk_ops
+        preserve = not overwrite
+        self._set_busy(True, f"{action}: working…")
+        try:
+            if action == "Ingest folder":
+                result = await bulk_ops.add_execute(plan, config, preserve)
+                msg = self._fmt_ingest_result(action, result)
+            elif action == "Re-ingest":
+                result = await bulk_ops.ingest_folder_execute(
+                    plan, config, preserve,
+                )
+                msg = self._fmt_ingest_result(action, result)
+            else:  # Sync
+                result = await bulk_ops.sync_execute(plan, config, preserve)
+                msg = self._fmt_sync_result(result)
+        except Exception as exc:
+            self._set_busy(False, f"{action} failed: {exc}")
+            return
+        self._set_busy(False, msg)
+
+    async def _execute_single_file(
+        self, path: Path, config: object, main: str,
+        sub: str | None, overwrite: bool,
+    ) -> None:
+        from knowledge_agent.ingestion import pipeline
+        self._set_busy(True, f"Ingesting {path.name}…")
+        try:
+            await pipeline.ingest_document(
+                path, config, main, sub,
+                preserve_existing_labels=not overwrite,
             )
-            self.app.page.update()
+        except Exception as exc:
+            self._set_busy(False, f"Ingest failed: {exc}")
+            return
+        self._set_busy(False, f"Ingested '{path.name}'. Refresh Select to see it.")
+
+    @staticmethod
+    def _fmt_ingest_result(action: str, result: object) -> str:
+        msg = (
+            f"{action} done: {result.n_succeeded} succeeded, "
+            f"{result.n_failed} failed."
+        )
+        if result.failures:
+            name, err = result.failures[0]
+            msg += f"  First failure: {name} — {err}"
+        return msg + "  Refresh Select to see changes."
+
+    @staticmethod
+    def _fmt_sync_result(result: object) -> str:
+        return (
+            f"Sync done: {result.n_new_ingested} new, "
+            f"{result.n_edited_succeeded} re-ingested, "
+            f"{result.n_orphans_deleted} removed, "
+            f"{result.n_new_failed + result.n_edited_failed} failed. "
+            f"Refresh Select to see changes."
+        )
 
     def _show_invalid_config_dialog(self, action: str, message: str) -> None:
         """Modal explaining why the ingest can't start. One [OK]

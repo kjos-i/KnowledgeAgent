@@ -722,6 +722,37 @@ def apply_connection_to_env(cfg: "GuiConfig") -> None:
         )
 
 
+def apply_active_corpus_password_to_env(cfg: "GuiConfig") -> bool:
+    """Bridge the ACTIVE corpus's Neo4j password (keyring) -> env.
+
+    `NEO4J_PASSWORD` is a per-corpus keyring secret, NOT part of the
+    connection triple `apply_connection_to_env` handles. Without this,
+    the password only reaches the env via the Library corpus-*switch*
+    handler — so the already-active corpus on a fresh GUI launch never
+    gets its password bridged, and the first backend read fails
+    `Settings` validation (`neo4j_password` required).
+
+    Call at startup (after `apply_connection_to_env`) AND whenever the
+    active corpus changes. Sets `NEO4J_PASSWORD` when a password is
+    stored for the active corpus; pops it otherwise (so `get_settings()`
+    surfaces a clear "password required" error rather than reusing a
+    stale one from another corpus).
+
+    Returns True when a non-empty password was bridged, False when the
+    active corpus has none stored (or there's no active corpus).
+    """
+    active = cfg.active_corpus_name
+    if not active:
+        os.environ.pop("NEO4J_PASSWORD", None)
+        return False
+    password = get_corpus_password(active) or ""
+    if password:
+        os.environ["NEO4J_PASSWORD"] = password
+        return True
+    os.environ.pop("NEO4J_PASSWORD", None)
+    return False
+
+
 def apply_ontology_downloads_dir_to_env(cfg: "GuiConfig") -> None:
     """Bridge `GuiConfig.ontology_downloads_dir` to `ONTOLOGY_DOWNLOADS_DIR`.
 

@@ -201,3 +201,36 @@ def test_apply_keys_to_env_skips_empty_values(monkeypatch: pytest.MonkeyPatch):
     ):
         apply_keys_to_env()
     assert os.environ["VOYAGE_API_KEY"] == "shell-value"
+
+
+# ---- apply_active_corpus_password_to_env (startup password bridge) ----
+
+
+def test_apply_active_corpus_password_bridges_stored(monkeypatch):
+    """A stored per-corpus password lands in NEO4J_PASSWORD."""
+    monkeypatch.setattr(
+        config_store, "get_corpus_password", lambda name: "s3cret",
+    )
+    monkeypatch.delenv("NEO4J_PASSWORD", raising=False)
+    cfg = config_store.GuiConfig(active_corpus_name="c1")
+    assert config_store.apply_active_corpus_password_to_env(cfg) is True
+    assert os.environ["NEO4J_PASSWORD"] == "s3cret"
+
+
+def test_apply_active_corpus_password_pops_when_none(monkeypatch):
+    """No stored password -> NEO4J_PASSWORD is removed (not left stale)."""
+    monkeypatch.setattr(
+        config_store, "get_corpus_password", lambda name: None,
+    )
+    monkeypatch.setenv("NEO4J_PASSWORD", "stale")
+    cfg = config_store.GuiConfig(active_corpus_name="c1")
+    assert config_store.apply_active_corpus_password_to_env(cfg) is False
+    assert "NEO4J_PASSWORD" not in os.environ
+
+
+def test_apply_active_corpus_password_no_active_corpus(monkeypatch):
+    """No active corpus -> pops NEO4J_PASSWORD, returns False."""
+    monkeypatch.setenv("NEO4J_PASSWORD", "stale")
+    cfg = config_store.GuiConfig(active_corpus_name=None)
+    assert config_store.apply_active_corpus_password_to_env(cfg) is False
+    assert "NEO4J_PASSWORD" not in os.environ
