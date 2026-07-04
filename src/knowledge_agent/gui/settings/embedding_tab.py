@@ -5,7 +5,8 @@ Same UX pattern as the LLM sub-tab, simpler scope:
   1. Active provider — radio group, only INSTALLED providers shown.
   2. Providers list — all 4 (voyage / openai / google / huggingface)
      with install state + Install / Uninstall buttons. Buttons are
-     stubs in slice 2; install lifecycle dialogs ship in slice 4.
+     wired to the embedder_lifecycle install/uninstall (pip) behind a
+     confirm dialog.
   3. Embedding model — single editable Dropdown. Options come from
      the curated `EMBEDDING_AVAILABLE_MODELS[active_provider]` menu;
      user can type a custom model name to override.
@@ -22,13 +23,20 @@ switch to another first.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import flet as ft
 
 from knowledge_agent.config import reset_after_key_change
-from knowledge_agent.embedder_lifecycle import EMBEDDER_PROVIDER_REGISTRY
+from knowledge_agent.embedder_lifecycle import (
+    EMBEDDER_PROVIDER_REGISTRY,
+    install_embedder_provider_execute,
+    install_embedder_provider_plan,
+    uninstall_embedder_provider_execute,
+    uninstall_embedder_provider_plan,
+)
 from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     PANEL_BG,
@@ -210,8 +218,8 @@ class EmbeddingTab:
                 # ---- Providers list ------------------------------------
                 ft.Text("Providers", weight=ft.FontWeight.BOLD),
                 ft.Text(
-                    "Install / Uninstall dialogs ship in slice 4 — the "
-                    "buttons stage the action for now.",
+                    "Install / Uninstall each provider's packages via pip "
+                    "(confirm dialog; a restart is needed after).",
                     size=11,
                     color=ft.Colors.GREY_500,
                     italic=True,
@@ -313,8 +321,7 @@ class EmbeddingTab:
         installed = [p for p in _PROVIDER_ORDER if self._installed_state.get(p)]
         if not installed:
             self.active_provider_container.content = ft.Text(
-                "No providers installed yet — pick one below and click "
-                "Install when slice 4 ships the dialogs.",
+                "No providers installed yet — pick one below and click Install.",
                 size=12,
                 color=ft.Colors.AMBER_300,
                 italic=True,
@@ -394,18 +401,92 @@ class EmbeddingTab:
         self._sync_provider_rows()
         self.app.page.update()
 
-    def on_install_clicked(self, provider: str) -> None:
-        """Slice 2 stub — install dialogs ship in slice 4."""
+    def _set_status(self, msg: str, *, ok: bool = True) -> None:
         if self.status is None:
             return
-        self.status.value = f"Install dialog for {provider} ships in slice 4."
+        self.status.value = msg
+        self.status.color = ft.Colors.GREY_400 if ok else ft.Colors.RED_300
+        self.app.page.update()
+
+    def _show_confirm(self, *, title: str, body: str, confirm_label: str, on_confirm: Any) -> None:
+        def _go(_e: ft.Event) -> None:
+            self.app.page.pop_dialog()
+            on_confirm()
+
+        def _cancel(_e: ft.Event) -> None:
+            self.app.page.pop_dialog()
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text(title),
+            content=ft.Container(
+                width=460,
+                content=ft.Text(body, size=12, selectable=True),
+            ),
+            actions=[
+                ft.TextButton("Cancel", on_click=_cancel),
+                ft.Button(content=centered_label(confirm_label), on_click=_go),
+            ],
+        )
+        self.app.page.show_dialog(dialog)
+        self.app.page.update()
+
+    def on_install_clicked(self, provider: str) -> None:
+        """Confirm + pip-install the provider's adapter / libs."""
+        plan = install_embedder_provider_plan(provider)
+        if plan.bundled or plan.already_installed:
+            self._set_status(plan.summary)
+            return
+        self._show_confirm(
+            title=f"Install {plan.display_name}?",
+            body=plan.summary,
+            confirm_label="Install",
+            on_confirm=lambda: asyncio.create_task(self._run_install(provider)),
+        )
+
+    async def _run_install(self, provider: str) -> None:
+        self._set_status(f"Installing {provider} embedder…")
+        plan = install_embedder_provider_plan(provider)
+        result = await install_embedder_provider_execute(plan)
+        if not result.install_ok:
+            tail = result.pip_output[-200:] if result.pip_output else ""
+            self._set_status(f"Install {provider} failed: {tail}", ok=False)
+            return
+        if not result.did_install:
+            self._set_status(f"{provider} was already installed.")
+        elif result.restart_required:
+            self._set_status(f"Installed {provider}. Restart the app for it to take effect.")
+        else:
+            self._set_status(f"Installed {provider}.")
+        self._sync_installed_state()
+        self._sync_provider_rows()
         self.app.page.update()
 
     def on_uninstall_clicked(self, provider: str) -> None:
-        """Slice 2 stub — uninstall dialogs ship in slice 4."""
-        if self.status is None:
+        """Confirm + pip-uninstall the provider's adapter. No-op cases
+        (bundled / active / not installed) just surface the plan summary."""
+        plan = uninstall_embedder_provider_plan(provider)
+        if plan.bundled or plan.is_active or not plan.installed:
+            self._set_status(plan.summary, ok=not plan.is_active)
             return
-        self.status.value = f"Uninstall dialog for {provider} ships in slice 4."
+        self._show_confirm(
+            title=f"Uninstall {plan.display_name}?",
+            body=plan.summary,
+            confirm_label="Uninstall",
+            on_confirm=lambda: asyncio.create_task(self._run_uninstall(provider)),
+        )
+
+    async def _run_uninstall(self, provider: str) -> None:
+        self._set_status(f"Uninstalling {provider} embedder…")
+        plan = uninstall_embedder_provider_plan(provider)
+        result = await uninstall_embedder_provider_execute(plan)
+        if not result.uninstall_ok:
+            tail = result.pip_output[-200:] if result.pip_output else ""
+            self._set_status(f"Uninstall {provider} failed: {tail}", ok=False)
+            return
+        self._set_status(f"Uninstalled {provider}. Restart the app to fully release the module.")
+        self._sync_installed_state()
+        self._sync_provider_rows()
         self.app.page.update()
 
     def on_model_blur(self, e: ft.Event) -> None:
