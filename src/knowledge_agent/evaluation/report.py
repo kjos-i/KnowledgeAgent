@@ -1,0 +1,169 @@
+"""Report building + persistence + run provenance.
+
+`build_report` turns the engine's per-case results into the report dict
+the ledger persists and the JSON file records: a run-level `summary`
+(pass rate + registry-driven averages), the per-case `results`, and
+PROVENANCE — the git commit, the graph's model IDs, and a snapshot of
+the node system prompts. Provenance is what makes "did my prompt/model
+change move the numbers?" answerable across runs.
+
+`write_report` writes a timestamped JSON (full) + CSV (per-case summary)
+to the git-ignored output dir.
+"""
+
+from __future__ import annotations
+
+import csv
+import json
+import re
+from typing import TYPE_CHECKING, Any
+
+from knowledge_agent.evaluation.metrics import safe_mean
+from knowledge_agent.evaluation.registry import csv_fieldnames, summary_avg_pairs
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from knowledge_agent.evaluation.config import EvalConfig
+
+
+# ---------------------------------------------------------------------------
+# Provenance
+# ---------------------------------------------------------------------------
+
+
+def _git_commit() -> str | None:
+    """Short HEAD commit, or None when git isn't available / not a repo."""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return None
+    return out.stdout.strip() or None if out.returncode == 0 else None
+
+
+def _model_config() -> dict[str, Any]:
+    """The graph's active model IDs — half of 'what config ran'."""
+    try:
+        from knowledge_agent.config import get_settings
+
+        s = get_settings()
+        return {
+            "llm_provider": s.llm_provider,
+            "mode_classifier_model": s.mode_classifier_model,
+            "query_builder_model": s.query_builder_model,
+            "cypher_builder_model": s.cypher_builder_model,
+            "synthesizer_model": s.synthesizer_model,
+            "embedding_provider": s.embedding_provider,
+            "embedding_model": s.embedding_model,
+        }
+    except Exception:
+        return {}
+
+
+def _prompt_snapshot() -> dict[str, str]:
+    """Snapshot the graph's node system prompts (auto-discovers every
+    `*_SYSTEM` string constant in `nodes`, so it survives prompt renames)
+    plus the chat-router prompt. Best-effort — degrades to what it finds."""
+    out: dict[str, str] = {}
+    try:
+        from knowledge_agent import nodes as nodes_mod
+
+        for name in dir(nodes_mod):
+            if name.endswith("_SYSTEM"):
+                val = getattr(nodes_mod, name, None)
+                if isinstance(val, str):
+                    out[name.strip("_").lower()] = val
+    except Exception:
+        pass
+    try:
+        from knowledge_agent.gui.chat_router import CHAT_SYSTEM_PROMPT
+
+        out["chat_router"] = CHAT_SYSTEM_PROMPT
+    except Exception:
+        pass
+    return out
+
+
+def capture_provenance() -> dict[str, Any]:
+    """git commit + model IDs + node-prompt snapshot for the run row."""
+    return {
+        "git_commit": _git_commit(),
+        "model_config": _model_config(),
+        "prompts": _prompt_snapshot(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Summary + report assembly
+# ---------------------------------------------------------------------------
+
+
+def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Run-level rollup: pass rate + a mean per registry metric (None-safe,
+    so cases lacking a metric's gold don't drag its average)."""
+    case_count = len(results)
+    pass_count = sum(1 for r in results if r.get("status") == "PASS")
+    summary: dict[str, Any] = {
+        "case_count": case_count,
+        "pass_count": pass_count,
+        "pass_rate": (pass_count / case_count) if case_count else 0.0,
+    }
+    for avg_key, source_key in summary_avg_pairs():
+        summary[avg_key] = safe_mean(r.get(source_key) for r in results)
+    return summary
+
+
+def build_report(
+    cfg: EvalConfig, results: list[dict[str, Any]], run_timestamp: str
+) -> dict[str, Any]:
+    """Assemble the full report dict (what the ledger + JSON consume)."""
+    prov = capture_provenance()
+    return {
+        "run_timestamp": run_timestamp,
+        "dataset_path": str(cfg.dataset_path),
+        "git_commit": prov["git_commit"],
+        "prompts_snapshot": {
+            "model_config": prov["model_config"],
+            "prompts": prov["prompts"],
+        },
+        "enabled_groups": sorted(cfg.enabled_groups),
+        "gate_thresholds": cfg.gate_thresholds(),
+        "summary": build_summary(results),
+        "results": results,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Persistence — JSON (full) + CSV (per-case summary)
+# ---------------------------------------------------------------------------
+
+
+def _filename_stamp(run_timestamp: str) -> str:
+    return re.sub(r"[^0-9]", "", run_timestamp)[:14] or "unknown"
+
+
+def write_report(report: dict[str, Any], output_dir: Path) -> tuple[Path, Path]:
+    """Write `eval_report_<ts>.json` + `eval_summary_<ts>.csv`; return paths."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stamp = _filename_stamp(report["run_timestamp"])
+    json_path = output_dir / f"eval_report_{stamp}.json"
+    csv_path = output_dir / f"eval_summary_{stamp}.csv"
+    json_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+    _write_csv(csv_path, report["results"])
+    return json_path, csv_path
+
+
+def _write_csv(path: Path, results: list[dict[str, Any]]) -> None:
+    fields = csv_fieldnames()
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        for r in results:
+            writer.writerow({**r, "error_count": len(r.get("errors", []))})

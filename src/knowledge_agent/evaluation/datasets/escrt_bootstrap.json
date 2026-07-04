@@ -1,0 +1,47 @@
+[
+  {
+    "id": "escrt3_membrane_remodeling",
+    "question": "What is the role of ESCRT-III in membrane remodeling?",
+    "expected_sources": [],
+    "expected_chunks": ["ESCRT-III", "membrane"],
+    "required_keywords": ["ESCRT-III"],
+    "disallowed_keywords": [],
+    "expected_answer_points": [
+      "ESCRT-III polymerizes into filaments that constrict and remodel membranes.",
+      "It drives membrane scission from the cytoplasmic side of the neck."
+    ],
+    "retrieval": { "retrieval_mode": "lancedb_only", "lancedb_search_mode": "hybrid", "top_k": 5 },
+    "category": "Mechanism",
+    "notes": "PLACEHOLDER bootstrap over test_corpus/. expected_sources (doc_ids) TBD by curator."
+  },
+  {
+    "id": "escrt_membrane_scission",
+    "question": "How do ESCRT complexes drive membrane scission?",
+    "expected_sources": [],
+    "expected_chunks": ["scission", "membrane"],
+    "required_keywords": ["ESCRT"],
+    "disallowed_keywords": [],
+    "expected_answer_points": [
+      "ESCRT machinery is recruited to the membrane neck and narrows it.",
+      "Scission occurs from within the neck (reverse-topology)."
+    ],
+    "retrieval": { "retrieval_mode": "lancedb_only", "lancedb_search_mode": "hybrid", "top_k": 5 },
+    "category": "Mechanism",
+    "notes": "PLACEHOLDER bootstrap. expected_sources TBD."
+  },
+  {
+    "id": "escrt_cellular_roles",
+    "question": "What cellular processes are ESCRT proteins involved in?",
+    "expected_sources": [],
+    "expected_chunks": ["ESCRT"],
+    "required_keywords": ["ESCRT"],
+    "disallowed_keywords": [],
+    "expected_answer_points": [
+      "Multivesicular body biogenesis and receptor sorting.",
+      "Cytokinetic abscission, viral budding, and membrane repair."
+    ],
+    "retrieval": { "retrieval_mode": "lancedb_only", "lancedb_search_mode": "hybrid", "top_k": 5 },
+    "category": "Overview",
+    "notes": "PLACEHOLDER bootstrap. expected_sources TBD."
+  }
+]

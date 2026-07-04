@@ -1,0 +1,181 @@
+"""SQLite ledger — per-run + per-case evaluation history for trend tracking.
+
+Two tables: `eval_runs` (one row per run, with provenance + run-level
+averages) and `eval_cases` (one row per case per run). Both schemas are
+generated from a SINGLE column declaration, so — unlike the reference —
+there is no second hand-maintained column list to drift out of sync, and
+therefore no import-time drift assertion. Each fixed column is declared
+once as a (name, type) pair; the `CREATE TABLE` and the INSERT column
+list both derive from that one list, and the auto-increment primary key
+is the only column excluded from inserts (detected from its type).
+
+Also, done to standard:
+  - `PRAGMA foreign_keys = ON` per connection (SQLite ignores FKs
+    otherwise), so `eval_cases.run_id` actually references a run.
+  - Indexes on the columns the dashboard queries (`eval_cases.run_id`,
+    `eval_runs.run_timestamp`).
+  - Connections opened + CLOSED via `contextlib.closing`.
+  - Add-only auto-migration (`ALTER TABLE ADD COLUMN`) so a registry that
+    grows (KG / judge metrics in later phases) extends an existing DB
+    without a wipe.
+
+The ledger is disposable trend data — the DB lives under the git-ignored
+`output_dir`, never committed.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from contextlib import closing
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from knowledge_agent.evaluation.registry import case_sql_columns, run_sql_columns
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+# ---------------------------------------------------------------------------
+# Fixed columns — declared ONCE. CREATE + INSERT both derive from these.
+# ---------------------------------------------------------------------------
+
+_RUNS_PREAMBLE: list[tuple[str, str]] = [
+    ("run_id", "INTEGER PRIMARY KEY AUTOINCREMENT"),
+    ("run_timestamp", "TEXT NOT NULL"),
+    ("dataset_path", "TEXT"),
+    ("git_commit", "TEXT"),
+    ("prompts_snapshot", "TEXT"),  # JSON — run provenance
+    ("case_count", "INTEGER"),
+    ("pass_count", "INTEGER"),
+    ("pass_rate", "REAL"),
+]
+_RUNS_TRAILING: list[tuple[str, str]] = [
+    ("enabled_groups", "TEXT"),  # JSON list
+    ("gate_thresholds", "TEXT"),  # JSON dict
+]
+
+_CASES_PREAMBLE: list[tuple[str, str]] = [
+    ("case_row_id", "INTEGER PRIMARY KEY AUTOINCREMENT"),
+    ("run_id", "INTEGER NOT NULL REFERENCES eval_runs(run_id)"),
+    ("run_timestamp", "TEXT NOT NULL"),
+    ("case_id", "TEXT NOT NULL"),
+    ("category", "TEXT"),
+    ("question", "TEXT"),
+    ("status", "TEXT"),
+]
+_CASES_TRAILING: list[tuple[str, str]] = [
+    ("answer", "TEXT"),
+    ("errors", "TEXT"),  # JSON list
+]
+
+
+def _run_columns() -> list[tuple[str, str]]:
+    return _RUNS_PREAMBLE + run_sql_columns() + _RUNS_TRAILING
+
+
+def _case_columns() -> list[tuple[str, str]]:
+    return _CASES_PREAMBLE + case_sql_columns() + _CASES_TRAILING
+
+
+def _create_sql(table: str, columns: Iterable[tuple[str, str]]) -> str:
+    body = ",\n    ".join(f"{name} {sqltype}" for name, sqltype in columns)
+    return f"CREATE TABLE IF NOT EXISTS {table} (\n    {body}\n)"
+
+
+def _insert_names(columns: Iterable[tuple[str, str]]) -> list[str]:
+    """Insertable column names — everything except the auto-increment PK."""
+    return [name for name, sqltype in columns if "AUTOINCREMENT" not in sqltype.upper()]
+
+
+def _try_add_column(conn: sqlite3.Connection, table: str, name: str, sqltype: str) -> None:
+    """Add-only migration: ALTER ADD COLUMN, swallowing only the
+    'already exists' error so a real SQL problem still surfaces."""
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sqltype}")
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            raise
+
+
+class EvalLedger:
+    """Thin SQLite wrapper. `save_run` is the only write entry point."""
+
+    def __init__(self, db_path: Path | str) -> None:
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._ensure_schema()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn
+
+    def _ensure_schema(self) -> None:
+        with closing(self._connect()) as conn:
+            conn.execute(_create_sql("eval_runs", _run_columns()))
+            conn.execute(_create_sql("eval_cases", _case_columns()))
+            # Registry growth (P2/P3 metrics) extends an existing DB.
+            for name, sqltype in run_sql_columns():
+                _try_add_column(conn, "eval_runs", name, sqltype)
+            for name, sqltype in case_sql_columns():
+                _try_add_column(conn, "eval_cases", name, sqltype)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_cases_run_id ON eval_cases(run_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_ts ON eval_runs(run_timestamp)")
+            conn.commit()
+
+    def save_run(self, report: dict[str, Any]) -> int:
+        """Persist one run (summary + provenance) + its per-case rows.
+
+        `report` is the dict `report.build_report()` produces. Returns the
+        assigned `run_id`.
+        """
+        summary = report.get("summary", {})
+        run_row: dict[str, Any] = {
+            "run_timestamp": report.get("run_timestamp"),
+            "dataset_path": report.get("dataset_path"),
+            "git_commit": report.get("git_commit"),
+            "prompts_snapshot": _json_or_none(report.get("prompts_snapshot")),
+            "case_count": summary.get("case_count"),
+            "pass_count": summary.get("pass_count"),
+            "pass_rate": summary.get("pass_rate"),
+            "enabled_groups": json.dumps(sorted(report.get("enabled_groups", []))),
+            "gate_thresholds": json.dumps(report.get("gate_thresholds", {})),
+        }
+        for avg_key, _ in run_sql_columns():
+            run_row[avg_key] = summary.get(avg_key)
+
+        with closing(self._connect()) as conn:
+            run_id = _insert(conn, "eval_runs", _run_columns(), run_row)
+            for case in report.get("results", []):
+                case_row: dict[str, Any] = {
+                    "run_id": run_id,
+                    "run_timestamp": report.get("run_timestamp"),
+                    "case_id": case.get("id"),
+                    "category": case.get("category", ""),
+                    "question": case.get("question"),
+                    "status": case.get("status"),
+                    "answer": case.get("answer"),
+                    "errors": json.dumps(case.get("errors", [])),
+                }
+                for col, _ in case_sql_columns():
+                    case_row[col] = case.get(col)
+                _insert(conn, "eval_cases", _case_columns(), case_row)
+            conn.commit()
+        return run_id
+
+
+def _json_or_none(value: Any) -> str | None:
+    return json.dumps(value) if value is not None else None
+
+
+def _insert(
+    conn: sqlite3.Connection, table: str, columns: list[tuple[str, str]], row: dict[str, Any]
+) -> int:
+    names = _insert_names(columns)
+    placeholders = ", ".join("?" for _ in names)
+    values = [row.get(name) for name in names]
+    cursor = conn.execute(
+        f"INSERT INTO {table} ({', '.join(names)}) VALUES ({placeholders})", values
+    )
+    return int(cursor.lastrowid)

@@ -1,0 +1,164 @@
+"""Deterministic metric compute functions.
+
+Pure functions over primitives (lists of doc_ids / chunk texts / the
+answer string) — no LLM, no KA objects, no framework. The adapter/engine
+pulls these primitives out of the typed graph state and passes them in,
+so the metrics stay provider- and framework-agnostic and trivially
+testable.
+
+Two relevance notions:
+  - source-level: a retrieved chunk is relevant if its doc_id is in the
+    case's gold `expected_sources`.
+  - chunk-level: a retrieved chunk is relevant if any gold snippet from
+    `expected_chunks` is a substring of its normalized text.
+
+A metric family returns None for every metric when the case carries no
+gold for it, so `safe_mean` drops it from run-level averages rather than
+scoring a vacuous 0 that drags the mean down.
+"""
+
+from __future__ import annotations
+
+import math
+import unicodedata
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+
+_SOURCE_KEYS = ("hit_at_k", "mrr", "precision_at_k", "recall_at_k", "ndcg_at_k")
+_CHUNK_KEYS = (
+    "chunk_hit_at_k",
+    "chunk_mrr",
+    "chunk_precision_at_k",
+    "chunk_recall_at_k",
+    "chunk_ndcg_at_k",
+)
+
+
+def normalize_text(text: str) -> str:
+    """Lowercase, strip accents, collapse whitespace — so substring matches
+    ignore case/accent/spacing noise."""
+    nfkd = unicodedata.normalize("NFKD", text or "")
+    no_accents = "".join(c for c in nfkd if not unicodedata.combining(c))
+    return " ".join(no_accents.lower().split())
+
+
+def safe_mean(values: Iterable[float | None]) -> float | None:
+    """Mean of the non-None values, or None when there are none."""
+    nums = [v for v in values if v is not None]
+    return sum(nums) / len(nums) if nums else None
+
+
+# ---------------------------------------------------------------------------
+# Ranking primitives (binary relevance list, in rank order).
+# ---------------------------------------------------------------------------
+
+
+def hit_at_k(relevance: Sequence[bool]) -> float:
+    """1.0 if any retrieved item is relevant, else 0.0."""
+    return 1.0 if any(relevance) else 0.0
+
+
+def mrr(relevance: Sequence[bool]) -> float:
+    """Reciprocal rank of the first relevant item (0.0 if none)."""
+    for i, rel in enumerate(relevance):
+        if rel:
+            return 1.0 / (i + 1)
+    return 0.0
+
+
+def precision_at_k(relevance: Sequence[bool]) -> float:
+    """Fraction of retrieved slots that are relevant."""
+    return (sum(relevance) / len(relevance)) if relevance else 0.0
+
+
+def ndcg_at_k(relevance: Sequence[bool], total_relevant: int) -> float:
+    """Binary-relevance NDCG. IDCG uses `min(total_relevant, k)` ideal
+    positions, so the score penalizes both bad ranking and not retrieving
+    enough of the gold set."""
+    dcg = sum(1.0 / math.log2(i + 2) for i, rel in enumerate(relevance) if rel)
+    ideal = min(total_relevant, len(relevance))
+    idcg = sum(1.0 / math.log2(i + 2) for i in range(ideal))
+    return (dcg / idcg) if idcg > 0 else 0.0
+
+
+# ---------------------------------------------------------------------------
+# Family compute functions.
+# ---------------------------------------------------------------------------
+
+
+def compute_source_metrics(
+    retrieved_doc_ids: Sequence[str], expected_sources: Sequence[str]
+) -> dict[str, float | None]:
+    """Source-level retrieval metrics (relevance by doc_id membership).
+
+    Recall dedups documents (a doc retrieved 3× counts once toward finding
+    the gold doc); precision/ndcg/mrr/hit use the per-slot relevance list.
+    All None when the case has no gold `expected_sources`.
+    """
+    gold = set(expected_sources)
+    if not gold:
+        return dict.fromkeys(_SOURCE_KEYS, None)
+    rel = [doc_id in gold for doc_id in retrieved_doc_ids]
+    found_docs = {doc_id for doc_id in retrieved_doc_ids if doc_id in gold}
+    return {
+        "hit_at_k": hit_at_k(rel),
+        "mrr": mrr(rel),
+        "precision_at_k": precision_at_k(rel),
+        "recall_at_k": len(found_docs) / len(gold),
+        "ndcg_at_k": ndcg_at_k(rel, len(gold)),
+    }
+
+
+def compute_chunk_metrics(
+    retrieved_texts: Sequence[str], expected_chunks: Sequence[str]
+) -> dict[str, float | None]:
+    """Chunk-level retrieval metrics (relevance by gold-snippet substring).
+
+    Recall is snippet-centric (fraction of gold snippets found in at least
+    one retrieved chunk); the rest use per-chunk relevance. All None when
+    the case has no gold `expected_chunks`.
+    """
+    snippets = [normalize_text(s) for s in expected_chunks if s.strip()]
+    if not snippets:
+        return dict.fromkeys(_CHUNK_KEYS, None)
+    texts = [normalize_text(t) for t in retrieved_texts]
+    rel = [any(s in t for s in snippets) for t in texts]
+    found_snippets = sum(1 for s in snippets if any(s in t for t in texts))
+    return {
+        "chunk_hit_at_k": hit_at_k(rel),
+        "chunk_mrr": mrr(rel),
+        "chunk_precision_at_k": precision_at_k(rel),
+        "chunk_recall_at_k": found_snippets / len(snippets),
+        "chunk_ndcg_at_k": ndcg_at_k(rel, len(snippets)),
+    }
+
+
+def required_keyword_hit_rate(answer: str, required: Sequence[str]) -> float:
+    """Fraction of required keywords present in the answer (substring after
+    normalization). Vacuously 1.0 when the case lists no required keywords."""
+    reqs = [normalize_text(k) for k in required if k.strip()]
+    if not reqs:
+        return 1.0
+    na = normalize_text(answer)
+    return sum(1 for k in reqs if k in na) / len(reqs)
+
+
+def disallowed_keyword_hits(answer: str, disallowed: Sequence[str]) -> int:
+    """Count of disallowed keywords present in the answer (0 = clean)."""
+    na = normalize_text(answer)
+    dis = [normalize_text(k) for k in disallowed if k.strip()]
+    return sum(1 for k in dis if k in na)
+
+
+def chunk_source_grounding(
+    cited_chunk_ids: Sequence[str], retrieved_chunk_ids: Sequence[str]
+) -> float:
+    """Fraction of the answer's chunk citations that point at an
+    actually-retrieved chunk — a structural anti-hallucination check.
+    1.0 when the answer cited nothing (nothing to ground)."""
+    if not cited_chunk_ids:
+        return 1.0
+    retrieved = set(retrieved_chunk_ids)
+    return sum(1 for cid in cited_chunk_ids if cid in retrieved) / len(cited_chunk_ids)

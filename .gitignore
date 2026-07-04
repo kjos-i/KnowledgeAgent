@@ -27,6 +27,9 @@ results/
 lance_data/
 lance_data_test/
 
+# Evaluation harness output (SQLite ledger + JSON/CSV reports)
+eval_output/
+
 # Logging output (crash files + rotated app log)
 crashes/
 *.log
