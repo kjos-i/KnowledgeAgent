@@ -105,20 +105,14 @@ async def _delete_smoke_nodes(client) -> None:
             f"-[m:MENTIONS]->(e:{ENTITY_LABEL}) DELETE m",
             chunk_id=chunk_id,
         )
-        await session.run(
-            f"MATCH (e:{ENTITY_LABEL}) "
-            f"WHERE NOT (e)<-[:MENTIONS]-() "
-            f"DETACH DELETE e"
-        )
+        await session.run(f"MATCH (e:{ENTITY_LABEL}) WHERE NOT (e)<-[:MENTIONS]-() DETACH DELETE e")
         # Drop the chunk + the doc.
         await session.run(
-            f"MATCH (c:{CHUNK_LABEL} {{doc_id: $doc_id}}) "
-            f"DETACH DELETE c",
+            f"MATCH (c:{CHUNK_LABEL} {{doc_id: $doc_id}}) DETACH DELETE c",
             doc_id=SYNTHETIC_DOC_ID,
         )
         await session.run(
-            f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) "
-            f"DETACH DELETE d",
+            f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) DETACH DELETE d",
             doc_id=SYNTHETIC_DOC_ID,
         )
 
@@ -192,14 +186,12 @@ async def main() -> None:
     entity_types = _DEFAULT_TYPES_PER_ADAPTER[args.adapter]
     print(f"  entity_types passed: {entity_types or '(adapter default)'}")
 
-    print(f"Extracting mentions from synthetic chunk text...")
+    print("Extracting mentions from synthetic chunk text...")
     mentions = extractor.extract(SYNTHETIC_CHUNK_TEXT, entity_types)
     print(f"  extractor returned {len(mentions)} mentions")
     for m in mentions[:10]:
         offset_str = f"@{m.offset}" if m.offset is not None else "(no offset)"
-        print(
-            f"    {offset_str:>14} {m.entity_type:>10}  {m.raw_text!r}"
-        )
+        print(f"    {offset_str:>14} {m.entity_type:>10}  {m.raw_text!r}")
     if len(mentions) > 10:
         print(f"    ... and {len(mentions) - 10} more")
 

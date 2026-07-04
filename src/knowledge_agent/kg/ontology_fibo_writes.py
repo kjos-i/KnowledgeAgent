@@ -44,27 +44,29 @@ to the shared `write_ontology_terms` family helpers for the Neo4j-write steps.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from knowledge_agent import _http_client
 from knowledge_agent.kg.ontology_helpers import (
     OntologyTerm,
     _owl_id_extractor,
+    delete_ontology_terms,
     ensure_cached,
     extract_terms_owl,
     get_downloads_dir,
-    delete_ontology_terms,
     is_ontology_imported,
     write_ontology_terms,
 )
 from knowledge_agent.kg.ontology_provenance import OntologyProvenance
 from knowledge_agent.kg.schema import FIBO_IS_A_REL, FIBO_TERM_LABEL
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 logger = logging.getLogger(__name__)
 
 # Re-exported for backward-compatible test patching.
-_ = ensure_cached  # noqa: F841
+_ = ensure_cached
 
 
 # ---------------------------------------------------------------------------
@@ -80,13 +82,8 @@ market infrastructure."""
 # GitHub repo coordinates. Master branch tracks the latest release.
 FIBO_REPO = "edmcouncil/fibo"
 FIBO_BRANCH = "master"
-FIBO_TREE_API_URL = (
-    f"https://api.github.com/repos/{FIBO_REPO}/git/trees/{FIBO_BRANCH}"
-    "?recursive=1"
-)
-FIBO_RAW_BASE_URL = (
-    f"https://raw.githubusercontent.com/{FIBO_REPO}/{FIBO_BRANCH}"
-)
+FIBO_TREE_API_URL = f"https://api.github.com/repos/{FIBO_REPO}/git/trees/{FIBO_BRANCH}?recursive=1"
+FIBO_RAW_BASE_URL = f"https://raw.githubusercontent.com/{FIBO_REPO}/{FIBO_BRANCH}"
 FIBO_CACHE_SUBDIR = "fibo"
 FIBO_ID_PREFIX = "FIBO"
 # Approximate size of all ~70 modules combined, surfaced in the
@@ -94,7 +91,6 @@ FIBO_ID_PREFIX = "FIBO"
 DOWNLOAD_SIZE_MB = 30
 
 _ONTOLOGY_NAME = "FIBO"
-
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +119,7 @@ _FIBO_PROVENANCE = OntologyProvenance(
     domain_tags=DOMAIN_TAGS,
     covers_labels=_FIBO_COVERS_LABELS,
     description=(
-                "Financial instruments, transactions, parties, agreements, "
+        "Financial instruments, transactions, parties, agreements, "
         "corporations, market infrastructure. Modular distribution; "
         "first install is 1-2 min of GitHub fetches. "
     ),
@@ -145,11 +141,14 @@ _SKIP_PATH_PREFIXES: tuple[str, ...] = ("etc/", ".github/")
 async def is_imported(client) -> bool:
     """True when at least one `:FIBOTerm` node exists in Neo4j."""
     return await is_ontology_imported(
-        client, term_label=FIBO_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
+        client,
+        term_label=FIBO_TERM_LABEL,
+        ontology_name=_ONTOLOGY_NAME,
     )
 
 
-async def import_fibo(client,
+async def import_fibo(
+    client,
     *,
     force: bool = False,
     xrefs_mode: str = "none",
@@ -184,9 +183,7 @@ async def import_fibo(client,
     terms = _read_and_extract(cache_dir)
 
     if not terms:
-        raise RuntimeError(
-            f"{_ONTOLOGY_NAME}: extracted 0 terms - unexpected, aborting write"
-        )
+        raise RuntimeError(f"{_ONTOLOGY_NAME}: extracted 0 terms - unexpected, aborting write")
 
     await write_terms(client, terms)
     return True
@@ -195,18 +192,22 @@ async def import_fibo(client,
 async def delete_imported(client) -> None:
     """DETACH DELETE every :FIBOTerm node + its :FIBO_IS_A edges."""
     await delete_ontology_terms(
-        client, term_label=FIBO_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
+        client,
+        term_label=FIBO_TERM_LABEL,
+        ontology_name=_ONTOLOGY_NAME,
     )
 
 
-async def write_terms(client,
+async def write_terms(
+    client,
     terms: list[OntologyTerm],
     *,
     xrefs_mode: str = "none",
 ) -> None:
     """Write `:OntologyTerm:FIBOTerm` nodes + `:FIBO_IS_A` edges."""
     await write_ontology_terms(
-        client, terms,
+        client,
+        terms,
         term_label=FIBO_TERM_LABEL,
         hierarchy_rel=FIBO_IS_A_REL,
         ontology_name=_ONTOLOGY_NAME,
@@ -238,13 +239,12 @@ async def _list_fibo_rdf_paths() -> list[str]:
         for entry in tree
         if entry.get("type") == "blob"
         and entry.get("path", "").endswith(".rdf")
-        and not any(
-            entry["path"].startswith(prefix)
-            for prefix in _SKIP_PATH_PREFIXES
-        )
+        and not any(entry["path"].startswith(prefix) for prefix in _SKIP_PATH_PREFIXES)
     )
     logger.info(
-        "%s: found %d module files to cache", _ONTOLOGY_NAME, len(paths),
+        "%s: found %d module files to cache",
+        _ONTOLOGY_NAME,
+        len(paths),
     )
     return paths
 
@@ -290,7 +290,8 @@ def _read_and_extract(cache_dir: Path) -> list[OntologyTerm]:
     rdf_files = sorted(cache_dir.rglob("*.rdf"))
     logger.info(
         "%s: parsing %d module files into a single graph",
-        _ONTOLOGY_NAME, len(rdf_files),
+        _ONTOLOGY_NAME,
+        len(rdf_files),
     )
 
     graph = rdflib.Graph()
@@ -303,7 +304,9 @@ def _read_and_extract(cache_dir: Path) -> list[OntologyTerm]:
             # enough that the rest still yield useful term coverage.
             logger.warning(
                 "%s: parse failed for %s: %r - skipping",
-                _ONTOLOGY_NAME, rdf_path, exc,
+                _ONTOLOGY_NAME,
+                rdf_path,
+                exc,
             )
 
     return extract_terms_owl(
@@ -328,10 +331,7 @@ def _fibo_id_extractor(uri: Any) -> str:
     """
     text = str(uri)
     if "edmcouncil.org/fibo" in text:
-        if "#" in text:
-            last = text.rsplit("#", 1)[1]
-        else:
-            last = text.rsplit("/", 1)[1]
+        last = text.rsplit("#", 1)[1] if "#" in text else text.rsplit("/", 1)[1]
         if last:
             return f"FIBO:{last}"
     return _owl_id_extractor(uri)

@@ -29,6 +29,7 @@ GUI, CLI install summary, and smoke tests. The 0d security review
 modules previously printed only the raw flag value (e.g.
 `safetensors=False`) without explaining why the user should care.
 """
+
 from __future__ import annotations
 
 

@@ -258,9 +258,7 @@ HF_EMBEDDING_MODELS: dict[str, HFEmbedderProvenance] = {
     "sentence-transformers/all-MiniLM-L6-v2": HFEmbedderProvenance(
         model_id="sentence-transformers/all-MiniLM-L6-v2",
         display_name="all-MiniLM-L6 (classic / fastest)",
-        source_url=(
-            "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2"
-        ),
+        source_url=("https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2"),
         download_size_mb=90,
         dimensions=384,
         language="English",
@@ -367,9 +365,7 @@ EMBEDDER_PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
 # ---- subprocess wrapper (mockable) ----
 
 
-async def _run_pip(
-    args: list[str], timeout: float = 1200.0
-) -> tuple[bool, str]:
+async def _run_pip(args: list[str], timeout: float = 1200.0) -> tuple[bool, str]:
     """Run `python -m pip <args>` async; return (success, combined output).
 
     Timeout default is 20 minutes — the HF extra pulls torch (large
@@ -380,7 +376,7 @@ async def _run_pip(
     On timeout the child is killed with `proc.kill()` + reaped via
     `proc.wait()` so no zombie remains.
     """
-    cmd = [sys.executable, "-m", "pip"] + args
+    cmd = [sys.executable, "-m", "pip", *args]
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -389,15 +385,15 @@ async def _run_pip(
         )
         try:
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout,
+                proc.communicate(),
+                timeout=timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             return False, f"pip command timed out after {timeout}s"
-        output = (
-            (stdout.decode("utf-8", errors="replace") if stdout else "")
-            + (stderr.decode("utf-8", errors="replace") if stderr else "")
+        output = (stdout.decode("utf-8", errors="replace") if stdout else "") + (
+            stderr.decode("utf-8", errors="replace") if stderr else ""
         )
         return proc.returncode == 0, output
     except Exception as exc:
@@ -412,8 +408,7 @@ def _registry_entry(provider: str) -> dict[str, Any]:
     entry = EMBEDDER_PROVIDER_REGISTRY.get(provider)
     if entry is None:
         raise ValueError(
-            f"Unknown embedder provider {provider!r}. "
-            f"Known: {sorted(EMBEDDER_PROVIDER_REGISTRY)}."
+            f"Unknown embedder provider {provider!r}. Known: {sorted(EMBEDDER_PROVIDER_REGISTRY)}."
         )
     return entry
 
@@ -423,8 +418,7 @@ def _hf_model_provenance(model_id: str) -> HFEmbedderProvenance:
     prov = HF_EMBEDDING_MODELS.get(model_id)
     if prov is None:
         raise ValueError(
-            f"Unknown HF embedding model {model_id!r}. "
-            f"Curated menu: {sorted(HF_EMBEDDING_MODELS)}."
+            f"Unknown HF embedding model {model_id!r}. Curated menu: {sorted(HF_EMBEDDING_MODELS)}."
         )
     return prov
 
@@ -506,8 +500,10 @@ async def install_embedder_provider_execute(
     if plan.bundled or plan.already_installed:
         return InstallEmbedderProviderResult(
             provider_name=plan.provider_name,
-            did_install=False, install_ok=True,
-            restart_required=False, pip_output="",
+            did_install=False,
+            install_ok=True,
+            restart_required=False,
+            pip_output="",
         )
     target = f"{distribution_name}[{plan.pip_extras}]"
     ok, output = await _run_pip(["install", target])
@@ -541,10 +537,7 @@ class UninstallEmbedderProviderPlan:
     @property
     def summary(self) -> str:
         if self.bundled:
-            return (
-                f"{self.display_name} is the bundled default — "
-                f"uninstall is not supported."
-            )
+            return f"{self.display_name} is the bundled default — uninstall is not supported."
         if self.is_active:
             return (
                 f"{self.display_name} is your ACTIVE embedding "
@@ -594,12 +587,12 @@ async def uninstall_embedder_provider_execute(
     if plan.bundled or not plan.installed or plan.is_active:
         return UninstallEmbedderProviderResult(
             provider_name=plan.provider_name,
-            did_uninstall=False, uninstall_ok=True,
-            restart_required=False, pip_output="",
+            did_uninstall=False,
+            uninstall_ok=True,
+            restart_required=False,
+            pip_output="",
         )
-    ok, output = await _run_pip(
-        ["uninstall", "-y", *plan.packages_to_remove]
-    )
+    ok, output = await _run_pip(["uninstall", "-y", *plan.packages_to_remove])
     return UninstallEmbedderProviderResult(
         provider_name=plan.provider_name,
         did_uninstall=True,
@@ -682,7 +675,8 @@ def download_hf_model_execute(plan: DownloadHFModelPlan) -> DownloadHFModelResul
     if not plan.libs_installed:
         return DownloadHFModelResult(
             model_id=plan.model_id,
-            did_download=False, download_ok=False,
+            did_download=False,
+            download_ok=False,
             error_output=(
                 "sentence-transformers + torch not installed. "
                 "Install the embed-huggingface extra first."
@@ -697,15 +691,16 @@ def download_hf_model_execute(plan: DownloadHFModelPlan) -> DownloadHFModelResul
         )
         return DownloadHFModelResult(
             model_id=plan.model_id,
-            did_download=True, download_ok=True, error_output="",
+            did_download=True,
+            download_ok=True,
+            error_output="",
         )
     except Exception as exc:
-        logger.exception(
-            "HF model download failed for %s", plan.model_id
-        )
+        logger.exception("HF model download failed for %s", plan.model_id)
         return DownloadHFModelResult(
             model_id=plan.model_id,
-            did_download=True, download_ok=False,
+            did_download=True,
+            download_ok=False,
             error_output=f"{type(exc).__name__}: {exc}",
         )
 
@@ -825,11 +820,11 @@ def switch_embedder_plan(to_provider: str) -> SwitchEmbedderPlan:
         # NOT flag destructive (the GUI can still warn via a separate
         # banner about LanceDB being down).
         logger.warning(
-            "switch_embedder_plan: could not read LanceDB schema "
-            "(%r); assuming no corpus yet", exc,
+            "switch_embedder_plan: could not read LanceDB schema (%r); assuming no corpus yet",
+            exc,
         )
 
-    dim_mismatch = (from_dim is not None and from_dim != to_dim)
+    dim_mismatch = from_dim is not None and from_dim != to_dim
     return SwitchEmbedderPlan(
         from_provider=from_provider,
         to_provider=to_provider,

@@ -37,6 +37,7 @@ All three ops dispatch generically via `ONTOLOGY_REGISTRY` (in
 that registry, no changes here.
 """
 
+import contextlib
 import logging
 import shutil
 from dataclasses import dataclass
@@ -74,6 +75,7 @@ def _safe_downloads_dir() -> Path | None:
     except Exception:
         pass
     from knowledge_agent.config import Settings
+
     model_field = Settings.model_fields.get("ontology_downloads_dir")
     if model_field is None:
         return None
@@ -81,11 +83,10 @@ def _safe_downloads_dir() -> Path | None:
     if default is None:
         return None
     default = Path(default)
-    try:
+    with contextlib.suppress(OSError):
         default.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        pass
     return default
+
 
 # Re-export so callers continue to do
 # `from knowledge_agent.kg.ontology_lifecycle import OntologyProvenance`.
@@ -150,16 +151,16 @@ class ImportOntologyPlan:
         base = self._base_summary()
         if self.xrefs_mode == "collect_only":
             return (
-                f"{base} L7 xrefs layer = \"collect_only\": this "
+                f'{base} L7 xrefs layer = "collect_only": this '
                 f"ontology's cross-ontology xref strings will be "
                 f"stored as `dangling_xrefs` properties on each "
                 f"source term. No `:<X>_XREF` edges are written at "
                 f"import time; run the `backfill_xrefs` op (or flip "
-                f"the layer to \"use\") to materialise resolved edges."
+                f'the layer to "use") to materialise resolved edges.'
             )
         if self.xrefs_mode == "use":
             return (
-                f"{base} L7 xrefs layer = \"use\": this ontology's "
+                f'{base} L7 xrefs layer = "use": this ontology\'s '
                 f"cross-ontology xref strings will be stored as "
                 f"`dangling_xrefs` AND any xref whose target already "
                 f"exists in the graph will get a resolved `:<X>_XREF` "
@@ -178,27 +179,19 @@ class ImportOntologyPlan:
         code) still get something meaningful.
         """
         if self.provenance is None:
-            return (
-                f"Import {self.ontology_name} (~{self.download_size_mb} "
-                f"MB download)."
-            )
+            return f"Import {self.ontology_name} (~{self.download_size_mb} MB download)."
         p = self.provenance
         lines = [
-            f"Import {p.full_name} ({p.ontology_name}) "
-            f"— {p.download_size_mb} MB {p.file_format}.",
+            f"Import {p.full_name} ({p.ontology_name}) — {p.download_size_mb} MB {p.file_format}.",
             f"  Publisher: {p.publisher}",
             f"  License: {p.license}",
             f"  Source: {p.source_url}",
             f"  Estimated terms: ~{p.estimated_terms:,}",
         ]
         if p.domain_tags:
-            lines.append(
-                f"  Domain tags: {', '.join(p.domain_tags)}"
-            )
+            lines.append(f"  Domain tags: {', '.join(p.domain_tags)}")
         if p.covers_labels:
-            lines.append(
-                f"  Covers entity labels: {', '.join(p.covers_labels)}"
-            )
+            lines.append(f"  Covers entity labels: {', '.join(p.covers_labels)}")
         lines.append(f"  {p.description}")
         if p.heavy_warning:
             lines.append(f"  WARNING: {p.heavy_warning}")
@@ -209,9 +202,7 @@ class ImportOntologyPlan:
         if self.extractor_candidates:
             lines.append("  Pairs well with extractors:")
             for ext_name, labels in self.extractor_candidates:
-                lines.append(
-                    f"    - {ext_name}: {', '.join(labels)}"
-                )
+                lines.append(f"    - {ext_name}: {', '.join(labels)}")
         elif p.covers_labels:
             # covers_labels declared but no shipped extractor emits
             # them — surface that explicitly so the user knows to
@@ -254,7 +245,9 @@ class ImportOntologyResult:
 
 
 async def import_ontology_plan(
-    ontology_name: str, *, xrefs_mode: str = "none",
+    ontology_name: str,
+    *,
+    xrefs_mode: str = "none",
 ) -> ImportOntologyPlan:
     """Build a plan for importing the named ontology.
 
@@ -324,7 +317,8 @@ async def import_ontology_execute(
     except Exception as exc:
         logger.warning(
             "import_ontology_execute (%s): import_fn failed: %r",
-            plan.ontology_name, exc,
+            plan.ontology_name,
+            exc,
         )
         import_ok = False
         import_error = ErrorDetail.from_exception(exc)
@@ -477,7 +471,8 @@ async def link_ontology_execute(plan: LinkOntologyPlan) -> LinkOntologyResult:
     except Exception as exc:
         logger.warning(
             "link_ontology_execute (%s): linking pass failed: %r",
-            plan.ontology_name, exc,
+            plan.ontology_name,
+            exc,
         )
         return LinkOntologyResult(
             ontology_name=plan.ontology_name,
@@ -601,7 +596,8 @@ async def delete_ontology_execute(
     except Exception as exc:
         logger.warning(
             "delete_ontology_execute (%s): delete_fn failed: %r",
-            plan.ontology_name, exc,
+            plan.ontology_name,
+            exc,
         )
         delete_ok = False
         delete_error = ErrorDetail.from_exception(exc)
@@ -671,7 +667,7 @@ class InstallXrefsPlan:
 
         if self.new_xrefs_mode == "none":
             return (
-                f"Set L7 xrefs layer to \"none\". {state} Future "
+                f'Set L7 xrefs layer to "none". {state} Future '
                 "imports will skip xref extraction entirely. Existing "
                 "dangling_xrefs properties and resolved edges are NOT "
                 "removed by this flip — run `clear_xref_edges` "
@@ -679,7 +675,7 @@ class InstallXrefsPlan:
             )
         if self.new_xrefs_mode == "collect_only":
             return (
-                "Set L7 xrefs layer to \"collect_only\". "
+                'Set L7 xrefs layer to "collect_only". '
                 f"{state} Future imports will extract xrefs and store "
                 "them as `dangling_xrefs` properties, but will NOT "
                 "write `:<X>_XREF` edges. Already-imported ontologies "
@@ -689,7 +685,7 @@ class InstallXrefsPlan:
             )
         # "use"
         return (
-            f"Set L7 xrefs layer to \"use\". {state} Future imports "
+            f'Set L7 xrefs layer to "use". {state} Future imports '
             "will extract xrefs AND immediately write `:<X>_XREF` "
             "edges for every xref whose target already exists. Xrefs "
             "pointing at not-yet-imported ontologies stay in "
@@ -756,8 +752,7 @@ async def install_xrefs_plan(client, new_xrefs_mode: str) -> InstallXrefsPlan:
 # (e.g. "mesh") so `install_xrefs_plan` can route through the existing
 # `is_imported_fn`. Built once at module load.
 _TERM_LABEL_TO_REGISTRY_KEY: dict[str, str] = {
-    entry["term_label"]: name
-    for name, entry in ONTOLOGY_REGISTRY.items()
+    entry["term_label"]: name for name, entry in ONTOLOGY_REGISTRY.items()
 }
 
 
@@ -822,7 +817,7 @@ class InstallCrossDocXrefsPlan:
         if not self.entities_layer_on:
             deps.append("`entities=true`")
         if not self.xrefs_layer_use:
-            deps.append("`xrefs=\"use\"`")
+            deps.append('`xrefs="use"`')
         if deps:
             missing = " AND ".join(deps)
             return (
@@ -883,9 +878,7 @@ async def _count_focal_nodes(client) -> int | None:
     """
     try:
         async with client.driver.session() as session:
-            result = await session.run(
-                "MATCH (d:Document|Artifact) RETURN count(d) AS n"
-            )
+            result = await session.run("MATCH (d:Document|Artifact) RETURN count(d) AS n")
             row = await result.single()
             return int(row["n"]) if row else 0
     except Exception as exc:
@@ -902,10 +895,7 @@ async def _count_l10_edges(client) -> int | None:
     """
     try:
         async with client.driver.session() as session:
-            result = await session.run(
-                "MATCH ()-[r:RELATED_BY_XREF]-() "
-                "RETURN count(r) AS n"
-            )
+            result = await session.run("MATCH ()-[r:RELATED_BY_XREF]-() RETURN count(r) AS n")
             row = await result.single()
             return int(row["n"]) if row else 0
     except Exception as exc:
@@ -953,6 +943,7 @@ def get_canonicalization_candidates(
     from knowledge_agent.entity_extractors.extractor_lifecycle import (
         EXTRACTOR_REGISTRY,
     )
+
     if extractor_name not in EXTRACTOR_REGISTRY:
         raise ValueError(
             f"get_canonicalization_candidates: unknown extractor "
@@ -1003,6 +994,7 @@ def get_extractor_candidates(
     from knowledge_agent.entity_extractors.extractor_lifecycle import (
         EXTRACTOR_REGISTRY,
     )
+
     if ontology_name not in ONTOLOGY_REGISTRY:
         raise ValueError(
             f"get_extractor_candidates: unknown ontology "
@@ -1137,15 +1129,9 @@ class DownloadOntologyDownloadPlan:
     def summary(self) -> str:
         if self.already_downloaded:
             mb = self.on_disk_bytes / (1024 * 1024)
-            return (
-                f"{self.ontology_name} already downloaded "
-                f"({mb:.1f} MB on disk)."
-            )
+            return f"{self.ontology_name} already downloaded ({mb:.1f} MB on disk)."
         if self.provenance is None:
-            return (
-                f"Download {self.ontology_name} source file "
-                f"(~{self.download_size_mb} MB)."
-            )
+            return f"Download {self.ontology_name} source file (~{self.download_size_mb} MB)."
         p = self.provenance
         return (
             f"Download {p.full_name} ({p.ontology_name}) — "
@@ -1208,8 +1194,10 @@ async def download_ontology_download_execute(
     if plan.already_downloaded:
         return DownloadOntologyDownloadResult(
             ontology_name=plan.ontology_name,
-            did_download=False, download_ok=True,
-            download_error=None, on_disk_bytes=plan.on_disk_bytes,
+            did_download=False,
+            download_ok=True,
+            download_error=None,
+            on_disk_bytes=plan.on_disk_bytes,
         )
     entry = ONTOLOGY_REGISTRY[plan.ontology_name]
     try:
@@ -1218,22 +1206,26 @@ async def download_ontology_download_execute(
             await entry["download_fn"]()
         else:
             await ensure_cached(
-                entry["download_url"], entry["download_filename"],
+                entry["download_url"],
+                entry["download_filename"],
             )
     except Exception as exc:
         logger.warning(
             "download_ontology_download_execute (%s) failed: %r",
-            plan.ontology_name, exc,
+            plan.ontology_name,
+            exc,
         )
         return DownloadOntologyDownloadResult(
             ontology_name=plan.ontology_name,
-            did_download=True, download_ok=False,
+            did_download=True,
+            download_ok=False,
             download_error=repr(exc),
             on_disk_bytes=get_ontology_download_bytes(plan.ontology_name),
         )
     return DownloadOntologyDownloadResult(
         ontology_name=plan.ontology_name,
-        did_download=True, download_ok=True,
+        did_download=True,
+        download_ok=True,
         download_error=None,
         on_disk_bytes=get_ontology_download_bytes(plan.ontology_name),
     )
@@ -1258,10 +1250,7 @@ class DeleteOntologyDownloadPlan:
     @property
     def summary(self) -> str:
         if not self.is_downloaded:
-            return (
-                f"{self.ontology_name} has no downloaded file(s) "
-                f"— nothing to delete."
-            )
+            return f"{self.ontology_name} has no downloaded file(s) — nothing to delete."
         mb = self.on_disk_bytes / (1024 * 1024)
         return (
             f"Delete {self.ontology_name} source file(s) from disk "
@@ -1314,8 +1303,10 @@ async def delete_ontology_download_execute(
     if not plan.is_downloaded:
         return DeleteOntologyDownloadResult(
             ontology_name=plan.ontology_name,
-            did_delete=False, delete_ok=True,
-            delete_error=None, freed_bytes=0,
+            did_delete=False,
+            delete_ok=True,
+            delete_error=None,
+            freed_bytes=0,
         )
     entry = ONTOLOGY_REGISTRY[plan.ontology_name]
     freed = plan.on_disk_bytes
@@ -1331,15 +1322,20 @@ async def delete_ontology_download_execute(
     except Exception as exc:
         logger.warning(
             "delete_ontology_download_execute (%s) failed: %r",
-            plan.ontology_name, exc,
+            plan.ontology_name,
+            exc,
         )
         return DeleteOntologyDownloadResult(
             ontology_name=plan.ontology_name,
-            did_delete=True, delete_ok=False,
-            delete_error=repr(exc), freed_bytes=0,
+            did_delete=True,
+            delete_ok=False,
+            delete_error=repr(exc),
+            freed_bytes=0,
         )
     return DeleteOntologyDownloadResult(
         ontology_name=plan.ontology_name,
-        did_delete=True, delete_ok=True,
-        delete_error=None, freed_bytes=freed,
+        did_delete=True,
+        delete_ok=True,
+        delete_error=None,
+        freed_bytes=freed,
     )

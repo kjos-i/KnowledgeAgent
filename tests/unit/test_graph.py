@@ -27,7 +27,6 @@ from knowledge_agent.graph import (
     graph,
 )
 
-
 # ---- helpers ----
 
 
@@ -79,9 +78,7 @@ def test_graph_registers_all_six_nodes():
         NODE_NEO4J_RETRIEVER,
         NODE_SYNTHESIZER,
     ):
-        assert expected in node_names, (
-            f"node {expected!r} missing from compiled graph"
-        )
+        assert expected in node_names, f"node {expected!r} missing from compiled graph"
 
 
 # ---- _entry_for_mode (concrete mode -> entry node[s]) ----
@@ -123,10 +120,7 @@ def test_entry_for_mode_unknown_falls_back_to_query_builder():
 
 def test_route_from_start_auto_mode_goes_to_classifier():
     with _mock_default_mode("auto"):
-        assert (
-            _route_from_start({"retrieval_mode": "auto"})
-            == NODE_MODE_CLASSIFIER
-        )
+        assert _route_from_start({"retrieval_mode": "auto"}) == NODE_MODE_CLASSIFIER
 
 
 def test_route_from_start_auto_via_settings_default_goes_to_classifier():
@@ -137,34 +131,22 @@ def test_route_from_start_auto_via_settings_default_goes_to_classifier():
 
 def test_route_from_start_lancedb_only_dispatches_to_query_builder():
     with _mock_default_mode("lancedb_only"):
-        assert (
-            _route_from_start({"retrieval_mode": "lancedb_only"})
-            == NODE_QUERY_BUILDER
-        )
+        assert _route_from_start({"retrieval_mode": "lancedb_only"}) == NODE_QUERY_BUILDER
 
 
 def test_route_from_start_neo4j_only_dispatches_to_cypher_builder():
     with _mock_default_mode("lancedb_only"):
-        assert (
-            _route_from_start({"retrieval_mode": "neo4j_only"})
-            == NODE_CYPHER_BUILDER
-        )
+        assert _route_from_start({"retrieval_mode": "neo4j_only"}) == NODE_CYPHER_BUILDER
 
 
 def test_route_from_start_mode3_dispatches_to_query_builder():
     with _mock_default_mode("lancedb_only"):
-        assert (
-            _route_from_start({"retrieval_mode": "lancedb_then_neo4j"})
-            == NODE_QUERY_BUILDER
-        )
+        assert _route_from_start({"retrieval_mode": "lancedb_then_neo4j"}) == NODE_QUERY_BUILDER
 
 
 def test_route_from_start_mode4_dispatches_to_cypher_builder():
     with _mock_default_mode("lancedb_only"):
-        assert (
-            _route_from_start({"retrieval_mode": "neo4j_then_lancedb"})
-            == NODE_CYPHER_BUILDER
-        )
+        assert _route_from_start({"retrieval_mode": "neo4j_then_lancedb"}) == NODE_CYPHER_BUILDER
 
 
 def test_route_from_start_parallel_fused_returns_list():
@@ -204,36 +186,24 @@ def test_route_from_classifier_parallel_fused_fans_out():
 def test_route_after_lance_mode3_goes_to_cypher_builder():
     """Mode 3 is the only mode where Lance is followed by KG."""
     with _mock_default_mode("lancedb_only"):
-        assert (
-            _route_after_lance({"retrieval_mode": "lancedb_then_neo4j"})
-            == NODE_CYPHER_BUILDER
-        )
+        assert _route_after_lance({"retrieval_mode": "lancedb_then_neo4j"}) == NODE_CYPHER_BUILDER
 
 
 def test_route_after_lance_mode1_goes_to_synthesizer():
     with _mock_default_mode("lancedb_only"):
-        assert (
-            _route_after_lance({"retrieval_mode": "lancedb_only"})
-            == NODE_SYNTHESIZER
-        )
+        assert _route_after_lance({"retrieval_mode": "lancedb_only"}) == NODE_SYNTHESIZER
 
 
 def test_route_after_lance_mode4_goes_to_synthesizer():
     """Mode 4: Lance ran second; the next step is synthesizer."""
     with _mock_default_mode("lancedb_only"):
-        assert (
-            _route_after_lance({"retrieval_mode": "neo4j_then_lancedb"})
-            == NODE_SYNTHESIZER
-        )
+        assert _route_after_lance({"retrieval_mode": "neo4j_then_lancedb"}) == NODE_SYNTHESIZER
 
 
 def test_route_after_lance_mode5_goes_to_synthesizer():
     """Mode 5: parallel branches converge at synthesizer."""
     with _mock_default_mode("lancedb_only"):
-        assert (
-            _route_after_lance({"retrieval_mode": "parallel_fused"})
-            == NODE_SYNTHESIZER
-        )
+        assert _route_after_lance({"retrieval_mode": "parallel_fused"}) == NODE_SYNTHESIZER
 
 
 # ---- _route_after_neo ----
@@ -242,35 +212,23 @@ def test_route_after_lance_mode5_goes_to_synthesizer():
 def test_route_after_neo_mode4_goes_to_query_builder():
     """Mode 4 is the only mode where KG is followed by Lance."""
     with _mock_default_mode("lancedb_only"):
-        assert (
-            _route_after_neo({"retrieval_mode": "neo4j_then_lancedb"})
-            == NODE_QUERY_BUILDER
-        )
+        assert _route_after_neo({"retrieval_mode": "neo4j_then_lancedb"}) == NODE_QUERY_BUILDER
 
 
 def test_route_after_neo_mode2_goes_to_synthesizer():
     with _mock_default_mode("lancedb_only"):
-        assert (
-            _route_after_neo({"retrieval_mode": "neo4j_only"})
-            == NODE_SYNTHESIZER
-        )
+        assert _route_after_neo({"retrieval_mode": "neo4j_only"}) == NODE_SYNTHESIZER
 
 
 def test_route_after_neo_mode3_goes_to_synthesizer():
     """Mode 3: Neo4j ran second; next is synthesizer."""
     with _mock_default_mode("lancedb_only"):
-        assert (
-            _route_after_neo({"retrieval_mode": "lancedb_then_neo4j"})
-            == NODE_SYNTHESIZER
-        )
+        assert _route_after_neo({"retrieval_mode": "lancedb_then_neo4j"}) == NODE_SYNTHESIZER
 
 
 def test_route_after_neo_mode5_goes_to_synthesizer():
     with _mock_default_mode("lancedb_only"):
-        assert (
-            _route_after_neo({"retrieval_mode": "parallel_fused"})
-            == NODE_SYNTHESIZER
-        )
+        assert _route_after_neo({"retrieval_mode": "parallel_fused"}) == NODE_SYNTHESIZER
 
 
 # ---- routed_mode mid-flight precedence ----

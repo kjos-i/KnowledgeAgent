@@ -26,6 +26,8 @@ version was deleted in Day 8 cleanup.
 
 from knowledge_agent.embedder_factory import (
     embed_chunks as embed_chunks,
+)
+from knowledge_agent.embedder_factory import (
     embed_texts as embed_texts,
 )
 

@@ -23,6 +23,7 @@ on_change.
 After a successful save we bridge to env + clear cached factories so
 the next search uses the new values without restart.
 """
+
 from __future__ import annotations
 
 import logging
@@ -106,9 +107,7 @@ class RetrievalTab:
         self.mode_dropdown = ft.Dropdown(
             label="Retrieval mode (agent-level)",
             value=cfg.retrieval_mode,
-            options=[
-                ft.DropdownOption(key=k, text=lbl) for k, lbl in _MODE_LABELS
-            ],
+            options=[ft.DropdownOption(key=k, text=lbl) for k, lbl in _MODE_LABELS],
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
@@ -119,8 +118,7 @@ class RetrievalTab:
             on_change=self.on_lancedb_mode_changed,
             content=ft.Row(
                 controls=[
-                    ft.Radio(value=k, label=lbl.split(" (")[0])
-                    for k, lbl in _LANCEDB_MODE_LABELS
+                    ft.Radio(value=k, label=lbl.split(" (")[0]) for k, lbl in _LANCEDB_MODE_LABELS
                 ],
                 spacing=16,
             ),
@@ -129,27 +127,33 @@ class RetrievalTab:
         # Integer fields.
         self.top_k_field = _int_field(
             "top_k (final result count, 1–50)",
-            cfg.top_k, self.on_top_k_blur,
+            cfg.top_k,
+            self.on_top_k_blur,
         )
         self.num_candidates_field = _int_field(
             "num_candidates (vector kNN pool size)",
-            cfg.num_candidates, self.on_num_candidates_blur,
+            cfg.num_candidates,
+            self.on_num_candidates_blur,
         )
         self.rrf_constant_field = _int_field(
             "RRF rank constant k (1/(k+rank))",
-            cfg.rrf_rank_constant, self.on_rrf_constant_blur,
+            cfg.rrf_rank_constant,
+            self.on_rrf_constant_blur,
         )
         self.rrf_window_field = _int_field(
             "RRF rank window size",
-            cfg.rrf_rank_window_size, self.on_rrf_window_blur,
+            cfg.rrf_rank_window_size,
+            self.on_rrf_window_blur,
         )
         self.mmr_multiplier_field = _int_field(
             "MMR candidate multiplier",
-            cfg.mmr_candidate_multiplier, self.on_mmr_multiplier_blur,
+            cfg.mmr_candidate_multiplier,
+            self.on_mmr_multiplier_blur,
         )
         self.kg_max_rows_field = _int_field(
             "kg_max_rows (cap on Neo4j rows per query)",
-            cfg.kg_max_rows, self.on_kg_max_rows_blur,
+            cfg.kg_max_rows,
+            self.on_kg_max_rows_blur,
         )
 
         # MMR enable checkbox — when off, slider+multiplier are grayed.
@@ -164,10 +168,14 @@ class RetrievalTab:
         # display; on_change_end persists (avoid one save per pixel).
         self.mmr_help_text = ft.Text(
             "λ = 1.0 → pure relevance; λ = 0.0 → pure diversity.",
-            size=11, color=ft.Colors.GREY_500, italic=True,
+            size=11,
+            color=ft.Colors.GREY_500,
+            italic=True,
         )
         self.mmr_lambda_value_text = ft.Text(
-            _fmt_float(cfg.mmr_lambda), size=12, color=ft.Colors.WHITE,
+            _fmt_float(cfg.mmr_lambda),
+            size=12,
+            color=ft.Colors.WHITE,
             width=42,
         )
         self.mmr_lambda_slider = ft.Slider(
@@ -179,8 +187,10 @@ class RetrievalTab:
             on_change_end=self.on_mmr_lambda_committed,
         )
         self.chat_router_temp_value_text = ft.Text(
-            _fmt_float(cfg.chat_router_temperature), size=12,
-            color=ft.Colors.WHITE, width=42,
+            _fmt_float(cfg.chat_router_temperature),
+            size=12,
+            color=ft.Colors.WHITE,
+            width=42,
         )
         self.chat_router_temp_slider = ft.Slider(
             value=cfg.chat_router_temperature,
@@ -193,18 +203,12 @@ class RetrievalTab:
 
         # Checkboxes.
         self.skip_query_builder_checkbox = ft.Checkbox(
-            label=(
-                "Skip query-builder LLM — use the raw message as the "
-                "search query"
-            ),
+            label=("Skip query-builder LLM — use the raw message as the search query"),
             value=cfg.skip_query_builder,
             on_change=self.on_skip_query_builder_changed,
         )
         self.direct_retrieve_checkbox = ft.Checkbox(
-            label=(
-                "Direct retrieval — skip synthesizer, show raw "
-                "chunks / rows"
-            ),
+            label=("Direct retrieval — skip synthesizer, show raw chunks / rows"),
             value=cfg.direct_retrieve,
             on_change=self.on_direct_retrieve_changed,
         )
@@ -224,7 +228,8 @@ class RetrievalTab:
                 self.mode_dropdown,
                 ft.Text(
                     "LanceDB search mode (within-store):",
-                    size=12, color=ft.Colors.GREY_400,
+                    size=12,
+                    color=ft.Colors.GREY_400,
                 ),
                 self.lancedb_mode_radio,
                 ft.Divider(),
@@ -234,12 +239,15 @@ class RetrievalTab:
                 ft.Divider(),
                 # ---- Hybrid fusion (RRF) -------------------------------
                 ft.Text(
-                    "Hybrid fusion (RRF)", weight=ft.FontWeight.BOLD,
+                    "Hybrid fusion (RRF)",
+                    weight=ft.FontWeight.BOLD,
                 ),
                 ft.Text(
                     "Rule: top_k ≤ window ≤ num_candidates. The form "
                     "rejects edits that break this ordering.",
-                    size=11, color=ft.Colors.GREY_500, italic=True,
+                    size=11,
+                    color=ft.Colors.GREY_500,
+                    italic=True,
                 ),
                 self.num_candidates_field,
                 self.rrf_window_field,
@@ -250,7 +258,8 @@ class RetrievalTab:
                 self.mmr_help_text,
                 self.use_mmr_checkbox,
                 _slider_row(
-                    "MMR λ", self.mmr_lambda_slider,
+                    "MMR λ",
+                    self.mmr_lambda_slider,
                     self.mmr_lambda_value_text,
                 ),
                 self.mmr_multiplier_field,
@@ -363,17 +372,11 @@ class RetrievalTab:
             self.mmr_multiplier_field.disabled = params_disabled
         if self.mmr_help_text is not None:
             if is_fts:
-                self.mmr_help_text.value = (
-                    "Disabled — FTS has no vectors to diversify."
-                )
+                self.mmr_help_text.value = "Disabled — FTS has no vectors to diversify."
             elif not use_mmr:
-                self.mmr_help_text.value = (
-                    "MMR off — enable to diversify the result pool."
-                )
+                self.mmr_help_text.value = "MMR off — enable to diversify the result pool."
             else:
-                self.mmr_help_text.value = (
-                    "λ = 1.0 → pure relevance; λ = 0.0 → pure diversity."
-                )
+                self.mmr_help_text.value = "λ = 1.0 → pure relevance; λ = 0.0 → pure diversity."
 
     def on_use_mmr_changed(self, e: ft.Event) -> None:
         """Persist use_mmr; re-sync slider/multiplier gray-out."""
@@ -381,9 +384,7 @@ class RetrievalTab:
             return
         previous = self.app.gui_config.use_mmr
         self.app.gui_config.use_mmr = bool(self.use_mmr_checkbox.value)
-        if not self._commit(
-            "MMR on" if self.app.gui_config.use_mmr else "MMR off"
-        ):
+        if not self._commit("MMR on" if self.app.gui_config.use_mmr else "MMR off"):
             self.app.gui_config.use_mmr = previous
             self.use_mmr_checkbox.value = previous
         self._sync_mmr_enabled_state()
@@ -418,7 +419,9 @@ class RetrievalTab:
             current=self.app.gui_config.rrf_rank_constant,
             label="RRF rank constant",
             apply=lambda v: setattr(
-                self.app.gui_config, "rrf_rank_constant", v,
+                self.app.gui_config,
+                "rrf_rank_constant",
+                v,
             ),
             validate=None,
         )
@@ -430,7 +433,9 @@ class RetrievalTab:
             current=self.app.gui_config.rrf_rank_window_size,
             label="RRF rank window size",
             apply=lambda v: setattr(
-                self.app.gui_config, "rrf_rank_window_size", v,
+                self.app.gui_config,
+                "rrf_rank_window_size",
+                v,
             ),
             validate=self._validate_window_ordering,
         )
@@ -442,7 +447,9 @@ class RetrievalTab:
             current=self.app.gui_config.mmr_candidate_multiplier,
             label="MMR candidate multiplier",
             apply=lambda v: setattr(
-                self.app.gui_config, "mmr_candidate_multiplier", v,
+                self.app.gui_config,
+                "mmr_candidate_multiplier",
+                v,
             ),
             validate=None,
         )
@@ -458,7 +465,8 @@ class RetrievalTab:
         )
 
     def _handle_int(
-        self, *,
+        self,
+        *,
         field: ft.TextField | None,
         new_value_parser,
         current: int,
@@ -510,8 +518,7 @@ class RetrievalTab:
         cfg = self.app.gui_config
         if cfg.rrf_rank_window_size < cfg.top_k:
             return (
-                f"rrf_rank_window_size ({cfg.rrf_rank_window_size}) must "
-                f"be >= top_k ({cfg.top_k})"
+                f"rrf_rank_window_size ({cfg.rrf_rank_window_size}) must be >= top_k ({cfg.top_k})"
             )
         if cfg.num_candidates < cfg.rrf_rank_window_size:
             return (
@@ -524,10 +531,7 @@ class RetrievalTab:
 
     def _on_mmr_lambda_slide(self, e: ft.Event) -> None:
         """Drag-in-progress: update the inline value display only."""
-        if (
-            self.mmr_lambda_slider is None
-            or self.mmr_lambda_value_text is None
-        ):
+        if self.mmr_lambda_slider is None or self.mmr_lambda_value_text is None:
             return
         self.mmr_lambda_value_text.value = _fmt_float(
             self.mmr_lambda_slider.value,
@@ -550,10 +554,7 @@ class RetrievalTab:
             self.app.page.update()
 
     def _on_chat_router_temp_slide(self, e: ft.Event) -> None:
-        if (
-            self.chat_router_temp_slider is None
-            or self.chat_router_temp_value_text is None
-        ):
+        if self.chat_router_temp_slider is None or self.chat_router_temp_value_text is None:
             return
         self.chat_router_temp_value_text.value = _fmt_float(
             self.chat_router_temp_slider.value,
@@ -564,15 +565,11 @@ class RetrievalTab:
         if self.chat_router_temp_slider is None:
             return
         new_value = float(self.chat_router_temp_slider.value)
-        if abs(
-            new_value - self.app.gui_config.chat_router_temperature
-        ) < 1e-6:
+        if abs(new_value - self.app.gui_config.chat_router_temperature) < 1e-6:
             return
         previous = self.app.gui_config.chat_router_temperature
         self.app.gui_config.chat_router_temperature = new_value
-        if not self._commit(
-            f"chat router temperature: {new_value:.2f}"
-        ):
+        if not self._commit(f"chat router temperature: {new_value:.2f}"):
             self.app.gui_config.chat_router_temperature = previous
             self.chat_router_temp_slider.value = previous
             if self.chat_router_temp_value_text is not None:
@@ -585,9 +582,7 @@ class RetrievalTab:
         if self.skip_query_builder_checkbox is None:
             return
         previous = self.app.gui_config.skip_query_builder
-        self.app.gui_config.skip_query_builder = bool(
-            self.skip_query_builder_checkbox.value
-        )
+        self.app.gui_config.skip_query_builder = bool(self.skip_query_builder_checkbox.value)
         if not self._commit(
             "skip query-builder on"
             if self.app.gui_config.skip_query_builder
@@ -601,9 +596,7 @@ class RetrievalTab:
         if self.direct_retrieve_checkbox is None:
             return
         previous = self.app.gui_config.direct_retrieve
-        self.app.gui_config.direct_retrieve = bool(
-            self.direct_retrieve_checkbox.value
-        )
+        self.app.gui_config.direct_retrieve = bool(self.direct_retrieve_checkbox.value)
         if not self._commit(
             "direct retrieval on (synthesizer skipped)"
             if self.app.gui_config.direct_retrieve
@@ -620,7 +613,9 @@ class RetrievalTab:
 
 
 def _int_field(
-    label: str, value: int, on_blur,
+    label: str,
+    value: int,
+    on_blur,
 ) -> ft.TextField:
     """Standard integer-input TextField using the panel's style."""
     return ft.TextField(
@@ -634,7 +629,9 @@ def _int_field(
 
 
 def _slider_row(
-    label: str, slider: ft.Slider, value_text: ft.Text,
+    label: str,
+    slider: ft.Slider,
+    value_text: ft.Text,
 ) -> ft.Control:
     """Row: label + slider (expanding) + numeric value display."""
     return ft.Row(

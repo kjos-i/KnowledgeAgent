@@ -15,8 +15,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from dataclasses import FrozenInstanceError
-from pathlib import Path
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -27,14 +26,15 @@ def _patch_http_stream(*, chunks: list[bytes] | None = None, raise_mid: bool = F
     returns `chunks` (optionally raising mid-iteration to simulate a
     partial download).
     """
-    async def _aiter(chunk_size: int = 0):  # noqa: ARG001
+
+    async def _aiter(chunk_size: int = 0):
         for c in chunks or []:
             yield c
         if raise_mid:
             raise RuntimeError("connection reset")
 
     @asynccontextmanager
-    async def _fake_stream(url, **kw):  # noqa: ARG001
+    async def _fake_stream(url, **kw):
         resp = MagicMock()
         resp.raise_for_status = MagicMock()
         resp.aiter_raw = _aiter
@@ -44,6 +44,9 @@ def _patch_http_stream(*, chunks: list[bytes] | None = None, raise_mid: bool = F
         "knowledge_agent.kg.ontology_helpers._http_client.stream",
         side_effect=_fake_stream,
     )
+
+
+from typing import TYPE_CHECKING
 
 from knowledge_agent.kg.ontology_helpers import (
     OntologyTerm,
@@ -57,6 +60,9 @@ from knowledge_agent.kg.ontology_helpers import (
     read_rdf,
     write_ontology_terms,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---- OntologyTerm dataclass ----
 
@@ -80,8 +86,11 @@ def test_ontology_term_is_frozen():
     """Immutable: in-place mutation raises. Same pattern as Mention -
     lets readers / writers pass terms around without aliasing."""
     t = OntologyTerm(
-        id="GO:0008150", label="biological_process",
-        synonyms=(), parents=(), definition=None,
+        id="GO:0008150",
+        label="biological_process",
+        synonyms=(),
+        parents=(),
+        definition=None,
     )
     with pytest.raises(FrozenInstanceError):
         t.label = "changed"  # type: ignore[misc]
@@ -91,12 +100,18 @@ def test_ontology_term_hashable_and_value_equal():
     """Frozen dataclass is hashable; field-wise equality makes
     set/dict-of-terms operations clean."""
     a = OntologyTerm(
-        id="GO:0008150", label="biological_process",
-        synonyms=("bp",), parents=("GO:0000001",), definition=None,
+        id="GO:0008150",
+        label="biological_process",
+        synonyms=("bp",),
+        parents=("GO:0000001",),
+        definition=None,
     )
     b = OntologyTerm(
-        id="GO:0008150", label="biological_process",
-        synonyms=("bp",), parents=("GO:0000001",), definition=None,
+        id="GO:0008150",
+        label="biological_process",
+        synonyms=("bp",),
+        parents=("GO:0000001",),
+        definition=None,
     )
     assert a == b
     assert hash(a) == hash(b)
@@ -111,9 +126,7 @@ def test_get_downloads_dir_creates_directory(tmp_path: Path):
     find it ready."""
     target = tmp_path / "ontology-downloads"
     assert not target.exists()
-    with patch(
-        "knowledge_agent.kg.ontology_helpers.get_settings"
-    ) as mock_settings:
+    with patch("knowledge_agent.kg.ontology_helpers.get_settings") as mock_settings:
         mock_settings.return_value.ontology_downloads_dir = target
         downloads = get_downloads_dir()
     assert downloads == target
@@ -128,12 +141,8 @@ async def test_ensure_cached_returns_existing_file(tmp_path: Path):
     existing.write_bytes(b"existing content")
 
     with (
-        patch(
-            "knowledge_agent.kg.ontology_helpers.get_settings"
-        ) as mock_settings,
-        patch(
-            "knowledge_agent.kg.ontology_helpers._http_client.stream"
-        ) as mock_stream,
+        patch("knowledge_agent.kg.ontology_helpers.get_settings") as mock_settings,
+        patch("knowledge_agent.kg.ontology_helpers._http_client.stream") as mock_stream,
     ):
         mock_settings.return_value.ontology_downloads_dir = target
         result = await ensure_cached("https://example.com/mesh.nt", "mesh.nt")
@@ -150,9 +159,7 @@ async def test_ensure_cached_downloads_when_missing(tmp_path: Path):
     target.mkdir()
 
     with (
-        patch(
-            "knowledge_agent.kg.ontology_helpers.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.kg.ontology_helpers.get_settings") as mock_settings,
         _patch_http_stream(chunks=[b"chunk1", b"chunk2", b"chunk3"]),
     ):
         mock_settings.return_value.ontology_downloads_dir = target
@@ -170,9 +177,7 @@ async def test_ensure_cached_atomic_writes_via_tmp(tmp_path: Path):
     target.mkdir()
 
     with (
-        patch(
-            "knowledge_agent.kg.ontology_helpers.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.kg.ontology_helpers.get_settings") as mock_settings,
         _patch_http_stream(chunks=[b"hello"]),
     ):
         mock_settings.return_value.ontology_downloads_dir = target
@@ -191,9 +196,7 @@ async def test_ensure_cached_cleans_up_tmp_on_failure(tmp_path: Path):
     target.mkdir()
 
     with (
-        patch(
-            "knowledge_agent.kg.ontology_helpers.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.kg.ontology_helpers.get_settings") as mock_settings,
         _patch_http_stream(chunks=[b"partial"], raise_mid=True),
         pytest.raises(RuntimeError, match="connection reset"),
     ):
@@ -214,15 +217,11 @@ async def test_ensure_cached_force_redownloads(tmp_path: Path):
     existing.write_bytes(b"old content")
 
     with (
-        patch(
-            "knowledge_agent.kg.ontology_helpers.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.kg.ontology_helpers.get_settings") as mock_settings,
         _patch_http_stream(chunks=[b"new content"]),
     ):
         mock_settings.return_value.ontology_downloads_dir = target
-        result = await ensure_cached(
-            "https://example.com/mesh.nt", "mesh.nt", force=True
-        )
+        result = await ensure_cached("https://example.com/mesh.nt", "mesh.nt", force=True)
 
     assert result == existing
     assert result.read_bytes() == b"new content"
@@ -257,16 +256,19 @@ def _build_sample_skos_graph():
             graph.add((uri, SKOS.scopeNote, rdflib.Literal(defn, lang="en")))
 
     add_concept(
-        "D003920", "Diabetes Mellitus",
+        "D003920",
+        "Diabetes Mellitus",
         defn="A heterogeneous group of metabolic disorders.",
     )
     add_concept(
-        "D003924", "Diabetes Mellitus, Type 2",
+        "D003924",
+        "Diabetes Mellitus, Type 2",
         parents=["D003920"],
         alt_labels=["Type 2 Diabetes", "NIDDM"],
     )
     add_concept(
-        "D003922", "Diabetes Mellitus, Type 1",
+        "D003922",
+        "Diabetes Mellitus, Type 1",
         parents=["D003920"],
     )
     return graph
@@ -315,9 +317,7 @@ def test_extract_terms_skos_picks_up_definition():
     graph = _build_sample_skos_graph()
     terms = extract_terms_skos(graph, id_prefix="MESH")
     by_id = {t.id: t for t in terms}
-    assert by_id["MESH:D003920"].definition == (
-        "A heterogeneous group of metabolic disorders."
-    )
+    assert by_id["MESH:D003920"].definition == ("A heterogeneous group of metabolic disorders.")
     assert by_id["MESH:D003924"].definition is None
 
 
@@ -344,15 +344,15 @@ def test_extract_terms_skos_skips_concepts_without_label():
 def _build_sample_owl_graph():
     """Build a tiny OWL graph mirroring OBO Foundry conventions:
 
-      OBI:0000123 "process A" - root, no parents
-        - hasExactSynonym "procA", "process-a" (different idioms)
-        - IAO_0000115 definition "the canonical process A"
-      OBI:0000456 "process B" - subclassOf OBI:0000123
-        - hasRelatedSynonym "proc-b"
-        - hasBroadSynonym "B-thing"
-      OBI:0000789 "deprecated thing" - obsolete, should be skipped
-        - owl:deprecated true
-      OBI:0000999 - no label, should be skipped (no rdfs:label)
+    OBI:0000123 "process A" - root, no parents
+      - hasExactSynonym "procA", "process-a" (different idioms)
+      - IAO_0000115 definition "the canonical process A"
+    OBI:0000456 "process B" - subclassOf OBI:0000123
+      - hasRelatedSynonym "proc-b"
+      - hasBroadSynonym "B-thing"
+    OBI:0000789 "deprecated thing" - obsolete, should be skipped
+      - owl:deprecated true
+    OBI:0000999 - no label, should be skipped (no rdfs:label)
     """
     import rdflib
     from rdflib.namespace import OWL, RDF, RDFS
@@ -363,18 +363,12 @@ def _build_sample_owl_graph():
     def class_uri(cid: str) -> rdflib.URIRef:
         return rdflib.URIRef(obo + cid)
 
-    OBO_HAS_EXACT = rdflib.URIRef(
-        "http://www.geneontology.org/formats/oboInOwl#hasExactSynonym"
-    )
+    OBO_HAS_EXACT = rdflib.URIRef("http://www.geneontology.org/formats/oboInOwl#hasExactSynonym")
     OBO_HAS_RELATED = rdflib.URIRef(
         "http://www.geneontology.org/formats/oboInOwl#hasRelatedSynonym"
     )
-    OBO_HAS_BROAD = rdflib.URIRef(
-        "http://www.geneontology.org/formats/oboInOwl#hasBroadSynonym"
-    )
-    IAO_DEFINITION = rdflib.URIRef(
-        "http://purl.obolibrary.org/obo/IAO_0000115"
-    )
+    OBO_HAS_BROAD = rdflib.URIRef("http://www.geneontology.org/formats/oboInOwl#hasBroadSynonym")
+    IAO_DEFINITION = rdflib.URIRef("http://purl.obolibrary.org/obo/IAO_0000115")
 
     # OBI:0000123 - root with two exact synonyms + definition
     a = class_uri("OBI_0000123")
@@ -382,10 +376,7 @@ def _build_sample_owl_graph():
     graph.add((a, RDFS.label, rdflib.Literal("process A", lang="en")))
     graph.add((a, OBO_HAS_EXACT, rdflib.Literal("procA", lang="en")))
     graph.add((a, OBO_HAS_EXACT, rdflib.Literal("process-a", lang="en")))
-    graph.add(
-        (a, IAO_DEFINITION,
-         rdflib.Literal("the canonical process A", lang="en"))
-    )
+    graph.add((a, IAO_DEFINITION, rdflib.Literal("the canonical process A", lang="en")))
 
     # OBI:0000456 - child of A with related + broad synonyms
     b = class_uri("OBI_0000456")
@@ -399,10 +390,7 @@ def _build_sample_owl_graph():
     c = class_uri("OBI_0000789")
     graph.add((c, RDF.type, OWL.Class))
     graph.add((c, RDFS.label, rdflib.Literal("deprecated thing", lang="en")))
-    graph.add(
-        (c, OWL.deprecated,
-         rdflib.Literal("true", datatype=rdflib.XSD.boolean))
-    )
+    graph.add((c, OWL.deprecated, rdflib.Literal("true", datatype=rdflib.XSD.boolean)))
 
     # OBI:0000999 - no label, must be filtered
     d = class_uri("OBI_0000999")
@@ -513,11 +501,7 @@ def test_read_rdf_handles_gzipped_source(tmp_path: Path):
     and `ensure_cached` preserves those bytes via `iter_raw`."""
     import gzip
 
-    nt_content = (
-        "<http://example.org/A> "
-        "<http://www.w3.org/2000/01/rdf-schema#label> "
-        '"alpha" .\n'
-    )
+    nt_content = '<http://example.org/A> <http://www.w3.org/2000/01/rdf-schema#label> "alpha" .\n'
     gz_path = tmp_path / "data.nt"
     with gzip.open(gz_path, "wb") as gz:
         gz.write(nt_content.encode("utf-8"))
@@ -530,11 +514,7 @@ def test_read_rdf_handles_gzipped_source(tmp_path: Path):
 def test_read_rdf_handles_plain_source(tmp_path: Path):
     """A non-gzipped RDF file parses through the original path - the
     magic-bytes check leaves regular files untouched."""
-    nt_content = (
-        "<http://example.org/B> "
-        "<http://www.w3.org/2000/01/rdf-schema#label> "
-        '"beta" .\n'
-    )
+    nt_content = '<http://example.org/B> <http://www.w3.org/2000/01/rdf-schema#label> "beta" .\n'
     nt_path = tmp_path / "data.nt"
     nt_path.write_text(nt_content, encoding="utf-8")
 
@@ -597,7 +577,8 @@ def test_extract_terms_obo_returns_ontology_terms():
         [
             _FakeTerm("GO:0008150", "biological_process"),
             _FakeTerm(
-                "GO:0007154", "cell communication",
+                "GO:0007154",
+                "cell communication",
                 parent_ids=("GO:0008150",),
                 definition="Any process that mediates interactions...",
             ),
@@ -612,7 +593,8 @@ def test_extract_terms_obo_lowercases_synonyms():
     ontology = _FakeOntology(
         [
             _FakeTerm(
-                "GO:0001234", "kinase activity",
+                "GO:0001234",
+                "kinase activity",
                 synonyms=("Kinase Activity", "Phosphotransferase"),
             ),
         ]
@@ -625,7 +607,8 @@ def test_extract_terms_obo_extracts_is_a_parents():
     ontology = _FakeOntology(
         [
             _FakeTerm(
-                "GO:0007154", "cell communication",
+                "GO:0007154",
+                "cell communication",
                 parent_ids=("GO:0008150", "GO:0050794"),
             ),
         ]
@@ -666,15 +649,14 @@ def test_extract_terms_obo_definition_passes_through():
     ontology = _FakeOntology(
         [
             _FakeTerm(
-                "GO:0001234", "kinase activity",
+                "GO:0001234",
+                "kinase activity",
                 definition="Catalysis of the transfer of a phosphate group...",
             ),
         ]
     )
     terms = extract_terms_obo(ontology, id_prefix="GO")
-    assert terms[0].definition == (
-        "Catalysis of the transfer of a phosphate group..."
-    )
+    assert terms[0].definition == ("Catalysis of the transfer of a phosphate group...")
 
 
 # ---- _xref_rel_from_term_label ----
@@ -697,6 +679,7 @@ def test_xref_rel_matches_all_18_shipped_schema_constants():
         ONTOLOGY_SUB_LABELS,
         ONTOLOGY_XREF_RELS,
     )
+
     derived = tuple(_xref_rel_from_term_label(lbl) for lbl in ONTOLOGY_SUB_LABELS)
     assert derived == ONTOLOGY_XREF_RELS
 
@@ -724,8 +707,8 @@ def test_validate_xrefs_mode_rejects_unknown():
 # ---- write_ontology_terms + xrefs_mode 3rd pass ----
 
 
-from dataclasses import dataclass, field  # noqa: E402
-from typing import Any  # noqa: E402
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -748,7 +731,7 @@ class _StubSession:
             return self.canned_results[idx]
         return _StubResult()
 
-    async def __aenter__(self) -> "_StubSession":
+    async def __aenter__(self) -> _StubSession:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -768,9 +751,7 @@ class _StubClient:
     driver: _StubDriver = field(default_factory=_StubDriver)
 
 
-def _term_with_xrefs(
-    id_: str, parents=(), xrefs=()
-) -> OntologyTerm:
+def _term_with_xrefs(id_: str, parents=(), xrefs=()) -> OntologyTerm:
     return OntologyTerm(
         id=id_,
         label=id_,
@@ -790,7 +771,8 @@ async def test_write_ontology_terms_default_xrefs_mode_is_none_no_extra_pass():
         _term_with_xrefs("X:2", parents=("X:1",), xrefs=("Y:42",)),
     ]
     ok = await write_ontology_terms(
-        client, terms,
+        client,
+        terms,
         term_label="XTerm",
         hierarchy_rel="X_IS_A",
         ontology_name="X",
@@ -809,7 +791,8 @@ async def test_write_ontology_terms_collect_only_writes_dangling_xrefs_no_edges(
         _term_with_xrefs("X:2"),  # no xrefs - row filtered out
     ]
     ok = await write_ontology_terms(
-        client, terms,
+        client,
+        terms,
         term_label="XTerm",
         hierarchy_rel="X_IS_A",
         ontology_name="X",
@@ -843,7 +826,8 @@ async def test_write_ontology_terms_use_mode_writes_dangling_and_resolved_edges(
     ]
     terms = [_term_with_xrefs("X:1", xrefs=("Y:42", "Z:99"))]
     ok = await write_ontology_terms(
-        client, terms,
+        client,
+        terms,
         term_label="XTerm",
         hierarchy_rel="X_IS_A",
         ontology_name="X",
@@ -867,7 +851,8 @@ async def test_write_ontology_terms_use_mode_no_xrefs_skips_pass_3():
     client = _StubClient()
     terms = [_term_with_xrefs("X:1"), _term_with_xrefs("X:2")]
     ok = await write_ontology_terms(
-        client, terms,
+        client,
+        terms,
         term_label="XTerm",
         hierarchy_rel="X_IS_A",
         ontology_name="X",
@@ -884,7 +869,8 @@ async def test_write_ontology_terms_rejects_unknown_xrefs_mode():
     client = _StubClient()
     with pytest.raises(ValueError, match="xrefs_mode must be"):
         await write_ontology_terms(
-            client, [_term_with_xrefs("X:1")],
+            client,
+            [_term_with_xrefs("X:1")],
             term_label="XTerm",
             hierarchy_rel="X_IS_A",
             ontology_name="X",
@@ -905,7 +891,8 @@ async def test_write_ontology_terms_use_mode_resolved_query_uses_correct_xref_re
     ]
     terms = [_term_with_xrefs("MESH:D003920", xrefs=("DOID:9352",))]
     await write_ontology_terms(
-        client, terms,
+        client,
+        terms,
         term_label="MeSHTerm",
         hierarchy_rel="MESH_BROADER",
         ontology_name="MeSH",

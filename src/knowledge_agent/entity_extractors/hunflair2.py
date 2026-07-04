@@ -112,14 +112,15 @@ def _get_model():
     from flair.models import PrefixedSequenceTagger
 
     from knowledge_agent.entity_extractors.extractor_lifecycle import (
-        WeightsNotDownloadedError,
         _HUNFLAIR2_PROVENANCE,
+        WeightsNotDownloadedError,
         _is_weights_downloaded,
     )
 
     if not _is_weights_downloaded(_HUNFLAIR2_PROVENANCE):
         raise WeightsNotDownloadedError(
-            "hunflair2", MODEL_NAME,
+            "hunflair2",
+            MODEL_NAME,
             "Open Library → Installs and press Download weights on "
             "the HunFlair2 row before running extraction.",
         )

@@ -23,23 +23,24 @@ def test_effective_mode_prefers_routed_mode_over_retrieval_mode():
         "routed_mode": "neo4j_only",
         "retrieval_mode": "lancedb_only",
     }
-    assert effective_mode(
-        state, FakeSettings(default_retrieval_mode="parallel_fused")
-    ) == "neo4j_only"
+    assert (
+        effective_mode(state, FakeSettings(default_retrieval_mode="parallel_fused")) == "neo4j_only"
+    )
 
 
 def test_effective_mode_prefers_retrieval_mode_over_default():
     state = {"retrieval_mode": "neo4j_only"}
-    assert effective_mode(
-        state, FakeSettings(default_retrieval_mode="lancedb_only")
-    ) == "neo4j_only"
+    assert (
+        effective_mode(state, FakeSettings(default_retrieval_mode="lancedb_only")) == "neo4j_only"
+    )
 
 
 def test_effective_mode_falls_back_to_settings_default():
     state: dict = {}
-    assert effective_mode(
-        state, FakeSettings(default_retrieval_mode="parallel_fused")
-    ) == "parallel_fused"
+    assert (
+        effective_mode(state, FakeSettings(default_retrieval_mode="parallel_fused"))
+        == "parallel_fused"
+    )
 
 
 def test_effective_mode_none_routed_mode_does_not_shadow_retrieval_mode():
@@ -48,6 +49,6 @@ def test_effective_mode_none_routed_mode_does_not_shadow_retrieval_mode():
         "routed_mode": None,
         "retrieval_mode": "neo4j_only",
     }
-    assert effective_mode(
-        state, FakeSettings(default_retrieval_mode="lancedb_only")
-    ) == "neo4j_only"
+    assert (
+        effective_mode(state, FakeSettings(default_retrieval_mode="lancedb_only")) == "neo4j_only"
+    )

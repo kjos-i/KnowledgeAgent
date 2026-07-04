@@ -74,6 +74,7 @@ async def test_embed_texts_vectors_are_floats_in_finite_range() -> None:
     vectors = await embed_texts(["sanity-check text"])
     assert vectors is not None
     import math
+
     for v in vectors:
         for x in v:
             assert isinstance(x, float)

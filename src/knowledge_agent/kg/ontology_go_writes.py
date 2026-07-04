@@ -27,20 +27,23 @@ having to know the helper indirection.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from knowledge_agent.kg.ontology_helpers import (
     OntologyTerm,
+    delete_ontology_terms,
     ensure_cached,
     extract_terms_obo,
-    delete_ontology_terms,
     import_ontology_data,
     is_ontology_imported,
-    write_ontology_terms,
     read_obo,
+    write_ontology_terms,
 )
 from knowledge_agent.kg.ontology_provenance import OntologyProvenance
 from knowledge_agent.kg.schema import GO_IS_A_REL, GO_TERM_LABEL
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +52,7 @@ logger = logging.getLogger(__name__)
 # the helper's own `ensure_cached`, NOT this re-export — so for
 # strict invocation-tracking tests, patch
 # `ontology_helpers.ensure_cached` instead.
-_ = ensure_cached  # noqa: F841 - re-export for back-compat patching
+_ = ensure_cached
 
 
 # ---------------------------------------------------------------------------
@@ -72,8 +75,6 @@ DOWNLOAD_SIZE_MB = 200
 
 # Internal identifier used for log messages in the shared helpers.
 _ONTOLOGY_NAME = "GO"
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +103,7 @@ _GO_PROVENANCE = OntologyProvenance(
     domain_tags=DOMAIN_TAGS,
     covers_labels=_GO_COVERS_LABELS,
     description=(
-                "Biological processes, molecular functions, and cellular "
+        "Biological processes, molecular functions, and cellular "
         "components. The canonical functional annotation vocabulary. "
     ),
     heavy_warning=None,
@@ -116,11 +117,14 @@ _GO_PROVENANCE = OntologyProvenance(
 async def is_imported(client) -> bool:
     """True when at least one `:GOTerm` node exists in Neo4j."""
     return await is_ontology_imported(
-        client, term_label=GO_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
+        client,
+        term_label=GO_TERM_LABEL,
+        ontology_name=_ONTOLOGY_NAME,
     )
 
 
-async def import_go(client,
+async def import_go(
+    client,
     *,
     force: bool = False,
     xrefs_mode: str = "none",
@@ -151,11 +155,14 @@ async def delete_imported(client) -> None:
     Idempotent. Used by `await import_go(force=True)` and by maintenance flows.
     """
     await delete_ontology_terms(
-        client, term_label=GO_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
+        client,
+        term_label=GO_TERM_LABEL,
+        ontology_name=_ONTOLOGY_NAME,
     )
 
 
-async def write_terms(client,
+async def write_terms(
+    client,
     terms: list[OntologyTerm],
     *,
     xrefs_mode: str = "none",
@@ -166,7 +173,8 @@ async def write_terms(client,
     OntologyTerm lists and call write_terms directly).
     """
     await write_ontology_terms(
-        client, terms,
+        client,
+        terms,
         term_label=GO_TERM_LABEL,
         hierarchy_rel=GO_IS_A_REL,
         ontology_name=_ONTOLOGY_NAME,

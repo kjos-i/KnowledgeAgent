@@ -10,6 +10,7 @@
 
 Right panel's MODE_SETTINGS dispatches to `SettingsView(app).build()`.
 """
+
 from knowledge_agent.gui.settings.settings_view import SettingsView
 
 __all__ = ["SettingsView"]

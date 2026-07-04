@@ -64,8 +64,7 @@ def test_compute_doc_id_empty_file(tmp_path: Path):
     path = tmp_path / "empty.txt"
     path.write_bytes(b"")
     assert (
-        compute_doc_id(path)
-        == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        compute_doc_id(path) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     )
 
 
@@ -135,7 +134,8 @@ def test_compute_doc_id_deterministic(content: bytes) -> None:
     content_b=st.binary(min_size=0, max_size=512),
 )
 def test_compute_doc_id_distinguishes_different_content(
-    content_a: bytes, content_b: bytes,
+    content_a: bytes,
+    content_b: bytes,
 ) -> None:
     """Different bytes (whenever they are different) must produce
     different ids. Equal bytes must produce equal ids."""
@@ -153,7 +153,8 @@ def test_compute_doc_id_distinguishes_different_content(
 @given(
     doc_id=st.text(
         alphabet=st.characters(
-            min_codepoint=ord("0"), max_codepoint=ord("z"),
+            min_codepoint=ord("0"),
+            max_codepoint=ord("z"),
             blacklist_categories=("Cs",),
             blacklist_characters=(CHUNK_ID_SEPARATOR,),
         ),
@@ -176,7 +177,8 @@ def test_make_chunk_id_format_invariants(doc_id: str, index: int) -> None:
 @given(
     doc_id=st.text(
         alphabet=st.characters(
-            min_codepoint=ord("0"), max_codepoint=ord("z"),
+            min_codepoint=ord("0"),
+            max_codepoint=ord("z"),
             blacklist_categories=("Cs",),
             blacklist_characters=(CHUNK_ID_SEPARATOR,),
         ),
@@ -186,9 +188,7 @@ def test_make_chunk_id_format_invariants(doc_id: str, index: int) -> None:
     a=st.integers(min_value=0, max_value=10**4),
     b=st.integers(min_value=0, max_value=10**4),
 )
-def test_make_chunk_id_distinct_indices_distinct_chunk_ids(
-    doc_id: str, a: int, b: int
-) -> None:
+def test_make_chunk_id_distinct_indices_distinct_chunk_ids(doc_id: str, a: int, b: int) -> None:
     """For a fixed doc_id, distinct indices produce distinct
     chunk_ids (injectivity in the index axis — the LanceDB/KG
     idempotency contract relies on this)."""

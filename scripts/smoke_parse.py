@@ -33,7 +33,7 @@ def main() -> None:
 
     target = pdfs[0]
     print(f"Parsing: {target.name}")
-    print(f"(first run downloads docling model artifacts - can take a minute)")
+    print("(first run downloads docling model artifacts - can take a minute)")
     print()
 
     chunks = parse_document(target)

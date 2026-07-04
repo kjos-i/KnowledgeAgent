@@ -18,11 +18,14 @@ Skipped by default; opt in via `pytest -m integration`.
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from knowledge_agent.ingestion.parsers import json_parser
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = pytest.mark.integration
 
@@ -33,7 +36,7 @@ def test_jsonl_file_yields_one_chunk_per_non_blank_line(tmp_path: Path) -> None:
     src.write_text(
         '{"id": 1, "text": "first"}\n'
         '{"id": 2, "text": "second"}\n'
-        '\n'  # blank line — should be skipped
+        "\n"  # blank line — should be skipped
         '{"id": 3, "text": "third"}\n'
     )
     chunks = json_parser.parse(src)
@@ -48,10 +51,7 @@ def test_ndjson_extension_same_path_as_jsonl(tmp_path: Path) -> None:
     """`.ndjson` routes through the same line-delimited path as
     `.jsonl`."""
     src = tmp_path / "data.ndjson"
-    src.write_text(
-        '{"a": 1}\n'
-        '{"a": 2}\n'
-    )
+    src.write_text('{"a": 1}\n{"a": 2}\n')
     chunks = json_parser.parse(src)
     assert len(chunks) == 2
 
@@ -59,11 +59,15 @@ def test_ndjson_extension_same_path_as_jsonl(tmp_path: Path) -> None:
 def test_json_array_yields_one_chunk_per_element(tmp_path: Path) -> None:
     """`.json` whose top-level is a list → one chunk per element."""
     src = tmp_path / "list.json"
-    src.write_text(json.dumps([
-        {"id": 1, "text": "one"},
-        {"id": 2, "text": "two"},
-        {"id": 3, "text": "three"},
-    ]))
+    src.write_text(
+        json.dumps(
+            [
+                {"id": 1, "text": "one"},
+                {"id": 2, "text": "two"},
+                {"id": 3, "text": "three"},
+            ]
+        )
+    )
     chunks = json_parser.parse(src)
     assert len(chunks) == 3
     for c in chunks:
@@ -106,11 +110,6 @@ def test_chunk_indices_are_sequential_in_jsonl(tmp_path: Path) -> None:
     """chunk_index is 0-based + sequential for downstream
     make_chunk_id() round-trips."""
     src = tmp_path / "data.jsonl"
-    src.write_text(
-        '{"a": 1}\n'
-        '{"a": 2}\n'
-        '{"a": 3}\n'
-        '{"a": 4}\n'
-    )
+    src.write_text('{"a": 1}\n{"a": 2}\n{"a": 3}\n{"a": 4}\n')
     chunks = json_parser.parse(src)
     assert [c.chunk_index for c in chunks] == [0, 1, 2, 3]

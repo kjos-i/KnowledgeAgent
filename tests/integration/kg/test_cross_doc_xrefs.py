@@ -26,7 +26,6 @@ from knowledge_agent.ingestion.ids import make_chunk_id
 from knowledge_agent.kg.schema import (
     HPO_TERM_LABEL,
     MESH_TERM_LABEL,
-    MONDO_TERM_LABEL,
     ONTOLOGY_TERM_LABEL,
 )
 
@@ -56,7 +55,8 @@ def _seed_doc_with_canonical_entities(
             "SET c.doc_id = $doc_id, c.chunk_index = 0, "
             "c.section = 'Synthetic', c.page = 1, c.content_type = 'text' "
             "MERGE (c)-[:PART_OF]->(d)",
-            doc_id=doc_id, chunk_id=chunk_id,
+            doc_id=doc_id,
+            chunk_id=chunk_id,
         )
         for entity_key, term_id in canonical_targets:
             session.run(
@@ -68,7 +68,9 @@ def _seed_doc_with_canonical_entities(
                 f"MERGE (t:{ONTOLOGY_TERM_LABEL}:{MESH_TERM_LABEL} "
                 f"  {{id: $tid}}) "
                 "MERGE (e)-[:CANONICAL_TO]->(t)",
-                key=entity_key, chunk_id=chunk_id, tid=term_id,
+                key=entity_key,
+                chunk_id=chunk_id,
+                tid=term_id,
             )
     return chunk_id
 
@@ -90,7 +92,8 @@ async def test_recompute_l10_writes_related_by_xref_when_canonicals_match(
             "MATCH (a:Document {doc_id: $a})-[r:RELATED_BY_XREF]-"
             "(b:Document {doc_id: $b}) "
             "RETURN r.shared_count AS n, r.shared_concepts AS concepts",
-            a=DOC_ALPHA, b=DOC_BETA,
+            a=DOC_ALPHA,
+            b=DOC_BETA,
         ).single()
     assert row is not None
     assert row["n"] == 2
@@ -105,7 +108,8 @@ async def test_recompute_l10_writes_via_xref_edge_equivalence(
     recompute treats them as the SAME shared concept."""
     # alpha → MeSH terms; beta → HPO terms.
     _seed_doc_with_canonical_entities(
-        kg_client, DOC_ALPHA,
+        kg_client,
+        DOC_ALPHA,
         [("metformin", "MESH:D008687"), ("diabetes", "MESH:D003920")],
     )
     with kg_client.driver.session() as session:
@@ -150,7 +154,8 @@ async def test_recompute_l10_writes_via_xref_edge_equivalence(
             "MERGE (c)-[:MENTIONS]->(e2) "
             "MERGE (h2:OntologyTerm:HPOTerm {id: 'HPO:0002'}) "
             "MERGE (e2)-[:CANONICAL_TO]->(h2)",
-            doc_id=DOC_BETA, chunk_id=beta_chunk,
+            doc_id=DOC_BETA,
+            chunk_id=beta_chunk,
         )
 
     n = await kg_client.recompute_cross_doc_xrefs_edges(DOC_ALPHA, 2)
@@ -161,7 +166,8 @@ async def test_recompute_l10_writes_via_xref_edge_equivalence(
             "MATCH (a:Document {doc_id: $a})-[r:RELATED_BY_XREF]-"
             "(b:Document {doc_id: $b}) "
             "RETURN r.shared_count AS n",
-            a=DOC_ALPHA, b=DOC_BETA,
+            a=DOC_ALPHA,
+            b=DOC_BETA,
         ).single()
     assert row is not None
     assert row["n"] == 2

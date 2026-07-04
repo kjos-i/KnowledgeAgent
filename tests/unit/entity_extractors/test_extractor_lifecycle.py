@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from knowledge_agent.entity_extractors.extractor_lifecycle import (
+    EXTRACTOR_REGISTRY,
     DeleteExtractorCachePlan,
     DeleteExtractorCacheResult,
-    EXTRACTOR_REGISTRY,
     InstallExtractorPlan,
     InstallExtractorResult,
     ModelProvenance,
@@ -38,9 +38,7 @@ def _sample_provenance(**overrides) -> ModelProvenance:
     return ModelProvenance(**defaults)
 
 
-_PIP_PATCH = (
-    "knowledge_agent.entity_extractors.extractor_lifecycle._run_pip"
-)
+_PIP_PATCH = "knowledge_agent.entity_extractors.extractor_lifecycle._run_pip"
 
 
 # ---- registry ----
@@ -49,7 +47,10 @@ _PIP_PATCH = (
 def test_registry_has_core_adapters():
     """LLM + GLiNER family + HunFlair2 all live in the registry."""
     assert set(EXTRACTOR_REGISTRY) >= {
-        "llm", "gliner", "gliner_biomed", "hunflair2",
+        "llm",
+        "gliner",
+        "gliner_biomed",
+        "hunflair2",
     }
 
 
@@ -103,8 +104,8 @@ def test_hunflair2_adapter_revision_matches_registry_provenance():
     from knowledge_agent.entity_extractors import hunflair2
 
     entry = EXTRACTOR_REGISTRY["hunflair2"]
-    assert hunflair2.MODEL_NAME == entry["provenance"].model_name
-    assert hunflair2.MODEL_REVISION == entry["provenance"].pinned_revision
+    assert entry["provenance"].model_name == hunflair2.MODEL_NAME
+    assert entry["provenance"].pinned_revision == hunflair2.MODEL_REVISION
 
 
 def test_registry_has_gliner_entry():
@@ -138,8 +139,8 @@ def test_gliner_adapter_revision_matches_registry_provenance():
     from knowledge_agent.entity_extractors import gliner
 
     entry = EXTRACTOR_REGISTRY["gliner"]
-    assert gliner.MODEL_NAME == entry["provenance"].model_name
-    assert gliner.MODEL_REVISION == entry["provenance"].pinned_revision
+    assert entry["provenance"].model_name == gliner.MODEL_NAME
+    assert entry["provenance"].pinned_revision == gliner.MODEL_REVISION
 
 
 def test_registry_has_gliner_biomed_entry():
@@ -174,10 +175,8 @@ def test_gliner_biomed_adapter_revision_matches_registry_provenance():
     from knowledge_agent.entity_extractors import gliner_biomed
 
     entry = EXTRACTOR_REGISTRY["gliner_biomed"]
-    assert gliner_biomed.MODEL_NAME == entry["provenance"].model_name
-    assert (
-        gliner_biomed.MODEL_REVISION == entry["provenance"].pinned_revision
-    )
+    assert entry["provenance"].model_name == gliner_biomed.MODEL_NAME
+    assert entry["provenance"].pinned_revision == gliner_biomed.MODEL_REVISION
 
 
 # ---- ModelProvenance ----
@@ -201,7 +200,7 @@ def test_model_provenance_is_frozen():
     """Immutable so the same provenance can be reused across plans
     without aliasing surprises."""
     prov = _sample_provenance()
-    with pytest.raises(Exception):  # noqa: PT011 - dataclass FrozenInstanceError
+    with pytest.raises(Exception):
         prov.safetensors = False  # type: ignore[misc]
 
 
@@ -231,8 +230,7 @@ def test_install_plan_for_not_installed_extractor_mentions_pip_command():
         },
     }
     with patch(
-        "knowledge_agent.entity_extractors.extractor_lifecycle"
-        ".EXTRACTOR_REGISTRY",
+        "knowledge_agent.entity_extractors.extractor_lifecycle.EXTRACTOR_REGISTRY",
         fake_registry,
     ):
         plan = install_extractor_plan("hunflair2")
@@ -253,8 +251,7 @@ def test_install_plan_for_already_installed_extractor_short_circuits():
         },
     }
     with patch(
-        "knowledge_agent.entity_extractors.extractor_lifecycle"
-        ".EXTRACTOR_REGISTRY",
+        "knowledge_agent.entity_extractors.extractor_lifecycle.EXTRACTOR_REGISTRY",
         fake_registry,
     ):
         plan = install_extractor_plan("hunflair2")
@@ -278,8 +275,7 @@ def test_install_plan_threads_provenance_from_registry():
         },
     }
     with patch(
-        "knowledge_agent.entity_extractors.extractor_lifecycle"
-        ".EXTRACTOR_REGISTRY",
+        "knowledge_agent.entity_extractors.extractor_lifecycle.EXTRACTOR_REGISTRY",
         fake_registry,
     ):
         plan = install_extractor_plan("fake-adapter")
@@ -301,8 +297,7 @@ def test_install_plan_provenance_is_none_when_registry_omits_it():
         },
     }
     with patch(
-        "knowledge_agent.entity_extractors.extractor_lifecycle"
-        ".EXTRACTOR_REGISTRY",
+        "knowledge_agent.entity_extractors.extractor_lifecycle.EXTRACTOR_REGISTRY",
         fake_registry,
     ):
         plan = install_extractor_plan("legacy-adapter")
@@ -313,9 +308,12 @@ def test_install_plan_provenance_is_none_when_registry_omits_it():
 def test_install_plan_summary_without_provenance_is_terse():
     """No provenance → short summary (existing behaviour preserved)."""
     plan = InstallExtractorPlan(
-        extractor_name="legacy", display_name="Legacy",
-        bundled=False, pip_extras="entities-legacy",
-        already_installed=False, provenance=None,
+        extractor_name="legacy",
+        display_name="Legacy",
+        bundled=False,
+        pip_extras="entities-legacy",
+        already_installed=False,
+        provenance=None,
     )
     assert "Downloads" not in plan.summary
     assert "entities-legacy" in plan.summary
@@ -337,9 +335,12 @@ def test_install_plan_summary_with_provenance_surfaces_security_fields():
         pinned_revision="abcdef0123456789abcdef0123456789abcdef01",
     )
     plan = InstallExtractorPlan(
-        extractor_name="gliner", display_name="GLiNER",
-        bundled=False, pip_extras="entities-gliner",
-        already_installed=False, provenance=prov,
+        extractor_name="gliner",
+        display_name="GLiNER",
+        bundled=False,
+        pip_extras="entities-gliner",
+        already_installed=False,
+        provenance=prov,
     )
     summary = plan.summary
     assert "urchade/gliner_multi-v2.1" in summary
@@ -358,9 +359,12 @@ def test_install_plan_summary_with_trust_remote_code_true_surfaces_it():
     explaining the load-time-code risk."""
     prov = _sample_provenance(trust_remote_code=True)
     plan = InstallExtractorPlan(
-        extractor_name="x", display_name="X",
-        bundled=False, pip_extras="entities-x",
-        already_installed=False, provenance=prov,
+        extractor_name="x",
+        display_name="X",
+        bundled=False,
+        pip_extras="entities-x",
+        already_installed=False,
+        provenance=prov,
     )
     assert "trust_remote_code=True" in plan.summary
     # Per the 0d security review, the dialog appends an explicit
@@ -375,9 +379,12 @@ def test_install_plan_summary_with_pickle_format_surfaces_it():
     why (arbitrary code execution at load time)."""
     prov = _sample_provenance(safetensors=False)
     plan = InstallExtractorPlan(
-        extractor_name="x", display_name="X",
-        bundled=False, pip_extras="entities-x",
-        already_installed=False, provenance=prov,
+        extractor_name="x",
+        display_name="X",
+        bundled=False,
+        pip_extras="entities-x",
+        already_installed=False,
+        provenance=prov,
     )
     assert "safetensors=False" in plan.summary
     # The 0d security review (2026-06-30) added an explicit warning
@@ -390,8 +397,11 @@ def test_install_plan_summary_with_pickle_format_surfaces_it():
 @pytest.mark.asyncio
 async def test_install_execute_bundled_is_noop_does_not_run_pip():
     plan = InstallExtractorPlan(
-        extractor_name="llm", display_name="LLM",
-        bundled=True, pip_extras=None, already_installed=True,
+        extractor_name="llm",
+        display_name="LLM",
+        bundled=True,
+        pip_extras=None,
+        already_installed=True,
     )
     with patch(_PIP_PATCH, new_callable=AsyncMock) as pip_mock:
         result = await install_extractor_execute(plan)
@@ -405,8 +415,11 @@ async def test_install_execute_bundled_is_noop_does_not_run_pip():
 @pytest.mark.asyncio
 async def test_install_execute_already_installed_is_noop():
     plan = InstallExtractorPlan(
-        extractor_name="hunflair2", display_name="HunFlair2",
-        bundled=False, pip_extras="entities-hunflair2", already_installed=True,
+        extractor_name="hunflair2",
+        display_name="HunFlair2",
+        bundled=False,
+        pip_extras="entities-hunflair2",
+        already_installed=True,
     )
     with patch(_PIP_PATCH, new_callable=AsyncMock) as pip_mock:
         result = await install_extractor_execute(plan)
@@ -418,20 +431,26 @@ async def test_install_execute_already_installed_is_noop():
 @pytest.mark.asyncio
 async def test_install_execute_runs_pip_with_distribution_and_extras():
     plan = InstallExtractorPlan(
-        extractor_name="hunflair2", display_name="HunFlair2",
-        bundled=False, pip_extras="entities-hunflair2",
+        extractor_name="hunflair2",
+        display_name="HunFlair2",
+        bundled=False,
+        pip_extras="entities-hunflair2",
         already_installed=False,
     )
     with patch(
-        _PIP_PATCH, new_callable=AsyncMock, return_value=(True, "ok"),
+        _PIP_PATCH,
+        new_callable=AsyncMock,
+        return_value=(True, "ok"),
     ) as pip_mock:
         result = await install_extractor_execute(
-            plan, distribution_name="research-literature-agent",
+            plan,
+            distribution_name="research-literature-agent",
         )
 
     args, _ = pip_mock.call_args
     assert args[0] == [
-        "install", "research-literature-agent[entities-hunflair2]",
+        "install",
+        "research-literature-agent[entities-hunflair2]",
     ]
     assert result.did_install is True
     assert result.install_ok is True
@@ -441,8 +460,10 @@ async def test_install_execute_runs_pip_with_distribution_and_extras():
 @pytest.mark.asyncio
 async def test_install_execute_propagates_pip_failure():
     plan = InstallExtractorPlan(
-        extractor_name="hunflair2", display_name="HunFlair2",
-        bundled=False, pip_extras="entities-hunflair2",
+        extractor_name="hunflair2",
+        display_name="HunFlair2",
+        bundled=False,
+        pip_extras="entities-hunflair2",
         already_installed=False,
     )
     with patch(
@@ -462,11 +483,15 @@ async def test_install_execute_propagates_pip_failure():
 @pytest.mark.asyncio
 async def test_install_execute_returns_result_dataclass():
     plan = InstallExtractorPlan(
-        extractor_name="llm", display_name="LLM",
-        bundled=True, pip_extras=None, already_installed=True,
+        extractor_name="llm",
+        display_name="LLM",
+        bundled=True,
+        pip_extras=None,
+        already_installed=True,
     )
     assert isinstance(
-        await install_extractor_execute(plan), InstallExtractorResult,
+        await install_extractor_execute(plan),
+        InstallExtractorResult,
     )
 
 
@@ -496,8 +521,7 @@ def test_delete_cache_plan_for_not_installed_extractor():
         },
     }
     with patch(
-        "knowledge_agent.entity_extractors.extractor_lifecycle"
-        ".EXTRACTOR_REGISTRY",
+        "knowledge_agent.entity_extractors.extractor_lifecycle.EXTRACTOR_REGISTRY",
         fake_registry,
     ):
         plan = delete_extractor_cache_plan("hunflair2")
@@ -517,8 +541,7 @@ def test_delete_cache_plan_for_installed_extractor_lists_packages():
         },
     }
     with patch(
-        "knowledge_agent.entity_extractors.extractor_lifecycle"
-        ".EXTRACTOR_REGISTRY",
+        "knowledge_agent.entity_extractors.extractor_lifecycle.EXTRACTOR_REGISTRY",
         fake_registry,
     ):
         plan = delete_extractor_cache_plan("hunflair2")
@@ -531,8 +554,10 @@ def test_delete_cache_plan_for_installed_extractor_lists_packages():
 @pytest.mark.asyncio
 async def test_delete_cache_execute_noop_when_no_model_packages():
     plan = DeleteExtractorCachePlan(
-        extractor_name="llm", display_name="LLM",
-        model_packages=(), installed=True,
+        extractor_name="llm",
+        display_name="LLM",
+        model_packages=(),
+        installed=True,
     )
     with patch(_PIP_PATCH, new_callable=AsyncMock) as pip_mock:
         result = await delete_extractor_cache_execute(plan)
@@ -545,8 +570,10 @@ async def test_delete_cache_execute_noop_when_no_model_packages():
 @pytest.mark.asyncio
 async def test_delete_cache_execute_noop_when_not_installed():
     plan = DeleteExtractorCachePlan(
-        extractor_name="hunflair2", display_name="HunFlair2",
-        model_packages=("flair-model",), installed=False,
+        extractor_name="hunflair2",
+        display_name="HunFlair2",
+        model_packages=("flair-model",),
+        installed=False,
     )
     with patch(_PIP_PATCH, new_callable=AsyncMock) as pip_mock:
         result = await delete_extractor_cache_execute(plan)
@@ -558,11 +585,15 @@ async def test_delete_cache_execute_noop_when_not_installed():
 @pytest.mark.asyncio
 async def test_delete_cache_execute_runs_pip_uninstall_with_y_flag():
     plan = DeleteExtractorCachePlan(
-        extractor_name="hunflair2", display_name="HunFlair2",
-        model_packages=("flair-model",), installed=True,
+        extractor_name="hunflair2",
+        display_name="HunFlair2",
+        model_packages=("flair-model",),
+        installed=True,
     )
     with patch(
-        _PIP_PATCH, new_callable=AsyncMock, return_value=(True, "removed"),
+        _PIP_PATCH,
+        new_callable=AsyncMock,
+        return_value=(True, "removed"),
     ) as pip_mock:
         result = await delete_extractor_cache_execute(plan)
 
@@ -576,8 +607,10 @@ async def test_delete_cache_execute_runs_pip_uninstall_with_y_flag():
 @pytest.mark.asyncio
 async def test_delete_cache_execute_propagates_failure():
     plan = DeleteExtractorCachePlan(
-        extractor_name="hunflair2", display_name="HunFlair2",
-        model_packages=("flair-model",), installed=True,
+        extractor_name="hunflair2",
+        display_name="HunFlair2",
+        model_packages=("flair-model",),
+        installed=True,
     )
     with patch(
         _PIP_PATCH,
@@ -592,11 +625,14 @@ async def test_delete_cache_execute_propagates_failure():
 @pytest.mark.asyncio
 async def test_delete_cache_execute_returns_result_dataclass():
     plan = DeleteExtractorCachePlan(
-        extractor_name="llm", display_name="LLM",
-        model_packages=(), installed=True,
+        extractor_name="llm",
+        display_name="LLM",
+        model_packages=(),
+        installed=True,
     )
     assert isinstance(
-        await delete_extractor_cache_execute(plan), DeleteExtractorCacheResult,
+        await delete_extractor_cache_execute(plan),
+        DeleteExtractorCacheResult,
     )
 
 
@@ -628,8 +664,7 @@ def test_uninstall_plan_for_installed_hunflair2_includes_library_and_model():
         },
     }
     with patch(
-        "knowledge_agent.entity_extractors.extractor_lifecycle"
-        ".EXTRACTOR_REGISTRY",
+        "knowledge_agent.entity_extractors.extractor_lifecycle.EXTRACTOR_REGISTRY",
         fake_registry,
     ):
         plan = uninstall_extractor_plan("hunflair2")
@@ -650,8 +685,7 @@ def test_uninstall_plan_for_not_installed_extractor():
         },
     }
     with patch(
-        "knowledge_agent.entity_extractors.extractor_lifecycle"
-        ".EXTRACTOR_REGISTRY",
+        "knowledge_agent.entity_extractors.extractor_lifecycle.EXTRACTOR_REGISTRY",
         fake_registry,
     ):
         plan = uninstall_extractor_plan("hunflair2")
@@ -663,9 +697,12 @@ def test_uninstall_plan_for_not_installed_extractor():
 @pytest.mark.asyncio
 async def test_uninstall_execute_bundled_does_not_run_pip_and_reports_blocked():
     plan = UninstallExtractorPlan(
-        extractor_name="llm", display_name="LLM",
-        bundled=True, pip_extras=None,
-        packages_to_remove=(), installed=True,
+        extractor_name="llm",
+        display_name="LLM",
+        bundled=True,
+        pip_extras=None,
+        packages_to_remove=(),
+        installed=True,
     )
     with patch(_PIP_PATCH, new_callable=AsyncMock) as pip_mock:
         result = await uninstall_extractor_execute(plan)
@@ -680,9 +717,12 @@ async def test_uninstall_execute_bundled_does_not_run_pip_and_reports_blocked():
 @pytest.mark.asyncio
 async def test_uninstall_execute_not_installed_is_noop_success():
     plan = UninstallExtractorPlan(
-        extractor_name="hunflair2", display_name="HunFlair2",
-        bundled=False, pip_extras="entities-hunflair2",
-        packages_to_remove=("hunflair2", "flair-model"), installed=False,
+        extractor_name="hunflair2",
+        display_name="HunFlair2",
+        bundled=False,
+        pip_extras="entities-hunflair2",
+        packages_to_remove=("hunflair2", "flair-model"),
+        installed=False,
     )
     with patch(_PIP_PATCH, new_callable=AsyncMock) as pip_mock:
         result = await uninstall_extractor_execute(plan)
@@ -695,18 +735,26 @@ async def test_uninstall_execute_not_installed_is_noop_success():
 @pytest.mark.asyncio
 async def test_uninstall_execute_runs_pip_uninstall_for_all_packages():
     plan = UninstallExtractorPlan(
-        extractor_name="hunflair2", display_name="HunFlair2",
-        bundled=False, pip_extras="entities-hunflair2",
-        packages_to_remove=("hunflair2", "flair-model"), installed=True,
+        extractor_name="hunflair2",
+        display_name="HunFlair2",
+        bundled=False,
+        pip_extras="entities-hunflair2",
+        packages_to_remove=("hunflair2", "flair-model"),
+        installed=True,
     )
     with patch(
-        _PIP_PATCH, new_callable=AsyncMock, return_value=(True, "ok"),
+        _PIP_PATCH,
+        new_callable=AsyncMock,
+        return_value=(True, "ok"),
     ) as pip_mock:
         result = await uninstall_extractor_execute(plan)
 
     args, _ = pip_mock.call_args
     assert args[0] == [
-        "uninstall", "-y", "hunflair2", "flair-model",
+        "uninstall",
+        "-y",
+        "hunflair2",
+        "flair-model",
     ]
     assert result.did_uninstall is True
     assert result.uninstall_ok is True
@@ -716,12 +764,17 @@ async def test_uninstall_execute_runs_pip_uninstall_for_all_packages():
 @pytest.mark.asyncio
 async def test_uninstall_execute_failed_pip_does_not_suggest_restart():
     plan = UninstallExtractorPlan(
-        extractor_name="hunflair2", display_name="HunFlair2",
-        bundled=False, pip_extras="entities-hunflair2",
-        packages_to_remove=("hunflair2", "flair-model"), installed=True,
+        extractor_name="hunflair2",
+        display_name="HunFlair2",
+        bundled=False,
+        pip_extras="entities-hunflair2",
+        packages_to_remove=("hunflair2", "flair-model"),
+        installed=True,
     )
     with patch(
-        _PIP_PATCH, new_callable=AsyncMock, return_value=(False, "denied"),
+        _PIP_PATCH,
+        new_callable=AsyncMock,
+        return_value=(False, "denied"),
     ):
         result = await uninstall_extractor_execute(plan)
 
@@ -732,12 +785,16 @@ async def test_uninstall_execute_failed_pip_does_not_suggest_restart():
 @pytest.mark.asyncio
 async def test_uninstall_execute_returns_result_dataclass():
     plan = UninstallExtractorPlan(
-        extractor_name="llm", display_name="LLM",
-        bundled=True, pip_extras=None,
-        packages_to_remove=(), installed=True,
+        extractor_name="llm",
+        display_name="LLM",
+        bundled=True,
+        pip_extras=None,
+        packages_to_remove=(),
+        installed=True,
     )
     assert isinstance(
-        await uninstall_extractor_execute(plan), UninstallExtractorResult,
+        await uninstall_extractor_execute(plan),
+        UninstallExtractorResult,
     )
 
 
@@ -762,6 +819,7 @@ def test_gliner_provenance_domain_tags_general():
     from knowledge_agent.entity_extractors.extractor_lifecycle import (
         _GLINER_PROVENANCE,
     )
+
     assert _GLINER_PROVENANCE.domain_tags == ("general",)
 
 
@@ -770,6 +828,7 @@ def test_gliner_biomed_provenance_domain_tags_biomedical():
     from knowledge_agent.entity_extractors.extractor_lifecycle import (
         _GLINER_BIOMED_PROVENANCE,
     )
+
     tags = _GLINER_BIOMED_PROVENANCE.domain_tags
     assert "medicine" in tags
     assert "biology" in tags
@@ -784,6 +843,7 @@ def test_hunflair2_provenance_domain_tags_narrower_than_gliner_biomed():
         _GLINER_BIOMED_PROVENANCE,
         _HUNFLAIR2_PROVENANCE,
     )
+
     h_tags = set(_HUNFLAIR2_PROVENANCE.domain_tags)
     g_tags = set(_GLINER_BIOMED_PROVENANCE.domain_tags)
     assert h_tags <= g_tags  # HunFlair2 tags are a subset
@@ -810,6 +870,7 @@ def test_registry_gliner_emitted_labels_matches_module_defaults():
     from knowledge_agent.entity_extractors.gliner import (
         DEFAULT_LABELS,
     )
+
     assert EXTRACTOR_REGISTRY["gliner"]["emitted_labels"] == DEFAULT_LABELS
 
 
@@ -817,10 +878,8 @@ def test_registry_gliner_biomed_emitted_labels_matches_module_defaults():
     from knowledge_agent.entity_extractors.gliner_biomed import (
         DEFAULT_LABELS,
     )
-    assert (
-        EXTRACTOR_REGISTRY["gliner_biomed"]["emitted_labels"]
-        == DEFAULT_LABELS
-    )
+
+    assert EXTRACTOR_REGISTRY["gliner_biomed"]["emitted_labels"] == DEFAULT_LABELS
 
 
 def test_registry_hunflair2_emitted_labels_is_fixed_5_label_set():
@@ -888,6 +947,7 @@ def test_install_plan_factory_threads_emitted_labels_from_registry():
     from knowledge_agent.entity_extractors.gliner_biomed import (
         DEFAULT_LABELS,
     )
+
     assert plan.emitted_labels == DEFAULT_LABELS
 
 

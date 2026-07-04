@@ -2,6 +2,7 @@
 
 Pure-function tests; no Flet involvement. File-IO tests use tmp_path.
 """
+
 from __future__ import annotations
 
 import json
@@ -24,10 +25,7 @@ from knowledge_agent.models import AgentAnswer, ChunkSource, KGSource
 def _answer(text: str, *, chunks: int = 0, kgs: int = 0) -> AgentAnswer:
     return AgentAnswer(
         answer=text,
-        chunk_sources=[
-            ChunkSource(chunk_id=f"d{i}#{i}", doc_id=f"d{i}")
-            for i in range(chunks)
-        ],
+        chunk_sources=[ChunkSource(chunk_id=f"d{i}#{i}", doc_id=f"d{i}") for i in range(chunks)],
         kg_sources=[KGSource(hit_index=i) for i in range(kgs)],
     )
 
@@ -70,7 +68,8 @@ def test_render_answer_with_no_sources_shows_none():
 
 def test_render_answer_lists_chunk_sources_with_indices():
     md = render_answer_markdown(
-        _answer("body", chunks=2), "q",
+        _answer("body", chunks=2),
+        "q",
     )
     assert "**[1]**" in md
     assert "**[2]**" in md
@@ -79,7 +78,8 @@ def test_render_answer_lists_chunk_sources_with_indices():
 
 def test_render_answer_lists_kg_sources_with_K_prefix():
     md = render_answer_markdown(
-        _answer("body", kgs=3), "q",
+        _answer("body", kgs=3),
+        "q",
     )
     assert "**[K0]**" in md
     assert "**[K1]**" in md
@@ -92,7 +92,9 @@ def test_render_answer_lists_kg_sources_with_K_prefix():
 
 def test_save_answer_writes_md_and_json_sidecar(tmp_path: Path):
     md_path, json_path = save_answer(
-        _answer("body", chunks=1), "what is X", tmp_path,
+        _answer("body", chunks=1),
+        "what is X",
+        tmp_path,
     )
     assert md_path.exists() and json_path.exists()
     assert md_path.suffix == ".md"
@@ -114,7 +116,8 @@ def test_save_answer_json_round_trips_to_AgentAnswer(tmp_path: Path):
 
 
 def test_save_answer_raises_save_error_when_dir_inaccessible(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     """OS error during write surfaces as the explicit SaveError type so
     the GUI's catch path can distinguish it from coding bugs."""

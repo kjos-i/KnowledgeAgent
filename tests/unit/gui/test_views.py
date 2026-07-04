@@ -4,6 +4,7 @@ shared `_frame` helpers.
 Static construction only — we build the Flet control trees and assert
 type + structure. No `ft.run` is launched.
 """
+
 from __future__ import annotations
 
 import flet as ft
@@ -16,7 +17,6 @@ from knowledge_agent.gui.views._frame import (
 from knowledge_agent.gui.views.file_view import FileView
 from knowledge_agent.gui.views.latest_view import LatestView
 from knowledge_agent.models import AgentAnswer, ChunkSource
-
 
 # ---- _frame helpers ----
 

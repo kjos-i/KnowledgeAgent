@@ -30,11 +30,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from knowledge_agent import _http_client
 from knowledge_agent.config import get_settings
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -102,9 +104,7 @@ def get_downloads_dir() -> Path:
     return downloads
 
 
-async def ensure_cached(
-    url: str, filename: str, *, force: bool = False
-) -> Path:
+async def ensure_cached(url: str, filename: str, *, force: bool = False) -> Path:
     """Download `url` into the cache as `filename` if not already present.
 
     Returns the cached file's local path. Idempotent: if the file exists
@@ -200,28 +200,27 @@ from knowledge_agent.kg.ontology_writes import (  # noqa: E402
     write_ontology_terms,
 )
 
-
 __all__ = [
     # Leaf concerns owned by this file
     "OntologyTerm",
-    "ensure_cached",
-    "get_downloads_dir",
-    # Pronto family (re-exported from ontology_pronto)
-    "extract_terms_obo",
-    "read_obo",
-    # rdflib family (re-exported from ontology_rdf)
-    "extract_terms_owl",
-    "extract_terms_skos",
-    "read_rdf",
-    # Writes family (re-exported from ontology_writes)
-    "delete_ontology_terms",
-    "import_ontology_data",
-    "is_ontology_imported",
-    "write_ontology_terms",
     # Internal helpers exposed for tests that patch them by path.
     "_default_id_extractor",
     "_first_english_literal",
     "_owl_id_extractor",
     "_validate_xrefs_mode",
     "_xref_rel_from_term_label",
+    # Writes family (re-exported from ontology_writes)
+    "delete_ontology_terms",
+    "ensure_cached",
+    # Pronto family (re-exported from ontology_pronto)
+    "extract_terms_obo",
+    # rdflib family (re-exported from ontology_rdf)
+    "extract_terms_owl",
+    "extract_terms_skos",
+    "get_downloads_dir",
+    "import_ontology_data",
+    "is_ontology_imported",
+    "read_obo",
+    "read_rdf",
+    "write_ontology_terms",
 ]

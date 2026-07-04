@@ -6,18 +6,20 @@ launching Flet. The Send pipeline is harder to test in isolation (it
 chains chat-router + agent graph); we rely on integration tests for
 that end-to-end path in later slices.
 """
+
 from __future__ import annotations
 
-import os
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from knowledge_agent.gui import app as app_mod
 from knowledge_agent.gui.app import GuiApp, _LoadedFile
 from knowledge_agent.gui.config_store import GuiConfig
 from knowledge_agent.gui.right_panel import MODE_FILE, MODE_LATEST
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
 
 
 def _make_app(page: MagicMock) -> GuiApp:
@@ -34,7 +36,8 @@ def _make_app(page: MagicMock) -> GuiApp:
 
 
 def test_missing_key_returns_env_var_when_anthropic_key_absent(
-    fake_page: MagicMock, monkeypatch: pytest.MonkeyPatch,
+    fake_page: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     """Active provider == anthropic + no ANTHROPIC_API_KEY in env or
     keyring → returns the env var name so the chat panel surfaces it."""
@@ -42,7 +45,8 @@ def test_missing_key_returns_env_var_when_anthropic_key_absent(
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
     fake_settings = MagicMock(
-        llm_provider="anthropic", embedding_provider="voyage",
+        llm_provider="anthropic",
+        embedding_provider="voyage",
     )
     with (
         patch("knowledge_agent.gui.app.get_settings", return_value=fake_settings),
@@ -53,13 +57,15 @@ def test_missing_key_returns_env_var_when_anthropic_key_absent(
 
 
 def test_missing_key_returns_none_when_local_provider(
-    fake_page: MagicMock, monkeypatch: pytest.MonkeyPatch,
+    fake_page: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     """Ollama (local) doesn't need an API key. HuggingFace embedder
     same. So no env var is reported missing."""
     app = _make_app(fake_page)
     fake_settings = MagicMock(
-        llm_provider="ollama", embedding_provider="huggingface",
+        llm_provider="ollama",
+        embedding_provider="huggingface",
     )
     with (
         patch("knowledge_agent.gui.app.get_settings", return_value=fake_settings),
@@ -70,7 +76,8 @@ def test_missing_key_returns_none_when_local_provider(
 
 
 def test_missing_key_accepts_env_var_set(
-    fake_page: MagicMock, monkeypatch: pytest.MonkeyPatch,
+    fake_page: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     """A shell-exported key (env var set) counts as present even when
     the keyring is empty — matches the bridging contract."""
@@ -78,7 +85,8 @@ def test_missing_key_accepts_env_var_set(
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     monkeypatch.setenv("VOYAGE_API_KEY", "vy-test")
     fake_settings = MagicMock(
-        llm_provider="anthropic", embedding_provider="voyage",
+        llm_provider="anthropic",
+        embedding_provider="voyage",
     )
     with (
         patch("knowledge_agent.gui.app.get_settings", return_value=fake_settings),
@@ -88,14 +96,16 @@ def test_missing_key_accepts_env_var_set(
 
 
 def test_missing_key_checks_embedder_when_llm_ok(
-    fake_page: MagicMock, monkeypatch: pytest.MonkeyPatch,
+    fake_page: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     """LLM key set but embedder key missing → embedder env var reported."""
     app = _make_app(fake_page)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
     fake_settings = MagicMock(
-        llm_provider="anthropic", embedding_provider="voyage",
+        llm_provider="anthropic",
+        embedding_provider="voyage",
     )
     with (
         patch("knowledge_agent.gui.app.get_settings", return_value=fake_settings),
@@ -108,7 +118,8 @@ def test_missing_key_checks_embedder_when_llm_ok(
 
 
 def test_load_corpus_config_uses_explicit_path_when_set(
-    fake_page: MagicMock, tmp_path: Path,
+    fake_page: MagicMock,
+    tmp_path: Path,
 ):
     """When gui_config.corpus_config_path is set + exists, that file
     is loaded; CWD fallback is skipped."""
@@ -119,7 +130,8 @@ def test_load_corpus_config_uses_explicit_path_when_set(
 
     fake_cfg = MagicMock(name="CorpusConfig")
     with patch(
-        "knowledge_agent.gui.app.load_corpus_config", return_value=fake_cfg,
+        "knowledge_agent.gui.app.load_corpus_config",
+        return_value=fake_cfg,
     ) as mock_load:
         result = app._load_corpus_config()
     assert result is fake_cfg
@@ -127,7 +139,9 @@ def test_load_corpus_config_uses_explicit_path_when_set(
 
 
 def test_load_corpus_config_falls_back_to_cwd_corpus_toml(
-    fake_page: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_page: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     """When the explicit path is unset, CWD/corpus.toml is tried."""
     app = _make_app(fake_page)
@@ -136,14 +150,17 @@ def test_load_corpus_config_falls_back_to_cwd_corpus_toml(
 
     fake_cfg = MagicMock(name="CorpusConfig")
     with patch(
-        "knowledge_agent.gui.app.load_corpus_config", return_value=fake_cfg,
+        "knowledge_agent.gui.app.load_corpus_config",
+        return_value=fake_cfg,
     ):
         result = app._load_corpus_config()
     assert result is fake_cfg
 
 
 def test_load_corpus_config_returns_none_when_no_candidate(
-    fake_page: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_page: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     """No explicit path AND no CWD corpus.toml → None. Caller surfaces
     a user-facing banner."""
@@ -153,7 +170,9 @@ def test_load_corpus_config_returns_none_when_no_candidate(
 
 
 def test_load_corpus_config_falls_through_on_parse_failure(
-    fake_page: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_page: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     """Explicit path exists but load_corpus_config raises → fall through
     to CWD; if that also fails (or doesn't exist), return None."""

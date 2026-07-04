@@ -17,6 +17,7 @@ Settings is the full SettingsView. Info is still a placeholder
 (static how-to help text, filled last). Library and Evaluation are
 top-level tabs, NOT right-panel modes — they need the full window.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -79,7 +80,8 @@ class RightPanel:
             controls=[
                 self._mode_button("View Result", MODE_LATEST),
                 ft.Button(
-                    content=centered_label("Save Result"), expand=True,
+                    content=centered_label("Save Result"),
+                    expand=True,
                     on_click=self.app.on_save_answer,
                 ),
                 self._open_result_button(),
@@ -124,7 +126,8 @@ class RightPanel:
     def _build_view_for_mode(self, mode: str) -> ft.Control:
         if mode == MODE_LATEST:
             return LatestView(
-                self.app.last_answer, self.app.last_query or "",
+                self.app.last_answer,
+                self.app.last_query or "",
                 page=self.app.page,
             ).build()
         if mode == MODE_FILE:
@@ -132,7 +135,8 @@ class RightPanel:
                 # Loaded-file wiped (e.g. Clear with keep_loaded_file_on_clear
                 # off) — silently fall through to the Latest view.
                 return LatestView(
-                    self.app.last_answer, self.app.last_query or "",
+                    self.app.last_answer,
+                    self.app.last_query or "",
                 ).build()
             return FileView(
                 name=self.app.loaded_file.name,
@@ -152,14 +156,16 @@ class RightPanel:
                 ),
             )
         return LatestView(
-            self.app.last_answer, self.app.last_query or "",
+            self.app.last_answer,
+            self.app.last_query or "",
         ).build()
 
     # ----- button builders -------------------------------------------------
 
     def _mode_button(self, label: str, mode: str) -> ft.Button:
         btn = ft.Button(
-            content=centered_label(label), expand=True,
+            content=centered_label(label),
+            expand=True,
             on_click=lambda e, m=mode: self.switch_mode(m),
         )
         self.mode_buttons[mode] = btn
@@ -167,7 +173,8 @@ class RightPanel:
 
     def _open_result_button(self) -> ft.Button:
         btn = ft.Button(
-            content=centered_label("Open Result"), expand=True,
+            content=centered_label("Open Result"),
+            expand=True,
             on_click=self.app.on_open_result,
         )
         # Registered as the mode switcher for MODE_FILE so its highlight

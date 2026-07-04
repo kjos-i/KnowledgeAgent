@@ -10,11 +10,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from knowledge_agent.ingestion.parser_lifecycle import (
-    InstallParserExtraPlan,
-    InstallParserExtraResult,
     PARSER_LIFECYCLE_REGISTRY,
+    InstallParserExtraPlan,
     UninstallParserExtraPlan,
-    UninstallParserExtraResult,
     _system_dep_hint,
     install_parser_extra_execute,
     install_parser_extra_plan,
@@ -22,13 +20,8 @@ from knowledge_agent.ingestion.parser_lifecycle import (
     uninstall_parser_extra_plan,
 )
 
-
-_PIP_PATCH = (
-    "knowledge_agent.ingestion.parser_lifecycle._run_pip"
-)
-_WHICH_PATCH = (
-    "knowledge_agent.ingestion.parser_lifecycle.shutil.which"
-)
+_PIP_PATCH = "knowledge_agent.ingestion.parser_lifecycle._run_pip"
+_WHICH_PATCH = "knowledge_agent.ingestion.parser_lifecycle.shutil.which"
 
 
 def _fake_registry(
@@ -126,10 +119,13 @@ def test_install_plan_asr_with_ffmpeg_present(monkeypatch):
         pip_extras="parsers-asr",
         system_deps_hints={"ffmpeg": {"Windows": "winget install ffmpeg"}},
     )
-    with patch(
-        "knowledge_agent.ingestion.parser_lifecycle.PARSER_LIFECYCLE_REGISTRY",
-        fake,
-    ), patch(_WHICH_PATCH, return_value="/usr/bin/ffmpeg"):
+    with (
+        patch(
+            "knowledge_agent.ingestion.parser_lifecycle.PARSER_LIFECYCLE_REGISTRY",
+            fake,
+        ),
+        patch(_WHICH_PATCH, return_value="/usr/bin/ffmpeg"),
+    ):
         plan = install_parser_extra_plan("asr")
 
     assert plan.system_deps_status == {"ffmpeg": "/usr/bin/ffmpeg"}
@@ -153,10 +149,13 @@ def test_install_plan_asr_with_ffmpeg_missing_includes_install_hint():
             }
         },
     )
-    with patch(
-        "knowledge_agent.ingestion.parser_lifecycle.PARSER_LIFECYCLE_REGISTRY",
-        fake,
-    ), patch(_WHICH_PATCH, return_value=None):
+    with (
+        patch(
+            "knowledge_agent.ingestion.parser_lifecycle.PARSER_LIFECYCLE_REGISTRY",
+            fake,
+        ),
+        patch(_WHICH_PATCH, return_value=None),
+    ):
         plan = install_parser_extra_plan("asr")
 
     assert plan.missing_system_deps == ("ffmpeg",)
@@ -177,10 +176,13 @@ def test_install_plan_already_installed_but_ffmpeg_missing_still_flags_it():
         pip_extras="parsers-asr",
         system_deps_hints={"ffmpeg": {"Linux": "apt install ffmpeg"}},
     )
-    with patch(
-        "knowledge_agent.ingestion.parser_lifecycle.PARSER_LIFECYCLE_REGISTRY",
-        fake,
-    ), patch(_WHICH_PATCH, return_value=None):
+    with (
+        patch(
+            "knowledge_agent.ingestion.parser_lifecycle.PARSER_LIFECYCLE_REGISTRY",
+            fake,
+        ),
+        patch(_WHICH_PATCH, return_value=None),
+    ):
         plan = install_parser_extra_plan("asr")
 
     assert plan.already_installed is True
@@ -242,9 +244,12 @@ async def test_install_execute_not_installed_calls_pip_with_extras_target():
 @pytest.mark.asyncio
 async def test_install_execute_pip_failure_sets_install_ok_false_and_no_restart():
     plan = InstallParserExtraPlan(
-        extra_name="code", display_name="Code Parser",
-        pip_extras="parsers-code", already_installed=False,
-        system_deps_status={}, system_deps_hints={},
+        extra_name="code",
+        display_name="Code Parser",
+        pip_extras="parsers-code",
+        already_installed=False,
+        system_deps_status={},
+        system_deps_hints={},
     )
     with patch(
         _PIP_PATCH,
@@ -302,8 +307,10 @@ def test_uninstall_plan_installed_mentions_packages_and_restart():
 @pytest.mark.asyncio
 async def test_uninstall_execute_not_installed_is_noop():
     plan = UninstallParserExtraPlan(
-        extra_name="code", display_name="Code",
-        packages_to_remove=("foo",), installed=False,
+        extra_name="code",
+        display_name="Code",
+        packages_to_remove=("foo",),
+        installed=False,
     )
     with patch(_PIP_PATCH, new_callable=AsyncMock) as pip_mock:
         result = await uninstall_parser_extra_execute(plan)
@@ -315,11 +322,15 @@ async def test_uninstall_execute_not_installed_is_noop():
 @pytest.mark.asyncio
 async def test_uninstall_execute_installed_calls_pip_uninstall():
     plan = UninstallParserExtraPlan(
-        extra_name="code", display_name="Code",
-        packages_to_remove=("tree-sitter-language-pack",), installed=True,
+        extra_name="code",
+        display_name="Code",
+        packages_to_remove=("tree-sitter-language-pack",),
+        installed=True,
     )
     with patch(
-        _PIP_PATCH, new_callable=AsyncMock, return_value=(True, "Removed"),
+        _PIP_PATCH,
+        new_callable=AsyncMock,
+        return_value=(True, "Removed"),
     ) as pip_mock:
         result = await uninstall_parser_extra_execute(plan)
 

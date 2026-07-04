@@ -62,6 +62,7 @@ DOI extraction is NOT done here - it reads chunk text in `metadata.py` so
 parsing stays format-agnostic.
 """
 
+import contextlib
 import logging
 from functools import lru_cache
 from io import BytesIO
@@ -113,9 +114,7 @@ SUPPORTED_FORMATS: tuple[InputFormat, ...] = (
     InputFormat.AUDIO,
 )
 
-_IMAGE_EXTENSIONS = frozenset(
-    ext.lower() for ext in FormatToExtensions[InputFormat.IMAGE]
-)
+_IMAGE_EXTENSIONS = frozenset(ext.lower() for ext in FormatToExtensions[InputFormat.IMAGE])
 
 # Extensions we route through a docling backend that natively handles a
 # different (but compatible) extension. `tsv` -> CSV backend (delimiter
@@ -362,7 +361,8 @@ def parse(
                 )
             )
         logger.info(
-            "parsed standalone image %s -> 1 chunk", path.name,
+            "parsed standalone image %s -> 1 chunk",
+            path.name,
         )
         return chunks
 
@@ -394,9 +394,9 @@ def parse(
                 image = picture.get_image(doc)
             except Exception as exc:
                 logger.warning(
-                    "docling picture %d: get_image failed: %r; "
-                    "skipping",
-                    i, exc,
+                    "docling picture %d: get_image failed: %r; skipping",
+                    i,
+                    exc,
                 )
                 continue
             if image is None:
@@ -406,9 +406,10 @@ def parse(
                 image.save(out)
             except OSError as exc:
                 logger.warning(
-                    "docling picture %d: save to %s failed: %r; "
-                    "skipping",
-                    i, out, exc,
+                    "docling picture %d: save to %s failed: %r; skipping",
+                    i,
+                    out,
+                    exc,
                 )
                 continue
             if config.min_figure_bytes > 0:
@@ -418,14 +419,13 @@ def parse(
                     size_bytes = 0
                 if size_bytes < config.min_figure_bytes:
                     logger.info(
-                        "docling picture %d: %d B < min_figure_bytes=%d; "
-                        "dropping",
-                        i, size_bytes, config.min_figure_bytes,
+                        "docling picture %d: %d B < min_figure_bytes=%d; dropping",
+                        i,
+                        size_bytes,
+                        config.min_figure_bytes,
                     )
-                    try:
+                    with contextlib.suppress(OSError):
                         out.unlink()
-                    except OSError:
-                        pass
                     continue
             if config.embed_images:
                 caption_text = ""

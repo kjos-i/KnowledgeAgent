@@ -76,9 +76,7 @@ async def delete_entities_by_doc_id(client, doc_id: str) -> None:
         # doc (if write_chunks hasn't been called yet on re-ingest)
         # and entities may still be referenced by other docs.
         await session.run(
-            f"MATCH (c:{CHUNK_LABEL} {{doc_id: $doc_id}})"
-            f"-[m:{MENTIONS_REL}]->() "
-            f"DELETE m",
+            f"MATCH (c:{CHUNK_LABEL} {{doc_id: $doc_id}})-[m:{MENTIONS_REL}]->() DELETE m",
             doc_id=doc_id,
         )
         # 2. GC orphan entities. WHERE-NOT pattern matches the
@@ -87,15 +85,12 @@ async def delete_entities_by_doc_id(client, doc_id: str) -> None:
         # guarantees no incoming MENTIONS - if a future edge type
         # is added without updating this WHERE, DELETE will error
         # so the bug surfaces rather than silently masks.
-        await session.run(
-            f"MATCH (e:{ENTITY_LABEL}) "
-            f"WHERE NOT ()-[:{MENTIONS_REL}]->(e) "
-            f"DELETE e"
-        )
+        await session.run(f"MATCH (e:{ENTITY_LABEL}) WHERE NOT ()-[:{MENTIONS_REL}]->(e) DELETE e")
     logger.info("KG: deleted entity mentions for doc %s + GC'd orphans", doc_id)
 
 
-async def write_entities(client,
+async def write_entities(
+    client,
     doc_id: str,
     chunk_mentions: list[tuple[str, list[Mention]]],
 ) -> None:
@@ -169,7 +164,8 @@ async def write_entities(client,
         # an error. Success no-op so the pipeline marks the layer as OK.
         logger.info(
             "KG: write_entities found no mentions across %d chunks for %s",
-            len(chunk_mentions), doc_id,
+            len(chunk_mentions),
+            doc_id,
         )
         return
 
@@ -189,5 +185,7 @@ async def write_entities(client,
         )
     logger.info(
         "KG: wrote %d entity mentions across %d chunks for doc %s",
-        len(rows), len(chunk_mentions), doc_id,
+        len(rows),
+        len(chunk_mentions),
+        doc_id,
     )

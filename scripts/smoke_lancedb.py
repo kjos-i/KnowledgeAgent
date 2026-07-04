@@ -134,16 +134,9 @@ async def main() -> None:
     print(f"Total rows in {CHUNKS_TABLE!r}: {total}")
     print()
     print(f"Chunks for doc_id={SYNTHETIC_DOC_ID!r}:")
-    rows = [
-        r
-        for r in table.to_arrow().to_pylist()
-        if r["doc_id"] == SYNTHETIC_DOC_ID
-    ]
+    rows = [r for r in table.to_arrow().to_pylist() if r["doc_id"] == SYNTHETIC_DOC_ID]
     for r in rows:
-        print(
-            f"  {r['chunk_id']}: section={r['section']!r}, "
-            f"text={r['text']!r}"
-        )
+        print(f"  {r['chunk_id']}: section={r['section']!r}, text={r['text']!r}")
     print()
 
     try:

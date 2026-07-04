@@ -60,7 +60,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from knowledge_agent.config import get_settings
 from knowledge_agent.llm_factory import ConfigError
@@ -82,9 +82,7 @@ def _validate_embedder_config(provider: str) -> None:
     settings = get_settings()
     if provider == "voyage":
         if not settings.voyage_api_key:
-            raise ConfigError(
-                "EMBEDDING_PROVIDER=voyage but VOYAGE_API_KEY is empty"
-            )
+            raise ConfigError("EMBEDDING_PROVIDER=voyage but VOYAGE_API_KEY is empty")
     elif provider == "openai":
         if not settings.openai_api_key:
             raise ConfigError(
@@ -115,7 +113,7 @@ def _build_voyage_client():
 
 
 @lru_cache(maxsize=4)
-def _build_langchain_embedder(provider: str, model: str) -> "Embeddings":
+def _build_langchain_embedder(provider: str, model: str) -> Embeddings:
     """Construct a LangChain Embeddings client (OpenAI / Google / HF).
 
     Each provider has its own adapter pulled in via its pip extra.
@@ -126,15 +124,11 @@ def _build_langchain_embedder(provider: str, model: str) -> "Embeddings":
     if provider == "openai":
         from langchain_openai import OpenAIEmbeddings
 
-        return OpenAIEmbeddings(
-            model=model, api_key=settings.openai_api_key
-        )
+        return OpenAIEmbeddings(model=model, api_key=settings.openai_api_key)
     if provider == "google":
         from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-        return GoogleGenerativeAIEmbeddings(
-            model=model, google_api_key=settings.google_api_key
-        )
+        return GoogleGenerativeAIEmbeddings(model=model, google_api_key=settings.google_api_key)
     if provider == "huggingface":
         # langchain-huggingface ships HuggingFaceEmbeddings which wraps
         # sentence-transformers. The `embed-huggingface` extra pulls
@@ -154,9 +148,7 @@ def _build_langchain_embedder(provider: str, model: str) -> "Embeddings":
     raise ConfigError(f"unknown embedding provider: {provider!r}")
 
 
-def _voyage_call(
-    texts: list[str], input_type: str
-) -> list[list[float]]:
+def _voyage_call(texts: list[str], input_type: str) -> list[list[float]]:
     """Native-client Voyage call, factored out so it can run in a thread.
 
     Used by `embed_texts` (wrapped in `asyncio.to_thread` since
@@ -270,7 +262,9 @@ async def embed_chunks(
     if provider == "voyage":
         items = [(_text_of(c), _image_ref_of(c)) for c in chunks]
         return await asyncio.to_thread(
-            _voyage_multimodal_call, items, input_type,
+            _voyage_multimodal_call,
+            items,
+            input_type,
         )
 
     # Non-Voyage: text-only. Warn once if any chunk has image_ref.
@@ -284,17 +278,11 @@ async def embed_chunks(
     model = _active_model_for(provider)
     embedder = _build_langchain_embedder(provider, model)
     if input_type == "query":
-        return list(
-            await asyncio.gather(
-                *(embedder.aembed_query(t) for t in texts)
-            )
-        )
+        return list(await asyncio.gather(*(embedder.aembed_query(t) for t in texts)))
     return await embedder.aembed_documents(texts)
 
 
-async def embed_texts(
-    texts: list[str], input_type: str = "document"
-) -> list[list[float]]:
+async def embed_texts(texts: list[str], input_type: str = "document") -> list[list[float]]:
     """Embed `texts` into fixed-size vectors. Returns vectors aligned 1:1.
 
     `input_type` is "document" for indexing (chunks being stored) or
@@ -333,11 +321,7 @@ async def embed_texts(
         # Fan out queries concurrently. For one-query callers (the
         # agent's read path) this collapses to a single await. For
         # multi-query callers the gather amortises round-trips.
-        return list(
-            await asyncio.gather(
-                *(embedder.aembed_query(t) for t in texts)
-            )
-        )
+        return list(await asyncio.gather(*(embedder.aembed_query(t) for t in texts)))
     return await embedder.aembed_documents(texts)
 
 

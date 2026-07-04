@@ -15,8 +15,11 @@ def _disk(path: str, doc_id: str) -> DiskFile:
 
 
 def _idx(
-    doc_id: str, stored_path: str | None = None, title: str | None = None,
-    metadata_status: str | None = None, n_chunks: int = 1,
+    doc_id: str,
+    stored_path: str | None = None,
+    title: str | None = None,
+    metadata_status: str | None = None,
+    n_chunks: int = 1,
 ) -> IndexedDoc:
     return IndexedDoc(
         doc_id=doc_id,
@@ -156,10 +159,10 @@ def test_classify_multiple_orphans_when_nothing_on_disk():
 def test_classify_mixed_scenario_all_buckets_populated():
     """One disk file in each non-empty bucket - sanity check the full algorithm."""
     disk = [
-        _disk("/data/clean.pdf", "doc-clean"),         # UNCHANGED
-        _disk("/new/moved.pdf", "doc-moved"),          # MOVED
-        _disk("/data/edited.pdf", "doc-edited-new"),   # EDITED
-        _disk("/data/brand-new.pdf", "doc-brand-new"), # NEW
+        _disk("/data/clean.pdf", "doc-clean"),  # UNCHANGED
+        _disk("/new/moved.pdf", "doc-moved"),  # MOVED
+        _disk("/data/edited.pdf", "doc-edited-new"),  # EDITED
+        _disk("/data/brand-new.pdf", "doc-brand-new"),  # NEW
     ]
     indexed = [
         _idx("doc-clean", stored_path="/data/clean.pdf"),
@@ -183,7 +186,7 @@ def test_classify_doc_id_match_takes_precedence_over_path_match():
     disk = [_disk("/data/x.pdf", "doc-A")]
     indexed = [
         _idx("doc-A", stored_path="/different/path.pdf"),  # doc_id match -> MOVED
-        _idx("doc-B", stored_path="/data/x.pdf"),          # path match (irrelevant now)
+        _idx("doc-B", stored_path="/data/x.pdf"),  # path match (irrelevant now)
     ]
     result = classify(disk, indexed)
 

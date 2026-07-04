@@ -17,13 +17,14 @@ Settings + Info live as right-panel modes of Search so the user can
 read help / view current settings WHILE composing a query in the
 chat. See `right_panel.py` for the mode list.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import flet as ft
 from langchain_core.messages import (
@@ -47,7 +48,6 @@ from knowledge_agent.gui.chat_router import (
     get_chat_router,
 )
 from knowledge_agent.gui.config_store import (
-    KEYRING_TO_ENV,
     ConfigError,
     GuiConfig,
     apply_active_corpus_password_to_env,
@@ -70,7 +70,9 @@ from knowledge_agent.gui.tabs.evaluation_tab import EvaluationTab
 from knowledge_agent.gui.tabs.library_tab import LibraryTab
 from knowledge_agent.gui.tabs.search_tab import SearchTab
 from knowledge_agent.kg.corpus_config import CorpusConfig, load_corpus_config
-from knowledge_agent.models import AgentAnswer
+
+if TYPE_CHECKING:
+    from knowledge_agent.models import AgentAnswer
 
 logger = logging.getLogger(__name__)
 
@@ -152,9 +154,7 @@ class GuiApp:
             "openai": "OPENAI_API_KEY",
             "google": "GOOGLE_API_KEY",
         }.get(embed_provider)
-        if embed_env and not (
-            os.getenv(embed_env) or get_api_key(embed_provider)
-        ):
+        if embed_env and not (os.getenv(embed_env) or get_api_key(embed_provider)):
             return embed_env
         return None
 
@@ -170,10 +170,7 @@ class GuiApp:
           3. None → caller surfaces a user-facing banner.
         """
         candidates: list[Path] = []
-        if (
-            self.gui_config.restore_last_corpus
-            and self.gui_config.corpus_config_path is not None
-        ):
+        if self.gui_config.restore_last_corpus and self.gui_config.corpus_config_path is not None:
             candidates.append(self.gui_config.corpus_config_path)
         candidates.append(Path.cwd() / "corpus.toml")
         for p in candidates:
@@ -182,7 +179,9 @@ class GuiApp:
                     return load_corpus_config(p)
                 except Exception as exc:
                     logger.warning(
-                        "load_corpus_config(%s) failed: %r", p, exc,
+                        "load_corpus_config(%s) failed: %r",
+                        p,
+                        exc,
                     )
         return None
 
@@ -199,8 +198,7 @@ class GuiApp:
         missing_env = self._missing_active_provider_key()
         if missing_env:
             self.chat_panel.append_system(
-                f"missing API key: set {missing_env} in Settings before "
-                "querying."
+                f"missing API key: set {missing_env} in Settings before querying."
             )
             return
 
@@ -236,8 +234,7 @@ class GuiApp:
                 )
             except Exception as exc:
                 self.chat_panel.append_system(
-                    f"could not initialize chat router "
-                    f"(check provider config): {exc}"
+                    f"could not initialize chat router (check provider config): {exc}"
                 )
                 self.messages.pop()
                 return
@@ -345,9 +342,7 @@ class GuiApp:
         entry for it.
         """
         initial = (
-            str(self.gui_config.results_dir)
-            if self.gui_config.results_dir is not None
-            else None
+            str(self.gui_config.results_dir) if self.gui_config.results_dir is not None else None
         )
         try:
             chosen = await self.file_picker.get_directory_path(
@@ -375,16 +370,16 @@ class GuiApp:
 
     async def on_save_answer(self, e: ft.Event) -> None:
         if self.last_answer is None or self.last_query is None:
-            self.chat_panel.append_system(
-                "nothing to save yet — ask a question first"
-            )
+            self.chat_panel.append_system("nothing to save yet — ask a question first")
             return
         target = await self._prompt_save_directory("Save result to folder")
         if target is None:
             return
         try:
             md_path, json_path = save_answer(
-                self.last_answer, self.last_query, target,
+                self.last_answer,
+                self.last_query,
+                target,
             )
         except SaveError as exc:
             self.chat_panel.append_system(f"could not save: {exc}")
@@ -394,16 +389,16 @@ class GuiApp:
 
     async def on_save_chat(self, e: ft.Event) -> None:
         if not self.messages:
-            self.chat_panel.append_system(
-                "nothing to save — chat is empty"
-            )
+            self.chat_panel.append_system("nothing to save — chat is empty")
             return
         target = await self._prompt_save_directory("Save chat to folder")
         if target is None:
             return
         try:
             path = save_chat(
-                self.messages, self.last_query, target,
+                self.messages,
+                self.last_query,
+                target,
             )
         except SaveError as exc:
             self.chat_panel.append_system(f"could not save: {exc}")

@@ -105,13 +105,9 @@ def classify(
 
     Pure function: no side effects, no I/O.
     """
-    by_doc_id: dict[str, IndexedDoc] = {
-        d.doc_id: d for d in indexed_docs
-    }
+    by_doc_id: dict[str, IndexedDoc] = {d.doc_id: d for d in indexed_docs}
     by_path: dict[str, IndexedDoc] = {
-        d.stored_path: d
-        for d in indexed_docs
-        if d.stored_path is not None
+        d.stored_path: d for d in indexed_docs if d.stored_path is not None
     }
     consumed: set[str] = set()
 
@@ -142,9 +138,7 @@ def classify(
         # Tier 3: brand new.
         new_bucket.append(disk)
 
-    orphan_bucket: list[IndexedDoc] = [
-        d for d in indexed_docs if d.doc_id not in consumed
-    ]
+    orphan_bucket: list[IndexedDoc] = [d for d in indexed_docs if d.doc_id not in consumed]
 
     return SyncBuckets(
         new=tuple(new_bucket),

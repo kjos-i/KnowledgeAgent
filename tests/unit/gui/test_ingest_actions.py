@@ -4,6 +4,7 @@ Cover the pure result-formatters (no construction) plus the busy/loop
 helpers. The picker + plan → execute paths are async and guarded off
 without a running loop, so unit tests never touch the backend.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -32,7 +33,9 @@ def test_fmt_ingest_result_clean():
 
 def test_fmt_ingest_result_with_failure():
     r = SimpleNamespace(
-        n_succeeded=1, n_failed=1, failures=(("bad.pdf", "boom"),),
+        n_succeeded=1,
+        n_failed=1,
+        failures=(("bad.pdf", "boom"),),
     )
     msg = IngestTab._fmt_ingest_result("Re-ingest", r)
     assert "bad.pdf" in msg
@@ -41,8 +44,13 @@ def test_fmt_ingest_result_with_failure():
 
 def test_fmt_sync_result():
     r = SimpleNamespace(
-        n_new_ingested=2, n_edited_succeeded=1, n_orphans_deleted=3,
-        n_new_failed=0, n_edited_failed=1, n_moved=0, failures=(),
+        n_new_ingested=2,
+        n_edited_succeeded=1,
+        n_orphans_deleted=3,
+        n_new_failed=0,
+        n_edited_failed=1,
+        n_moved=0,
+        failures=(),
     )
     msg = IngestTab._fmt_sync_result(r)
     assert "2 new" in msg
@@ -84,7 +92,10 @@ def test_start_action_noop_while_busy(fake_app):
 
 def test_fmt_bulk_result_shows_ints_and_failures():
     r = _FakeBulkResult(
-        n_resolved=2, n_no_work=1, n_failed=1, failures=(("d", "boom"),),
+        n_resolved=2,
+        n_no_work=1,
+        n_failed=1,
+        failures=(("d", "boom"),),
     )
     msg = IngestTab._fmt_bulk_result(r)
     assert "n_resolved=2" in msg

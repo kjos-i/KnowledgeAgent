@@ -87,18 +87,12 @@ def test_mode_classifier_returns_routed_mode_from_llm():
     choice = ModeChoice(mode="neo4j_only")
     mock_llm = _mock_llm_returning(choice)
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.mode_classifier_model = "claude-haiku"
         mock_settings.return_value.mode_classifier_temperature = 0.0
-        result = asyncio.run(
-            mode_classifier_node({"query": "Who cites paper W123?"})
-        )
+        result = asyncio.run(mode_classifier_node({"query": "Who cites paper W123?"}))
     assert result == {"routed_mode": "neo4j_only"}
 
 
@@ -106,12 +100,8 @@ def test_mode_classifier_calls_llm_with_mode_choice_schema():
     choice = ModeChoice(mode="lancedb_only")
     mock_llm = _mock_llm_returning(choice)
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.mode_classifier_model = "claude-haiku"
         mock_settings.return_value.mode_classifier_temperature = 0.0
@@ -124,18 +114,12 @@ def test_mode_classifier_passes_user_query_in_human_message():
     mock_llm = _mock_llm_returning(choice)
     mock_structured = mock_llm.with_structured_output.return_value
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.mode_classifier_model = "claude-haiku"
         mock_settings.return_value.mode_classifier_temperature = 0.0
-        asyncio.run(
-            mode_classifier_node({"query": "Who is the most cited author?"})
-        )
+        asyncio.run(mode_classifier_node({"query": "Who is the most cited author?"}))
     human_content = mock_structured.ainvoke.call_args.args[0][1].content
     assert human_content == "Who is the most cited author?"
 
@@ -144,12 +128,8 @@ def test_mode_classifier_uses_settings_model_and_temperature():
     choice = ModeChoice(mode="lancedb_only")
     mock_llm = _mock_llm_returning(choice)
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ) as mock_get_llm,
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm) as mock_get_llm,
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.mode_classifier_model = "test-model"
         mock_settings.return_value.mode_classifier_temperature = 0.5
@@ -165,12 +145,8 @@ def test_mode_classifier_fail_soft_to_lancedb_only_on_exception():
     mock_llm = MagicMock()
     mock_llm.with_structured_output = MagicMock(return_value=mock_structured)
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.mode_classifier_model = "claude-haiku"
         mock_settings.return_value.mode_classifier_temperature = 0.0
@@ -188,9 +164,7 @@ def test_query_builder_skip_via_state_uses_raw_query():
 
 
 def test_query_builder_skip_via_settings_when_state_silent():
-    with patch(
-        "knowledge_agent.nodes.get_settings"
-    ) as mock_settings:
+    with patch("knowledge_agent.nodes.get_settings") as mock_settings:
         mock_settings.return_value.skip_query_builder = True
         result = asyncio.run(query_builder_node({"query": "raw"}))
     assert result == {"search_query": "raw"}
@@ -200,9 +174,7 @@ def test_query_builder_state_false_beats_settings_true():
     """Explicit per-invocation override wins over the settings default."""
     with (
         patch("knowledge_agent.nodes._get_llm") as mock_get_llm,
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.skip_query_builder = True
         mock_settings.return_value.query_builder_model = "claude-haiku"
@@ -219,24 +191,16 @@ def test_query_builder_calls_llm_with_structured_output():
     rewrite = SearchQueryRewrite(search_query="apoptosis cancer cells")
     mock_llm = _mock_llm_returning(rewrite)
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.skip_query_builder = False
         mock_settings.return_value.query_builder_model = "claude-haiku"
         mock_settings.return_value.query_builder_temperature = 0.0
         result = asyncio.run(
-            query_builder_node(
-                {"query": "What does the literature say about apoptosis?"}
-            )
+            query_builder_node({"query": "What does the literature say about apoptosis?"})
         )
-    mock_llm.with_structured_output.assert_called_once_with(
-        SearchQueryRewrite
-    )
+    mock_llm.with_structured_output.assert_called_once_with(SearchQueryRewrite)
     assert result == {"search_query": "apoptosis cancer cells"}
 
 
@@ -244,17 +208,11 @@ def test_query_builder_calls_llm_with_structured_output():
 
 
 def test_cypher_builder_calls_llm_with_structured_output():
-    rewrite = CypherQueryRewrite(
-        cypher_query="MATCH (d:Document) RETURN d LIMIT 5"
-    )
+    rewrite = CypherQueryRewrite(cypher_query="MATCH (d:Document) RETURN d LIMIT 5")
     mock_llm = _mock_llm_returning(rewrite)
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.cypher_builder_model = "claude-sonnet"
         mock_settings.return_value.cypher_builder_temperature = 0.0
@@ -281,18 +239,12 @@ def test_cypher_builder_passes_schema_in_system_message():
     mock_llm = _mock_llm_returning(rewrite)
     mock_structured = mock_llm.with_structured_output.return_value
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.cypher_builder_model = "claude-sonnet"
         mock_settings.return_value.cypher_builder_temperature = 0.0
-        asyncio.run(
-            cypher_builder_node({"query": "q", "corpus_config": _TEST_CONFIG})
-        )
+        asyncio.run(cypher_builder_node({"query": "q", "corpus_config": _TEST_CONFIG}))
     messages = mock_structured.ainvoke.call_args.args[0]
     system_msg_content = messages[0].content
     # Schema constants must appear (proves format_schema_for_prompt was injected).
@@ -309,12 +261,8 @@ def test_cypher_builder_passes_user_query_in_human_message():
     mock_llm = _mock_llm_returning(rewrite)
     mock_structured = mock_llm.with_structured_output.return_value
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.cypher_builder_model = "claude-sonnet"
         mock_settings.return_value.cypher_builder_temperature = 0.0
@@ -332,18 +280,12 @@ def test_cypher_builder_uses_settings_model_and_temperature():
     rewrite = CypherQueryRewrite(cypher_query="RETURN 1")
     mock_llm = _mock_llm_returning(rewrite)
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ) as mock_get_llm,
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm) as mock_get_llm,
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.cypher_builder_model = "test-model"
         mock_settings.return_value.cypher_builder_temperature = 0.3
-        asyncio.run(
-            cypher_builder_node({"query": "q", "corpus_config": _TEST_CONFIG})
-        )
+        asyncio.run(cypher_builder_node({"query": "q", "corpus_config": _TEST_CONFIG}))
     mock_get_llm.assert_called_once_with("test-model", 0.3)
 
 
@@ -353,12 +295,8 @@ def test_cypher_builder_non_cross_store_omits_doc_id_rule():
     mock_llm = _mock_llm_returning(rewrite)
     mock_structured = mock_llm.with_structured_output.return_value
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.cypher_builder_model = "claude-sonnet"
         mock_settings.return_value.cypher_builder_temperature = 0.0
@@ -378,12 +316,8 @@ def test_cypher_builder_mode3_injects_doc_id_rule():
     mock_llm = _mock_llm_returning(rewrite)
     mock_structured = mock_llm.with_structured_output.return_value
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.cypher_builder_model = "claude-sonnet"
         mock_settings.return_value.cypher_builder_temperature = 0.0
@@ -403,12 +337,8 @@ def test_cypher_builder_mode4_injects_doc_id_rule():
     mock_llm = _mock_llm_returning(rewrite)
     mock_structured = mock_llm.with_structured_output.return_value
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.cypher_builder_model = "claude-sonnet"
         mock_settings.return_value.cypher_builder_temperature = 0.0
@@ -430,12 +360,8 @@ def test_cypher_builder_mode3_prepends_lance_hits_to_user_message():
     mock_structured = mock_llm.with_structured_output.return_value
     chunks = [_chunk(0)]
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.cypher_builder_model = "claude-sonnet"
         mock_settings.return_value.cypher_builder_temperature = 0.0
@@ -458,12 +384,8 @@ def test_cypher_builder_mode3_with_no_chunks_uses_plain_user_query():
     mock_llm = _mock_llm_returning(rewrite)
     mock_structured = mock_llm.with_structured_output.return_value
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.cypher_builder_model = "claude-sonnet"
         mock_settings.return_value.cypher_builder_temperature = 0.0
@@ -487,12 +409,8 @@ def test_cypher_builder_mode4_does_not_prepend_lance_hits():
     mock_structured = mock_llm.with_structured_output.return_value
     chunks = [_chunk(0)]
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.cypher_builder_model = "claude-sonnet"
         mock_settings.return_value.cypher_builder_temperature = 0.0
@@ -529,9 +447,7 @@ def test_neo4j_retriever_empty_cypher_query_is_noop():
         "knowledge_agent.nodes.get_kg_client",
         return_value=mock_client,
     ):
-        result = asyncio.run(
-            neo4j_retriever_node({"query": "q", "cypher_query": ""})
-        )
+        result = asyncio.run(neo4j_retriever_node({"query": "q", "cypher_query": ""}))
     assert result == {}
     mock_client.read_query.assert_not_called()
 
@@ -544,9 +460,7 @@ def test_neo4j_retriever_rejects_unsafe_cypher():
         return_value=mock_client,
     ):
         result = asyncio.run(
-            neo4j_retriever_node(
-                {"query": "q", "cypher_query": "MATCH (n) DELETE n"}
-            )
+            neo4j_retriever_node({"query": "q", "cypher_query": "MATCH (n) DELETE n"})
         )
     assert result == {"kg_hits": []}
     mock_client.read_query.assert_not_called()
@@ -561,9 +475,7 @@ def test_neo4j_retriever_wraps_cypher_with_limit():
             "knowledge_agent.nodes.get_kg_client",
             return_value=mock_client,
         ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.kg_max_rows = 50
         asyncio.run(
@@ -588,16 +500,10 @@ def test_neo4j_retriever_uses_settings_kg_max_rows():
             "knowledge_agent.nodes.get_kg_client",
             return_value=mock_client,
         ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.kg_max_rows = 7
-        asyncio.run(
-            neo4j_retriever_node(
-                {"query": "q", "cypher_query": "MATCH (n) RETURN n"}
-            )
-        )
+        asyncio.run(neo4j_retriever_node({"query": "q", "cypher_query": "MATCH (n) RETURN n"}))
     cypher_sent = mock_client.read_query.call_args.args[0]
     assert "LIMIT 7" in cypher_sent
 
@@ -616,15 +522,11 @@ def test_neo4j_retriever_returns_rows_as_kg_hits():
             "knowledge_agent.nodes.get_kg_client",
             return_value=mock_client,
         ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.kg_max_rows = 50
         result = asyncio.run(
-            neo4j_retriever_node(
-                {"query": "q", "cypher_query": "MATCH (a:Author) RETURN a"}
-            )
+            neo4j_retriever_node({"query": "q", "cypher_query": "MATCH (a:Author) RETURN a"})
         )
     hits = result["kg_hits"]
     assert len(hits) == 2
@@ -636,23 +538,17 @@ def test_neo4j_retriever_returns_rows_as_kg_hits():
 def test_neo4j_retriever_fail_soft_on_exception():
     """Any read_query exception is swallowed -> empty kg_hits."""
     mock_client = MagicMock()
-    mock_client.read_query = AsyncMock(
-        side_effect=RuntimeError("connection refused")
-    )
+    mock_client.read_query = AsyncMock(side_effect=RuntimeError("connection refused"))
     with (
         patch(
             "knowledge_agent.nodes.get_kg_client",
             return_value=mock_client,
         ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.kg_max_rows = 50
         result = asyncio.run(
-            neo4j_retriever_node(
-                {"query": "q", "cypher_query": "MATCH (n) RETURN n"}
-            )
+            neo4j_retriever_node({"query": "q", "cypher_query": "MATCH (n) RETURN n"})
         )
     # Empty hits + typed-error detail populated for the synthesizer / UI.
     assert result["kg_hits"] == []
@@ -674,9 +570,7 @@ def test_retriever_prefers_rewritten_search_query():
             "knowledge_agent.nodes.get_search_client",
             return_value=mock_client,
         ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.top_k = 5
         mock_settings.return_value.default_retrieval_mode = "lancedb_only"
@@ -684,7 +578,10 @@ def test_retriever_prefers_rewritten_search_query():
         state = {"query": "raw", "search_query": "rewritten"}
         result = asyncio.run(lancedb_retriever_node(state))
     mock_client.retrieve.assert_called_once_with(
-        query="rewritten", top_k=5, use_mmr=False, filters=None,
+        query="rewritten",
+        top_k=5,
+        use_mmr=False,
+        filters=None,
     )
     assert result == {"retrieved_chunks": hits}
 
@@ -697,16 +594,17 @@ def test_retriever_falls_back_to_raw_query_when_no_search_query():
             "knowledge_agent.nodes.get_search_client",
             return_value=mock_client,
         ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.top_k = 5
         mock_settings.return_value.default_retrieval_mode = "lancedb_only"
         mock_settings.return_value.default_use_mmr = False
         asyncio.run(lancedb_retriever_node({"query": "raw"}))
     mock_client.retrieve.assert_called_once_with(
-        query="raw", top_k=5, use_mmr=False, filters=None,
+        query="raw",
+        top_k=5,
+        use_mmr=False,
+        filters=None,
     )
 
 
@@ -718,9 +616,7 @@ def test_retriever_honours_state_top_k_override():
             "knowledge_agent.nodes.get_search_client",
             return_value=mock_client,
         ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.top_k = 5
         mock_settings.return_value.default_retrieval_mode = "lancedb_only"
@@ -744,9 +640,7 @@ def test_retriever_mode4_extracts_doc_ids_from_kg_hits_and_filters():
             "knowledge_agent.nodes.get_search_client",
             return_value=mock_client,
         ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.top_k = 5
         mock_settings.return_value.default_retrieval_mode = "lancedb_only"
@@ -769,9 +663,7 @@ def test_retriever_mode4_empty_kg_hits_falls_back_to_unfiltered():
             "knowledge_agent.nodes.get_search_client",
             return_value=mock_client,
         ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.top_k = 5
         mock_settings.return_value.default_retrieval_mode = "lancedb_only"
@@ -798,9 +690,7 @@ def test_retriever_mode4_no_doc_ids_in_hits_falls_back_to_unfiltered():
             "knowledge_agent.nodes.get_search_client",
             return_value=mock_client,
         ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.top_k = 5
         mock_settings.return_value.default_retrieval_mode = "lancedb_only"
@@ -823,9 +713,7 @@ def test_retriever_non_mode4_does_not_filter_even_with_kg_hits():
             "knowledge_agent.nodes.get_search_client",
             return_value=mock_client,
         ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.top_k = 5
         mock_settings.return_value.default_retrieval_mode = "lancedb_only"
@@ -843,9 +731,7 @@ def test_lancedb_retriever_captures_typed_error_on_failure():
     """Lance / Voyage failures now propagate from `client.retrieve()`;
     the node catches and populates `lancedb_retrieval_error`."""
     mock_client = MagicMock()
-    mock_client.retrieve = AsyncMock(
-        side_effect=RuntimeError("voyage outage")
-    )
+    mock_client.retrieve = AsyncMock(side_effect=RuntimeError("voyage outage"))
     with (
         patch(
             "knowledge_agent.nodes.get_search_client",
@@ -868,9 +754,7 @@ def test_lancedb_retriever_captures_typed_error_on_failure():
 
 def test_synthesizer_direct_via_state_returns_empty_answer_with_sources():
     chunks = [_chunk(0), _chunk(1)]
-    with patch(
-        "knowledge_agent.nodes.get_settings"
-    ) as mock_settings:
+    with patch("knowledge_agent.nodes.get_settings") as mock_settings:
         mock_settings.return_value.direct_retrieval = False
         state = {
             "query": "q",
@@ -888,13 +772,9 @@ def test_synthesizer_direct_via_state_returns_empty_answer_with_sources():
 
 def test_synthesizer_direct_via_settings_when_state_silent():
     chunks = [_chunk(0)]
-    with patch(
-        "knowledge_agent.nodes.get_settings"
-    ) as mock_settings:
+    with patch("knowledge_agent.nodes.get_settings") as mock_settings:
         mock_settings.return_value.direct_retrieval = True
-        result = asyncio.run(
-            synthesizer_node({"query": "q", "retrieved_chunks": chunks})
-        )
+        result = asyncio.run(synthesizer_node({"query": "q", "retrieved_chunks": chunks}))
     assert result["final_answer"].answer == ""
     assert len(result["final_answer"].chunk_sources) == 1
 
@@ -907,27 +787,19 @@ def test_synthesizer_calls_llm_with_agent_answer_schema():
     mock_llm = _mock_llm_returning(answer_obj)
     chunks = [_chunk(0)]
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.direct_retrieval = False
         mock_settings.return_value.synthesizer_model = "claude-sonnet"
         mock_settings.return_value.synthesizer_temperature = 0.0
-        result = asyncio.run(
-            synthesizer_node({"query": "q", "retrieved_chunks": chunks})
-        )
+        result = asyncio.run(synthesizer_node({"query": "q", "retrieved_chunks": chunks}))
     mock_llm.with_structured_output.assert_called_once_with(AgentAnswer)
     assert result == {"final_answer": answer_obj}
 
 
 def test_synthesizer_direct_with_no_chunks_returns_empty_sources():
-    with patch(
-        "knowledge_agent.nodes.get_settings"
-    ) as mock_settings:
+    with patch("knowledge_agent.nodes.get_settings") as mock_settings:
         mock_settings.return_value.direct_retrieval = True
         result = asyncio.run(synthesizer_node({"query": "q"}))
     assert result["final_answer"].answer == ""
@@ -937,13 +809,9 @@ def test_synthesizer_direct_with_no_chunks_returns_empty_sources():
 
 def test_synthesizer_direct_with_only_kg_hits():
     kg_hits = [KGHit(data={"x": 1}), KGHit(data={"y": 2})]
-    with patch(
-        "knowledge_agent.nodes.get_settings"
-    ) as mock_settings:
+    with patch("knowledge_agent.nodes.get_settings") as mock_settings:
         mock_settings.return_value.direct_retrieval = True
-        result = asyncio.run(
-            synthesizer_node({"query": "q", "kg_hits": kg_hits})
-        )
+        result = asyncio.run(synthesizer_node({"query": "q", "kg_hits": kg_hits}))
     answer = result["final_answer"]
     assert answer.answer == ""
     assert answer.chunk_sources == []
@@ -955,9 +823,7 @@ def test_synthesizer_direct_with_only_kg_hits():
 def test_synthesizer_direct_with_both_chunks_and_kg_hits():
     chunks = [_chunk(0)]
     kg_hits = [KGHit(data={"x": 1})]
-    with patch(
-        "knowledge_agent.nodes.get_settings"
-    ) as mock_settings:
+    with patch("knowledge_agent.nodes.get_settings") as mock_settings:
         mock_settings.return_value.direct_retrieval = True
         state = {
             "query": "q",
@@ -983,19 +849,13 @@ def test_synthesizer_llm_branch_passes_kg_hits_to_user_message():
     mock_structured = mock_llm.with_structured_output.return_value
     kg_hits = [KGHit(data={"title": "Unique Title XYZ"})]
     with (
-        patch(
-            "knowledge_agent.nodes._get_llm", return_value=mock_llm
-        ),
-        patch(
-            "knowledge_agent.nodes.get_settings"
-        ) as mock_settings,
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
     ):
         mock_settings.return_value.direct_retrieval = False
         mock_settings.return_value.synthesizer_model = "claude-sonnet"
         mock_settings.return_value.synthesizer_temperature = 0.0
-        result = asyncio.run(
-            synthesizer_node({"query": "q", "kg_hits": kg_hits})
-        )
+        result = asyncio.run(synthesizer_node({"query": "q", "kg_hits": kg_hits}))
     # Verify the row data actually reached the prompt.
     messages = mock_structured.ainvoke.call_args.args[0]
     human_msg_content = messages[1].content
@@ -1011,23 +871,30 @@ def test_synthesizer_direct_populates_multimodal_fields_on_chunk_sources():
     ChunkSource. content_type / image_ref / page must be threaded
     through so the GUI can render the figure gallery."""
     fig_chunk = RetrievedChunk(
-        chunk_id="doc#0", doc_id="doc", text="caption",
+        chunk_id="doc#0",
+        doc_id="doc",
+        text="caption",
         content_type="figure",
         image_ref="/corpus/figures/doc/0.png",
         page=4,
     )
     txt_chunk = RetrievedChunk(
-        chunk_id="doc#1", doc_id="doc", text="body text",
-        content_type="text", image_ref=None,
+        chunk_id="doc#1",
+        doc_id="doc",
+        text="body text",
+        content_type="text",
+        image_ref=None,
     )
-    with patch(
-        "knowledge_agent.nodes.get_settings"
-    ) as mock_settings:
+    with patch("knowledge_agent.nodes.get_settings") as mock_settings:
         mock_settings.return_value.direct_retrieval = True
-        result = asyncio.run(synthesizer_node({
-            "query": "q",
-            "retrieved_chunks": [fig_chunk, txt_chunk],
-        }))
+        result = asyncio.run(
+            synthesizer_node(
+                {
+                    "query": "q",
+                    "retrieved_chunks": [fig_chunk, txt_chunk],
+                }
+            )
+        )
     sources = result["final_answer"].chunk_sources
     assert len(sources) == 2
     # Figure ChunkSource carries the multimodal fields end-to-end.
@@ -1055,7 +922,9 @@ def test_synthesizer_llm_path_enriches_chunk_sources_from_retrieval():
     mock_llm = _mock_llm_returning(llm_answer)
     # Retrieval hits — carries the multimodal metadata to enrich from.
     fig_chunk = RetrievedChunk(
-        chunk_id="doc#0", doc_id="doc", text="caption text",
+        chunk_id="doc#0",
+        doc_id="doc",
+        text="caption text",
         content_type="figure",
         image_ref="/corpus/figures/doc/0.png",
         page=3,
@@ -1067,10 +936,14 @@ def test_synthesizer_llm_path_enriches_chunk_sources_from_retrieval():
         mock_settings.return_value.direct_retrieval = False
         mock_settings.return_value.synthesizer_model = "claude-sonnet"
         mock_settings.return_value.synthesizer_temperature = 0.0
-        result = asyncio.run(synthesizer_node({
-            "query": "q",
-            "retrieved_chunks": [fig_chunk],
-        }))
+        result = asyncio.run(
+            synthesizer_node(
+                {
+                    "query": "q",
+                    "retrieved_chunks": [fig_chunk],
+                }
+            )
+        )
     sources = result["final_answer"].chunk_sources
     assert len(sources) == 2
     # Matching chunk_id: enriched from RetrievedChunk.
@@ -1134,17 +1007,13 @@ def test_format_kg_hits_empty_returns_placeholder():
 
 
 def test_format_kg_hits_numbers_from_zero():
-    out = _format_kg_hits_for_prompt(
-        [KGHit(data={"x": 1}), KGHit(data={"y": 2})]
-    )
+    out = _format_kg_hits_for_prompt([KGHit(data={"x": 1}), KGHit(data={"y": 2})])
     assert "[K0]" in out
     assert "[K1]" in out
 
 
 def test_format_kg_hits_renders_data_as_key_value_pairs():
-    out = _format_kg_hits_for_prompt(
-        [KGHit(data={"title": "Paper A", "year": 2024})]
-    )
+    out = _format_kg_hits_for_prompt([KGHit(data={"title": "Paper A", "year": 2024})])
     assert "title=" in out
     assert "Paper A" in out
     assert "year=2024" in out

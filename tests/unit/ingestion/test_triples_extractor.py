@@ -19,7 +19,7 @@ extractor call — 2026-07-02 refactor removed the get_settings() global
 read. Tests pass them explicitly.
 """
 
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from knowledge_agent.ingestion import triples_extractor
 from knowledge_agent.ingestion.triples_extractor import (
@@ -27,7 +27,6 @@ from knowledge_agent.ingestion.triples_extractor import (
     _LLMTriples,
 )
 from knowledge_agent.kg.triples_writes import ExtractedTriple
-
 
 # Constants for the model + temperature kwargs. Value doesn't matter
 # except in `test_extract_propagates_model_and_temperature_to_get_llm`.
@@ -63,7 +62,10 @@ async def test_extract_empty_vocab_returns_empty_without_llm_call():
         return_value=mock_llm,
     ):
         result = await triples_extractor.extract(
-            "some text", [], model=_TEST_MODEL, temperature=_TEST_TEMPERATURE,
+            "some text",
+            [],
+            model=_TEST_MODEL,
+            temperature=_TEST_TEMPERATURE,
         )
 
     assert result == []
@@ -74,9 +76,7 @@ async def test_extract_empty_vocab_returns_empty_without_llm_call():
 
 
 def test_build_system_prompt_renders_entity_vocab():
-    prompt = triples_extractor._build_system_prompt(
-        [("brca1", "GENE"), ("tp53", "GENE")]
-    )
+    prompt = triples_extractor._build_system_prompt([("brca1", "GENE"), ("tp53", "GENE")])
     assert "brca1" in prompt
     assert "tp53" in prompt
     assert "GENE" in prompt

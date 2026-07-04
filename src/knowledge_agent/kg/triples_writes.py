@@ -84,8 +84,7 @@ class ExtractedTriple:
     evidence_span: str
 
 
-async def get_entities_by_chunk(client, doc_id: str
-) -> dict[str, list[tuple[str, str]]]:
+async def get_entities_by_chunk(client, doc_id: str) -> dict[str, list[tuple[str, str]]]:
     """Return `{chunk_id: [(entity_key, entity_type), ...], ...}` for a doc.
 
     Used by `pipeline.backfill_triples` to rebuild each chunk's L6
@@ -142,15 +141,14 @@ async def delete_triples_by_doc_id(client, doc_id: str) -> None:
     rel_union = "|".join(TRIPLE_PREDICATE_RELS)
     async with client.driver.session() as session:
         await session.run(
-            f"MATCH ()-[r:{rel_union}]->() "
-            f"WHERE r.doc_id = $doc_id "
-            f"DELETE r",
+            f"MATCH ()-[r:{rel_union}]->() WHERE r.doc_id = $doc_id DELETE r",
             doc_id=doc_id,
         )
     logger.info("KG: deleted L8 triples for doc %s", doc_id)
 
 
-async def write_triples(client,
+async def write_triples(
+    client,
     doc_id: str,
     chunk_triples: list[tuple[str, list[ExtractedTriple]]],
 ) -> None:
@@ -209,7 +207,9 @@ async def write_triples(client,
                     logger.warning(
                         "KG: write_triples dropping triple with unknown "
                         "predicate %r (subject=%r object=%r)",
-                        t.predicate, t.subject_key, t.object_key,
+                        t.predicate,
+                        t.subject_key,
+                        t.object_key,
                     )
                     seen_bad.add(t.predicate)
                 continue
@@ -228,7 +228,8 @@ async def write_triples(client,
     if not rows_by_pred:
         logger.info(
             "KG: write_triples found no valid triples across %d chunks for %s",
-            len(chunk_triples), doc_id,
+            len(chunk_triples),
+            doc_id,
         )
         return
 
@@ -254,5 +255,7 @@ async def write_triples(client,
             await session.run(cypher, rows=rows)
     logger.info(
         "KG: wrote %d L8 triples (%d predicates) for doc %s",
-        total, len(rows_by_pred), doc_id,
+        total,
+        len(rows_by_pred),
+        doc_id,
     )

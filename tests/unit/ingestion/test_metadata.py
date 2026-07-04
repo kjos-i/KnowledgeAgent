@@ -93,7 +93,8 @@ def _http_response(status_code: int, json_data: Any = None) -> Mock:
 async def test_resolve_doi_returns_work_on_200():
     work = {"id": "https://openalex.org/W1", "title": "Test"}
     with patch(
-        _HTTP_GET_PATCH, new_callable=AsyncMock,
+        _HTTP_GET_PATCH,
+        new_callable=AsyncMock,
         return_value=_http_response(200, work),
     ):
         assert await resolve_doi("10.1234/abc") == work
@@ -101,7 +102,8 @@ async def test_resolve_doi_returns_work_on_200():
 
 async def test_resolve_doi_returns_none_on_404():
     with patch(
-        _HTTP_GET_PATCH, new_callable=AsyncMock,
+        _HTTP_GET_PATCH,
+        new_callable=AsyncMock,
         return_value=_http_response(404),
     ):
         assert await resolve_doi("10.1234/abc") is None
@@ -111,23 +113,29 @@ async def test_resolve_doi_raises_on_5xx():
     """Non-200, non-404 is a real API failure under typed-errors:
     raise so the orchestrator (resolve_metadata) can catch and try
     the next candidate."""
-    with patch(
-        _HTTP_GET_PATCH, new_callable=AsyncMock,
-        return_value=_http_response(500),
+    with (
+        patch(
+            _HTTP_GET_PATCH,
+            new_callable=AsyncMock,
+            return_value=_http_response(500),
+        ),
+        pytest.raises(RuntimeError, match="status 500"),
     ):
-        with pytest.raises(RuntimeError, match="status 500"):
-            await resolve_doi("10.1234/abc")
+        await resolve_doi("10.1234/abc")
 
 
 async def test_resolve_doi_propagates_network_error():
     """Network failure (DNS, connection) propagates as the original
     httpx exception so the orchestrator boundary can distinguish."""
-    with patch(
-        _HTTP_GET_PATCH, new_callable=AsyncMock,
-        side_effect=httpx.ConnectError("boom"),
+    with (
+        patch(
+            _HTTP_GET_PATCH,
+            new_callable=AsyncMock,
+            side_effect=httpx.ConnectError("boom"),
+        ),
+        pytest.raises(httpx.ConnectError, match="boom"),
     ):
-        with pytest.raises(httpx.ConnectError, match="boom"):
-            await resolve_doi("10.1234/abc")
+        await resolve_doi("10.1234/abc")
 
 
 async def test_resolve_doi_propagates_invalid_json():
@@ -136,11 +144,15 @@ async def test_resolve_doi_propagates_invalid_json():
     resp = Mock()
     resp.status_code = 200
     resp.json = Mock(side_effect=ValueError("not json"))
-    with patch(
-        _HTTP_GET_PATCH, new_callable=AsyncMock, return_value=resp,
+    with (
+        patch(
+            _HTTP_GET_PATCH,
+            new_callable=AsyncMock,
+            return_value=resp,
+        ),
+        pytest.raises(ValueError, match="not json"),
     ):
-        with pytest.raises(ValueError, match="not json"):
-            await resolve_doi("10.1234/abc")
+        await resolve_doi("10.1234/abc")
 
 
 async def test_resolve_metadata_skips_candidate_on_api_failure():
@@ -170,7 +182,8 @@ async def test_resolve_metadata_resolves_first_candidate():
     work = {"id": "W1"}
     with patch(
         "knowledge_agent.ingestion.metadata.resolve_doi",
-        new_callable=AsyncMock, return_value=work,
+        new_callable=AsyncMock,
+        return_value=work,
     ) as mock_resolve:
         assert await resolve_metadata(chunks) == work
         mock_resolve.assert_called_once_with("10.1234/abc")
@@ -181,7 +194,8 @@ async def test_resolve_metadata_tries_next_when_first_fails():
     work = {"id": "W2"}
     with patch(
         "knowledge_agent.ingestion.metadata.resolve_doi",
-        new_callable=AsyncMock, side_effect=[None, work],
+        new_callable=AsyncMock,
+        side_effect=[None, work],
     ) as mock_resolve:
         assert await resolve_metadata(chunks) == work
         assert mock_resolve.call_count == 2
@@ -191,6 +205,7 @@ async def test_resolve_metadata_returns_none_when_all_candidates_fail():
     chunks = [_chunk(0, "10.1234/abc")]
     with patch(
         "knowledge_agent.ingestion.metadata.resolve_doi",
-        new_callable=AsyncMock, return_value=None,
+        new_callable=AsyncMock,
+        return_value=None,
     ):
         assert await resolve_metadata(chunks) is None

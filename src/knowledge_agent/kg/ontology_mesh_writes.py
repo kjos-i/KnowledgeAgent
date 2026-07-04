@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import gzip
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from knowledge_agent.kg.ontology_helpers import (
@@ -50,6 +49,8 @@ from knowledge_agent.kg.schema import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import rdflib
 
 logger = logging.getLogger(__name__)
@@ -149,9 +150,7 @@ _MESHV = "http://id.nlm.nih.gov/mesh/vocab#"
 # TopicalDescriptor covers the vast majority (diseases, chemicals,
 # anatomy, methods). Extend this tuple to pull in GeographicalDescriptor,
 # PublicationType, etc. if future corpora need them.
-_DESCRIPTOR_TYPES: tuple[str, ...] = (
-    f"{_MESHV}TopicalDescriptor",
-)
+_DESCRIPTOR_TYPES: tuple[str, ...] = (f"{_MESHV}TopicalDescriptor",)
 
 
 # ---------------------------------------------------------------------------
@@ -168,14 +167,13 @@ async def is_imported(client) -> bool:
     orchestrator boundary that catches per-ontology.
     """
     async with client.driver.session() as session:
-        result = await session.run(
-            f"MATCH (t:{MESH_TERM_LABEL}) RETURN count(t) > 0 AS present"
-        )
+        result = await session.run(f"MATCH (t:{MESH_TERM_LABEL}) RETURN count(t) > 0 AS present")
         row = await result.single()
         return bool(row and row["present"])
 
 
-async def import_mesh(client,
+async def import_mesh(
+    client,
     *,
     force: bool = False,
     xrefs_mode: str = "none",
@@ -206,9 +204,7 @@ async def import_mesh(client,
     terms = _read_and_extract(path)
 
     if not terms:
-        raise RuntimeError(
-            "MeSH: extracted 0 terms - unexpected, aborting write"
-        )
+        raise RuntimeError("MeSH: extracted 0 terms - unexpected, aborting write")
 
     await write_terms(client, terms, xrefs_mode=xrefs_mode)
     return True
@@ -227,9 +223,7 @@ async def delete_imported(client) -> None:
         # DETACH DELETE handles all incoming + outgoing edges
         # (MESH_BROADER between MeSHTerms, future CANONICAL_TO
         # from :Entity nodes).
-        await session.run(
-            f"MATCH (t:{MESH_TERM_LABEL}) DETACH DELETE t"
-        )
+        await session.run(f"MATCH (t:{MESH_TERM_LABEL}) DETACH DELETE t")
     logger.info("MeSH: deleted all :MeSHTerm nodes + edges")
 
 
@@ -238,7 +232,8 @@ async def delete_imported(client) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def write_terms(client,
+async def write_terms(
+    client,
     terms: list[OntologyTerm],
     *,
     xrefs_mode: str = "none",
@@ -259,7 +254,8 @@ async def write_terms(client,
     OntologyTerm lists and call this directly).
     """
     await write_ontology_terms(
-        client, terms,
+        client,
+        terms,
         term_label=MESH_TERM_LABEL,
         hierarchy_rel=MESH_BROADER_REL,
         ontology_name="MeSH",
@@ -300,7 +296,9 @@ def _read_and_extract(path: Path) -> list[OntologyTerm]:
         "MeSH: streaming N-Triples parse of %s (%.0f MB, gzipped=%s) - "
         "single-threaded pure Python; expect ~1-3 minutes silent block "
         "during parse.",
-        path, size_mb, is_gzipped,
+        path,
+        size_mb,
+        is_gzipped,
     )
 
     sink = _MeshStreamSink()
@@ -315,7 +313,8 @@ def _read_and_extract(path: Path) -> list[OntologyTerm]:
     logger.info(
         "MeSH: parse complete - sink retained %d subject records, "
         "%d total triples. Building descriptors...",
-        len(sink.records), sink.triple_count,
+        len(sink.records),
+        sink.triple_count,
     )
     terms = _build_terms_from_sink(sink)
     logger.info(
@@ -449,10 +448,7 @@ def _build_terms_from_sink(sink: _MeshStreamSink) -> list[OntologyTerm]:
             if concept_label and concept_label.lower() != primary_lower:
                 synonyms.add(concept_label.lower())
 
-        parents = sorted(
-            f"{MESH_ID_PREFIX}:{_local_name(p)}"
-            for p in record["broader"]
-        )
+        parents = sorted(f"{MESH_ID_PREFIX}:{_local_name(p)}" for p in record["broader"])
 
         # L7 xrefs: stored verbatim as the URI strings the sink
         # captured. Most MeSH xref targets are LCSH / EuroVoc URIs
@@ -507,12 +503,8 @@ def _extract_descriptors(graph: rdflib.Graph) -> list[OntologyTerm]:
     rdfs_label = rdflib.URIRef(_RDFS_LABEL)
     meshv_broader = rdflib.URIRef(f"{_MESHV}broaderDescriptor")
     meshv_concept = rdflib.URIRef(f"{_MESHV}concept")
-    skos_close_match = rdflib.URIRef(
-        "http://www.w3.org/2004/02/skos/core#closeMatch"
-    )
-    skos_exact_match = rdflib.URIRef(
-        "http://www.w3.org/2004/02/skos/core#exactMatch"
-    )
+    skos_close_match = rdflib.URIRef("http://www.w3.org/2004/02/skos/core#closeMatch")
+    skos_exact_match = rdflib.URIRef("http://www.w3.org/2004/02/skos/core#exactMatch")
     descriptor_types = [rdflib.URIRef(t) for t in _DESCRIPTOR_TYPES]
 
     # Gather all Descriptor URIs across the configured descriptor types.
@@ -595,9 +587,7 @@ def _collect_concept_synonyms(
     return synonyms
 
 
-def _english_or_untagged_literal(
-    graph: rdflib.Graph, subject: Any, predicate: Any
-) -> str | None:
+def _english_or_untagged_literal(graph: rdflib.Graph, subject: Any, predicate: Any) -> str | None:
     """First English-tagged literal, or first untagged literal as
     fallback, for `(subject, predicate, *)`. Returns None when no
     matching literal is present."""

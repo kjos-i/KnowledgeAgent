@@ -189,7 +189,9 @@ async def main() -> None:
     print("Importing HPO with xrefs_mode='use'...")
     try:
         ontology_hpo_writes.import_hpo(
-            client, force=True, xrefs_mode="use",
+            client,
+            force=True,
+            xrefs_mode="use",
         )
     except Exception as exc:
         print(f"  HPO import failed: {exc!r} — abort.", file=sys.stderr)
@@ -199,7 +201,9 @@ async def main() -> None:
     print("Importing MONDO with xrefs_mode='use'...")
     try:
         ontology_mondo_writes.import_mondo(
-            client, force=True, xrefs_mode="use",
+            client,
+            force=True,
+            xrefs_mode="use",
         )
     except Exception as exc:
         print(f"  MONDO import failed: {exc!r} — abort.", file=sys.stderr)
@@ -209,7 +213,9 @@ async def main() -> None:
     print("Importing MeSH with xrefs_mode='use'...")
     try:
         await ontology_mesh_writes.import_mesh(
-            client, force=True, xrefs_mode="use",
+            client,
+            force=True,
+            xrefs_mode="use",
         )
     except Exception as exc:
         print(f"  MeSH import failed: {exc!r} — abort.", file=sys.stderr)
@@ -259,7 +265,8 @@ async def main() -> None:
     pre_mesh = _count_one_xref_type(client, MESH_TERM_LABEL)
     print(f"  before clear: {pre_mesh} outgoing :MESH_XREF edges")
     n_cleared = await ontology_xrefs.clear_xref_edges_for_ontology(
-        client, MESH_TERM_LABEL,
+        client,
+        MESH_TERM_LABEL,
     )
     post_mesh = _count_one_xref_type(client, MESH_TERM_LABEL)
     print(
@@ -268,18 +275,16 @@ async def main() -> None:
     )
     if post_mesh != 0:
         print(
-            "  WARNING: MeSH outgoing xref edges did not drop to 0 after "
-            "clear. Investigate.", file=sys.stderr,
+            "  WARNING: MeSH outgoing xref edges did not drop to 0 after clear. Investigate.",
+            file=sys.stderr,
         )
 
     if args.include_l10:
         print()
-        print(
-            "Running recompute_cross_doc_xrefs_global (L10, "
-            f"threshold={args.l10_threshold})..."
-        )
+        print(f"Running recompute_cross_doc_xrefs_global (L10, threshold={args.l10_threshold})...")
         n_l10 = cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(
-            client, args.l10_threshold,
+            client,
+            args.l10_threshold,
         )
         if n_l10 is None:
             print("  L10 recompute returned None — session error.", file=sys.stderr)
@@ -292,26 +297,19 @@ async def main() -> None:
 
     print()
     print("Smoke data written. In Neo4j Desktop -> Query, try:")
-    print(
-        "  // Top 10 MONDO terms with the most outgoing :MONDO_XREF edges:"
-    )
-    print(
-        "  MATCH (s:MONDOTerm)-[r:MONDO_XREF]->(t:OntologyTerm)"
-    )
+    print("  // Top 10 MONDO terms with the most outgoing :MONDO_XREF edges:")
+    print("  MATCH (s:MONDOTerm)-[r:MONDO_XREF]->(t:OntologyTerm)")
     print("  RETURN s.id, s.label, count(r) AS n ORDER BY n DESC LIMIT 10")
     print()
     print("  // Cross-source xref traversal via pipe-union (Neo4j 5+):")
     print(
-        "  MATCH (a:OntologyTerm)-[r:" + "|".join(ONTOLOGY_XREF_RELS)
+        "  MATCH (a:OntologyTerm)-[r:"
+        + "|".join(ONTOLOGY_XREF_RELS)
         + "]-(b:OntologyTerm) RETURN type(r), count(r) AS n ORDER BY n DESC"
     )
     print()
-    print(
-        "  // Surface MONDO terms whose dangling_xrefs still hold unresolved strings:"
-    )
-    print(
-        "  MATCH (s:MONDOTerm) WHERE size(s.dangling_xrefs) > 0"
-    )
+    print("  // Surface MONDO terms whose dangling_xrefs still hold unresolved strings:")
+    print("  MATCH (s:MONDOTerm) WHERE size(s.dangling_xrefs) > 0")
     print("  RETURN s.id, s.dangling_xrefs LIMIT 20")
     print()
 
@@ -320,8 +318,7 @@ async def main() -> None:
     except KeyboardInterrupt:
         print()
         print(
-            "Keeping smoke data. Re-run this script (which clears at "
-            "start) to clean it up later."
+            "Keeping smoke data. Re-run this script (which clears at start) to clean it up later."
         )
         await client.close()
         return

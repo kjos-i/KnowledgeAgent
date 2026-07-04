@@ -57,7 +57,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 
 def test_import_hpo_writes_term_nodes_via_pronto_obo_path(
-    kg_client: Any, ensure_constraints: None,
+    kg_client: Any,
+    ensure_constraints: None,
 ) -> None:
     """import_hpo downloads + parses the OBO + writes :HPOTerm nodes.
     Asserts > 0 terms imported and the is_imported helper agrees."""
@@ -73,22 +74,20 @@ def test_import_hpo_writes_term_nodes_via_pronto_obo_path(
 
     # Count HPO term nodes — should be in the thousands.
     with kg_client.driver.session() as session:
-        n_terms = session.run(
-            f"MATCH (t:{HPO_TERM_LABEL}) RETURN count(t) AS n"
-        ).single()["n"]
+        n_terms = session.run(f"MATCH (t:{HPO_TERM_LABEL}) RETURN count(t) AS n").single()["n"]
     assert n_terms > 1000  # HPO has ~16K terms
 
     # All HPO terms carry the OntologyTerm super-label too.
     with kg_client.driver.session() as session:
         n_super = session.run(
-            f"MATCH (t:{ONTOLOGY_TERM_LABEL}) "
-            f"WHERE t.id STARTS WITH 'HP:' RETURN count(t) AS n"
+            f"MATCH (t:{ONTOLOGY_TERM_LABEL}) WHERE t.id STARTS WITH 'HP:' RETURN count(t) AS n"
         ).single()["n"]
     assert n_super == n_terms
 
 
 def test_hpo_import_idempotent_via_ensure_imported(
-    kg_client: Any, ensure_constraints: None,
+    kg_client: Any,
+    ensure_constraints: None,
 ) -> None:
     """Calling import_hpo a second time without force=True should
     short-circuit via is_imported and not duplicate any nodes."""
@@ -96,22 +95,19 @@ def test_hpo_import_idempotent_via_ensure_imported(
     ontology_hpo_writes.import_hpo(kg_client, force=True)
 
     with kg_client.driver.session() as session:
-        n_before = session.run(
-            f"MATCH (t:{HPO_TERM_LABEL}) RETURN count(t) AS n"
-        ).single()["n"]
+        n_before = session.run(f"MATCH (t:{HPO_TERM_LABEL}) RETURN count(t) AS n").single()["n"]
 
     # Second call without force; should not write anything.
     ontology_hpo_writes.import_hpo(kg_client, force=False)
 
     with kg_client.driver.session() as session:
-        n_after = session.run(
-            f"MATCH (t:{HPO_TERM_LABEL}) RETURN count(t) AS n"
-        ).single()["n"]
+        n_after = session.run(f"MATCH (t:{HPO_TERM_LABEL}) RETURN count(t) AS n").single()["n"]
     assert n_after == n_before
 
 
 def test_hpo_delete_imported_drops_every_term_node(
-    kg_client: Any, ensure_constraints: None,
+    kg_client: Any,
+    ensure_constraints: None,
 ) -> None:
     """delete_imported runs the full :HPOTerm wipe + relationship
     cleanup. After call, is_imported returns False."""
@@ -122,9 +118,7 @@ def test_hpo_delete_imported_drops_every_term_node(
     assert ontology_hpo_writes.is_imported(kg_client) is False
 
     with kg_client.driver.session() as session:
-        n = session.run(
-            f"MATCH (t:{HPO_TERM_LABEL}) RETURN count(t) AS n"
-        ).single()["n"]
+        n = session.run(f"MATCH (t:{HPO_TERM_LABEL}) RETURN count(t) AS n").single()["n"]
     assert n == 0
 
 
@@ -134,7 +128,8 @@ def test_hpo_delete_imported_drops_every_term_node(
 
 
 def test_import_efo_writes_term_nodes_via_rdflib_owl_path(
-    kg_client: Any, ensure_constraints: None,
+    kg_client: Any,
+    ensure_constraints: None,
 ) -> None:
     """import_efo exercises the rdflib OWL path (pronto drops
     oboInOwl synonyms on OWL files, so we built `extract_terms_owl`
@@ -147,9 +142,7 @@ def test_import_efo_writes_term_nodes_via_rdflib_owl_path(
     assert ontology_efo_writes.is_imported(kg_client) is True
 
     with kg_client.driver.session() as session:
-        n = session.run(
-            f"MATCH (t:{EFO_TERM_LABEL}) RETURN count(t) AS n"
-        ).single()["n"]
+        n = session.run(f"MATCH (t:{EFO_TERM_LABEL}) RETURN count(t) AS n").single()["n"]
     assert n > 1000  # EFO has tens of thousands of terms
 
 
@@ -159,7 +152,8 @@ def test_import_efo_writes_term_nodes_via_rdflib_owl_path(
 
 
 async def test_import_mesh_writes_term_nodes_via_streaming_n_triples_path(
-    kg_client: Any, ensure_constraints: None,
+    kg_client: Any,
+    ensure_constraints: None,
 ) -> None:
     """import_mesh exercises the custom streaming N-Triples sink
     (~600 MB download). Asserts > 0 :MeSHTerm nodes after import."""
@@ -170,9 +164,7 @@ async def test_import_mesh_writes_term_nodes_via_streaming_n_triples_path(
     assert ontology_mesh_writes.is_imported(kg_client) is True
 
     with kg_client.driver.session() as session:
-        n = session.run(
-            f"MATCH (t:{MESH_TERM_LABEL}) RETURN count(t) AS n"
-        ).single()["n"]
+        n = session.run(f"MATCH (t:{MESH_TERM_LABEL}) RETURN count(t) AS n").single()["n"]
     assert n > 20000  # MeSH has ~30K Descriptors
 
 
@@ -182,7 +174,8 @@ async def test_import_mesh_writes_term_nodes_via_streaming_n_triples_path(
 
 
 def test_import_fibo_writes_term_nodes_via_multi_file_walker_path(
-    kg_client: Any, ensure_constraints: None,
+    kg_client: Any,
+    ensure_constraints: None,
 ) -> None:
     """import_fibo exercises the GitHub walker that fetches ~70
     `.rdf` files and loads them into one rdflib Graph. Asserts > 0
@@ -194,7 +187,5 @@ def test_import_fibo_writes_term_nodes_via_multi_file_walker_path(
     assert ontology_fibo_writes.is_imported(kg_client) is True
 
     with kg_client.driver.session() as session:
-        n = session.run(
-            f"MATCH (t:{FIBO_TERM_LABEL}) RETURN count(t) AS n"
-        ).single()["n"]
+        n = session.run(f"MATCH (t:{FIBO_TERM_LABEL}) RETURN count(t) AS n").single()["n"]
     assert n > 100  # FIBO has thousands of classes across modules

@@ -24,7 +24,6 @@ import pytest
 
 from knowledge_agent.ingestion.parsers import code_parser
 
-
 # ---- fake AST node + parser ----
 #
 # Duck-types the tree-sitter 0.25 Node API where every accessor is a
@@ -82,9 +81,7 @@ def _patch_parser(root: _FakeNode):
     """Patch `_get_parser` to return a fake parser yielding `root`."""
     # Clear lru_cache so each test gets a fresh parser
     code_parser._get_parser.cache_clear()
-    return patch.object(
-        code_parser, "_get_parser", return_value=_FakeParser(root)
-    )
+    return patch.object(code_parser, "_get_parser", return_value=_FakeParser(root))
 
 
 # ---- EXTENSIONS + language map ----
@@ -152,12 +149,7 @@ def test_two_python_functions_emit_one_chunk_each(tmp_path: Path):
 
 def test_inter_definition_code_emits_its_own_chunk(tmp_path: Path):
     """Imports + module-level code before/between definitions get a chunk."""
-    source = (
-        b"import os\n"
-        b"\n"
-        b"def foo():\n"
-        b"    return os.getcwd()\n"
-    )
+    source = b"import os\n\ndef foo():\n    return os.getcwd()\n"
     path = tmp_path / "x.py"
     path.write_bytes(source)
 
@@ -233,8 +225,10 @@ def _dispatcher_config():
     signature is satisfied.
     """
     from knowledge_agent.kg.corpus_config import CorpusConfig, LayerFlags
+
     return CorpusConfig(
-        allowed_types=["Paper"], layers=LayerFlags(chunks=True),
+        allowed_types=["Paper"],
+        layers=LayerFlags(chunks=True),
     )
 
 
@@ -296,7 +290,8 @@ def test_parse_raises_import_error_when_extra_missing(tmp_path: Path):
     path.write_bytes(b"def foo(): pass\n")
 
     code_parser._get_parser.cache_clear()
-    with patch.dict(
-        "sys.modules", {"tree_sitter_language_pack": None}
-    ), pytest.raises(ImportError, match="parsers-code"):
+    with (
+        patch.dict("sys.modules", {"tree_sitter_language_pack": None}),
+        pytest.raises(ImportError, match="parsers-code"),
+    ):
         code_parser.parse(path)

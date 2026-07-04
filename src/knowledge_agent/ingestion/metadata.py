@@ -40,9 +40,7 @@ _DOI_TRAILING_NOISE = ".,;)]>"
 OPENALEX_BASE_URL = "https://api.openalex.org"
 
 
-def extract_doi_candidates(
-    chunks: list[ParsedChunk], max_chunks_to_search: int = 3
-) -> list[str]:
+def extract_doi_candidates(chunks: list[ParsedChunk], max_chunks_to_search: int = 3) -> list[str]:
     """Find DOI candidates in the first few chunks.
 
     Returns matches deduplicated, in order of first appearance, lowercased.
@@ -88,9 +86,7 @@ async def resolve_doi(doi: str, timeout: float = 10.0) -> dict[str, Any] | None:
         logger.info("OpenAlex: DOI not found: %r", doi)
         return None
     if response.status_code != 200:
-        raise RuntimeError(
-            f"OpenAlex: unexpected status {response.status_code} for doi={doi!r}"
-        )
+        raise RuntimeError(f"OpenAlex: unexpected status {response.status_code} for doi={doi!r}")
     return response.json()
 
 
@@ -114,13 +110,12 @@ async def resolve_metadata(chunks: list[ParsedChunk]) -> dict[str, Any] | None:
         except Exception as exc:
             logger.warning(
                 "metadata: resolve_doi failed for %r: %r; trying next candidate",
-                doi, exc,
+                doi,
+                exc,
             )
             continue
         if work is not None:
             logger.info("metadata: resolved DOI %r", doi)
             return work
-    logger.info(
-        "metadata: %d candidate DOI(s) but none resolved", len(candidates)
-    )
+    logger.info("metadata: %d candidate DOI(s) but none resolved", len(candidates))
     return None

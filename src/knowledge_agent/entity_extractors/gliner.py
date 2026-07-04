@@ -108,14 +108,15 @@ def _get_model():
     from gliner import GLiNER
 
     from knowledge_agent.entity_extractors.extractor_lifecycle import (
-        WeightsNotDownloadedError,
         _GLINER_PROVENANCE,
+        WeightsNotDownloadedError,
         _is_weights_downloaded,
     )
 
     if not _is_weights_downloaded(_GLINER_PROVENANCE):
         raise WeightsNotDownloadedError(
-            "gliner", MODEL_NAME,
+            "gliner",
+            MODEL_NAME,
             "Open Library → Installs and press Download weights on "
             "the GLiNER row before running extraction.",
         )
@@ -132,7 +133,9 @@ def _run_inference(text: str, entity_types: list[str]) -> list[Mention]:
     labels = list(entity_types) if entity_types else list(DEFAULT_LABELS)
 
     predictions = model.predict_entities(
-        text, labels, threshold=_SCORE_THRESHOLD,
+        text,
+        labels,
+        threshold=_SCORE_THRESHOLD,
     )
 
     return [

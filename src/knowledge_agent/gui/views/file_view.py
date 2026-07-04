@@ -5,6 +5,7 @@ Stateless: takes the filename + contents at construct time and
 renders the contents as Markdown. Same shape as `LatestView` so the
 right panel's mode switch is uniform.
 """
+
 import flet as ft
 
 from knowledge_agent.gui.views._frame import view_with_header

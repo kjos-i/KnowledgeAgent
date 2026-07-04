@@ -78,8 +78,7 @@ async def reconcile_ontologies_to_config(client, config) -> list[str]:
         if not await entry["is_imported_fn"](client):
             continue
         logger.info(
-            "reconcile: wiping ontology %s (disabled in config but "
-            "present in KG)",
+            "reconcile: wiping ontology %s (disabled in config but present in KG)",
             name,
         )
         await entry["delete_fn"](client)
@@ -116,10 +115,7 @@ async def reconcile_entities_to_config(client, config) -> dict[str, int]:
         # Layer off — wipe all entities corpus-wide.
         async with client.driver.session() as session:
             result = await session.run(
-                f"MATCH (e:{ENTITY_LABEL}) "
-                f"WITH e, count(e) AS _c "
-                f"DETACH DELETE e "
-                f"RETURN _c AS n"
+                f"MATCH (e:{ENTITY_LABEL}) WITH e, count(e) AS _c DETACH DELETE e RETURN _c AS n"
             )
             row = await result.single()
             wiped_total = int(row["n"]) if row is not None else 0
@@ -150,7 +146,8 @@ async def reconcile_entities_to_config(client, config) -> dict[str, int]:
     if wiped_total > 0:
         logger.info(
             "reconcile: wiped %d :Entity nodes with types outside %r",
-            wiped_total, kept_types,
+            wiped_total,
+            kept_types,
         )
     return {"n_wiped": wiped_total}
 
@@ -176,10 +173,7 @@ async def reconcile_triples_to_config(client, config) -> dict[str, int]:
     rel_pattern = "|".join(TRIPLE_PREDICATE_RELS)
     async with client.driver.session() as session:
         result = await session.run(
-            f"MATCH ()-[r:{rel_pattern}]->() "
-            f"WITH r, count(r) AS _c "
-            f"DELETE r "
-            f"RETURN _c AS n"
+            f"MATCH ()-[r:{rel_pattern}]->() WITH r, count(r) AS _c DELETE r RETURN _c AS n"
         )
         row = await result.single()
         wiped = int(row["n"]) if row is not None else 0
@@ -211,10 +205,7 @@ async def reconcile_cross_doc_to_config(client, config) -> dict[str, int]:
 
     async with client.driver.session() as session:
         result = await session.run(
-            f"MATCH ()-[r:{RELATED_TO_REL}]->() "
-            f"WITH r, count(r) AS _c "
-            f"DELETE r "
-            f"RETURN _c AS n"
+            f"MATCH ()-[r:{RELATED_TO_REL}]->() WITH r, count(r) AS _c DELETE r RETURN _c AS n"
         )
         row = await result.single()
         wiped = int(row["n"]) if row is not None else 0
@@ -232,7 +223,8 @@ async def reconcile_cross_doc_to_config(client, config) -> dict[str, int]:
 
 
 async def reconcile_cross_doc_xrefs_to_config(
-    client, config,
+    client,
+    config,
 ) -> dict[str, int]:
     """Wipe all `:RELATED_BY_XREF` edges when `layers.cross_doc_xrefs = false`.
 
@@ -247,17 +239,13 @@ async def reconcile_cross_doc_xrefs_to_config(
 
     async with client.driver.session() as session:
         result = await session.run(
-            f"MATCH ()-[r:{RELATED_BY_XREF_REL}]->() "
-            f"WITH r, count(r) AS _c "
-            f"DELETE r "
-            f"RETURN _c AS n"
+            f"MATCH ()-[r:{RELATED_BY_XREF_REL}]->() WITH r, count(r) AS _c DELETE r RETURN _c AS n"
         )
         row = await result.single()
         wiped = int(row["n"]) if row is not None else 0
     if wiped > 0:
         logger.info(
-            "reconcile: wiped %d :RELATED_BY_XREF edges "
-            "(layers.cross_doc_xrefs=false)",
+            "reconcile: wiped %d :RELATED_BY_XREF edges (layers.cross_doc_xrefs=false)",
             wiped,
         )
     return {"n_wiped": wiped}

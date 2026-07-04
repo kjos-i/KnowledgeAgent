@@ -56,29 +56,28 @@ async def test_write_chunks_creates_focal_and_chunks_with_part_of_edges(
 ) -> None:
     """write_chunks MERGEs the focal :Document:Paper + N :Chunk nodes
     + N :PART_OF edges to the focal."""
-    ok = await kg_client.write_chunks(
-        SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper"
-    )
+    ok = await kg_client.write_chunks(SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper")
     assert ok is None  # success: returns None (typed-errors contract)
 
     with kg_client.driver.session() as session:
         # Focal :Document:Paper with in_corpus flag.
         focal = session.run(
-            "MATCH (d:Document:Paper {doc_id: $doc_id}) "
-            "RETURN d.in_corpus AS flag",
+            "MATCH (d:Document:Paper {doc_id: $doc_id}) RETURN d.in_corpus AS flag",
             doc_id=SYNTHETIC_DOC_ID,
         ).single()
         assert focal is not None
         assert focal["flag"] is True
 
         # 3 :Chunk nodes with the expected chunk_id pattern + properties.
-        chunks = list(session.run(
-            "MATCH (c:Chunk)-[:PART_OF]->(d:Document {doc_id: $doc_id}) "
-            "RETURN c.chunk_id AS chunk_id, c.chunk_index AS idx, "
-            "c.section AS section, c.page AS page, "
-            "c.content_type AS ctype ORDER BY c.chunk_index",
-            doc_id=SYNTHETIC_DOC_ID,
-        ))
+        chunks = list(
+            session.run(
+                "MATCH (c:Chunk)-[:PART_OF]->(d:Document {doc_id: $doc_id}) "
+                "RETURN c.chunk_id AS chunk_id, c.chunk_index AS idx, "
+                "c.section AS section, c.page AS page, "
+                "c.content_type AS ctype ORDER BY c.chunk_index",
+                doc_id=SYNTHETIC_DOC_ID,
+            )
+        )
     assert len(chunks) == 3
     assert chunks[0]["chunk_id"] == make_chunk_id(SYNTHETIC_DOC_ID, 0)
     assert chunks[0]["section"] == "Introduction"
@@ -94,12 +93,8 @@ async def test_write_chunks_is_idempotent(
 ) -> None:
     """Re-writing the same chunks doesn't duplicate nodes — MERGE on
     chunk_id protects this."""
-    await kg_client.write_chunks(
-        SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper"
-    )
-    await kg_client.write_chunks(
-        SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper"
-    )
+    await kg_client.write_chunks(SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper")
+    await kg_client.write_chunks(SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper")
 
     with kg_client.driver.session() as session:
         n_chunks = session.run(
@@ -107,8 +102,7 @@ async def test_write_chunks_is_idempotent(
             doc_id=SYNTHETIC_DOC_ID,
         ).single()["n"]
         n_part_of = session.run(
-            "MATCH (:Chunk {doc_id: $doc_id})-[r:PART_OF]->(:Document) "
-            "RETURN count(r) AS n",
+            "MATCH (:Chunk {doc_id: $doc_id})-[r:PART_OF]->(:Document) RETURN count(r) AS n",
             doc_id=SYNTHETIC_DOC_ID,
         ).single()["n"]
     assert n_chunks == 3
@@ -144,12 +138,8 @@ async def test_delete_chunks_wipes_only_target_doc(
     """delete_chunks_by_doc_id removes :Chunk nodes ONLY for the
     requested doc. Other docs' chunks survive."""
     other_doc = "integ-doc-chunks-other"
-    await kg_client.write_chunks(
-        SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper"
-    )
-    await kg_client.write_chunks(
-        other_doc, SYNTHETIC_CHUNKS, "Document", "Paper"
-    )
+    await kg_client.write_chunks(SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper")
+    await kg_client.write_chunks(other_doc, SYNTHETIC_CHUNKS, "Document", "Paper")
 
     ok = await kg_client.delete_chunks_by_doc_id(SYNTHETIC_DOC_ID)
     assert ok is None  # success: returns None (typed-errors contract)
@@ -181,9 +171,7 @@ async def test_write_chunks_preserves_existing_focal_labels(
     }
     await kg_client.write_citations(SYNTHETIC_DOC_ID, work)
     # Then: write_chunks should not clobber the :Paper label.
-    await kg_client.write_chunks(
-        SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper"
-    )
+    await kg_client.write_chunks(SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper")
 
     with kg_client.driver.session() as session:
         labels = session.run(
@@ -198,7 +186,9 @@ async def test_write_chunks_preserves_existing_focal_labels(
 
 
 async def test_get_focal_labels_returns_none_when_doc_missing(
-    kg_client: Any, ensure_constraints: None, clean_kg: None,
+    kg_client: Any,
+    ensure_constraints: None,
+    clean_kg: None,
 ) -> None:
     """No focal for this doc_id → (None, None). Ingest pipeline's
     preserve branch uses this as the 'first ingest' signal."""
@@ -207,31 +197,42 @@ async def test_get_focal_labels_returns_none_when_doc_missing(
 
 
 async def test_get_focal_labels_returns_main_plus_sub_when_both_set(
-    kg_client: Any, ensure_constraints: None, clean_kg: None,
+    kg_client: Any,
+    ensure_constraints: None,
+    clean_kg: None,
 ) -> None:
     """Focal created with (Document, Paper) → lookup returns exactly
     that tuple."""
     await kg_client.write_chunks(
-        SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper",
+        SYNTHETIC_DOC_ID,
+        SYNTHETIC_CHUNKS,
+        "Document",
+        "Paper",
     )
     result = await kg_client.get_focal_labels_by_doc_id(SYNTHETIC_DOC_ID)
     assert result == ("Document", "Paper")
 
 
 async def test_get_focal_labels_returns_main_only_when_no_sub(
-    kg_client: Any, ensure_constraints: None, clean_kg: None,
+    kg_client: Any,
+    ensure_constraints: None,
+    clean_kg: None,
 ) -> None:
     """Focal created with sub_label=None → (main, None). Sub-label
     slot is empty, main-label is still returned."""
     await kg_client.write_chunks(
-        SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Artifact", None,
+        SYNTHETIC_DOC_ID,
+        SYNTHETIC_CHUNKS,
+        "Artifact",
+        None,
     )
     result = await kg_client.get_focal_labels_by_doc_id(SYNTHETIC_DOC_ID)
     assert result == ("Artifact", None)
 
 
 async def test_get_focal_labels_rejects_empty_doc_id(
-    kg_client: Any, ensure_constraints: None,
+    kg_client: Any,
+    ensure_constraints: None,
 ) -> None:
     """Guard: empty doc_id is a programmer error, not a lookup with
     no results. Raise rather than silently return (None, None)."""

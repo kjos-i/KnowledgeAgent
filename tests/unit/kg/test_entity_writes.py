@@ -149,9 +149,7 @@ async def test_write_entities_sends_one_session_one_call():
 
 
 async def test_write_entities_cypher_includes_entity_label_and_mentions_rel():
-    driver = await _run_write(
-        [("c0", [Mention(raw_text="BRCA1", entity_type="GENE")])]
-    )
+    driver = await _run_write([("c0", [Mention(raw_text="BRCA1", entity_type="GENE")])])
     cypher, _params = driver.sessions[0].calls[0]
     # The composite-key MERGE on :Entity.
     assert ":Entity" in cypher
@@ -164,9 +162,7 @@ async def test_write_entities_cypher_includes_entity_label_and_mentions_rel():
 
 async def test_write_entities_lowercases_raw_text_into_key():
     """raw_text 'BRCA1' (capital) becomes key 'brca1' in the merge param."""
-    driver = await _run_write(
-        [("c0", [Mention(raw_text="BRCA1", entity_type="GENE")])]
-    )
+    driver = await _run_write([("c0", [Mention(raw_text="BRCA1", entity_type="GENE")])])
     _cypher, params = driver.sessions[0].calls[0]
     rows = params["rows"]
     assert rows[0]["key"] == "brca1"
@@ -214,9 +210,7 @@ async def test_write_entities_preserves_offset_and_confidence_in_rows():
 async def test_write_entities_llm_mentions_carry_none_offset_and_confidence():
     """LLM mentions have offset=None, confidence=None - rows carry None
     through so the Cypher sets them to null on the edge."""
-    driver = await _run_write(
-        [("c0", [Mention(raw_text="brca1", entity_type="GENE")])]
-    )
+    driver = await _run_write([("c0", [Mention(raw_text="brca1", entity_type="GENE")])])
     _cypher, params = driver.sessions[0].calls[0]
     rows = params["rows"]
     assert rows[0]["offset"] is None
@@ -250,9 +244,7 @@ async def test_write_entities_carries_union_sources_onto_edge():
 async def test_write_entities_sources_defaults_empty_when_unset():
     """A plain mention with no `sources` (e.g. a hand-built one) writes an
     empty list, not null - keeps the edge property shape consistent."""
-    driver = await _run_write(
-        [("c0", [Mention(raw_text="brca1", entity_type="GENE")])]
-    )
+    driver = await _run_write([("c0", [Mention(raw_text="brca1", entity_type="GENE")])])
     _cypher, params = driver.sessions[0].calls[0]
     rows = params["rows"]
     assert rows[0]["sources"] == []
@@ -334,9 +326,7 @@ async def test_client_write_entities_delegates_to_module():
     """Client.write_entities is a 1-line wrapper. Verify it calls through."""
     driver = RecordingDriver()
     client = _client_with_driver(driver)
-    result = await client.write_entities(
-        DOC_ID, [("c0", [Mention("BRCA1", "GENE")])]
-    )
+    result = await client.write_entities(DOC_ID, [("c0", [Mention("BRCA1", "GENE")])])
     assert result is None
     # The underlying call landed: one Cypher round trip with our payload.
     assert len(driver.sessions) == 1

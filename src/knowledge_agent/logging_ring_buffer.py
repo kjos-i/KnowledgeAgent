@@ -24,12 +24,15 @@ RingBufferHandler`. New code should import directly from here.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from collections import deque
-from collections.abc import Callable
 from logging import LogRecord
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 RING_BUFFER_SIZE = 1000
 """Default ring capacity (records). Tuned to keep crash files
@@ -63,19 +66,15 @@ class RingBufferHandler(logging.Handler):
         with self._lock:
             subs = list(self._subscribers)
         for callback in subs:
-            try:
+            # A broken subscriber must not break logging.
+            with contextlib.suppress(Exception):
                 callback(record)
-            except Exception:
-                # A broken subscriber must not break logging.
-                pass
 
     def get_snapshot(self) -> list[LogRecord]:
         """Return a copy of the current ring contents (oldest first)."""
         return list(self._records)
 
-    def subscribe(
-        self, callback: Callable[[LogRecord], None]
-    ) -> Callable[[], None]:
+    def subscribe(self, callback: Callable[[LogRecord], None]) -> Callable[[], None]:
         """Register a callback fired on every new record.
 
         Returns an `unsubscribe` zero-arg function. Calling it twice is

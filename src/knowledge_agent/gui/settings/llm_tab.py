@@ -22,6 +22,7 @@ UX rule: the currently-active provider can't be uninstalled — that
 button is disabled with an explanatory tooltip. User must switch the
 active provider before removing it.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -73,13 +74,19 @@ LLM_AVAILABLE_MODELS: dict[str, tuple[str, ...]] = {
     "openai": ("gpt-4o-mini", "gpt-4o"),
     "google": ("gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"),
     "ollama": (
-        "llama3.2:3b", "qwen2.5:7b", "qwen2.5:14b", "llama3.3:70b",
+        "llama3.2:3b",
+        "qwen2.5:7b",
+        "qwen2.5:14b",
+        "llama3.3:70b",
     ),
 }
 
 
 _QUERY_NODES: tuple[str, ...] = (
-    "mode_classifier", "query_builder", "cypher_builder", "synthesizer",
+    "mode_classifier",
+    "query_builder",
+    "cypher_builder",
+    "synthesizer",
 )
 
 
@@ -88,6 +95,9 @@ class LlmTab:
 
     def __init__(self, app: GuiApp) -> None:
         self.app = app
+        # Strong refs to fire-and-forget background tasks so the event
+        # loop doesn't GC them mid-flight (see the daemon probe below).
+        self._bg_tasks: set[asyncio.Task] = set()
         self.status: ft.Text | None = None
 
         # Active provider radio — rebuilt on first show + on install change.
@@ -130,7 +140,9 @@ class LlmTab:
         self.active_provider_container = ft.Container(
             content=ft.Text(
                 "(checking install state...)",
-                size=12, color=ft.Colors.GREY_500, italic=True,
+                size=12,
+                color=ft.Colors.GREY_500,
+                italic=True,
             ),
         )
 
@@ -138,7 +150,9 @@ class LlmTab:
         # are populated by _sync_provider_state() at first build.
         for provider in _PROVIDER_ORDER:
             self.provider_status_texts[provider] = ft.Text(
-                "(checking…)", size=12, color=ft.Colors.GREY_500,
+                "(checking…)",
+                size=12,
+                color=ft.Colors.GREY_500,
                 italic=True,
             )
             self.provider_install_buttons[provider] = ft.Button(
@@ -167,8 +181,7 @@ class LlmTab:
         # / future models without a code edit). on_blur fires for both
         # paths (typed text + menu pick).
         provider_options = [
-            ft.DropdownOption(key=m, text=m)
-            for m in LLM_AVAILABLE_MODELS.get(cfg.llm_provider, ())
+            ft.DropdownOption(key=m, text=m) for m in LLM_AVAILABLE_MODELS.get(cfg.llm_provider, ())
         ]
         for node_name, default_temp in (
             ("mode_classifier", cfg.mode_classifier_temperature),
@@ -188,11 +201,16 @@ class LlmTab:
                 on_blur=lambda e, n=node_name: self.on_model_blur(n),
             )
             self.node_temp_value_texts[node_name] = ft.Text(
-                _fmt_float(default_temp), size=12,
-                color=ft.Colors.WHITE, width=42,
+                _fmt_float(default_temp),
+                size=12,
+                color=ft.Colors.WHITE,
+                width=42,
             )
             self.node_temp_sliders[node_name] = ft.Slider(
-                value=default_temp, min=0.0, max=1.0, divisions=20,
+                value=default_temp,
+                min=0.0,
+                max=1.0,
+                divisions=20,
                 on_change=lambda e, n=node_name: self._on_temp_slide(n),
                 on_change_end=lambda e, n=node_name: self.on_temp_committed(n),
             )
@@ -240,7 +258,9 @@ class LlmTab:
             except RuntimeError:
                 pass
             else:
-                asyncio.create_task(self._probe_ollama_daemon())
+                task = asyncio.create_task(self._probe_ollama_daemon())
+                self._bg_tasks.add(task)
+                task.add_done_callback(self._bg_tasks.discard)
 
         return ft.Column(
             scroll=ft.ScrollMode.AUTO,
@@ -254,7 +274,9 @@ class LlmTab:
                 ft.Text(
                     "Switching is immediate. Install / Uninstall are "
                     "separate per-provider actions below.",
-                    size=11, color=ft.Colors.GREY_500, italic=True,
+                    size=11,
+                    color=ft.Colors.GREY_500,
+                    italic=True,
                 ),
                 self.active_provider_container,
                 ft.Divider(),
@@ -263,11 +285,11 @@ class LlmTab:
                 ft.Text(
                     "Install / Uninstall dialogs ship in slice 4 — the "
                     "buttons stage the action for now.",
-                    size=11, color=ft.Colors.GREY_500, italic=True,
+                    size=11,
+                    color=ft.Colors.GREY_500,
+                    italic=True,
                 ),
-                *[
-                    self._render_provider_row(p) for p in _PROVIDER_ORDER
-                ],
+                *[self._render_provider_row(p) for p in _PROVIDER_ORDER],
                 ft.Divider(),
                 # ---- Ollama base URL -----------------------------------
                 ft.Text("Ollama", weight=ft.FontWeight.BOLD),
@@ -279,14 +301,18 @@ class LlmTab:
                     weight=ft.FontWeight.BOLD,
                 ),
                 ft.Text(
-                    "Query-time nodes only. Ingest-time extractor "
-                    "models live in the Library tab.",
-                    size=11, color=ft.Colors.GREY_500, italic=True,
+                    "Query-time nodes only. Ingest-time extractor models live in the Library tab.",
+                    size=11,
+                    color=ft.Colors.GREY_500,
+                    italic=True,
                 ),
                 *[
-                    self._render_node_block(n) for n in (
-                        "mode_classifier", "query_builder",
-                        "cypher_builder", "synthesizer",
+                    self._render_node_block(n)
+                    for n in (
+                        "mode_classifier",
+                        "query_builder",
+                        "cypher_builder",
+                        "synthesizer",
                     )
                 ],
                 ft.Divider(),
@@ -299,11 +325,11 @@ class LlmTab:
                     "Leave blank for no limit. Useful when your "
                     "provider tier rate-limits below your "
                     "concurrent fan-out.",
-                    size=11, color=ft.Colors.GREY_500, italic=True,
+                    size=11,
+                    color=ft.Colors.GREY_500,
+                    italic=True,
                 ),
-                *[
-                    self.rate_limit_fields[p] for p in _PROVIDER_ORDER
-                ],
+                *[self.rate_limit_fields[p] for p in _PROVIDER_ORDER],
                 self.max_retries_field,
                 # ---- Shared status text --------------------------------
                 self.status,
@@ -337,12 +363,12 @@ class LlmTab:
         for provider in _PROVIDER_ORDER:
             entry = LLM_PROVIDER_REGISTRY[provider]
             try:
-                self._installed_state[provider] = bool(
-                    entry["is_installed_fn"]()
-                )
+                self._installed_state[provider] = bool(entry["is_installed_fn"]())
             except Exception as exc:
                 logger.warning(
-                    "is_installed_fn(%s) failed: %r", provider, exc,
+                    "is_installed_fn(%s) failed: %r",
+                    provider,
+                    exc,
                 )
                 self._installed_state[provider] = False
 
@@ -372,19 +398,13 @@ class LlmTab:
                     status_text.value = "✓ installed (daemon reachable)"
                     status_text.color = ft.Colors.GREEN_300
                 elif installed and daemon is False:
-                    status_text.value = (
-                        "○ adapter installed; daemon not reachable"
-                    )
+                    status_text.value = "○ adapter installed; daemon not reachable"
                     status_text.color = ft.Colors.AMBER_300
                 elif installed and daemon is None:
-                    status_text.value = (
-                        "✓ adapter installed; probing daemon…"
-                    )
+                    status_text.value = "✓ adapter installed; probing daemon…"
                     status_text.color = ft.Colors.GREY_400
                 else:
-                    status_text.value = (
-                        "○ not installed (adapter + daemon both needed)"
-                    )
+                    status_text.value = "○ not installed (adapter + daemon both needed)"
                     status_text.color = ft.Colors.GREY_400
             else:
                 if installed:
@@ -401,8 +421,7 @@ class LlmTab:
             if installed and provider == active:
                 uninstall_btn.disabled = True
                 uninstall_btn.tooltip = (
-                    "Active provider can't be uninstalled — switch "
-                    "to another first."
+                    "Active provider can't be uninstalled — switch to another first."
                 )
             else:
                 uninstall_btn.disabled = False
@@ -412,14 +431,14 @@ class LlmTab:
         """Rebuild the radio group from currently-installed providers."""
         if self.active_provider_container is None:
             return
-        installed = [
-            p for p in _PROVIDER_ORDER if self._installed_state.get(p)
-        ]
+        installed = [p for p in _PROVIDER_ORDER if self._installed_state.get(p)]
         if not installed:
             self.active_provider_container.content = ft.Text(
                 "No providers installed yet — pick one below and click "
                 "Install when slice 4 ships the dialogs.",
-                size=12, color=ft.Colors.AMBER_300, italic=True,
+                size=12,
+                color=ft.Colors.AMBER_300,
+                italic=True,
             )
             return
         current = self.app.gui_config.llm_provider
@@ -471,7 +490,9 @@ class LlmTab:
                     controls=[
                         ft.Text(
                             f"{node_name} temperature",
-                            size=12, color=ft.Colors.GREY_300, width=220,
+                            size=12,
+                            color=ft.Colors.GREY_300,
+                            width=220,
                         ),
                         ft.Container(
                             content=self.node_temp_sliders[node_name],
@@ -510,10 +531,7 @@ class LlmTab:
             return
         # Snapshot previous state for rollback on save failure.
         previous_provider = self.app.gui_config.llm_provider
-        previous_models = {
-            n: getattr(self.app.gui_config, f"{n}_model")
-            for n in _QUERY_NODES
-        }
+        previous_models = {n: getattr(self.app.gui_config, f"{n}_model") for n in _QUERY_NODES}
         self.app.gui_config.llm_provider = new_value  # type: ignore[assignment]
         # Copy the new provider's default models into GuiConfig.
         defaults = LLM_PROVIDER_REGISTRY[new_value]["default_models"]
@@ -530,8 +548,7 @@ class LlmTab:
         # Repopulate each dropdown's options + reset its visible value
         # to the new provider's default.
         new_options = [
-            ft.DropdownOption(key=m, text=m)
-            for m in LLM_AVAILABLE_MODELS.get(new_value, ())
+            ft.DropdownOption(key=m, text=m) for m in LLM_AVAILABLE_MODELS.get(new_value, ())
         ]
         for node in _QUERY_NODES:
             dropdown = self.node_model_fields.get(node)
@@ -556,9 +573,7 @@ class LlmTab:
         """Slice 2 stub — uninstall dialogs ship in slice 4."""
         if self.status is None:
             return
-        self.status.value = (
-            f"Uninstall dialog for {provider} ships in slice 4."
-        )
+        self.status.value = f"Uninstall dialog for {provider} ships in slice 4."
         self.app.page.update()
 
     def on_ollama_url_blur(self, e: ft.Event) -> None:
@@ -642,18 +657,14 @@ class LlmTab:
                     raise ValueError("must be positive")
             except (ValueError, TypeError):
                 field.value = "" if current is None else str(current)
-                self.status.value = (
-                    f"{provider} rate limit must be a positive number "
-                    f"or empty"
-                )
+                self.status.value = f"{provider} rate limit must be a positive number or empty"
                 self.app.page.update()
                 return
         if new_value == current:
             return
         setattr(self.app.gui_config, attr, new_value)
         if not self._commit(
-            f"{provider} rate limit: "
-            f"{'unlimited' if new_value is None else new_value}"
+            f"{provider} rate limit: {'unlimited' if new_value is None else new_value}"
         ):
             setattr(self.app.gui_config, attr, current)
             field.value = "" if current is None else str(current)

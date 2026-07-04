@@ -75,7 +75,8 @@ def _entry_for_mode(mode: str) -> str | list[str]:
     if mode == "parallel_fused":
         return [NODE_QUERY_BUILDER, NODE_CYPHER_BUILDER]
     logger.warning(
-        "graph router: unknown mode %r; falling back to lancedb_only", mode,
+        "graph router: unknown mode %r; falling back to lancedb_only",
+        mode,
     )
     return NODE_QUERY_BUILDER
 
@@ -88,9 +89,7 @@ def _route_from_start(state: AgentState) -> str | list[str]:
     using `effective_mode`, because routed_mode hasn't been set yet at
     this point in the run.
     """
-    raw_mode = (
-        state.get("retrieval_mode") or get_settings().default_retrieval_mode
-    )
+    raw_mode = state.get("retrieval_mode") or get_settings().default_retrieval_mode
     if raw_mode == "auto":
         return NODE_MODE_CLASSIFIER
     return _entry_for_mode(raw_mode)
@@ -134,21 +133,15 @@ def _build_graph() -> CompiledStateGraph:
     builder.add_conditional_edges(START, _route_from_start)
 
     # ---- After classifier: conditional dispatch by routed_mode.
-    builder.add_conditional_edges(
-        NODE_MODE_CLASSIFIER, _route_from_classifier
-    )
+    builder.add_conditional_edges(NODE_MODE_CLASSIFIER, _route_from_classifier)
 
     # ---- Static "builder -> retriever" edges (always fire).
     builder.add_edge(NODE_QUERY_BUILDER, NODE_LANCEDB_RETRIEVER)
     builder.add_edge(NODE_CYPHER_BUILDER, NODE_NEO4J_RETRIEVER)
 
     # ---- Post-retriever conditional edges (continue or converge).
-    builder.add_conditional_edges(
-        NODE_LANCEDB_RETRIEVER, _route_after_lance
-    )
-    builder.add_conditional_edges(
-        NODE_NEO4J_RETRIEVER, _route_after_neo
-    )
+    builder.add_conditional_edges(NODE_LANCEDB_RETRIEVER, _route_after_lance)
+    builder.add_conditional_edges(NODE_NEO4J_RETRIEVER, _route_after_neo)
 
     # ---- Synthesizer is the only exit.
     builder.add_edge(NODE_SYNTHESIZER, END)

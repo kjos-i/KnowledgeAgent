@@ -5,6 +5,7 @@ dialog security warnings. The lifecycle modules' own tests
 (`test_extractor_lifecycle`, `test_embedder_lifecycle`) cover the
 end-to-end summaries; this module pins the helper's exact contract.
 """
+
 from __future__ import annotations
 
 from knowledge_agent._provenance import security_warning_text
@@ -12,9 +13,13 @@ from knowledge_agent._provenance import security_warning_text
 
 def test_returns_empty_when_both_flags_safe():
     """safetensors=True + trust_remote_code=False → no warning."""
-    assert security_warning_text(
-        safetensors=True, trust_remote_code=False,
-    ) == ""
+    assert (
+        security_warning_text(
+            safetensors=True,
+            trust_remote_code=False,
+        )
+        == ""
+    )
 
 
 def test_returns_empty_when_only_safetensors_given_and_safe():
@@ -36,7 +41,8 @@ def test_warns_on_pickle_format():
 def test_warns_on_trust_remote_code():
     """trust_remote_code=True surfaces the load-time-code warning."""
     text = security_warning_text(
-        safetensors=True, trust_remote_code=True,
+        safetensors=True,
+        trust_remote_code=True,
     )
     assert text
     assert "trust_remote_code" in text
@@ -46,7 +52,8 @@ def test_warns_on_trust_remote_code():
 def test_warns_on_both_flags_in_one_text():
     """Both risks present → both warnings appear in the same string."""
     text = security_warning_text(
-        safetensors=False, trust_remote_code=True,
+        safetensors=False,
+        trust_remote_code=True,
     )
     assert "pickle" in text.lower()
     assert "trust_remote_code" in text
@@ -65,5 +72,6 @@ def test_warning_has_security_prefix():
     not as generic provenance lines."""
     assert "SECURITY:" in security_warning_text(safetensors=False)
     assert "SECURITY:" in security_warning_text(
-        safetensors=True, trust_remote_code=True,
+        safetensors=True,
+        trust_remote_code=True,
     )

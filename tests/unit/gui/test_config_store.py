@@ -4,6 +4,7 @@
 Keyring is mocked end-to-end (no real OS-keyring backend touched).
 JSON persistence is tested against tmp_path.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,16 +18,15 @@ import pytest
 from knowledge_agent.gui import config_store
 from knowledge_agent.gui.config_store import (
     APP_ID,
-    GuiConfig,
     KEYRING_TO_ENV,
     ConfigError,
+    GuiConfig,
     apply_keys_to_env,
     get_api_key,
     load_config,
     save_config,
     set_api_key,
 )
-
 
 # ---- GuiConfig defaults ----
 
@@ -55,14 +55,17 @@ def test_retrieval_mode_rejects_unknown():
 
 def _redirect_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Point `config_store._config_dir` at `tmp_path` for isolation."""
+
     def fake_dir() -> Path:
         return tmp_path
+
     monkeypatch.setattr(config_store, "_config_dir", fake_dir)
     return tmp_path
 
 
 def test_load_config_returns_defaults_when_file_missing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ):
     _redirect_config_dir(monkeypatch, tmp_path)
     cfg = load_config()
@@ -72,7 +75,8 @@ def test_load_config_returns_defaults_when_file_missing(
 
 
 def test_load_config_returns_defaults_on_malformed_json(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ):
     """Corrupt JSON is treated as a missing file (logged, defaults
     returned) so the user can re-enter via the UI rather than crash."""
@@ -83,20 +87,23 @@ def test_load_config_returns_defaults_on_malformed_json(
 
 
 def test_load_config_returns_defaults_on_validation_error(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ):
     """Schema drift (e.g. an unknown retrieval_mode value left over
     from a future version) falls back to defaults, not a crash."""
     _redirect_config_dir(monkeypatch, tmp_path)
     (tmp_path / "settings.json").write_text(
-        json.dumps({"retrieval_mode": "magic-mode"}), encoding="utf-8",
+        json.dumps({"retrieval_mode": "magic-mode"}),
+        encoding="utf-8",
     )
     cfg = load_config()
     assert cfg.retrieval_mode == "auto"
 
 
 def test_save_then_load_roundtrips(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ):
     _redirect_config_dir(monkeypatch, tmp_path)
     save_config(GuiConfig(top_k=9, retrieval_mode="neo4j_only"))
@@ -106,7 +113,8 @@ def test_save_then_load_roundtrips(
 
 
 def test_save_config_atomic_no_tmp_left(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ):
     _redirect_config_dir(monkeypatch, tmp_path)
     save_config(GuiConfig())
@@ -114,7 +122,8 @@ def test_save_config_atomic_no_tmp_left(
 
 
 def test_save_config_cleans_tmp_on_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ):
     _redirect_config_dir(monkeypatch, tmp_path)
 
@@ -197,7 +206,8 @@ def test_apply_keys_to_env_skips_empty_values(monkeypatch: pytest.MonkeyPatch):
     """Empty stored values don't overwrite an existing shell-exported env."""
     monkeypatch.setenv("VOYAGE_API_KEY", "shell-value")
     with patch(
-        "knowledge_agent.gui.config_store.get_api_key", return_value="",
+        "knowledge_agent.gui.config_store.get_api_key",
+        return_value="",
     ):
         apply_keys_to_env()
     assert os.environ["VOYAGE_API_KEY"] == "shell-value"
@@ -209,7 +219,9 @@ def test_apply_keys_to_env_skips_empty_values(monkeypatch: pytest.MonkeyPatch):
 def test_apply_active_corpus_password_bridges_stored(monkeypatch):
     """A stored per-corpus password lands in NEO4J_PASSWORD."""
     monkeypatch.setattr(
-        config_store, "get_corpus_password", lambda name: "s3cret",
+        config_store,
+        "get_corpus_password",
+        lambda name: "s3cret",
     )
     monkeypatch.delenv("NEO4J_PASSWORD", raising=False)
     cfg = config_store.GuiConfig(active_corpus_name="c1")
@@ -220,7 +232,9 @@ def test_apply_active_corpus_password_bridges_stored(monkeypatch):
 def test_apply_active_corpus_password_pops_when_none(monkeypatch):
     """No stored password -> NEO4J_PASSWORD is removed (not left stale)."""
     monkeypatch.setattr(
-        config_store, "get_corpus_password", lambda name: None,
+        config_store,
+        "get_corpus_password",
+        lambda name: None,
     )
     monkeypatch.setenv("NEO4J_PASSWORD", "stale")
     cfg = config_store.GuiConfig(active_corpus_name="c1")

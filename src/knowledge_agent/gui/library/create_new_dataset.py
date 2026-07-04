@@ -34,8 +34,10 @@ On [Create corpus]:
   6. Chat-panel status message + a hint to open Select Dataset to
      tune the corpus's config.
 """
+
 from __future__ import annotations
 
+import contextlib
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -163,7 +165,9 @@ class CreateNewDatasetTab:
                         "One Neo4j instance + one LanceDB path per "
                         "corpus. Set the Neo4j DBMS up in Neo4j Desktop "
                         "first, then enter its connection details below.",
-                        size=11, color=ft.Colors.GREY_500, italic=True,
+                        size=11,
+                        color=ft.Colors.GREY_500,
+                        italic=True,
                     ),
                     self.name_field,
                     self.uri_field,
@@ -194,11 +198,13 @@ class CreateNewDatasetTab:
                 controls=[
                     ft.Text(
                         "What gets created",
-                        size=13, weight=ft.FontWeight.BOLD,
+                        size=13,
+                        weight=ft.FontWeight.BOLD,
                     ),
                     ft.Text(
                         "At the location you pick:",
-                        size=12, color=ft.Colors.GREY_400,
+                        size=12,
+                        color=ft.Colors.GREY_400,
                     ),
                     ft.Text(
                         "  <location>/\n"
@@ -214,18 +220,21 @@ class CreateNewDatasetTab:
                         "The Neo4j DBMS lives outside — Neo4j Desktop "
                         "manages its data directory itself. Only the "
                         "connection URI is stored per corpus.",
-                        size=11, color=ft.Colors.GREY_400,
+                        size=11,
+                        color=ft.Colors.GREY_400,
                     ),
                     ft.Divider(),
                     ft.Text(
                         "After creation",
-                        size=13, weight=ft.FontWeight.BOLD,
+                        size=13,
+                        weight=ft.FontWeight.BOLD,
                     ),
                     ft.Text(
                         "Open Ingest to configure the corpus "
                         "(ontologies, layer flags, extractor, "
                         "thresholds) and run your first ingest.",
-                        size=11, color=ft.Colors.GREY_400,
+                        size=11,
+                        color=ft.Colors.GREY_400,
                     ),
                 ],
             ),
@@ -330,8 +339,7 @@ class CreateNewDatasetTab:
         if lancedb_path.exists() and any(lancedb_path.iterdir()):
             return (
                 False,
-                f"{lancedb_path} exists and is non-empty — "
-                f"pick a different name or location",
+                f"{lancedb_path} exists and is non-empty — pick a different name or location",
             )
         return True, ""
 
@@ -345,12 +353,14 @@ class CreateNewDatasetTab:
 
         driver = AsyncGraphDatabase.driver(uri, auth=(user, password))
         try:
-            async with driver.session() as session:
-                async with await session.begin_transaction() as tx:
-                    result = await tx.run("RETURN 1 AS ok")
-                    row = await result.single()
-                    if row is None or row.get("ok") != 1:
-                        return f"unexpected result from RETURN 1: {row!r}"
+            async with (
+                driver.session() as session,
+                await session.begin_transaction() as tx,
+            ):
+                result = await tx.run("RETURN 1 AS ok")
+                row = await result.single()
+                if row is None or row.get("ok") != 1:
+                    return f"unexpected result from RETURN 1: {row!r}"
             return None
         except Exception as exc:
             return f"{type(exc).__name__}: {exc}"
@@ -433,7 +443,8 @@ class CreateNewDatasetTab:
             corpus_config_path=toml_path,
         )
         self.app.gui_config.corpora = [
-            *self.app.gui_config.corpora, entry,
+            *self.app.gui_config.corpora,
+            entry,
         ]
         self.app.gui_config.active_corpus_name = name
         # Mirror the active corpus's storage params to the top-level
@@ -467,8 +478,7 @@ class CreateNewDatasetTab:
             f"to tune its config (ontologies, layer flags, extractor)."
         )
         self.app.chat_panel.append_system(
-            f"created corpus {name!r} — connection saved, corpus.toml "
-            f"written at {toml_path}"
+            f"created corpus {name!r} — connection saved, corpus.toml written at {toml_path}"
         )
         # Sibling-tab refresh: Select's picker + info card should
         # reflect the new corpus without waiting for the user to click
@@ -478,7 +488,8 @@ class CreateNewDatasetTab:
             self.app.library_tab.view.select_tab.on_refresh_clicked(None)
         except Exception as exc:
             logger.warning(
-                "sibling refresh after create failed: %r", exc,
+                "sibling refresh after create failed: %r",
+                exc,
             )
         # Reset the form so the user can create another if they want.
         self._reset_form()
@@ -488,7 +499,9 @@ class CreateNewDatasetTab:
     def _reset_form(self) -> None:
         """Clear the form fields after a successful Create."""
         for field in (
-            self.name_field, self.password_field, self.folder_field,
+            self.name_field,
+            self.password_field,
+            self.folder_field,
         ):
             if field is not None:
                 field.value = ""
@@ -525,10 +538,8 @@ def _write_corpus_toml(path: Path, cfg: CorpusConfig) -> None:
         tmp.replace(path)
     except OSError:
         if tmp.exists():
-            try:
+            with contextlib.suppress(OSError):
                 tmp.unlink()
-            except OSError:
-                pass
         raise
 
 

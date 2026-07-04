@@ -35,7 +35,7 @@ so we encode + slice the source as bytes when extracting chunk text.
 """
 
 import logging
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -75,64 +75,82 @@ _EXTENSION_TO_LANGUAGE: dict[str, str] = {
 # tree-sitter's playground (https://tree-sitter.github.io/tree-sitter/playground)
 # before adding new entries.
 _DEFINITION_NODE_TYPES: dict[str, frozenset[str]] = {
-    "python": frozenset({
-        "function_definition",
-        "class_definition",
-        "decorated_definition",
-    }),
-    "typescript": frozenset({
-        "function_declaration",
-        "class_declaration",
-        "method_definition",
-        "interface_declaration",
-        "type_alias_declaration",
-        "enum_declaration",
-    }),
-    "tsx": frozenset({
-        "function_declaration",
-        "class_declaration",
-        "method_definition",
-        "interface_declaration",
-        "type_alias_declaration",
-        "enum_declaration",
-    }),
-    "javascript": frozenset({
-        "function_declaration",
-        "class_declaration",
-        "method_definition",
-    }),
-    "go": frozenset({
-        "function_declaration",
-        "method_declaration",
-        "type_declaration",
-    }),
-    "rust": frozenset({
-        "function_item",
-        "impl_item",
-        "struct_item",
-        "enum_item",
-        "trait_item",
-        "mod_item",
-    }),
-    "java": frozenset({
-        "class_declaration",
-        "method_declaration",
-        "interface_declaration",
-        "enum_declaration",
-    }),
-    "c": frozenset({
-        "function_definition",
-        "struct_specifier",
-        "union_specifier",
-        "enum_specifier",
-    }),
-    "cpp": frozenset({
-        "function_definition",
-        "class_specifier",
-        "struct_specifier",
-        "union_specifier",
-        "namespace_definition",
-    }),
+    "python": frozenset(
+        {
+            "function_definition",
+            "class_definition",
+            "decorated_definition",
+        }
+    ),
+    "typescript": frozenset(
+        {
+            "function_declaration",
+            "class_declaration",
+            "method_definition",
+            "interface_declaration",
+            "type_alias_declaration",
+            "enum_declaration",
+        }
+    ),
+    "tsx": frozenset(
+        {
+            "function_declaration",
+            "class_declaration",
+            "method_definition",
+            "interface_declaration",
+            "type_alias_declaration",
+            "enum_declaration",
+        }
+    ),
+    "javascript": frozenset(
+        {
+            "function_declaration",
+            "class_declaration",
+            "method_definition",
+        }
+    ),
+    "go": frozenset(
+        {
+            "function_declaration",
+            "method_declaration",
+            "type_declaration",
+        }
+    ),
+    "rust": frozenset(
+        {
+            "function_item",
+            "impl_item",
+            "struct_item",
+            "enum_item",
+            "trait_item",
+            "mod_item",
+        }
+    ),
+    "java": frozenset(
+        {
+            "class_declaration",
+            "method_declaration",
+            "interface_declaration",
+            "enum_declaration",
+        }
+    ),
+    "c": frozenset(
+        {
+            "function_definition",
+            "struct_specifier",
+            "union_specifier",
+            "enum_specifier",
+        }
+    ),
+    "cpp": frozenset(
+        {
+            "function_definition",
+            "class_specifier",
+            "struct_specifier",
+            "union_specifier",
+            "namespace_definition",
+        }
+    ),
 }
 
 # Parser dispatcher contract.
@@ -159,9 +177,7 @@ def parse(path: Path) -> list[ParsedChunk]:
     tree = parser.parse(source_str)
 
     definition_types = _DEFINITION_NODE_TYPES.get(language, frozenset())
-    raw_chunks = _split_by_definitions(
-        tree.root_node(), source_bytes, definition_types
-    )
+    raw_chunks = _split_by_definitions(tree.root_node(), source_bytes, definition_types)
 
     chunks: list[ParsedChunk] = []
     for text in raw_chunks:
@@ -173,13 +189,11 @@ def parse(path: Path) -> list[ParsedChunk]:
                     content_type="code",
                 )
             )
-    logger.info(
-        "parsed %s (%s) -> %d chunks", path.name, language, len(chunks)
-    )
+    logger.info("parsed %s (%s) -> %d chunks", path.name, language, len(chunks))
     return chunks
 
 
-@lru_cache(maxsize=None)
+@cache
 def _get_parser(language: str) -> Any:
     """Load and cache a tree-sitter parser for one language.
 
@@ -226,23 +240,15 @@ def _split_by_definitions(
         # Flush any code between the previous boundary and this definition
         # (imports, module-level statements, etc.) as its own chunk.
         if cursor < child_start:
-            prelude = source_bytes[cursor:child_start].decode(
-                "utf-8", errors="replace"
-            )
+            prelude = source_bytes[cursor:child_start].decode("utf-8", errors="replace")
             if prelude.strip():
                 chunks.append(prelude)
-        chunks.append(
-            source_bytes[child_start:child_end].decode(
-                "utf-8", errors="replace"
-            )
-        )
+        chunks.append(source_bytes[child_start:child_end].decode("utf-8", errors="replace"))
         cursor = child_end
     # Trailing code after the last definition.
     root_end = root.end_byte()
     if cursor < root_end:
-        trailing = source_bytes[cursor:root_end].decode(
-            "utf-8", errors="replace"
-        )
+        trailing = source_bytes[cursor:root_end].decode("utf-8", errors="replace")
         if trailing.strip():
             chunks.append(trailing)
     # File with no definitions -> whole file as one chunk.

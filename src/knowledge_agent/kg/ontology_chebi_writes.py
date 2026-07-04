@@ -29,17 +29,17 @@ is the [[deferred-cross-ontology-xrefs]] work item.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from knowledge_agent.kg.ontology_helpers import (
     OntologyTerm,
+    delete_ontology_terms,
     ensure_cached,
     extract_terms_obo,
-    delete_ontology_terms,
     import_ontology_data,
     is_ontology_imported,
-    write_ontology_terms,
     read_obo,
+    write_ontology_terms,
 )
 from knowledge_agent.kg.ontology_provenance import OntologyProvenance
 from knowledge_agent.kg.schema import (
@@ -47,10 +47,13 @@ from knowledge_agent.kg.schema import (
     CHEBI_TERM_LABEL,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 logger = logging.getLogger(__name__)
 
 # Re-exported for backward-compatible test patching.
-_ = ensure_cached  # noqa: F841
+_ = ensure_cached
 
 
 # ---------------------------------------------------------------------------
@@ -70,8 +73,6 @@ CHEBI_ID_PREFIX = "CHEBI"
 DOWNLOAD_SIZE_MB = 51
 
 _ONTOLOGY_NAME = "ChEBI"
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +101,7 @@ _CHEBI_PROVENANCE = OntologyProvenance(
     domain_tags=DOMAIN_TAGS,
     covers_labels=_CHEBI_COVERS_LABELS,
     description=(
-                "Small molecules of biological relevance: drugs, metabolites, "
+        "Small molecules of biological relevance: drugs, metabolites, "
         "signaling molecules, nutrients. The LITE variant skips "
         "chemical structures to keep the file small. "
     ),
@@ -115,11 +116,14 @@ _CHEBI_PROVENANCE = OntologyProvenance(
 async def is_imported(client) -> bool:
     """True when at least one `:ChEBITerm` node exists in Neo4j."""
     return await is_ontology_imported(
-        client, term_label=CHEBI_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
+        client,
+        term_label=CHEBI_TERM_LABEL,
+        ontology_name=_ONTOLOGY_NAME,
     )
 
 
-async def import_chebi(client,
+async def import_chebi(
+    client,
     *,
     force: bool = False,
     xrefs_mode: str = "none",
@@ -141,18 +145,22 @@ async def import_chebi(client,
 async def delete_imported(client) -> None:
     """DETACH DELETE every :ChEBITerm node + its :CHEBI_IS_A edges."""
     await delete_ontology_terms(
-        client, term_label=CHEBI_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
+        client,
+        term_label=CHEBI_TERM_LABEL,
+        ontology_name=_ONTOLOGY_NAME,
     )
 
 
-async def write_terms(client,
+async def write_terms(
+    client,
     terms: list[OntologyTerm],
     *,
     xrefs_mode: str = "none",
 ) -> None:
     """Write `:OntologyTerm:ChEBITerm` nodes + `:CHEBI_IS_A` edges."""
     await write_ontology_terms(
-        client, terms,
+        client,
+        terms,
         term_label=CHEBI_TERM_LABEL,
         hierarchy_rel=CHEBI_IS_A_REL,
         ontology_name=_ONTOLOGY_NAME,

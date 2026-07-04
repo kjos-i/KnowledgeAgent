@@ -43,22 +43,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _install_smoke_lib import (  # noqa: E402
+from _install_smoke_lib import (
     bail_if_not_confirmed,
     confirm_no_default,
     header,
     print_plan,
     print_result,
 )
+from knowledge_agent.entity_extractors.dispatcher import extract
 
-from knowledge_agent.entity_extractors.dispatcher import extract  # noqa: E402
-from knowledge_agent.entity_extractors.extractor_lifecycle import (  # noqa: E402
+from knowledge_agent.entity_extractors.extractor_lifecycle import (
     install_extractor_execute,
     install_extractor_plan,
     uninstall_extractor_execute,
     uninstall_extractor_plan,
 )
-
 
 EXTRACTOR = "gliner"
 
@@ -69,21 +68,15 @@ async def main() -> None:
     print_plan(f"install_extractor_plan({EXTRACTOR!r})", plan)
 
     if plan.already_installed:
-        print(
-            f"\nAdapter {EXTRACTOR!r} already installed — skipping "
-            "install step."
-        )
+        print(f"\nAdapter {EXTRACTOR!r} already installed — skipping install step.")
     else:
         bail_if_not_confirmed(
-            f"Proceed with pip install of {EXTRACTOR!r} "
-            f"(extra {plan.pip_extras!r})?"
+            f"Proceed with pip install of {EXTRACTOR!r} (extra {plan.pip_extras!r})?"
         )
         result = await install_extractor_execute(plan)
         print_result("install_extractor_execute", result)
         if not result.install_ok:
-            print(
-                "\nInstall failed. Pip output above. Aborting smoke."
-            )
+            print("\nInstall failed. Pip output above. Aborting smoke.")
             sys.exit(1)
 
     header(f"STEP 2: invoke {EXTRACTOR!r} on a sample sentence")
@@ -93,9 +86,7 @@ async def main() -> None:
         "empty.\n"
     )
 
-    sample_text = (
-        "Marie Curie discovered radium at the Sorbonne in 1898."
-    )
+    sample_text = "Marie Curie discovered radium at the Sorbonne in 1898."
     print(f"Input: {sample_text!r}")
     mentions = extract(
         text=sample_text,

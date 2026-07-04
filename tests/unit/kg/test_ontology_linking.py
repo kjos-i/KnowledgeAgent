@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch
 
 import pytest
 
@@ -52,7 +52,7 @@ class RecordingSession:
             return self.canned_results[idx]
         return _RecordingResult()
 
-    async def __aenter__(self) -> "RecordingSession":
+    async def __aenter__(self) -> RecordingSession:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -63,9 +63,7 @@ class RecordingSession:
 class RecordingDriver:
     sessions: list[RecordingSession] = field(default_factory=list)
     raise_on_run: Exception | None = None
-    canned_results_per_session: list[list[_RecordingResult]] = field(
-        default_factory=list
-    )
+    canned_results_per_session: list[list[_RecordingResult]] = field(default_factory=list)
 
     def session(self) -> RecordingSession:
         idx = len(self.sessions)
@@ -74,9 +72,7 @@ class RecordingDriver:
             if idx < len(self.canned_results_per_session)
             else []
         )
-        sess = RecordingSession(
-            raise_on_run=self.raise_on_run, canned_results=canned
-        )
+        sess = RecordingSession(raise_on_run=self.raise_on_run, canned_results=canned)
         self.sessions.append(sess)
         return sess
 
@@ -107,9 +103,24 @@ def _client_with_driver(driver: RecordingDriver) -> Neo4jClient:
 def test_registry_has_known_ontologies():
     """All shipped pronto OBO + MeSH ontologies are in the registry."""
     expected = {
-        "mesh", "go", "hpo", "uberon", "mondo", "chebi",
-        "eco", "so", "pr", "cl", "po", "foodon", "envo", "ncbitaxon",
-        "obi", "efo", "dron", "fibo",
+        "mesh",
+        "go",
+        "hpo",
+        "uberon",
+        "mondo",
+        "chebi",
+        "eco",
+        "so",
+        "pr",
+        "cl",
+        "po",
+        "foodon",
+        "envo",
+        "ncbitaxon",
+        "obi",
+        "efo",
+        "dron",
+        "fibo",
     }
     assert set(ontology_linking.ONTOLOGY_REGISTRY) == expected
     for name in expected:
@@ -162,9 +173,7 @@ async def test_count_ontology_terms_unknown_ontology_raises():
 
 
 async def test_count_ontology_terms_runs_count_cypher_against_term_label():
-    driver = RecordingDriver(
-        canned_results_per_session=[[_RecordingResult(rows=[{"n": 30142}])]]
-    )
+    driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"n": 30142}])]])
     client = _client_with_driver(driver)
     assert await ontology_linking.count_ontology_terms(client, "mesh") == 30142
     query, _ = driver.sessions[0].calls[0]
@@ -192,9 +201,7 @@ async def test_count_canonical_links_unknown_ontology_raises():
 
 
 async def test_count_canonical_links_runs_count_cypher_against_canonical_to():
-    driver = RecordingDriver(
-        canned_results_per_session=[[_RecordingResult(rows=[{"n": 18}])]]
-    )
+    driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"n": 18}])]])
     client = _client_with_driver(driver)
     assert await ontology_linking.count_canonical_links(client, "mesh") == 18
     query, _ = driver.sessions[0].calls[0]
@@ -216,17 +223,13 @@ async def test_count_canonical_links_propagates_cypher_exception():
 
 def test_match_exact_hit_returns_term_id_with_none_confidence():
     index = {"diabetes mellitus": ["MESH:D003920"]}
-    matches = ontology_linking._match_entity_key(
-        "diabetes mellitus", index, "exact"
-    )
+    matches = ontology_linking._match_entity_key("diabetes mellitus", index, "exact")
     assert matches == [("MESH:D003920", None)]
 
 
 def test_match_exact_miss_returns_empty_in_exact_mode():
     index = {"diabetes mellitus": ["MESH:D003920"]}
-    matches = ontology_linking._match_entity_key(
-        "diabetes mellituses", index, "exact"
-    )
+    matches = ontology_linking._match_entity_key("diabetes mellituses", index, "exact")
     assert matches == []
 
 
@@ -254,9 +257,7 @@ def test_match_fuzzy_tries_singular_strip_when_plural():
 def test_match_fuzzy_tries_plural_add_when_singular():
     """'cardiovascular disease' -> matches 'cardiovascular diseases' via +s."""
     index = {"cardiovascular diseases": ["MESH:D002318"]}
-    matches = ontology_linking._match_entity_key(
-        "cardiovascular disease", index, "fuzzy"
-    )
+    matches = ontology_linking._match_entity_key("cardiovascular disease", index, "fuzzy")
     assert matches == [("MESH:D002318", 0.9)]
 
 
@@ -264,9 +265,7 @@ def test_match_fuzzy_tries_hyphen_space_swap():
     """'non-alcoholic fatty liver' -> matches 'non alcoholic fatty liver'
     via hyphen->space."""
     index = {"non alcoholic fatty liver": ["MESH:D065626"]}
-    matches = ontology_linking._match_entity_key(
-        "non-alcoholic fatty liver", index, "fuzzy"
-    )
+    matches = ontology_linking._match_entity_key("non-alcoholic fatty liver", index, "fuzzy")
     assert matches == [("MESH:D065626", 0.85)]
 
 
@@ -326,9 +325,7 @@ async def test_build_term_index_maps_labels_and_synonyms_to_ids():
             "synonyms": ["niddm", "type 2 diabetes"],
         },
     ]
-    driver = RecordingDriver(
-        canned_results_per_session=[[_RecordingResult(rows=rows)]]
-    )
+    driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=rows)]])
     client = _client_with_driver(driver)
     index = await ontology_linking._build_term_index(client, "MeSHTerm")
 
@@ -352,9 +349,7 @@ async def test_build_term_index_handles_shared_synonyms_with_list():
             "synonyms": ["stress"],
         },
     ]
-    driver = RecordingDriver(
-        canned_results_per_session=[[_RecordingResult(rows=rows)]]
-    )
+    driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=rows)]])
     client = _client_with_driver(driver)
     index = await ontology_linking._build_term_index(client, "MeSHTerm")
     assert sorted(index["stress"]) == ["X:1", "X:2"]
@@ -379,9 +374,7 @@ async def test_fetch_entities_with_doc_id_uses_chunk_match():
         ]
     )
     client = _client_with_driver(driver)
-    rows = await ontology_linking._fetch_entities_to_link(
-        client, "MeSHTerm", "doc-abc"
-    )
+    rows = await ontology_linking._fetch_entities_to_link(client, "MeSHTerm", "doc-abc")
     assert rows == [{"key": "brca1", "entity_type": "GENE"}]
     cypher, params = driver.sessions[0].calls[0]
     assert "MENTIONS" in cypher
@@ -393,9 +386,7 @@ async def test_fetch_entities_global_uses_unlinked_filter():
     """Global fetch returns only entities NOT yet linked to the given
     ontology - check Cypher uses the WHERE NOT EXISTS pattern with
     the right term label."""
-    driver = RecordingDriver(
-        canned_results_per_session=[[_RecordingResult(rows=[])]]
-    )
+    driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[])]])
     client = _client_with_driver(driver)
     await ontology_linking._fetch_entities_to_link(client, "MeSHTerm", None)
     cypher, params = driver.sessions[0].calls[0]
@@ -453,8 +444,11 @@ async def test_write_canonical_links_propagates_cypher_exception():
             client,
             [
                 {
-                    "entity_key": "k", "entity_type": "T",
-                    "term_id": "X:1", "strategy": "exact", "confidence": None,
+                    "entity_key": "k",
+                    "entity_type": "T",
+                    "term_id": "X:1",
+                    "strategy": "exact",
+                    "confidence": None,
                 }
             ],
             "MeSHTerm",
@@ -513,9 +507,7 @@ async def test_link_entities_returns_zero_when_no_entities_to_link():
         ]
     )
     client = _client_with_driver(driver)
-    n = await ontology_linking.link_entities(
-        client, "mesh", "exact", doc_id="doc-1"
-    )
+    n = await ontology_linking.link_entities(client, "mesh", "exact", doc_id="doc-1")
     assert n == 0
 
 
@@ -561,9 +553,7 @@ async def test_link_entities_happy_path_writes_canonical_to_edges():
         ]
     )
     client = _client_with_driver(driver)
-    n = await ontology_linking.link_entities(
-        client, "mesh", "exact", doc_id="doc-1"
-    )
+    n = await ontology_linking.link_entities(client, "mesh", "exact", doc_id="doc-1")
     # Two entities matched (the third didn't); two edges written.
     assert n == 2
     # Verify the write call landed and had the right rows.

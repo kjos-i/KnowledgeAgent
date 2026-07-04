@@ -10,6 +10,7 @@ Picked so the most-touched-first-launch tab (Keys) sits leftmost and
 the App+Diagnostics tab is last (less-frequent reference). Order is
 the binding decision; tab labels are provisional and may be tweaked.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -53,11 +54,15 @@ class SettingsView:
             controls=[
                 ft.Container(content=self.keys_tab.build(), padding=8, expand=True),
                 ft.Container(
-                    content=self.retrieval_tab.build(), padding=8, expand=True,
+                    content=self.retrieval_tab.build(),
+                    padding=8,
+                    expand=True,
                 ),
                 ft.Container(content=self.llm_tab.build(), padding=8, expand=True),
                 ft.Container(
-                    content=self.embedding_tab.build(), padding=8, expand=True,
+                    content=self.embedding_tab.build(),
+                    padding=8,
+                    expand=True,
                 ),
                 ft.Container(content=self.app_tab.build(), padding=8, expand=True),
             ],
@@ -67,7 +72,9 @@ class SettingsView:
             length=len(SUB_TAB_LABELS),
             selected_index=0,
             content=ft.Column(
-                controls=[sub_bar, sub_bodies], expand=True, spacing=0,
+                controls=[sub_bar, sub_bodies],
+                expand=True,
+                spacing=0,
             ),
             expand=True,
         )

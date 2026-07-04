@@ -87,10 +87,7 @@ TEST_DOCS = Path(__file__).resolve().parent.parent / "test_documents"
 
 # Question default. Picked so the lancedb_only default makes sense without
 # any flags; pass `--question` for modes that need a different shape.
-DEFAULT_QUESTION = (
-    "What role does nutrition play in chronic disease, "
-    "according to the literature?"
-)
+DEFAULT_QUESTION = "What role does nutrition play in chronic disease, according to the literature?"
 
 VALID_MODES: tuple[str, ...] = (
     "lancedb_only",
@@ -273,10 +270,7 @@ async def main() -> None:
         print(f"Chunk sources ({len(answer.chunk_sources)}):")
         for i, src in enumerate(answer.chunk_sources, start=1):
             quote = f" - {src.quote!r}" if src.quote else ""
-            print(
-                f"  [{i}] chunk_id={src.chunk_id} "
-                f"doc_id={src.doc_id[:12]}...{quote}"
-            )
+            print(f"  [{i}] chunk_id={src.chunk_id} doc_id={src.doc_id[:12]}...{quote}")
         print(f"KG sources ({len(answer.kg_sources)}):")
         for i, src in enumerate(answer.kg_sources):
             quote = f" - {src.quote!r}" if src.quote else ""

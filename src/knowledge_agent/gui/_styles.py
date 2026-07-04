@@ -7,8 +7,8 @@ Mirrors the ResearchArticlesAgent style module so the sibling apps
 visually match. Bumping a value here moves both apps' look together if
 we ever re-skin.
 """
-import flet as ft
 
+import flet as ft
 
 PANEL_BG = ft.Colors.BLACK
 """Panel background. Matches the dark Material 3 surface tone the rest

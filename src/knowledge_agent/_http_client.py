@@ -55,16 +55,20 @@ is the platform-standard pattern that every other httpx-based app
 (pip, huggingface_hub, requests) already follows. Documenting one
 override mechanism in two places risks drift.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from knowledge_agent.config import get_settings
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +127,7 @@ def _is_retryable_status(status_code: int) -> bool:
 
 def _backoff_seconds(attempt: int) -> float:
     """Exponential 1s → 2s → 4s → 8s..."""
-    return float(2 ** attempt)
+    return float(2**attempt)
 
 
 async def request(
@@ -170,7 +174,11 @@ async def request(
                 logger.info(
                     "http get failed (network/timeout) attempt %d/%d for %s: "
                     "%s — retrying in %.1fs",
-                    attempt + 1, retries + 1, url, exc, wait,
+                    attempt + 1,
+                    retries + 1,
+                    url,
+                    exc,
+                    wait,
                 )
                 await asyncio.sleep(wait)
                 continue
@@ -179,7 +187,11 @@ async def request(
             wait = _backoff_seconds(attempt)
             logger.info(
                 "http get returned %d attempt %d/%d for %s — retrying in %.1fs",
-                response.status_code, attempt + 1, retries + 1, url, wait,
+                response.status_code,
+                attempt + 1,
+                retries + 1,
+                url,
+                wait,
             )
             await asyncio.sleep(wait)
             continue

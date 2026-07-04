@@ -3,6 +3,7 @@
 Verifies the mode-switcher state machine + that each mode dispatches
 to the right view builder.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -26,7 +27,10 @@ def test_build_starts_on_latest_mode(fake_app: MagicMock):
     # All four mode buttons are registered (Latest / File via Open Result /
     # Settings / Info).
     assert set(panel.mode_buttons) == {
-        MODE_LATEST, MODE_FILE, MODE_SETTINGS, MODE_INFO,
+        MODE_LATEST,
+        MODE_FILE,
+        MODE_SETTINGS,
+        MODE_INFO,
     }
 
 

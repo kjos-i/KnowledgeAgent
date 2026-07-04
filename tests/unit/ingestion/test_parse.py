@@ -91,9 +91,7 @@ def test_is_image_path_rejects_non_images():
 
 
 def test_extract_section_returns_last_heading():
-    chunk = SimpleNamespace(
-        meta=SimpleNamespace(headings=["H1", "H2", "H3"])
-    )
+    chunk = SimpleNamespace(meta=SimpleNamespace(headings=["H1", "H2", "H3"]))
     assert _extract_section(chunk) == "H3"
 
 
@@ -112,11 +110,7 @@ def test_extract_section_returns_none_when_meta_missing():
 
 def test_extract_page_pulls_from_first_doc_item_prov():
     chunk = SimpleNamespace(
-        meta=SimpleNamespace(
-            doc_items=[
-                SimpleNamespace(prov=[SimpleNamespace(page_no=7)])
-            ]
-        )
+        meta=SimpleNamespace(doc_items=[SimpleNamespace(prov=[SimpleNamespace(page_no=7)])])
     )
     assert _extract_page(chunk) == 7
 
@@ -127,9 +121,7 @@ def test_extract_page_returns_none_when_no_doc_items():
 
 
 def test_extract_page_returns_none_when_prov_empty():
-    chunk = SimpleNamespace(
-        meta=SimpleNamespace(doc_items=[SimpleNamespace(prov=[])])
-    )
+    chunk = SimpleNamespace(meta=SimpleNamespace(doc_items=[SimpleNamespace(prov=[])]))
     assert _extract_page(chunk) is None
 
 

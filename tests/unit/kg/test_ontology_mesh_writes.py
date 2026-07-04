@@ -18,9 +18,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from unittest.mock import patch
 
 import pytest
-from unittest.mock import patch, AsyncMock
 
 from knowledge_agent.config import Settings
 from knowledge_agent.kg import ontology_mesh_writes
@@ -56,7 +56,7 @@ class RecordingSession:
             return self.canned_results[idx]
         return _RecordingResult()
 
-    async def __aenter__(self) -> "RecordingSession":
+    async def __aenter__(self) -> RecordingSession:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -67,9 +67,7 @@ class RecordingSession:
 class RecordingDriver:
     sessions: list[RecordingSession] = field(default_factory=list)
     raise_on_run: Exception | None = None
-    canned_results_per_session: list[list[_RecordingResult]] = field(
-        default_factory=list
-    )
+    canned_results_per_session: list[list[_RecordingResult]] = field(default_factory=list)
     closed: bool = False
 
     def session(self) -> RecordingSession:
@@ -79,9 +77,7 @@ class RecordingDriver:
             if idx < len(self.canned_results_per_session)
             else []
         )
-        sess = RecordingSession(
-            raise_on_run=self.raise_on_run, canned_results=canned
-        )
+        sess = RecordingSession(raise_on_run=self.raise_on_run, canned_results=canned)
         self.sessions.append(sess)
         return sess
 
@@ -124,9 +120,7 @@ def test_domain_tags_declared():
 async def test_is_imported_true_when_query_returns_present():
     """is_imported returns True when the COUNT query says nodes exist."""
     driver = RecordingDriver(
-        canned_results_per_session=[
-            [_RecordingResult(rows=[{"present": True}])]
-        ]
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
     )
     client = _client_with_driver(driver)
     assert await ontology_mesh_writes.is_imported(client) is True
@@ -134,9 +128,7 @@ async def test_is_imported_true_when_query_returns_present():
 
 async def test_is_imported_false_when_query_returns_no_nodes():
     driver = RecordingDriver(
-        canned_results_per_session=[
-            [_RecordingResult(rows=[{"present": False}])]
-        ]
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]]
     )
     client = _client_with_driver(driver)
     assert await ontology_mesh_writes.is_imported(client) is False
@@ -248,18 +240,14 @@ async def test_write_terms_edge_query_uses_mesh_broader_rel_and_id_match():
     assert ":MESH_BROADER" in cypher
     assert "row.child" in cypher
     assert "row.parent" in cypher
-    assert params["rows"] == [
-        {"child": "MESH:D003924", "parent": "MESH:D003920"}
-    ]
+    assert params["rows"] == [{"child": "MESH:D003924", "parent": "MESH:D003920"}]
 
 
 async def test_write_terms_propagates_driver_exception():
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(driver)
     with pytest.raises(RuntimeError, match="boom"):
-        await ontology_mesh_writes.write_terms(
-            client, [_term("MESH:D003920", "Diabetes Mellitus")]
-        )
+        await ontology_mesh_writes.write_terms(client, [_term("MESH:D003920", "Diabetes Mellitus")])
 
 
 # ---- import_mesh ----
@@ -275,9 +263,7 @@ async def test_import_mesh_short_circuits_when_already_imported():
         ]
     )
     client = _client_with_driver(driver)
-    with patch(
-        "knowledge_agent.kg.ontology_mesh_writes.ensure_cached"
-    ) as mock_cache:
+    with patch("knowledge_agent.kg.ontology_mesh_writes.ensure_cached") as mock_cache:
         result = await ontology_mesh_writes.import_mesh(client, force=False)
 
     assert result is False  # no-op: typed-errors contract
@@ -332,25 +318,25 @@ async def test_import_mesh_aborts_on_zero_terms():
             "knowledge_agent.kg.ontology_mesh_writes._read_and_extract",
             return_value=[],
         ),
+        pytest.raises(RuntimeError, match="extracted 0 terms"),
     ):
-        with pytest.raises(RuntimeError, match="extracted 0 terms"):
-            await ontology_mesh_writes.import_mesh(client, force=False)
+        await ontology_mesh_writes.import_mesh(client, force=False)
 
 
 async def test_import_mesh_propagates_download_exception():
     """Network failure -> log + return False, don't raise."""
     driver = RecordingDriver(
-        canned_results_per_session=[
-            [_RecordingResult(rows=[{"present": False}])]
-        ]
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]]
     )
     client = _client_with_driver(driver)
-    with patch(
-        "knowledge_agent.kg.ontology_mesh_writes.ensure_cached",
-        side_effect=RuntimeError("network down"),
+    with (
+        patch(
+            "knowledge_agent.kg.ontology_mesh_writes.ensure_cached",
+            side_effect=RuntimeError("network down"),
+        ),
+        pytest.raises(RuntimeError, match="network down"),
     ):
-        with pytest.raises(RuntimeError, match="network down"):
-            await ontology_mesh_writes.import_mesh(client, force=False)
+        await ontology_mesh_writes.import_mesh(client, force=False)
 
 
 # ---- delete_imported ----
@@ -379,12 +365,12 @@ async def test_delete_imported_propagates_driver_exception():
 
 def _build_sample_mesh_graph():
     """Build a tiny meshv-shaped RDF graph:
-      D003920 "Diabetes Mellitus" - root descriptor
-                concept C100 "Diabetes Mellitus" (= primary, same as label)
-                concept C101 "Diabetes" (alt name, becomes synonym)
-      D003924 "Diabetes Mellitus, Type 2" - broader = D003920
-                concept C200 "Type 2 Diabetes Mellitus"
-                concept C201 "NIDDM"
+    D003920 "Diabetes Mellitus" - root descriptor
+              concept C100 "Diabetes Mellitus" (= primary, same as label)
+              concept C101 "Diabetes" (alt name, becomes synonym)
+    D003924 "Diabetes Mellitus, Type 2" - broader = D003920
+              concept C200 "Type 2 Diabetes Mellitus"
+              concept C201 "NIDDM"
     """
     import rdflib
     from rdflib import URIRef
@@ -408,14 +394,16 @@ def _build_sample_mesh_graph():
             graph.add((c_uri, RDFS.label, rdflib.Literal(c_label, lang="en")))
 
     add_descriptor(
-        "D003920", "Diabetes Mellitus",
+        "D003920",
+        "Diabetes Mellitus",
         concept_pairs=[
             ("C100", "Diabetes Mellitus"),  # same as descriptor label
-            ("C101", "Diabetes"),            # alternative name
+            ("C101", "Diabetes"),  # alternative name
         ],
     )
     add_descriptor(
-        "D003924", "Diabetes Mellitus, Type 2",
+        "D003924",
+        "Diabetes Mellitus, Type 2",
         concept_pairs=[
             ("C200", "Type 2 Diabetes Mellitus"),
             ("C201", "NIDDM"),
@@ -467,7 +455,6 @@ def test_extract_descriptors_picks_up_broader_parents():
 def test_extract_descriptors_skips_unlabelled_descriptors():
     """A descriptor without an rdfs:label is skipped - can't write a
     term without a label."""
-    import rdflib
     from rdflib import URIRef
     from rdflib.namespace import RDF
 
@@ -487,9 +474,7 @@ def test_extract_descriptors_skips_unlabelled_descriptors():
 
 async def test_client_is_mesh_imported_delegates_to_module():
     driver = RecordingDriver(
-        canned_results_per_session=[
-            [_RecordingResult(rows=[{"present": True}])]
-        ]
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
     )
     client = _client_with_driver(driver)
     assert await client.is_mesh_imported() is True
@@ -509,14 +494,10 @@ async def test_client_import_mesh_delegates_to_module():
     """Smoke check the delegate path: client.import_mesh runs the
     short-circuit branch when MeSH is already imported."""
     driver = RecordingDriver(
-        canned_results_per_session=[
-            [_RecordingResult(rows=[{"present": True}])]
-        ]
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
     )
     client = _client_with_driver(driver)
-    with patch(
-        "knowledge_agent.kg.ontology_mesh_writes.ensure_cached"
-    ) as mock_cache:
+    with patch("knowledge_agent.kg.ontology_mesh_writes.ensure_cached") as mock_cache:
         assert await client.import_mesh(force=False) is False
     mock_cache.assert_not_called()
 
@@ -526,30 +507,30 @@ async def test_client_import_mesh_delegates_to_module():
 
 _SAMPLE_NTRIPLES = (
     # Two descriptors + one concept for D003920 + hierarchy edge D003924 -> D003920.
-    b'<http://id.nlm.nih.gov/mesh/D003920> '
-    b'<http://www.w3.org/1999/02/22-rdf-syntax-ns#type> '
-    b'<http://id.nlm.nih.gov/mesh/vocab#TopicalDescriptor> .\n'
-    b'<http://id.nlm.nih.gov/mesh/D003920> '
-    b'<http://www.w3.org/2000/01/rdf-schema#label> '
+    b"<http://id.nlm.nih.gov/mesh/D003920> "
+    b"<http://www.w3.org/1999/02/22-rdf-syntax-ns#type> "
+    b"<http://id.nlm.nih.gov/mesh/vocab#TopicalDescriptor> .\n"
+    b"<http://id.nlm.nih.gov/mesh/D003920> "
+    b"<http://www.w3.org/2000/01/rdf-schema#label> "
     b'"Diabetes Mellitus"@en .\n'
-    b'<http://id.nlm.nih.gov/mesh/D003920> '
-    b'<http://id.nlm.nih.gov/mesh/vocab#concept> '
-    b'<http://id.nlm.nih.gov/mesh/C100> .\n'
-    b'<http://id.nlm.nih.gov/mesh/C100> '
-    b'<http://www.w3.org/2000/01/rdf-schema#label> '
+    b"<http://id.nlm.nih.gov/mesh/D003920> "
+    b"<http://id.nlm.nih.gov/mesh/vocab#concept> "
+    b"<http://id.nlm.nih.gov/mesh/C100> .\n"
+    b"<http://id.nlm.nih.gov/mesh/C100> "
+    b"<http://www.w3.org/2000/01/rdf-schema#label> "
     b'"Diabetes"@en .\n'
-    b'<http://id.nlm.nih.gov/mesh/D003924> '
-    b'<http://www.w3.org/1999/02/22-rdf-syntax-ns#type> '
-    b'<http://id.nlm.nih.gov/mesh/vocab#TopicalDescriptor> .\n'
-    b'<http://id.nlm.nih.gov/mesh/D003924> '
-    b'<http://www.w3.org/2000/01/rdf-schema#label> '
+    b"<http://id.nlm.nih.gov/mesh/D003924> "
+    b"<http://www.w3.org/1999/02/22-rdf-syntax-ns#type> "
+    b"<http://id.nlm.nih.gov/mesh/vocab#TopicalDescriptor> .\n"
+    b"<http://id.nlm.nih.gov/mesh/D003924> "
+    b"<http://www.w3.org/2000/01/rdf-schema#label> "
     b'"Diabetes Mellitus, Type 2"@en .\n'
-    b'<http://id.nlm.nih.gov/mesh/D003924> '
-    b'<http://id.nlm.nih.gov/mesh/vocab#broaderDescriptor> '
-    b'<http://id.nlm.nih.gov/mesh/D003920> .\n'
+    b"<http://id.nlm.nih.gov/mesh/D003924> "
+    b"<http://id.nlm.nih.gov/mesh/vocab#broaderDescriptor> "
+    b"<http://id.nlm.nih.gov/mesh/D003920> .\n"
     # Noise: a triple with an UNINTERESTING property - sink should drop it.
-    b'<http://id.nlm.nih.gov/mesh/D003920> '
-    b'<http://id.nlm.nih.gov/mesh/vocab#dateCreated> '
+    b"<http://id.nlm.nih.gov/mesh/D003920> "
+    b"<http://id.nlm.nih.gov/mesh/vocab#dateCreated> "
     b'"2025-01-01" .\n'
 )
 
@@ -579,7 +560,11 @@ def test_stream_sink_drops_irrelevant_properties():
     record = sink.records["http://id.nlm.nih.gov/mesh/D003920"]
     # Only the 5 expected keys (xrefs added 2026-06-25 for the L7 xref ship).
     assert set(record.keys()) == {
-        "types", "labels", "broader", "concepts", "xrefs",
+        "types",
+        "labels",
+        "broader",
+        "concepts",
+        "xrefs",
     }
 
 
@@ -641,9 +626,9 @@ def test_build_terms_skips_descriptors_without_label():
     """A subject typed as a Descriptor but with no rdfs:label is
     silently dropped (can't write a term without a label)."""
     no_label = (
-        b'<http://id.nlm.nih.gov/mesh/D999999> '
-        b'<http://www.w3.org/1999/02/22-rdf-syntax-ns#type> '
-        b'<http://id.nlm.nih.gov/mesh/vocab#TopicalDescriptor> .\n'
+        b"<http://id.nlm.nih.gov/mesh/D999999> "
+        b"<http://www.w3.org/1999/02/22-rdf-syntax-ns#type> "
+        b"<http://id.nlm.nih.gov/mesh/vocab#TopicalDescriptor> .\n"
     )
     sink = _stream_parse(no_label)
     terms = ontology_mesh_writes._build_terms_from_sink(sink)

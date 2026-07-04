@@ -22,25 +22,28 @@ Lifecycle delegates to the shared `write_ontology_terms` family helpers in
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from knowledge_agent.kg.ontology_helpers import (
     OntologyTerm,
+    delete_ontology_terms,
     ensure_cached,
     extract_terms_obo,
-    delete_ontology_terms,
     import_ontology_data,
     is_ontology_imported,
-    write_ontology_terms,
     read_obo,
+    write_ontology_terms,
 )
 from knowledge_agent.kg.ontology_provenance import OntologyProvenance
 from knowledge_agent.kg.schema import CL_IS_A_REL, CL_TERM_LABEL
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 logger = logging.getLogger(__name__)
 
 # Re-exported for backward-compatible test patching.
-_ = ensure_cached  # noqa: F841
+_ = ensure_cached
 
 
 # ---------------------------------------------------------------------------
@@ -59,8 +62,6 @@ CL_ID_PREFIX = "CL"
 DOWNLOAD_SIZE_MB = 20
 
 _ONTOLOGY_NAME = "CL"
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +90,7 @@ _CL_PROVENANCE = OntologyProvenance(
     domain_tags=DOMAIN_TAGS,
     covers_labels=_CL_COVERS_LABELS,
     description=(
-                "Cell types across organisms — neurons, lymphocytes, "
+        "Cell types across organisms — neurons, lymphocytes, "
         "epithelial cells, and the rest of the canonical cytology. "
     ),
     heavy_warning=None,
@@ -103,11 +104,14 @@ _CL_PROVENANCE = OntologyProvenance(
 async def is_imported(client) -> bool:
     """True when at least one `:CLTerm` node exists in Neo4j."""
     return await is_ontology_imported(
-        client, term_label=CL_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
+        client,
+        term_label=CL_TERM_LABEL,
+        ontology_name=_ONTOLOGY_NAME,
     )
 
 
-async def import_cl(client,
+async def import_cl(
+    client,
     *,
     force: bool = False,
     xrefs_mode: str = "none",
@@ -129,18 +133,22 @@ async def import_cl(client,
 async def delete_imported(client) -> None:
     """DETACH DELETE every :CLTerm node + its :CL_IS_A edges."""
     await delete_ontology_terms(
-        client, term_label=CL_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
+        client,
+        term_label=CL_TERM_LABEL,
+        ontology_name=_ONTOLOGY_NAME,
     )
 
 
-async def write_terms(client,
+async def write_terms(
+    client,
     terms: list[OntologyTerm],
     *,
     xrefs_mode: str = "none",
 ) -> None:
     """Write `:OntologyTerm:CLTerm` nodes + `:CL_IS_A` edges."""
     await write_ontology_terms(
-        client, terms,
+        client,
+        terms,
         term_label=CL_TERM_LABEL,
         hierarchy_rel=CL_IS_A_REL,
         ontology_name=_ONTOLOGY_NAME,

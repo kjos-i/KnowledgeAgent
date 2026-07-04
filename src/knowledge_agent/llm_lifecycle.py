@@ -410,9 +410,7 @@ LLM_PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
 # ---- subprocess wrapper (mockable) ----
 
 
-async def _run_pip(
-    args: list[str], timeout: float = 600.0
-) -> tuple[bool, str]:
+async def _run_pip(args: list[str], timeout: float = 600.0) -> tuple[bool, str]:
     """Run `python -m pip <args>` async; return (success, combined output).
 
     Same shape as `parser_lifecycle._run_pip` and
@@ -425,7 +423,7 @@ async def _run_pip(
     On timeout the child is killed with `proc.kill()` + reaped via
     `proc.wait()` so no zombie remains.
     """
-    cmd = [sys.executable, "-m", "pip"] + args
+    cmd = [sys.executable, "-m", "pip", *args]
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -434,24 +432,22 @@ async def _run_pip(
         )
         try:
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout,
+                proc.communicate(),
+                timeout=timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             return False, f"pip command timed out after {timeout}s"
-        output = (
-            (stdout.decode("utf-8", errors="replace") if stdout else "")
-            + (stderr.decode("utf-8", errors="replace") if stderr else "")
+        output = (stdout.decode("utf-8", errors="replace") if stdout else "") + (
+            stderr.decode("utf-8", errors="replace") if stderr else ""
         )
         return proc.returncode == 0, output
     except Exception as exc:
         return False, f"pip subprocess failed: {exc!r}"
 
 
-async def _run_ollama(
-    args: list[str], timeout: float = 1800.0
-) -> tuple[bool, str]:
+async def _run_ollama(args: list[str], timeout: float = 1800.0) -> tuple[bool, str]:
     """Run `ollama <args>` async; return (success, combined output).
 
     Used for `ollama pull <model>` — large models take time, so the
@@ -465,7 +461,7 @@ async def _run_ollama(
     `ollama` binary isn't on PATH — translated to the same friendly
     message as before.
     """
-    cmd = ["ollama"] + args
+    cmd = ["ollama", *args]
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -474,22 +470,21 @@ async def _run_ollama(
         )
     except FileNotFoundError:
         return False, (
-            "`ollama` not found on PATH. Install the daemon from "
-            "https://ollama.com/download first."
+            "`ollama` not found on PATH. Install the daemon from https://ollama.com/download first."
         )
     except Exception as exc:
         return False, f"ollama subprocess failed: {exc!r}"
     try:
         stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout,
+            proc.communicate(),
+            timeout=timeout,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         return False, f"ollama command timed out after {timeout}s"
-    output = (
-        (stdout.decode("utf-8", errors="replace") if stdout else "")
-        + (stderr.decode("utf-8", errors="replace") if stderr else "")
+    output = (stdout.decode("utf-8", errors="replace") if stdout else "") + (
+        stderr.decode("utf-8", errors="replace") if stderr else ""
     )
     return proc.returncode == 0, output
 
@@ -502,8 +497,7 @@ def _registry_entry(provider: str) -> dict[str, Any]:
     entry = LLM_PROVIDER_REGISTRY.get(provider)
     if entry is None:
         raise ValueError(
-            f"Unknown LLM provider {provider!r}. "
-            f"Known: {sorted(LLM_PROVIDER_REGISTRY)}."
+            f"Unknown LLM provider {provider!r}. Known: {sorted(LLM_PROVIDER_REGISTRY)}."
         )
     return entry
 
@@ -513,8 +507,7 @@ def _ollama_model_provenance(model_id: str) -> OllamaModelProvenance:
     prov = OLLAMA_MODELS.get(model_id)
     if prov is None:
         raise ValueError(
-            f"Unknown Ollama model {model_id!r}. "
-            f"Curated menu: {sorted(OLLAMA_MODELS)}."
+            f"Unknown Ollama model {model_id!r}. Curated menu: {sorted(OLLAMA_MODELS)}."
         )
     return prov
 
@@ -547,20 +540,14 @@ class InstallLLMProviderPlan:
             return f"{self.display_name} ships by default - nothing to install."
         if self.already_installed:
             base = f"{self.display_name} adapter is already installed."
-            if (
-                self.provenance.requires_daemon
-                and self.daemon_reachable is False
-            ):
+            if self.provenance.requires_daemon and self.daemon_reachable is False:
                 base += (
                     f" Ollama DAEMON is not reachable — install it from "
                     f"{self.provenance.daemon_install_url} and start it."
                 )
             return base
         daemon_clause = ""
-        if (
-            self.provenance.requires_daemon
-            and self.daemon_reachable is False
-        ):
+        if self.provenance.requires_daemon and self.daemon_reachable is False:
             daemon_clause = (
                 f" NOTE: also requires the Ollama daemon — install "
                 f"manually from {self.provenance.daemon_install_url}."
@@ -617,8 +604,10 @@ async def install_llm_provider_execute(
     if plan.bundled or plan.already_installed:
         return InstallLLMProviderResult(
             provider_name=plan.provider_name,
-            did_install=False, install_ok=True,
-            restart_required=False, pip_output="",
+            did_install=False,
+            install_ok=True,
+            restart_required=False,
+            pip_output="",
         )
     target = f"{distribution_name}[{plan.pip_extras}]"
     ok, output = await _run_pip(["install", target])
@@ -652,10 +641,7 @@ class UninstallLLMProviderPlan:
     @property
     def summary(self) -> str:
         if self.bundled:
-            return (
-                f"{self.display_name} is the bundled default — "
-                f"uninstall is not supported."
-            )
+            return f"{self.display_name} is the bundled default — uninstall is not supported."
         if self.is_active:
             return (
                 f"{self.display_name} is your ACTIVE LLM provider. "
@@ -710,12 +696,12 @@ async def uninstall_llm_provider_execute(
     if plan.bundled or not plan.installed or plan.is_active:
         return UninstallLLMProviderResult(
             provider_name=plan.provider_name,
-            did_uninstall=False, uninstall_ok=True,
-            restart_required=False, pip_output="",
+            did_uninstall=False,
+            uninstall_ok=True,
+            restart_required=False,
+            pip_output="",
         )
-    ok, output = await _run_pip(
-        ["uninstall", "-y", *plan.packages_to_remove]
-    )
+    ok, output = await _run_pip(["uninstall", "-y", *plan.packages_to_remove])
     return UninstallLLMProviderResult(
         provider_name=plan.provider_name,
         did_uninstall=True,
@@ -792,7 +778,8 @@ async def pull_ollama_model_execute(
     if not plan.daemon_reachable:
         return PullOllamaModelResult(
             model_id=plan.model_id,
-            did_pull=False, pull_ok=False,
+            did_pull=False,
+            pull_ok=False,
             ollama_output=(
                 "Ollama daemon not reachable. Install from "
                 "https://ollama.com/download and start it first."

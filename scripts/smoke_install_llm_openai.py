@@ -29,7 +29,7 @@ from pathlib import Path
 # helper module imports cleanly when run from project root.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _install_smoke_lib import (  # noqa: E402
+from _install_smoke_lib import (
     bail_if_not_confirmed,
     confirm_no_default,
     header,
@@ -37,15 +37,14 @@ from _install_smoke_lib import (  # noqa: E402
     print_result,
 )
 
-from knowledge_agent import llm_factory  # noqa: E402
-from knowledge_agent.config import get_settings  # noqa: E402
-from knowledge_agent.llm_lifecycle import (  # noqa: E402
+from knowledge_agent import llm_factory
+from knowledge_agent.config import get_settings
+from knowledge_agent.llm_lifecycle import (
     install_llm_provider_execute,
     install_llm_provider_plan,
     uninstall_llm_provider_execute,
     uninstall_llm_provider_plan,
 )
-
 
 PROVIDER = "openai"
 SMOKE_MODEL = "gpt-4o-mini"  # cheapest GPT — keep smoke cost minimal
@@ -53,36 +52,30 @@ SMOKE_MODEL = "gpt-4o-mini"  # cheapest GPT — keep smoke cost minimal
 
 async def main() -> None:
     if not get_settings().openai_api_key:
-        print(
-            "OPENAI_API_KEY is not set in .env. Add it before running "
-            "this smoke."
-        )
+        print("OPENAI_API_KEY is not set in .env. Add it before running this smoke.")
         sys.exit(1)
 
     plan = await install_llm_provider_plan(PROVIDER)
     print_plan(f"install_llm_provider_plan({PROVIDER!r})", plan)
 
     if plan.already_installed:
-        print(
-            "\nAdapter already installed — skipping install step. "
-            "Proceeding to invocation test."
-        )
+        print("\nAdapter already installed — skipping install step. Proceeding to invocation test.")
     else:
         bail_if_not_confirmed("Proceed with pip install?")
         result = await install_llm_provider_execute(plan)
         print_result("install_llm_provider_execute", result)
         if not result.install_ok:
-            print(
-                "\nInstall failed. Pip output is above. Aborting smoke."
-            )
+            print("\nInstall failed. Pip output is above. Aborting smoke.")
             sys.exit(1)
         # langchain_openai needs to be importable in THIS interpreter
         # for the next step; pip-installed in subprocess + the
         # restart_required flag tells the GUI to ask the user to
         # restart. In this smoke we just import lazily below — if pip
         # said success, it should work without restart in 99% of cases.
-        print("\nNOTE: restart required in the GUI; in this smoke we "
-              "proceed directly via lazy import.")
+        print(
+            "\nNOTE: restart required in the GUI; in this smoke we "
+            "proceed directly via lazy import."
+        )
 
     header("INVOKE: send 'say hi' via llm_factory.get_llm")
 

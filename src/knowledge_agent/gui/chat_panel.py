@@ -13,6 +13,7 @@ across slices.
 
 Mirrors `research_articles_agent/gui/chat_panel.py` for visual parity.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -61,7 +62,10 @@ class ChatPanel:
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
         self.progress_ring = ft.ProgressRing(
-            visible=False, width=18, height=18, stroke_width=2,
+            visible=False,
+            width=18,
+            height=18,
+            stroke_width=2,
             color=ft.Colors.GREY_500,
         )
         progress_row = ft.Row(
@@ -75,8 +79,11 @@ class ChatPanel:
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
         output_box = ft.Container(
-            content=chat_area, bgcolor=PANEL_BG, padding=16,
-            expand=True, border_radius=4,
+            content=chat_area,
+            bgcolor=PANEL_BG,
+            padding=16,
+            expand=True,
+            border_radius=4,
         )
         # Passive divider between output and input. NOT draggable —
         # Flet 0.85's TextField has a rigid line-based height model
@@ -85,14 +92,12 @@ class ChatPanel:
         # vertical splitter would move the divider without resizing
         # the TextField. Kept as a visual separator only.
         splitter = ft.Container(
-            content=ft.Divider(height=4, color=FRAME_BORDER_COLOR), height=4,
+            content=ft.Divider(height=4, color=FRAME_BORDER_COLOR),
+            height=4,
         )
 
         self.input_field = ft.TextField(
-            hint_text=(
-                "Ask a question about your corpus ... "
-                "(Shift+Enter for newline)"
-            ),
+            hint_text=("Ask a question about your corpus ... (Shift+Enter for newline)"),
             multiline=True,
             min_lines=3,
             max_lines=10,
@@ -108,21 +113,26 @@ class ChatPanel:
         )
 
         self.send_button = ft.Button(
-            content=centered_label("Send"), expand=True,
+            content=centered_label("Send"),
+            expand=True,
             on_click=self.app.on_send,
         )
         self.stop_button = ft.Button(
-            content=centered_label("Stop"), expand=True,
-            on_click=self.app.on_stop, disabled=True,
+            content=centered_label("Stop"),
+            expand=True,
+            on_click=self.app.on_stop,
+            disabled=True,
         )
         button_row = ft.Row(
             controls=[
                 ft.Button(
-                    content=centered_label("Save"), expand=True,
+                    content=centered_label("Save"),
+                    expand=True,
                     on_click=self.app.on_save_chat,
                 ),
                 ft.Button(
-                    content=centered_label("Clear"), expand=True,
+                    content=centered_label("Clear"),
+                    expand=True,
                     on_click=self.app.on_clear,
                 ),
                 self.stop_button,
@@ -215,7 +225,9 @@ class ChatPanel:
         return body_text
 
     def update_assistant_stream(
-        self, body_text: ft.Text, text: str,
+        self,
+        body_text: ft.Text,
+        text: str,
     ) -> None:
         """Overwrite a streaming bubble's text with the latest cumulative value."""
         body_text.value = text
@@ -231,7 +243,9 @@ class ChatPanel:
     @staticmethod
     def _placeholder_text() -> ft.Text:
         return ft.Text(
-            CHAT_EMPTY_PLACEHOLDER, color=ft.Colors.GREY_500, italic=True,
+            CHAT_EMPTY_PLACEHOLDER,
+            color=ft.Colors.GREY_500,
+            italic=True,
         )
 
     def _append(self, control: ft.Control) -> None:
@@ -283,8 +297,11 @@ class ChatPanel:
     def _render_system_message(text: str) -> ft.Control:
         return ft.Container(
             content=ft.Text(
-                text, size=11, italic=True,
-                color=ft.Colors.GREY_500, selectable=True,
+                text,
+                size=11,
+                italic=True,
+                color=ft.Colors.GREY_500,
+                selectable=True,
             ),
             padding=ft.Padding.symmetric(vertical=2),
         )

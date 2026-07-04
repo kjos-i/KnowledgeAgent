@@ -2,13 +2,17 @@
 
 Static construction + state-transition tests. No real Flet rendering.
 """
+
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from typing import TYPE_CHECKING
 
 import flet as ft
 
 from knowledge_agent.gui.chat_panel import ChatPanel
+
+if TYPE_CHECKING:
+    from unittest.mock import MagicMock
 
 
 def test_build_returns_container_with_chat_output_and_inputs(fake_app: MagicMock):

@@ -203,7 +203,11 @@ _GLINER_BIOMED_PROVENANCE = ModelProvenance(
     # GENE, PROTEIN, SPECIES, CELL_LINE, CELL_TYPE, ANATOMY) span
     # the standard biomedical NER vocabulary.
     domain_tags=(
-        "medicine", "biology", "chemistry", "proteins", "cell biology",
+        "medicine",
+        "biology",
+        "chemistry",
+        "proteins",
+        "cell biology",
     ),
 )
 
@@ -252,7 +256,11 @@ from knowledge_agent.entity_extractors.gliner_biomed import (  # noqa: E402
 # `_FLAIR_TO_OUR_LABELS` mapping defines them, but we hard-code here
 # to avoid loading the adapter (which would try to import Flair).
 _HUNFLAIR2_EMITTED_LABELS: tuple[str, ...] = (
-    "DISEASE", "CHEMICAL", "GENE", "SPECIES", "CELL_LINE",
+    "DISEASE",
+    "CHEMICAL",
+    "GENE",
+    "SPECIES",
+    "CELL_LINE",
 )
 
 
@@ -327,9 +335,7 @@ EXTRACTOR_REGISTRY: dict[str, dict[str, Any]] = {
 # ---- subprocess wrapper (mockable) ----
 
 
-async def _run_pip(
-    args: list[str], timeout: float = 600.0
-) -> tuple[bool, str]:
+async def _run_pip(args: list[str], timeout: float = 600.0) -> tuple[bool, str]:
     """Run `python -m pip <args>` async; return (success, combined output).
 
     `sys.executable` ensures the pip call targets the SAME interpreter
@@ -342,7 +348,7 @@ async def _run_pip(
     On timeout the child is killed with `proc.kill()` + reaped via
     `proc.wait()` so no zombie remains.
     """
-    cmd = [sys.executable, "-m", "pip"] + args
+    cmd = [sys.executable, "-m", "pip", *args]
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -351,15 +357,15 @@ async def _run_pip(
         )
         try:
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout,
+                proc.communicate(),
+                timeout=timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             return False, f"pip command timed out after {timeout}s"
-        output = (
-            (stdout.decode("utf-8", errors="replace") if stdout else "")
-            + (stderr.decode("utf-8", errors="replace") if stderr else "")
+        output = (stdout.decode("utf-8", errors="replace") if stdout else "") + (
+            stderr.decode("utf-8", errors="replace") if stderr else ""
         )
         return proc.returncode == 0, output
     except Exception as exc:
@@ -405,9 +411,7 @@ class InstallExtractorPlan:
     provenance: ModelProvenance | None = None
     domain_tags: tuple[str, ...] = ()
     emitted_labels: tuple[str, ...] | None = None
-    canonicalization_candidates: (
-        tuple[tuple[str, tuple[str, ...]], ...] | None
-    ) = None
+    canonicalization_candidates: tuple[tuple[str, tuple[str, ...]], ...] | None = None
     """Pre-computed cross-link surface for the coverage clause.
 
     `tuple[(label, ontology_names), ...]` — one entry per emitted
@@ -430,10 +434,7 @@ class InstallExtractorPlan:
                 f"install.{self._coverage_clause()}"
             )
         if self.already_installed:
-            return (
-                f"{self.display_name} is already installed."
-                f"{self._coverage_clause()}"
-            )
+            return f"{self.display_name} is already installed.{self._coverage_clause()}"
         if self.provenance is None:
             return (
                 f"Install {self.display_name}? Will run "
@@ -469,16 +470,12 @@ class InstallExtractorPlan:
         the plan directly without registry-sourced fields)."""
         parts: list[str] = []
         if self.domain_tags:
-            parts.append(
-                f"Domain tags: {', '.join(self.domain_tags)}."
-            )
+            parts.append(f"Domain tags: {', '.join(self.domain_tags)}.")
         else:
             # Empty tuple is meaningful for LLM ("domain-agnostic"); the
             # absence of the field altogether is what we want silent.
             if self.emitted_labels is None and self.bundled:
-                parts.append(
-                    "Domain tags: (domain-agnostic — open vocabulary)."
-                )
+                parts.append("Domain tags: (domain-agnostic — open vocabulary).")
         if self.emitted_labels is None:
             parts.append(
                 "Emitted labels: open vocabulary "
@@ -486,9 +483,7 @@ class InstallExtractorPlan:
                 "`entity_types` in corpus.toml)."
             )
         elif self.emitted_labels:
-            parts.append(
-                f"Emitted labels: {', '.join(self.emitted_labels)}."
-            )
+            parts.append(f"Emitted labels: {', '.join(self.emitted_labels)}.")
 
         # Cross-link surface: per-label ontology candidates.
         if self.canonicalization_candidates is None:
@@ -505,18 +500,11 @@ class InstallExtractorPlan:
             target_parts: list[str] = []
             for label, ont_names in self.canonicalization_candidates:
                 if ont_names:
-                    target_parts.append(
-                        f"{label} → {', '.join(ont_names)}"
-                    )
+                    target_parts.append(f"{label} → {', '.join(ont_names)}")
                 else:
-                    target_parts.append(
-                        f"{label} → (no shipped ontology covers this)"
-                    )
+                    target_parts.append(f"{label} → (no shipped ontology covers this)")
             if target_parts:
-                parts.append(
-                    "Canonicalisation targets: "
-                    + "; ".join(target_parts) + "."
-                )
+                parts.append("Canonicalisation targets: " + "; ".join(target_parts) + ".")
 
         if not parts:
             return ""
@@ -548,8 +536,7 @@ def _registry_entry(extractor_name: str) -> dict[str, Any]:
     entry = EXTRACTOR_REGISTRY.get(extractor_name)
     if entry is None:
         raise ValueError(
-            f"Unknown extractor {extractor_name!r}. "
-            f"Known extractors: {sorted(EXTRACTOR_REGISTRY)}."
+            f"Unknown extractor {extractor_name!r}. Known extractors: {sorted(EXTRACTOR_REGISTRY)}."
         )
     return entry
 
@@ -572,14 +559,13 @@ def install_extractor_plan(extractor_name: str) -> InstallExtractorPlan:
     from knowledge_agent.kg.ontology_lifecycle import (
         get_canonicalization_candidates,
     )
+
     candidates_dict = get_canonicalization_candidates(extractor_name)
     # Open-vocabulary marker: emitted_labels=None -> candidates={}.
     # Preserve the None sentinel so the summary surfaces "any ontology
     # lexically" instead of "no candidates" (different semantics).
     emitted_labels = entry.get("emitted_labels")
-    canonicalization_candidates: (
-        tuple[tuple[str, tuple[str, ...]], ...] | None
-    )
+    canonicalization_candidates: tuple[tuple[str, tuple[str, ...]], ...] | None
     if emitted_labels is None:
         canonicalization_candidates = None
     else:
@@ -587,8 +573,7 @@ def install_extractor_plan(extractor_name: str) -> InstallExtractorPlan:
         # adapter's natural priority. Each value becomes a tuple for
         # the frozen dataclass.
         canonicalization_candidates = tuple(
-            (label, candidates_dict.get(label, ()))
-            for label in emitted_labels
+            (label, candidates_dict.get(label, ())) for label in emitted_labels
         )
     return InstallExtractorPlan(
         extractor_name=extractor_name,
@@ -618,14 +603,18 @@ async def install_extractor_execute(
     if plan.bundled:
         return InstallExtractorResult(
             extractor_name=plan.extractor_name,
-            did_install=False, install_ok=True,
-            restart_required=False, pip_output="",
+            did_install=False,
+            install_ok=True,
+            restart_required=False,
+            pip_output="",
         )
     if plan.already_installed:
         return InstallExtractorResult(
             extractor_name=plan.extractor_name,
-            did_install=False, install_ok=True,
-            restart_required=False, pip_output="",
+            did_install=False,
+            install_ok=True,
+            restart_required=False,
+            pip_output="",
         )
 
     target = f"{distribution_name}[{plan.pip_extras}]"
@@ -665,10 +654,7 @@ class DeleteExtractorCachePlan:
         if not self.installed:
             return f"{self.display_name} is not installed - nothing to delete."
         if not self.model_packages:
-            return (
-                f"{self.display_name} has no separate model cache - "
-                f"nothing to delete."
-            )
+            return f"{self.display_name} has no separate model cache - nothing to delete."
         listed = ", ".join(self.model_packages)
         return (
             f"Delete cached model files for {self.display_name}? "
@@ -707,12 +693,12 @@ async def delete_extractor_cache_execute(
     if not plan.installed or not plan.model_packages:
         return DeleteExtractorCacheResult(
             extractor_name=plan.extractor_name,
-            did_delete=False, delete_ok=True, pip_output="",
+            did_delete=False,
+            delete_ok=True,
+            pip_output="",
         )
 
-    ok, output = await _run_pip(
-        ["uninstall", "-y", *plan.model_packages]
-    )
+    ok, output = await _run_pip(["uninstall", "-y", *plan.model_packages])
     return DeleteExtractorCacheResult(
         extractor_name=plan.extractor_name,
         did_delete=True,
@@ -744,10 +730,7 @@ class UninstallExtractorPlan:
     @property
     def summary(self) -> str:
         if self.bundled:
-            return (
-                f"{self.display_name} is bundled with the base package - "
-                f"cannot be uninstalled."
-            )
+            return f"{self.display_name} is bundled with the base package - cannot be uninstalled."
         if not self.installed:
             return f"{self.display_name} is not installed."
         return (
@@ -807,20 +790,21 @@ async def uninstall_extractor_execute(
     if plan.bundled:
         return UninstallExtractorResult(
             extractor_name=plan.extractor_name,
-            did_uninstall=False, uninstall_ok=False,
+            did_uninstall=False,
+            uninstall_ok=False,
             restart_required=False,
             pip_output="bundled extractor; uninstall is not allowed",
         )
     if not plan.installed:
         return UninstallExtractorResult(
             extractor_name=plan.extractor_name,
-            did_uninstall=False, uninstall_ok=True,
-            restart_required=False, pip_output="",
+            did_uninstall=False,
+            uninstall_ok=True,
+            restart_required=False,
+            pip_output="",
         )
 
-    ok, output = await _run_pip(
-        ["uninstall", "-y", *plan.packages_to_remove]
-    )
+    ok, output = await _run_pip(["uninstall", "-y", *plan.packages_to_remove])
     return UninstallExtractorResult(
         extractor_name=plan.extractor_name,
         did_uninstall=True,
@@ -853,12 +837,12 @@ class WeightsNotDownloadedError(RuntimeError):
     """
 
     def __init__(
-        self, extractor_name: str, model_name: str, hint: str,
+        self,
+        extractor_name: str,
+        model_name: str,
+        hint: str,
     ) -> None:
-        super().__init__(
-            f"{extractor_name}: model {model_name!r} weights not "
-            f"downloaded. {hint}"
-        )
+        super().__init__(f"{extractor_name}: model {model_name!r} weights not downloaded. {hint}")
         self.extractor_name = extractor_name
         self.model_name = model_name
 
@@ -888,6 +872,7 @@ def _weights_cache_dir(provenance: ModelProvenance):
     org, model = parts
     try:
         from huggingface_hub import constants as _hf_constants
+
         hub_cache = Path(_hf_constants.HF_HUB_CACHE)
     except ImportError:
         # huggingface_hub not installed — no weights could exist locally
@@ -998,9 +983,7 @@ class DownloadExtractorWeightsPlan:
     @property
     def summary(self) -> str:
         if self.provenance is None:
-            return (
-                f"{self.display_name} has no downloadable weights."
-            )
+            return f"{self.display_name} has no downloadable weights."
         if self.already_downloaded:
             mb = self.on_disk_bytes / (1024 * 1024)
             return (
@@ -1047,9 +1030,7 @@ def download_extractor_weights_plan(
         extractor_name=extractor_name,
         display_name=entry["display_name"],
         provenance=provenance,
-        already_downloaded=(
-            provenance is not None and _is_weights_downloaded(provenance)
-        ),
+        already_downloaded=(provenance is not None and _is_weights_downloaded(provenance)),
         on_disk_bytes=on_disk,
     )
 
@@ -1066,14 +1047,18 @@ async def download_extractor_weights_execute(
     if plan.provenance is None:
         return DownloadExtractorWeightsResult(
             extractor_name=plan.extractor_name,
-            did_download=False, download_ok=True,
-            download_error=None, on_disk_bytes=plan.on_disk_bytes,
+            did_download=False,
+            download_ok=True,
+            download_error=None,
+            on_disk_bytes=plan.on_disk_bytes,
         )
     if plan.already_downloaded:
         return DownloadExtractorWeightsResult(
             extractor_name=plan.extractor_name,
-            did_download=False, download_ok=True,
-            download_error=None, on_disk_bytes=plan.on_disk_bytes,
+            did_download=False,
+            download_ok=True,
+            download_error=None,
+            on_disk_bytes=plan.on_disk_bytes,
         )
 
     try:
@@ -1081,7 +1066,8 @@ async def download_extractor_weights_execute(
     except ImportError as exc:
         return DownloadExtractorWeightsResult(
             extractor_name=plan.extractor_name,
-            did_download=False, download_ok=False,
+            did_download=False,
+            download_ok=False,
             download_error=(
                 f"huggingface_hub not installed: {exc!r}. Install the "
                 f"pip extras for this extractor first."
@@ -1100,17 +1086,20 @@ async def download_extractor_weights_execute(
     except Exception as exc:
         logger.warning(
             "download_extractor_weights_execute (%s) failed: %r",
-            plan.extractor_name, exc,
+            plan.extractor_name,
+            exc,
         )
         return DownloadExtractorWeightsResult(
             extractor_name=plan.extractor_name,
-            did_download=True, download_ok=False,
+            did_download=True,
+            download_ok=False,
             download_error=repr(exc),
             on_disk_bytes=_weights_size_bytes(plan.provenance),
         )
     return DownloadExtractorWeightsResult(
         extractor_name=plan.extractor_name,
-        did_download=True, download_ok=True,
+        did_download=True,
+        download_ok=True,
         download_error=None,
         on_disk_bytes=_weights_size_bytes(plan.provenance),
     )
@@ -1165,9 +1154,7 @@ def delete_extractor_weights_plan(
         extractor_name=extractor_name,
         display_name=entry["display_name"],
         provenance=provenance,
-        is_downloaded=(
-            provenance is not None and _is_weights_downloaded(provenance)
-        ),
+        is_downloaded=(provenance is not None and _is_weights_downloaded(provenance)),
         on_disk_bytes=on_disk,
     )
 
@@ -1184,15 +1171,19 @@ async def delete_extractor_weights_execute(
     if plan.provenance is None:
         return DeleteExtractorWeightsResult(
             extractor_name=plan.extractor_name,
-            did_delete=False, delete_ok=True,
-            delete_error=None, freed_bytes=0,
+            did_delete=False,
+            delete_ok=True,
+            delete_error=None,
+            freed_bytes=0,
         )
     cache_dir = _weights_cache_dir(plan.provenance)
     if cache_dir is None or not cache_dir.exists():
         return DeleteExtractorWeightsResult(
             extractor_name=plan.extractor_name,
-            did_delete=False, delete_ok=True,
-            delete_error=None, freed_bytes=0,
+            did_delete=False,
+            delete_ok=True,
+            delete_error=None,
+            freed_bytes=0,
         )
 
     import shutil
@@ -1206,16 +1197,20 @@ async def delete_extractor_weights_execute(
     except Exception as exc:
         logger.warning(
             "delete_extractor_weights_execute (%s) failed: %r",
-            plan.extractor_name, exc,
+            plan.extractor_name,
+            exc,
         )
         return DeleteExtractorWeightsResult(
             extractor_name=plan.extractor_name,
-            did_delete=True, delete_ok=False,
+            did_delete=True,
+            delete_ok=False,
             delete_error=repr(exc),
             freed_bytes=0,
         )
     return DeleteExtractorWeightsResult(
         extractor_name=plan.extractor_name,
-        did_delete=True, delete_ok=True,
-        delete_error=None, freed_bytes=freed,
+        did_delete=True,
+        delete_ok=True,
+        delete_error=None,
+        freed_bytes=freed,
     )

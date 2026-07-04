@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 
 
 async def get_focal_labels_by_doc_id(
-    client, doc_id: str,
+    client,
+    doc_id: str,
 ) -> tuple[str | None, str | None]:
     """Look up the focal doc node's (main_label, sub_label) if it exists.
 
@@ -55,9 +56,7 @@ async def get_focal_labels_by_doc_id(
         `_error: ErrorDetail | None` result field.
     """
     if not doc_id:
-        raise ValueError(
-            "KG: get_focal_labels_by_doc_id called with no doc_id"
-        )
+        raise ValueError("KG: get_focal_labels_by_doc_id called with no doc_id")
     async with client.driver.session() as session:
         result = await session.run(
             "MATCH (d) WHERE d.doc_id = $doc_id "
@@ -70,10 +69,12 @@ async def get_focal_labels_by_doc_id(
         return None, None
     labels: list[str] = list(row["labels"] or [])
     main_label: str | None = next(
-        (lbl for lbl in labels if lbl in MAIN_LABELS), None,
+        (lbl for lbl in labels if lbl in MAIN_LABELS),
+        None,
     )
     sub_label: str | None = next(
-        (lbl for lbl in labels if lbl in ALL_SUB_LABELS), None,
+        (lbl for lbl in labels if lbl in ALL_SUB_LABELS),
+        None,
     )
     return main_label, sub_label
 
@@ -95,14 +96,14 @@ async def delete_chunks_by_doc_id(client, doc_id: str) -> None:
         raise ValueError("KG: delete_chunks_by_doc_id called with no doc_id")
     async with client.driver.session() as session:
         await session.run(
-            f"MATCH (c:{CHUNK_LABEL} {{doc_id: $doc_id}}) "
-            f"DETACH DELETE c",
+            f"MATCH (c:{CHUNK_LABEL} {{doc_id: $doc_id}}) DETACH DELETE c",
             doc_id=doc_id,
         )
     logger.info("KG: deleted chunks for doc %s", doc_id)
 
 
-async def write_chunks(client,
+async def write_chunks(
+    client,
     doc_id: str,
     chunks: list[Any],
     main_label: str,
@@ -144,13 +145,10 @@ async def write_chunks(client,
     if not doc_id:
         raise ValueError("KG: write_chunks called with no doc_id")
     if main_label not in MAIN_LABELS:
-        raise ValueError(
-            f"KG: write_chunks called with invalid main_label={main_label!r}"
-        )
+        raise ValueError(f"KG: write_chunks called with invalid main_label={main_label!r}")
     if sub_label is not None and SUB_LABEL_TO_MAIN.get(sub_label) != main_label:
         raise ValueError(
-            f"KG: write_chunks sub_label={sub_label!r} doesn't belong "
-            f"under :{main_label}"
+            f"KG: write_chunks sub_label={sub_label!r} doesn't belong under :{main_label}"
         )
     if not chunks:
         logger.info("KG: write_chunks found no chunks for %s", doc_id)
@@ -179,8 +177,7 @@ async def write_chunks(client,
     if sub_label:
         on_create_clauses.append(f"d:{sub_label}")
     focal_merge = (
-        f"MERGE (d:{main_label} {{doc_id: $doc_id}}) "
-        f"ON CREATE SET {', '.join(on_create_clauses)} "
+        f"MERGE (d:{main_label} {{doc_id: $doc_id}}) ON CREATE SET {', '.join(on_create_clauses)} "
     )
 
     async with client.driver.session() as session:
@@ -201,5 +198,6 @@ async def write_chunks(client,
         )
     logger.info(
         "KG: wrote %d chunks + PART_OF edges for doc %s",
-        len(chunks), doc_id,
+        len(chunks),
+        doc_id,
     )

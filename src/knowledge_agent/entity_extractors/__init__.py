@@ -48,7 +48,10 @@ _WS_RE = re.compile(r"\s+")
 # user sees the valid set when they typo. Update alongside the
 # `get_extractor` branches below.
 _ADAPTER_NAMES: tuple[str, ...] = (
-    "llm", "gliner", "gliner_biomed", "hunflair2",
+    "llm",
+    "gliner",
+    "gliner_biomed",
+    "hunflair2",
 )
 
 
@@ -75,10 +78,7 @@ def get_extractor(name: str):
         from knowledge_agent.entity_extractors import hunflair2
 
         return hunflair2
-    raise ValueError(
-        f"Unknown entity extractor: {name!r}. "
-        f"Known adapters: {_ADAPTER_NAMES}."
-    )
+    raise ValueError(f"Unknown entity extractor: {name!r}. Known adapters: {_ADAPTER_NAMES}.")
 
 
 def get_known_labels(name: str) -> tuple[str, ...] | None:
@@ -120,7 +120,9 @@ def _normalize_span(text: str) -> str:
 
 
 def effective_entity_types(
-    name: str, entity_types: list[str], mode: str,
+    name: str,
+    entity_types: list[str],
+    mode: str,
 ) -> list[str]:
     """Resolve the entity_types an adapter should receive under the
     corpus's `entity_types_mode`.
@@ -193,10 +195,7 @@ async def extract_union(
             elif name not in sources[span]:
                 sources[span].append(name)
 
-    return [
-        replace(m, sources=tuple(sources[span]))
-        for span, m in claimed.items()
-    ]
+    return [replace(m, sources=tuple(sources[span])) for span, m in claimed.items()]
 
 
 __all__ = [

@@ -28,6 +28,7 @@ Four action buttons:
 Empty state (no active corpus): both columns collapse to a single
 hint pointing at Create New.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -43,8 +44,8 @@ from knowledge_agent.gui._styles import (
     centered_label,
 )
 from knowledge_agent.gui.library.corpus_config_editor import (
-    CorpusConfigEditor,
     _ONTOLOGY_DISPLAY,
+    CorpusConfigEditor,
 )
 from knowledge_agent.gui.views._frame import view_header
 
@@ -94,16 +95,21 @@ class IngestTab:
     def _create_controls(self) -> None:
         self.status = ft.Text("", size=11, color=ft.Colors.GREY_400)
         self.progress_ring = ft.ProgressRing(
-            width=16, height=16, stroke_width=2, visible=False,
+            width=16,
+            height=16,
+            stroke_width=2,
+            visible=False,
         )
         self.skip_manual_checkbox = ft.Checkbox(
             label="Skip manually edited",
             value=True,
             tooltip="When resolving all, leave docs with status 'manual' "
-                    "untouched (protects your hand-edits).",
+            "untouched (protects your hand-edits).",
         )
         self.active_corpus_label = ft.Text(
-            "", size=13, weight=ft.FontWeight.BOLD,
+            "",
+            size=13,
+            weight=ft.FontWeight.BOLD,
         )
 
         # ---- Folder picker + 3 folder-action buttons ----
@@ -163,7 +169,9 @@ class IngestTab:
                         "No active corpus — open Create New to register "
                         "a corpus, then come back here to configure and "
                         "ingest into it.",
-                        size=12, color=ft.Colors.AMBER_300, italic=True,
+                        size=12,
+                        color=ft.Colors.AMBER_300,
+                        italic=True,
                     ),
                 ],
             )
@@ -192,10 +200,10 @@ class IngestTab:
                     ft.Text(
                         "Every setting lives in the config on the right. "
                         "Pick a folder or file below and hit an action.",
-                        size=11, color=ft.Colors.GREY_400,
+                        size=11,
+                        color=ft.Colors.GREY_400,
                     ),
                     ft.Divider(),
-
                     # Folder picker + 3 folder actions.
                     ft.Row(
                         controls=[
@@ -214,9 +222,7 @@ class IngestTab:
                         spacing=8,
                         wrap=True,
                     ),
-
                     ft.Divider(),
-
                     # File picker + single-file ingest.
                     ft.Row(
                         controls=[
@@ -230,30 +236,27 @@ class IngestTab:
                         controls=[self.ingest_file_button],
                         spacing=8,
                     ),
-
                     ft.Divider(),
-
                     ft.Row(
                         controls=[self.progress_ring, self.status],
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-
                     ft.Divider(),
-
                     self._build_diff_card(),
-
                     ft.Divider(),
-
                     ft.Text(
                         "Bulk operations",
-                        size=13, weight=ft.FontWeight.BOLD,
+                        size=13,
+                        weight=ft.FontWeight.BOLD,
                     ),
                     ft.Text(
                         "Retroactive per-layer refreshes for the "
                         "already-ingested corpus — re-run one layer "
                         "without re-ingesting the files.",
-                        size=11, color=ft.Colors.GREY_500, italic=True,
+                        size=11,
+                        color=ft.Colors.GREY_500,
+                        italic=True,
                     ),
                     self._build_bulk_ops_panel(),
                 ],
@@ -319,26 +322,18 @@ class IngestTab:
             i = getattr(inmem.layers, f"ontology_{key}", False)
             if b != i:
                 diffs.append(
-                    (f"ontology_{key} ({display})",
-                     _fmt_bool(b), _fmt_bool(i)),
+                    (f"ontology_{key} ({display})", _fmt_bool(b), _fmt_bool(i)),
                 )
         # Extractor + entity_types.
-        base_extractor = (
-            baseline.entities.extractor if baseline.entities is not None
-            else "—"
-        )
-        cur_extractor = (
-            inmem.entities.extractor if inmem.entities is not None else "—"
-        )
+        base_extractor = baseline.entities.extractor if baseline.entities is not None else "—"
+        cur_extractor = inmem.entities.extractor if inmem.entities is not None else "—"
         if base_extractor != cur_extractor:
             diffs.append(("extractor", base_extractor, cur_extractor))
         base_types = (
-            ", ".join(baseline.entities.entity_types)
-            if baseline.entities is not None else "—"
+            ", ".join(baseline.entities.entity_types) if baseline.entities is not None else "—"
         ) or "(default)"
         cur_types = (
-            ", ".join(inmem.entities.entity_types)
-            if inmem.entities is not None else "—"
+            ", ".join(inmem.entities.entity_types) if inmem.entities is not None else "—"
         ) or "(default)"
         if base_types != cur_types:
             diffs.append(("entity_types", base_types, cur_types))
@@ -367,23 +362,14 @@ class IngestTab:
                 else:
                     diffs.append((name, str(base_val), str(cur_val)))
         # Cross-doc thresholds.
-        base_thr = (
-            baseline.cross_doc.threshold
-            if baseline.cross_doc is not None else 2
-        )
-        cur_thr = (
-            inmem.cross_doc.threshold if inmem.cross_doc is not None else 2
-        )
+        base_thr = baseline.cross_doc.threshold if baseline.cross_doc is not None else 2
+        cur_thr = inmem.cross_doc.threshold if inmem.cross_doc is not None else 2
         if base_thr != cur_thr:
             diffs.append(("cross_doc.threshold", str(base_thr), str(cur_thr)))
         base_xthr = (
-            baseline.cross_doc_xrefs.threshold
-            if baseline.cross_doc_xrefs is not None else 2
+            baseline.cross_doc_xrefs.threshold if baseline.cross_doc_xrefs is not None else 2
         )
-        cur_xthr = (
-            inmem.cross_doc_xrefs.threshold
-            if inmem.cross_doc_xrefs is not None else 2
-        )
+        cur_xthr = inmem.cross_doc_xrefs.threshold if inmem.cross_doc_xrefs is not None else 2
         if base_xthr != cur_xthr:
             diffs.append(
                 ("cross_doc_xrefs.threshold", str(base_xthr), str(cur_xthr)),
@@ -391,18 +377,22 @@ class IngestTab:
 
         header = ft.Text(
             "Ingestion summary",
-            size=13, weight=ft.FontWeight.BOLD,
+            size=13,
+            weight=ft.FontWeight.BOLD,
         )
         if not diffs:
             body: ft.Control = ft.Text(
                 "No pending changes — new ingest = previous.",
-                size=11, color=ft.Colors.GREY_500, italic=True,
+                size=11,
+                color=ft.Colors.GREY_500,
+                italic=True,
             )
         else:
             rows: list[ft.Control] = [
                 ft.Text(
                     f"{len(diffs)} pending change{'s' if len(diffs) != 1 else ''}:",
-                    size=11, color=ft.Colors.GREY_400,
+                    size=11,
+                    color=ft.Colors.GREY_400,
                 ),
             ]
             for name, cur, new in diffs:
@@ -417,13 +407,19 @@ class IngestTab:
                                 width=180,
                             ),
                             ft.Text(
-                                cur, size=11, color=ft.Colors.GREY_400,
+                                cur,
+                                size=11,
+                                color=ft.Colors.GREY_400,
                             ),
                             ft.Text(
-                                "→", size=11, color=ft.Colors.GREY_500,
+                                "→",
+                                size=11,
+                                color=ft.Colors.GREY_500,
                             ),
                             ft.Text(
-                                new, size=11, color=ft.Colors.AMBER_300,
+                                new,
+                                size=11,
+                                color=ft.Colors.AMBER_300,
                             ),
                         ],
                     ),
@@ -444,6 +440,7 @@ class IngestTab:
         buttons directly below it. Each button runs its
         `ingestion.bulk_ops` plan → confirm → execute flow via
         `_on_bulk_op_clicked`."""
+
         def op_button(op_name: str) -> ft.Control:
             return ft.Button(
                 content=centered_label(op_name),
@@ -453,49 +450,66 @@ class IngestTab:
         def layer_group(title: str, ops: list[str]) -> list[ft.Control]:
             return [
                 ft.Text(
-                    title, size=12, color=ft.Colors.GREY_300,
+                    title,
+                    size=12,
+                    color=ft.Colors.GREY_300,
                 ),
                 ft.Row(
-                    wrap=True, spacing=8,
+                    wrap=True,
+                    spacing=8,
                     controls=[op_button(op) for op in ops],
                 ),
             ]
 
         controls: list[ft.Control] = []
-        controls.extend(layer_group(
-            "openalex_papers (L1–L4)",
-            ["bulk_resolve_openalex"],
-        ))
+        controls.extend(
+            layer_group(
+                "openalex_papers (L1–L4)",
+                ["bulk_resolve_openalex"],
+            )
+        )
         if self.skip_manual_checkbox is not None:
             controls.append(self.skip_manual_checkbox)
-        controls.extend(layer_group(
-            "Chunks (L5)",
-            ["bulk_backfill_chunks", "bulk_re_embed"],
-        ))
-        controls.extend(layer_group(
-            "Entities (L6)",
-            ["bulk_backfill_entities"],
-        ))
-        controls.extend(layer_group(
-            "Ontology linking (L7)",
-            [
-                "bulk_backfill_ontology",
-                "backfill_xrefs",
-                "clear_xref_edges",
-            ],
-        ))
-        controls.extend(layer_group(
-            "Triples (L8)",
-            ["bulk_backfill_triples"],
-        ))
-        controls.extend(layer_group(
-            "Cross-doc (L9)",
-            ["bulk_backfill_cross_doc"],
-        ))
-        controls.extend(layer_group(
-            "Cross-doc xrefs (L10)",
-            ["recompute_cross_doc_xrefs"],
-        ))
+        controls.extend(
+            layer_group(
+                "Chunks (L5)",
+                ["bulk_backfill_chunks", "bulk_re_embed"],
+            )
+        )
+        controls.extend(
+            layer_group(
+                "Entities (L6)",
+                ["bulk_backfill_entities"],
+            )
+        )
+        controls.extend(
+            layer_group(
+                "Ontology linking (L7)",
+                [
+                    "bulk_backfill_ontology",
+                    "backfill_xrefs",
+                    "clear_xref_edges",
+                ],
+            )
+        )
+        controls.extend(
+            layer_group(
+                "Triples (L8)",
+                ["bulk_backfill_triples"],
+            )
+        )
+        controls.extend(
+            layer_group(
+                "Cross-doc (L9)",
+                ["bulk_backfill_cross_doc"],
+            )
+        )
+        controls.extend(
+            layer_group(
+                "Cross-doc xrefs (L10)",
+                ["recompute_cross_doc_xrefs"],
+            )
+        )
         return ft.Column(spacing=8, controls=controls)
 
     def _on_bulk_op_clicked(self, op_name: str) -> None:
@@ -536,31 +550,58 @@ class IngestTab:
         table = {
             "bulk_backfill_chunks": (
                 bulk_ops.bulk_backfill_chunks_plan,
-                bulk_ops.bulk_backfill_chunks_execute, "none", True),
+                bulk_ops.bulk_backfill_chunks_execute,
+                "none",
+                True,
+            ),
             "bulk_re_embed": (
                 bulk_ops.bulk_re_embed_plan,
-                bulk_ops.bulk_re_embed_execute, "none", True),
+                bulk_ops.bulk_re_embed_execute,
+                "none",
+                True,
+            ),
             "bulk_backfill_entities": (
                 bulk_ops.bulk_backfill_entities_plan,
-                bulk_ops.bulk_backfill_entities_execute, "none", True),
+                bulk_ops.bulk_backfill_entities_execute,
+                "none",
+                True,
+            ),
             "bulk_backfill_ontology": (
                 bulk_ops.bulk_backfill_ontology_plan,
-                bulk_ops.bulk_backfill_ontology_execute, "none", True),
+                bulk_ops.bulk_backfill_ontology_execute,
+                "none",
+                True,
+            ),
             "bulk_backfill_triples": (
                 bulk_ops.bulk_backfill_triples_plan,
-                bulk_ops.bulk_backfill_triples_execute, "none", True),
+                bulk_ops.bulk_backfill_triples_execute,
+                "none",
+                True,
+            ),
             "bulk_backfill_cross_doc": (
                 bulk_ops.bulk_backfill_cross_doc_plan,
-                bulk_ops.bulk_backfill_cross_doc_execute, "none", True),
+                bulk_ops.bulk_backfill_cross_doc_execute,
+                "none",
+                True,
+            ),
             "backfill_xrefs": (
                 bulk_ops.backfill_xrefs_plan,
-                bulk_ops.backfill_xrefs_execute, "config", True),
+                bulk_ops.backfill_xrefs_execute,
+                "config",
+                True,
+            ),
             "recompute_cross_doc_xrefs": (
                 bulk_ops.recompute_cross_doc_xrefs_plan,
-                bulk_ops.recompute_cross_doc_xrefs_execute, "config", True),
+                bulk_ops.recompute_cross_doc_xrefs_execute,
+                "config",
+                True,
+            ),
             "bulk_resolve_openalex": (
                 bulk_ops.bulk_resolve_openalex_plan,
-                bulk_ops.bulk_resolve_openalex_execute, "skip_manual", False),
+                bulk_ops.bulk_resolve_openalex_execute,
+                "skip_manual",
+                False,
+            ),
         }
         entry = table.get(op_name)
         if entry is None:
@@ -573,7 +614,8 @@ class IngestTab:
             elif plan_arg == "skip_manual":
                 skip = (
                     bool(self.skip_manual_checkbox.value)
-                    if self.skip_manual_checkbox is not None else True
+                    if self.skip_manual_checkbox is not None
+                    else True
                 )
                 plan = await plan_fn(skip_manual=skip)
             else:
@@ -583,14 +625,17 @@ class IngestTab:
             return
 
         if exec_config:
+
             def executor(pf=exec_fn, p=plan, c=config):
                 return pf(p, c)
         else:
+
             def executor(pf=exec_fn, p=plan):
                 return pf(p)
 
         self._show_ingest_confirm(
-            op_name, plan.summary,
+            op_name,
+            plan.summary,
             lambda: self._spawn(self._execute_bulk_op(op_name, executor)),
         )
 
@@ -599,8 +644,7 @@ class IngestTab:
         dropdown = ft.Dropdown(
             label="Ontology",
             options=[
-                ft.DropdownOption(key=key, text=text)
-                for key, text in _ONTOLOGY_DISPLAY.items()
+                ft.DropdownOption(key=key, text=text) for key, text in _ONTOLOGY_DISPLAY.items()
             ],
         )
 
@@ -619,11 +663,11 @@ class IngestTab:
             modal=True,
             title=ft.Text("Clear xref edges"),
             content=ft.Column(
-                tight=True, spacing=8,
+                tight=True,
+                spacing=8,
                 controls=[
                     ft.Text(
-                        "Which ontology's cross-ontology xref edges "
-                        "should be cleared?",
+                        "Which ontology's cross-ontology xref edges should be cleared?",
                         size=12,
                     ),
                     dropdown,
@@ -639,6 +683,7 @@ class IngestTab:
 
     async def _run_clear_xref(self, ontology_name: str) -> None:
         from knowledge_agent.ingestion import bulk_ops
+
         try:
             plan = await bulk_ops.clear_xref_edges_plan(ontology_name)
         except Exception as exc:
@@ -650,10 +695,9 @@ class IngestTab:
             return pf(p)
 
         self._show_ingest_confirm(
-            "clear_xref_edges", plan.summary,
-            lambda: self._spawn(
-                self._execute_bulk_op("clear_xref_edges", executor)
-            ),
+            "clear_xref_edges",
+            plan.summary,
+            lambda: self._spawn(self._execute_bulk_op("clear_xref_edges", executor)),
         )
 
     async def _execute_bulk_op(self, op_name: str, executor) -> None:
@@ -675,6 +719,7 @@ class IngestTab:
         Works across all the bulk_ops `*Result` dataclasses without
         hard-coding each one's fields."""
         from dataclasses import asdict, is_dataclass
+
         if not is_dataclass(result):
             return "done"
         parts: list[str] = []
@@ -714,9 +759,12 @@ class IngestTab:
         if self.progress_ring is not None:
             self.progress_ring.visible = busy
         for btn in (
-            self.ingest_folder_button, self.reingest_button,
-            self.sync_button, self.ingest_file_button,
-            self.folder_browse_button, self.file_browse_button,
+            self.ingest_folder_button,
+            self.reingest_button,
+            self.sync_button,
+            self.ingest_file_button,
+            self.folder_browse_button,
+            self.file_browse_button,
         ):
             if btn is not None:
                 btn.disabled = busy
@@ -823,8 +871,7 @@ class IngestTab:
             return
 
         folder_str = (
-            (self.folder_field.value or "").strip()
-            if self.folder_field is not None else ""
+            (self.folder_field.value or "").strip() if self.folder_field is not None else ""
         )
         if not folder_str:
             self._set_status("Pick a folder first (Browse).")
@@ -840,10 +887,7 @@ class IngestTab:
                 empty = plan.n_files == 0
             else:  # Sync
                 plan = await bulk_ops.sync_plan(folder, main, sub)
-                empty = (
-                    plan.n_new + plan.n_moved
-                    + plan.n_edited + plan.n_orphans
-                ) == 0
+                empty = (plan.n_new + plan.n_moved + plan.n_edited + plan.n_orphans) == 0
         except Exception as exc:
             self._set_status(f"{action}: could not plan — {exc}")
             return
@@ -853,19 +897,19 @@ class IngestTab:
             return
 
         self._show_ingest_confirm(
-            action, plan.summary,
-            lambda: self._spawn(
-                self._execute_action(action, plan, config, overwrite)
-            ),
+            action,
+            plan.summary,
+            lambda: self._spawn(self._execute_action(action, plan, config, overwrite)),
         )
 
     def _plan_single_file(
-        self, config: object, main: str, sub: str | None, overwrite: bool,
+        self,
+        config: object,
+        main: str,
+        sub: str | None,
+        overwrite: bool,
     ) -> None:
-        path_str = (
-            (self.file_field.value or "").strip()
-            if self.file_field is not None else ""
-        )
+        path_str = (self.file_field.value or "").strip() if self.file_field is not None else ""
         if not path_str:
             self._set_status("Pick a file first (Browse).")
             return
@@ -878,13 +922,20 @@ class IngestTab:
             f"Ingest '{path.name}' into the active corpus?",
             lambda: self._spawn(
                 self._execute_single_file(
-                    path, config, main, sub, overwrite,
+                    path,
+                    config,
+                    main,
+                    sub,
+                    overwrite,
                 )
             ),
         )
 
     def _show_ingest_confirm(
-        self, action: str, summary: str, on_confirm,
+        self,
+        action: str,
+        summary: str,
+        on_confirm,
     ) -> None:
         def _cancel(_ev: ft.Event) -> None:
             self.app.page.pop_dialog()
@@ -906,9 +957,14 @@ class IngestTab:
         self.app.page.update()
 
     async def _execute_action(
-        self, action: str, plan: object, config: object, overwrite: bool,
+        self,
+        action: str,
+        plan: object,
+        config: object,
+        overwrite: bool,
     ) -> None:
         from knowledge_agent.ingestion import bulk_ops
+
         preserve = not overwrite
         self._set_busy(True, f"{action}: working…")
         try:
@@ -917,7 +973,9 @@ class IngestTab:
                 msg = self._fmt_ingest_result(action, result)
             elif action == "Re-ingest":
                 result = await bulk_ops.ingest_folder_execute(
-                    plan, config, preserve,
+                    plan,
+                    config,
+                    preserve,
                 )
                 msg = self._fmt_ingest_result(action, result)
             else:  # Sync
@@ -930,14 +988,22 @@ class IngestTab:
         self._notify_ingest_complete()
 
     async def _execute_single_file(
-        self, path: Path, config: object, main: str,
-        sub: str | None, overwrite: bool,
+        self,
+        path: Path,
+        config: object,
+        main: str,
+        sub: str | None,
+        overwrite: bool,
     ) -> None:
         from knowledge_agent.ingestion import pipeline
+
         self._set_busy(True, f"Ingesting {path.name}…")
         try:
             await pipeline.ingest_document(
-                path, config, main, sub,
+                path,
+                config,
+                main,
+                sub,
                 preserve_existing_labels=not overwrite,
             )
         except Exception as exc:
@@ -948,10 +1014,7 @@ class IngestTab:
 
     @staticmethod
     def _fmt_ingest_result(action: str, result: object) -> str:
-        msg = (
-            f"{action} done: {result.n_succeeded} succeeded, "
-            f"{result.n_failed} failed."
-        )
+        msg = f"{action} done: {result.n_succeeded} succeeded, {result.n_failed} failed."
         if result.failures:
             name, err = result.failures[0]
             msg += f"  First failure: {name} — {err}"
@@ -970,6 +1033,7 @@ class IngestTab:
         """Modal explaining why the ingest can't start. One [OK]
         button — the config is untouched on disk (validation happens
         before the write)."""
+
         def _close(_ev):
             self.app.page.pop_dialog()
 
@@ -986,9 +1050,10 @@ class IngestTab:
                     ),
                     ft.Text(message, size=12, selectable=True),
                     ft.Text(
-                        "Fix it in the config editor on the right, "
-                        "then try again.",
-                        size=11, italic=True, color=ft.Colors.GREY_400,
+                        "Fix it in the config editor on the right, then try again.",
+                        size=11,
+                        italic=True,
+                        color=ft.Colors.GREY_400,
                     ),
                 ],
             ),

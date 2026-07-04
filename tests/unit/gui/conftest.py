@@ -4,6 +4,7 @@ panel/view tests can build their controls without launching Flet.
 Flet's `Page` does NOT need to be a real one for static control
 construction; `MagicMock` with a callable `.update()` is enough.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock

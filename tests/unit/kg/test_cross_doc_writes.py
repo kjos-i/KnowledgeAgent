@@ -27,7 +27,6 @@ from knowledge_agent.config import Settings
 from knowledge_agent.kg import cross_doc_writes
 from knowledge_agent.kg.client import Neo4jClient
 
-
 # ---- Test harness ----
 
 
@@ -161,9 +160,7 @@ async def test_recompute_returns_zero_when_single_returns_no_row():
     failures."""
     driver = RecordingDriver(single_returns=[None, None])
     client = _client_with_driver(driver)
-    assert (
-        await cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID) == 0
-    )
+    assert await cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID) == 0
 
 
 # ---- Two-step Cypher ----
@@ -235,9 +232,7 @@ async def test_recompute_merge_query_filters_self_edges():
 async def test_recompute_merge_query_uses_threshold_param():
     driver = _driver_with_count(5)
     client = _client_with_driver(driver)
-    await cross_doc_writes.recompute_cross_doc_edges(
-        client, DOC_ID, threshold=4
-    )
+    await cross_doc_writes.recompute_cross_doc_edges(client, DOC_ID, threshold=4)
     merge_cypher, params = driver.sessions[0].calls[1]
     assert "size(shared) >= $threshold" in merge_cypher
     assert params["threshold"] == 4

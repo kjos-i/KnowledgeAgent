@@ -43,19 +43,17 @@ def _seed_terms(
             session.run(
                 f"MERGE (t:{ONTOLOGY_TERM_LABEL}:{sub_label} {{id: $id}}) "
                 f"SET t.label = $id, t.dangling_xrefs = $dangling",
-                id=term_id, dangling=dangling,
+                id=term_id,
+                dangling=dangling,
             )
 
 
-def _seed_target(
-    client: Any, sub_label: str, term_id: str
-) -> None:
+def _seed_target(client: Any, sub_label: str, term_id: str) -> None:
     """Seed a single ontology term that other terms' dangling_xrefs
     can resolve to."""
     with client.driver.session() as session:
         session.run(
-            f"MERGE (t:{ONTOLOGY_TERM_LABEL}:{sub_label} {{id: $id}}) "
-            f"SET t.label = $id",
+            f"MERGE (t:{ONTOLOGY_TERM_LABEL}:{sub_label} {{id: $id}}) SET t.label = $id",
             id=term_id,
         )
 
@@ -68,9 +66,13 @@ def test_backfill_resolves_dangling_xrefs_when_target_exists(
     target into a :MONDO_XREF edge and leaves the unresolved string
     in dangling_xrefs for a future backfill."""
     _seed_target(kg_client, MESH_TERM_LABEL, "MESH:D003920")
-    _seed_terms(kg_client, MONDO_TERM_LABEL, [
-        ("MONDO:0001", ["MESH:D003920", "HPO:0001"]),
-    ])
+    _seed_terms(
+        kg_client,
+        MONDO_TERM_LABEL,
+        [
+            ("MONDO:0001", ["MESH:D003920", "HPO:0001"]),
+        ],
+    )
 
     result = ontology_xrefs.backfill_resolved_xrefs(kg_client)
     assert result is not None
@@ -88,8 +90,7 @@ def test_backfill_resolves_dangling_xrefs_when_target_exists(
             f"-[:MONDO_XREF]->(t:{ONTOLOGY_TERM_LABEL}) RETURN t.id AS id"
         ).single()
         dangling = session.run(
-            f"MATCH (s:{MONDO_TERM_LABEL} {{id: 'MONDO:0001'}}) "
-            f"RETURN s.dangling_xrefs AS d"
+            f"MATCH (s:{MONDO_TERM_LABEL} {{id: 'MONDO:0001'}}) RETURN s.dangling_xrefs AS d"
         ).single()["d"]
     assert edge is not None
     assert edge["id"] == "MESH:D003920"
@@ -97,16 +98,18 @@ def test_backfill_resolves_dangling_xrefs_when_target_exists(
     assert "HPO:0001" in dangling
 
 
-def test_backfill_is_idempotent(
-    kg_client: Any, ensure_constraints: None, clean_kg: None
-) -> None:
+def test_backfill_is_idempotent(kg_client: Any, ensure_constraints: None, clean_kg: None) -> None:
     """A second backfill on a fully-resolved corpus must not change
     state (n_sources_cleaned drops to 0 on the second call — MERGE
     is idempotent at the edge level)."""
     _seed_target(kg_client, MESH_TERM_LABEL, "MESH:D003920")
-    _seed_terms(kg_client, MONDO_TERM_LABEL, [
-        ("MONDO:0001", ["MESH:D003920"]),
-    ])
+    _seed_terms(
+        kg_client,
+        MONDO_TERM_LABEL,
+        [
+            ("MONDO:0001", ["MESH:D003920"]),
+        ],
+    )
 
     ontology_xrefs.backfill_resolved_xrefs(kg_client)
     second = ontology_xrefs.backfill_resolved_xrefs(kg_client)
@@ -129,10 +132,14 @@ def test_count_xref_edges_returns_per_ontology_count(
     edge count for that ontology sub-label."""
     _seed_target(kg_client, MESH_TERM_LABEL, "MESH:D001")
     _seed_target(kg_client, MESH_TERM_LABEL, "MESH:D002")
-    _seed_terms(kg_client, MONDO_TERM_LABEL, [
-        ("MONDO:0001", ["MESH:D001"]),
-        ("MONDO:0002", ["MESH:D002"]),
-    ])
+    _seed_terms(
+        kg_client,
+        MONDO_TERM_LABEL,
+        [
+            ("MONDO:0001", ["MESH:D001"]),
+            ("MONDO:0002", ["MESH:D002"]),
+        ],
+    )
     ontology_xrefs.backfill_resolved_xrefs(kg_client)
 
     n_mondo = ontology_xrefs.count_xref_edges(kg_client, MONDO_TERM_LABEL)
@@ -148,17 +155,19 @@ def test_count_dangling_xrefs_counts_source_nodes(
     source nodes that still have unresolved entries in their
     `dangling_xrefs` list."""
     _seed_target(kg_client, MESH_TERM_LABEL, "MESH:D001")
-    _seed_terms(kg_client, MONDO_TERM_LABEL, [
-        ("MONDO:0001", ["MESH:D001", "MESH:UNKNOWN_1"]),
-        ("MONDO:0002", ["MESH:UNKNOWN_2"]),
-    ])
+    _seed_terms(
+        kg_client,
+        MONDO_TERM_LABEL,
+        [
+            ("MONDO:0001", ["MESH:D001", "MESH:UNKNOWN_1"]),
+            ("MONDO:0002", ["MESH:UNKNOWN_2"]),
+        ],
+    )
     ontology_xrefs.backfill_resolved_xrefs(kg_client)
 
     # MONDO:0001 still has MESH:UNKNOWN_1 dangling; MONDO:0002 still
     # has MESH:UNKNOWN_2 dangling — both count.
-    n_dangling = ontology_xrefs.count_dangling_xrefs(
-        kg_client, MONDO_TERM_LABEL
-    )
+    n_dangling = ontology_xrefs.count_dangling_xrefs(kg_client, MONDO_TERM_LABEL)
     assert n_dangling == 2
 
 
@@ -169,21 +178,27 @@ async def test_clear_xref_edges_for_ontology_drops_only_target(
     outgoing :<X>_XREF edges from the target ontology only;
     other ontologies' edges survive."""
     _seed_target(kg_client, MESH_TERM_LABEL, "MESH:D001")
-    _seed_terms(kg_client, MONDO_TERM_LABEL, [
-        ("MONDO:0001", ["MESH:D001"]),
-    ])
-    _seed_terms(kg_client, HPO_TERM_LABEL, [
-        ("HPO:0001", ["MESH:D001"]),
-    ])
+    _seed_terms(
+        kg_client,
+        MONDO_TERM_LABEL,
+        [
+            ("MONDO:0001", ["MESH:D001"]),
+        ],
+    )
+    _seed_terms(
+        kg_client,
+        HPO_TERM_LABEL,
+        [
+            ("HPO:0001", ["MESH:D001"]),
+        ],
+    )
     ontology_xrefs.backfill_resolved_xrefs(kg_client)
 
     # Pre-clear: both MONDO and HPO have 1 outgoing edge.
     assert ontology_xrefs.count_xref_edges(kg_client, MONDO_TERM_LABEL) == 1
     assert ontology_xrefs.count_xref_edges(kg_client, HPO_TERM_LABEL) == 1
 
-    n_cleared = await ontology_xrefs.clear_xref_edges_for_ontology(
-        kg_client, MONDO_TERM_LABEL
-    )
+    n_cleared = await ontology_xrefs.clear_xref_edges_for_ontology(kg_client, MONDO_TERM_LABEL)
     # n_cleared = edges deleted + dangling_xrefs props removed
     # = 1 (MONDO->MESH edge) + 1 (MONDO:0001 dangling_xrefs prop) = 2.
     assert n_cleared == 2

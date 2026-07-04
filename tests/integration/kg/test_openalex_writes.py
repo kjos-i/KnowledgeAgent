@@ -121,14 +121,18 @@ async def test_write_citations_creates_focal_and_cited_documents(
         assert focal["oa_id"] == "W9990000001"
 
         # Cited shadow documents — one per referenced_work.
-        cited = list(session.run(
-            "MATCH (d:Document {doc_id: $doc_id})-[:CITES]->(c:Document) "
-            "RETURN c.openalex_id AS oa_id ORDER BY oa_id",
-            doc_id=SYNTHETIC_DOC_ID,
-        ))
+        cited = list(
+            session.run(
+                "MATCH (d:Document {doc_id: $doc_id})-[:CITES]->(c:Document) "
+                "RETURN c.openalex_id AS oa_id ORDER BY oa_id",
+                doc_id=SYNTHETIC_DOC_ID,
+            )
+        )
         assert len(cited) == 3
         assert {r["oa_id"] for r in cited} == {
-            "W9990000100", "W9990000101", "W9990000102",
+            "W9990000100",
+            "W9990000101",
+            "W9990000102",
         }
 
 
@@ -142,8 +146,7 @@ async def test_write_citations_is_idempotent(
 
     with kg_client.driver.session() as session:
         n_cites = session.run(
-            "MATCH (d:Document {doc_id: $doc_id})-[r:CITES]->(:Document) "
-            "RETURN count(r) AS n",
+            "MATCH (d:Document {doc_id: $doc_id})-[r:CITES]->(:Document) RETURN count(r) AS n",
             doc_id=SYNTHETIC_DOC_ID,
         ).single()["n"]
         assert n_cites == 3  # not 6 — MERGE prevented duplication
@@ -164,12 +167,14 @@ async def test_write_authorships_creates_authors_with_position_and_corresponding
     assert ok is None  # success: returns None (typed-errors contract)
 
     with kg_client.driver.session() as session:
-        rows = list(session.run(
-            "MATCH (a:Author)-[r:AUTHORED]->(d:Document {doc_id: $doc_id}) "
-            "RETURN a.display_name AS name, r.position AS pos, "
-            "r.is_corresponding AS corresp ORDER BY r.position",
-            doc_id=SYNTHETIC_DOC_ID,
-        ))
+        rows = list(
+            session.run(
+                "MATCH (a:Author)-[r:AUTHORED]->(d:Document {doc_id: $doc_id}) "
+                "RETURN a.display_name AS name, r.position AS pos, "
+                "r.is_corresponding AS corresp ORDER BY r.position",
+                doc_id=SYNTHETIC_DOC_ID,
+            )
+        )
 
     assert len(rows) == 3
     by_position = {r["pos"]: r for r in rows}
@@ -188,8 +193,7 @@ async def test_write_authorships_is_idempotent(
 
     with kg_client.driver.session() as session:
         n_authored = session.run(
-            "MATCH (:Author)-[r:AUTHORED]->(d:Document {doc_id: $doc_id}) "
-            "RETURN count(r) AS n",
+            "MATCH (:Author)-[r:AUTHORED]->(d:Document {doc_id: $doc_id}) RETURN count(r) AS n",
             doc_id=SYNTHETIC_DOC_ID,
         ).single()["n"]
         assert n_authored == 3
@@ -234,12 +238,14 @@ async def test_write_topics_creates_topics_with_score(
     assert ok is None  # success: returns None (typed-errors contract)
 
     with kg_client.driver.session() as session:
-        rows = list(session.run(
-            "MATCH (d:Document {doc_id: $doc_id})-[r:ABOUT_TOPIC]->(t:Topic) "
-            "RETURN t.display_name AS name, r.score AS score "
-            "ORDER BY r.score DESC",
-            doc_id=SYNTHETIC_DOC_ID,
-        ))
+        rows = list(
+            session.run(
+                "MATCH (d:Document {doc_id: $doc_id})-[r:ABOUT_TOPIC]->(t:Topic) "
+                "RETURN t.display_name AS name, r.score AS score "
+                "ORDER BY r.score DESC",
+                doc_id=SYNTHETIC_DOC_ID,
+            )
+        )
 
     assert len(rows) == 2
     assert rows[0]["name"] == "Integration Topic Alpha"
@@ -278,16 +284,13 @@ async def test_delete_doc_wipes_full_l1_l4_with_orphan_gc(
         # edges should be gone. (Cited shadow :Document nodes are also
         # GC'd by the delete_doc contract.)
         n_authors = session.run(
-            "MATCH (a:Author) WHERE a.openalex_id STARTS WITH 'A999' "
-            "RETURN count(a) AS n"
+            "MATCH (a:Author) WHERE a.openalex_id STARTS WITH 'A999' RETURN count(a) AS n"
         ).single()["n"]
         n_venues = session.run(
-            "MATCH (v:Venue) WHERE v.openalex_id STARTS WITH 'S999' "
-            "RETURN count(v) AS n"
+            "MATCH (v:Venue) WHERE v.openalex_id STARTS WITH 'S999' RETURN count(v) AS n"
         ).single()["n"]
         n_topics = session.run(
-            "MATCH (t:Topic) WHERE t.openalex_id STARTS WITH 'T999' "
-            "RETURN count(t) AS n"
+            "MATCH (t:Topic) WHERE t.openalex_id STARTS WITH 'T999' RETURN count(t) AS n"
         ).single()["n"]
         assert n_authors == 0
         assert n_venues == 0
@@ -338,15 +341,13 @@ async def test_delete_doc_l1_l4_edges_preserves_focal_and_chunks(
         assert chunk is not None
         # L1 edges gone.
         n_cites = session.run(
-            "MATCH (d:Document {doc_id: $doc_id})-[r:CITES]->() "
-            "RETURN count(r) AS n",
+            "MATCH (d:Document {doc_id: $doc_id})-[r:CITES]->() RETURN count(r) AS n",
             doc_id=SYNTHETIC_DOC_ID,
         ).single()["n"]
         assert n_cites == 0
         # L2 edges gone.
         n_authored = session.run(
-            "MATCH (:Author)-[r:AUTHORED]->(d:Document {doc_id: $doc_id}) "
-            "RETURN count(r) AS n",
+            "MATCH (:Author)-[r:AUTHORED]->(d:Document {doc_id: $doc_id}) RETURN count(r) AS n",
             doc_id=SYNTHETIC_DOC_ID,
         ).single()["n"]
         assert n_authored == 0

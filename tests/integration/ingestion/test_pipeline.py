@@ -20,8 +20,7 @@ Skipped by default; opt in via `pytest -m integration`.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -31,6 +30,9 @@ from knowledge_agent.ingestion.pipeline import (
     ingest_document,
 )
 from knowledge_agent.kg.corpus_config import CorpusConfig, LayerFlags
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = pytest.mark.integration
 
@@ -57,9 +59,7 @@ def _minimal_corpus_config() -> CorpusConfig:
 
 
 @pytest.fixture
-def clean_both_stores(
-    kg_client: Any, lance_client: Any, ensure_constraints: None
-) -> Any:
+def clean_both_stores(kg_client: Any, lance_client: Any, ensure_constraints: None) -> Any:
     """Wipe both stores before each pipeline test.
 
     The pipeline writes to both LanceDB and Neo4j, so per-test
@@ -76,7 +76,9 @@ def clean_both_stores(
 
 
 async def test_ingest_document_full_l1_l5_path(
-    kg_client: Any, lance_client: Any, clean_both_stores: None,
+    kg_client: Any,
+    lance_client: Any,
+    clean_both_stores: None,
     sample_pdf: Path,
 ) -> None:
     """A real PDF ingest with L1-L5 enabled produces a successful
@@ -111,7 +113,9 @@ async def test_ingest_document_full_l1_l5_path(
 
 
 async def test_ingest_document_writes_chunks_to_both_stores(
-    kg_client: Any, lance_client: Any, clean_both_stores: None,
+    kg_client: Any,
+    lance_client: Any,
+    clean_both_stores: None,
     sample_pdf: Path,
 ) -> None:
     """After ingest, the same n_chunks land in BOTH LanceDB (chunk
@@ -135,7 +139,9 @@ async def test_ingest_document_writes_chunks_to_both_stores(
 
 
 async def test_ingest_document_is_idempotent_on_doc_id(
-    kg_client: Any, lance_client: Any, clean_both_stores: None,
+    kg_client: Any,
+    lance_client: Any,
+    clean_both_stores: None,
     sample_pdf: Path,
 ) -> None:
     """Re-ingesting the same file does NOT duplicate rows — the per-
@@ -164,7 +170,9 @@ async def test_ingest_document_is_idempotent_on_doc_id(
 
 
 async def test_delete_doc_wipes_both_stores(
-    kg_client: Any, lance_client: Any, clean_both_stores: None,
+    kg_client: Any,
+    lance_client: Any,
+    clean_both_stores: None,
     sample_pdf: Path,
 ) -> None:
     """The pipeline's top-level `delete_doc` removes the document

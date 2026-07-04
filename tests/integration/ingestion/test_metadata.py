@@ -20,7 +20,7 @@ Skipped by default; opt in via `pytest -m integration`.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -30,6 +30,9 @@ from knowledge_agent.ingestion.metadata import (
     resolve_metadata,
 )
 from knowledge_agent.ingestion.parse import parse_document
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = pytest.mark.integration
 

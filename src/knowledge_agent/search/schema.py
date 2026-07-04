@@ -24,9 +24,9 @@ CONTENT_TYPES: tuple[str, ...] = ("text", "figure", "table")
 
 METADATA_STATUS_VALUES: tuple[str, ...] = (
     "enriched",  # DOI resolved against OpenAlex, full metadata available.
-    "pending",   # DOI resolution attempted, failed - eligible for retry.
+    "pending",  # DOI resolution attempted, failed - eligible for retry.
     "baseline",  # No DOI resolution attempted (non-PDF, or resolve_doi off).
-    "manual",    # User-edited via the Metadata view.
+    "manual",  # User-edited via the Metadata view.
 )
 
 

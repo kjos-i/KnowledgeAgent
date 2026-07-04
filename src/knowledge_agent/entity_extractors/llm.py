@@ -121,9 +121,7 @@ Rules:
 def _build_system_prompt(entity_types: list[str]) -> str:
     """Closed-mode prompt when types provided; open-mode prompt when not."""
     if entity_types:
-        return _SYSTEM_PROMPT_CLOSED_TEMPLATE.format(
-            types=", ".join(entity_types)
-        )
+        return _SYSTEM_PROMPT_CLOSED_TEMPLATE.format(types=", ".join(entity_types))
     return _SYSTEM_PROMPT_OPEN
 
 

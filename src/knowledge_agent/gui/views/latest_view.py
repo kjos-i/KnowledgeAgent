@@ -15,15 +15,19 @@ time and builds a Flet Column with:
 
 Updates happen by switching the right panel's mode (re-build the view).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import flet as ft
 
 from knowledge_agent.gui.artifacts import render_answer_markdown
 from knowledge_agent.gui.views._frame import empty_state, view_with_header
-from knowledge_agent.models import AgentAnswer, ChunkSource
+
+if TYPE_CHECKING:
+    from knowledge_agent.models import AgentAnswer, ChunkSource
 
 # Thumbnail size for the figure gallery. Small enough not to dominate
 # the right-panel layout; click-to-expand shows the full-size image.
@@ -54,9 +58,7 @@ class LatestView:
 
     def build(self) -> ft.Control:
         if self.answer is None:
-            body: ft.Control = empty_state(
-                "Search result will show here once you ask a question."
-            )
+            body: ft.Control = empty_state("Search result will show here once you ask a question.")
             return view_with_header("Latest Result", body)
 
         md = render_answer_markdown(self.answer, self.query)
@@ -74,25 +76,22 @@ class LatestView:
         # are missing (moved / deleted since ingest); text-based
         # citation still appears via the markdown block above.
         figure_sources = [
-            (i, cs) for i, cs in enumerate(self.answer.chunk_sources, start=1)
-            if cs.content_type == "figure"
-            and cs.image_ref
-            and Path(cs.image_ref).is_file()
+            (i, cs)
+            for i, cs in enumerate(self.answer.chunk_sources, start=1)
+            if cs.content_type == "figure" and cs.image_ref and Path(cs.image_ref).is_file()
         ]
         if figure_sources:
             controls.append(ft.Divider())
             controls.append(
                 ft.Text(
                     f"Figures cited ({len(figure_sources)})",
-                    weight=ft.FontWeight.BOLD, size=14,
+                    weight=ft.FontWeight.BOLD,
+                    size=14,
                 )
             )
             controls.append(
                 ft.Row(
-                    controls=[
-                        self._build_thumbnail(index, cs)
-                        for index, cs in figure_sources
-                    ],
+                    controls=[self._build_thumbnail(index, cs) for index, cs in figure_sources],
                     wrap=True,
                     spacing=8,
                     run_spacing=8,
@@ -108,7 +107,9 @@ class LatestView:
         return view_with_header("Latest Result", body)
 
     def _build_thumbnail(
-        self, source_index: int, cs: ChunkSource,
+        self,
+        source_index: int,
+        cs: ChunkSource,
     ) -> ft.Control:
         """One clickable thumbnail with a caption strip below.
 
@@ -133,7 +134,9 @@ class LatestView:
                 controls=[
                     thumb,
                     ft.Text(
-                        caption, size=10, color=ft.Colors.GREY_400,
+                        caption,
+                        size=10,
+                        color=ft.Colors.GREY_400,
                         no_wrap=False,
                         text_align=ft.TextAlign.CENTER,
                     ),
@@ -145,16 +148,10 @@ class LatestView:
             border=ft.border.all(1, ft.Colors.GREY_700),
             border_radius=4,
             on_click=(
-                (lambda e, s=cs: self._show_full_image_dialog(s))
-                if self.page is not None
-                else None
+                (lambda e, s=cs: self._show_full_image_dialog(s)) if self.page is not None else None
             ),
             ink=self.page is not None,
-            tooltip=(
-                f"Click to expand\n"
-                f"chunk_id: {cs.chunk_id}\n"
-                f"image_ref: {cs.image_ref}"
-            ),
+            tooltip=(f"Click to expand\nchunk_id: {cs.chunk_id}\nimage_ref: {cs.image_ref}"),
         )
 
     def _show_full_image_dialog(self, cs: ChunkSource) -> None:
@@ -172,18 +169,19 @@ class LatestView:
             ft.Text(f"chunk_id: {cs.chunk_id}", size=11, selectable=True),
             ft.Text(
                 f"image_ref: {cs.image_ref}",
-                size=11, selectable=True,
+                size=11,
+                selectable=True,
             ),
         ]
         if cs.page:
-            metadata_rows.append(
-                ft.Text(f"page: {cs.page}", size=11)
-            )
+            metadata_rows.append(ft.Text(f"page: {cs.page}", size=11))
         if cs.quote:
             metadata_rows.append(
                 ft.Text(
                     f"caption: {cs.quote}",
-                    size=11, selectable=True, italic=True,
+                    size=11,
+                    selectable=True,
+                    italic=True,
                 )
             )
 

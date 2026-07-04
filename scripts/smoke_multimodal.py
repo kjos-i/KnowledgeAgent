@@ -41,8 +41,8 @@ Run from the project root:
 """
 
 import asyncio
-from pathlib import Path
 import shutil
+from pathlib import Path
 
 # Switch the process to the smoke-test Neo4j instance BEFORE any other
 # import that might trigger `get_settings()`. Mirrors other smokes.
@@ -50,6 +50,7 @@ from knowledge_agent.config import load_test_env
 
 load_test_env()
 
+from knowledge_agent.config import get_settings  # noqa: E402
 from knowledge_agent.ingestion.ids import compute_doc_id  # noqa: E402
 from knowledge_agent.ingestion.pipeline import ingest_document  # noqa: E402
 from knowledge_agent.kg.client import get_kg_client  # noqa: E402
@@ -64,7 +65,6 @@ from knowledge_agent.kg.schema import (  # noqa: E402
     CITES_REL,
     DOCUMENT_LABEL,
 )
-from knowledge_agent.config import get_settings  # noqa: E402
 from knowledge_agent.search.client import get_search_client  # noqa: E402
 
 TEST_DOCS = Path(__file__).resolve().parent.parent / "test_documents"
@@ -186,8 +186,10 @@ async def main() -> None:
     fig_dir = _figures_dir_for(doc_id)
     print(f"Figures on disk in {fig_dir}:")
     if not fig_dir.exists():
-        print("  (directory not created — extract_figures may have found no "
-              "PictureItems, or docling failed to save)")
+        print(
+            "  (directory not created — extract_figures may have found no "
+            "PictureItems, or docling failed to save)"
+        )
     else:
         pngs = sorted(fig_dir.glob("*.png"))
         for p in pngs:
@@ -229,11 +231,7 @@ async def main() -> None:
     if not data:
         print("  (no :Chunk nodes with content_type='figure')")
     for row in data:
-        print(
-            f"  chunk_id={row['chunk_id']!r} "
-            f"image_ref={row['image_ref']!r} "
-            f"page={row['page']!r}"
-        )
+        print(f"  chunk_id={row['chunk_id']!r} image_ref={row['image_ref']!r} page={row['page']!r}")
 
     print()
     print("Inspect in your tools:")
@@ -243,10 +241,7 @@ async def main() -> None:
         f"WHERE c.content_type = 'figure' "
         f"RETURN c LIMIT 20"
     )
-    print(
-        f"  LanceDB: chunks where doc_id = {doc_id!r} "
-        f"AND content_type = 'figure'"
-    )
+    print(f"  LanceDB: chunks where doc_id = {doc_id!r} AND content_type = 'figure'")
     print(
         "  GUI:     open the Search tab, ask a question, look for the "
         "'Figures cited' section in the Latest view."

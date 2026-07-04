@@ -27,7 +27,6 @@ from knowledge_agent.kg.corpus_config import (
     load_corpus_config,
 )
 
-
 # ---- defaults ----
 
 
@@ -60,11 +59,7 @@ def test_corpus_config_defaults():
 def test_load_corpus_config_full_toml(tmp_path: Path):
     """All fields specified - parsed verbatim."""
     toml_path = tmp_path / "corpus.toml"
-    toml_path.write_text(
-        "[layers]\n"
-        "openalex_papers = true\n"
-        "chunks = true\n"
-    )
+    toml_path.write_text("[layers]\nopenalex_papers = true\nchunks = true\n")
     config = load_corpus_config(toml_path)
     assert config.layers.openalex_papers is True
     assert config.layers.chunks is True
@@ -73,7 +68,7 @@ def test_load_corpus_config_full_toml(tmp_path: Path):
 def test_load_corpus_config_omitted_fields_use_defaults(tmp_path: Path):
     """Only `allowed_types` set - layers stay at their defaults."""
     toml_path = tmp_path / "corpus.toml"
-    toml_path.write_text('allowed_types = []\n')
+    toml_path.write_text("allowed_types = []\n")
     config = load_corpus_config(toml_path)
     assert config.allowed_types == []
     assert config.layers.openalex_papers is False  # default
@@ -109,11 +104,7 @@ def test_load_corpus_config_comment_only_toml_returns_defaults(tmp_path: Path):
 def test_load_corpus_config_layers_off_for_legal_corpus(tmp_path: Path):
     """Realistic non-paper-corpus example: chunks on, openalex off."""
     toml_path = tmp_path / "corpus.toml"
-    toml_path.write_text(
-        "[layers]\n"
-        "openalex_papers = false\n"
-        "chunks = true\n"
-    )
+    toml_path.write_text("[layers]\nopenalex_papers = false\nchunks = true\n")
     config = load_corpus_config(toml_path)
     assert config.layers.openalex_papers is False
     assert config.layers.chunks is True
@@ -133,8 +124,7 @@ def test_load_corpus_config_unknown_top_level_field_raises(tmp_path: Path):
     """extra='forbid' catches typos at the top level."""
     toml_path = tmp_path / "corpus.toml"
     toml_path.write_text(
-        'allowed_types = []\n'
-        'alowed_types = []\n'  # typo of 'allowed_types'
+        "allowed_types = []\nalowed_types = []\n"  # typo of 'allowed_types'
     )
     with pytest.raises(ValidationError):
         load_corpus_config(toml_path)
@@ -144,8 +134,7 @@ def test_load_corpus_config_unknown_layer_name_raises(tmp_path: Path):
     """extra='forbid' on LayerFlags catches typos in layer names."""
     toml_path = tmp_path / "corpus.toml"
     toml_path.write_text(
-        "[layers]\n"
-        "openalex_paper = true\n"  # missing 's'
+        "[layers]\nopenalex_paper = true\n"  # missing 's'
     )
     with pytest.raises(ValidationError):
         load_corpus_config(toml_path)
@@ -161,9 +150,7 @@ def test_load_corpus_config_wrong_type_raises(tmp_path: Path):
     no Norway problem.)
     """
     toml_path = tmp_path / "corpus.toml"
-    toml_path.write_text(
-        "[layers]\nopenalex_papers = \"not_a_bool\"\n"
-    )
+    toml_path.write_text('[layers]\nopenalex_papers = "not_a_bool"\n')
     with pytest.raises(ValidationError):
         load_corpus_config(toml_path)
 
@@ -200,6 +187,7 @@ def test_corpus_config_allowed_types_defaults_to_all_sub_labels():
     corpus can be tagged with any of them; users narrow the list to
     restrict a corpus (e.g. `['Paper']` for paper-only)."""
     from knowledge_agent.kg.schema import ALL_SUB_LABELS
+
     config = CorpusConfig()
     assert set(config.allowed_types) == set(ALL_SUB_LABELS)
 
@@ -215,9 +203,7 @@ def test_corpus_config_allowed_types_explicit_empty_is_preserved():
 def test_load_corpus_config_accepts_known_sub_labels(tmp_path: Path):
     """A realistic biomedical-paper corpus declaring three sub-labels."""
     toml_path = tmp_path / "corpus.toml"
-    toml_path.write_text(
-        'allowed_types = ["Paper", "Note", "Dataset"]\n'
-    )
+    toml_path.write_text('allowed_types = ["Paper", "Note", "Dataset"]\n')
     config = load_corpus_config(toml_path)
     assert config.allowed_types == ["Paper", "Note", "Dataset"]
 
@@ -370,7 +356,7 @@ def test_load_corpus_config_entities_section_optional_when_layer_off(
     """layers.entities=false (the default) -> [entities] section can be
     omitted entirely. `config.entities` stays None."""
     toml_path = tmp_path / "corpus.toml"
-    toml_path.write_text('allowed_types = []\n')
+    toml_path.write_text("allowed_types = []\n")
     config = load_corpus_config(toml_path)
     assert config.layers.entities is False
     assert config.entities is None
@@ -391,10 +377,7 @@ def test_load_corpus_config_entities_section_without_layer_on(tmp_path: Path):
     the section is parsed but ignored at extraction time. This lets a
     user have the section prepared before flipping the flag on."""
     toml_path = tmp_path / "corpus.toml"
-    toml_path.write_text(
-        "[entities]\n"
-        'extractor = "llm"\n'
-    )
+    toml_path.write_text('[entities]\nextractor = "llm"\n')
     config = load_corpus_config(toml_path)
     assert config.layers.entities is False
     assert config.entities is not None
@@ -405,11 +388,7 @@ def test_load_corpus_config_entities_rejects_unknown_field(tmp_path: Path):
     """Typos inside the [entities] section surface at config-load time."""
     toml_path = tmp_path / "corpus.toml"
     toml_path.write_text(
-        "[layers]\n"
-        "entities = true\n"
-        "[entities]\n"
-        'extractor = "llm"\n'
-        'extracter = "llm"\n'  # typo
+        '[layers]\nentities = true\n[entities]\nextractor = "llm"\nextracter = "llm"\n'  # typo
     )
     with pytest.raises(ValidationError):
         load_corpus_config(toml_path)
@@ -486,10 +465,7 @@ def test_load_corpus_config_ontology_section_without_layer_on_kept(
     """User can prepare an `[ontology.mesh]` section before flipping the
     flag - config is parsed and stored, just not active."""
     toml_path = tmp_path / "corpus.toml"
-    toml_path.write_text(
-        "[ontology.mesh]\n"
-        'matching = "fuzzy"\n'
-    )
+    toml_path.write_text('[ontology.mesh]\nmatching = "fuzzy"\n')
     config = load_corpus_config(toml_path)
     assert config.layers.ontology_mesh is False
     assert "mesh" in config.ontology
@@ -500,11 +476,7 @@ def test_load_corpus_config_ontology_layer_requires_entities(tmp_path: Path):
     """`ontology_mesh=true` without `entities=true` -> the linking pass
     would have nothing to link. Validator rejects at load time."""
     toml_path = tmp_path / "corpus.toml"
-    toml_path.write_text(
-        "[layers]\n"
-        "chunks = true\n"
-        "ontology_mesh = true\n"
-    )
+    toml_path.write_text("[layers]\nchunks = true\nontology_mesh = true\n")
     with pytest.raises(ValidationError, match="entities"):
         load_corpus_config(toml_path)
 
@@ -537,9 +509,7 @@ def test_enabled_ontology_layers_helper():
     """`_enabled_ontology_layers()` returns the names of currently-on
     ontology flags. Used by the validators + downstream callers."""
     config = CorpusConfig(
-        layers=LayerFlags(
-            chunks=True, entities=True, ontology_mesh=True, ontology_go=False
-        ),
+        layers=LayerFlags(chunks=True, entities=True, ontology_mesh=True, ontology_go=False),
         entities=EntityConfig(extractor="llm"),
     )
     assert config._enabled_ontology_layers() == ["mesh"]
@@ -566,11 +536,7 @@ def test_load_corpus_config_triples_layer_on_requires_entities(tmp_path: Path):
     """`triples=true` without `entities=true` -> the LLM has no entity
     vocabulary to constrain to. Validator rejects at load time."""
     toml_path = tmp_path / "corpus.toml"
-    toml_path.write_text(
-        "[layers]\n"
-        "chunks = true\n"
-        "triples = true\n"
-    )
+    toml_path.write_text("[layers]\nchunks = true\ntriples = true\n")
     with pytest.raises(ValidationError, match="entities"):
         load_corpus_config(toml_path)
 
@@ -580,12 +546,7 @@ def test_load_corpus_config_triples_with_entities_loads_cleanly(tmp_path: Path):
     [entities] block. No [triples] section needed at v1."""
     toml_path = tmp_path / "corpus.toml"
     toml_path.write_text(
-        "[layers]\n"
-        "chunks = true\n"
-        "entities = true\n"
-        "triples = true\n"
-        "[entities]\n"
-        'extractor = "llm"\n'
+        '[layers]\nchunks = true\nentities = true\ntriples = true\n[entities]\nextractor = "llm"\n'
     )
     config = load_corpus_config(toml_path)
     assert config.layers.triples is True
@@ -617,11 +578,7 @@ def test_load_corpus_config_cross_doc_on_requires_entities(tmp_path: Path):
     """`cross_doc=true` without `entities=true` -> overlap query has
     nothing to compute. Validator rejects at load time."""
     toml_path = tmp_path / "corpus.toml"
-    toml_path.write_text(
-        "[layers]\n"
-        "chunks = true\n"
-        "cross_doc = true\n"
-    )
+    toml_path.write_text("[layers]\nchunks = true\ncross_doc = true\n")
     with pytest.raises(ValidationError, match="entities"):
         load_corpus_config(toml_path)
 

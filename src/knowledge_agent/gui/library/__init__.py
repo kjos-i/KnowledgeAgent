@@ -7,6 +7,7 @@
 
 `tabs.library_tab.LibraryTab` dispatches its `build()` here.
 """
+
 from knowledge_agent.gui.library.library_view import LibraryView
 
 __all__ = ["LibraryView"]

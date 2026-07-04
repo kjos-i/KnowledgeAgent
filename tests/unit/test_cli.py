@@ -8,6 +8,7 @@ These tests don't cover the underlying bulk_ops / graph behaviour —
 those have their own suites. The CLI is glue; the tests verify the
 glue is wired correctly + the exit codes match the contract.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -24,7 +25,6 @@ from knowledge_agent.cli import (
     _cmd_query,
     main,
 )
-
 
 # ---- parser ----
 
@@ -67,9 +67,8 @@ def test_build_parser_routes_health():
 
 def test_main_help_exits_zero():
     """`ka --help` is a successful no-op."""
-    with pytest.raises(SystemExit) as exc:
-        with redirect_stdout(io.StringIO()):
-            main(["--help"])
+    with pytest.raises(SystemExit) as exc, redirect_stdout(io.StringIO()):
+        main(["--help"])
     assert exc.value.code == 0
 
 
@@ -124,7 +123,8 @@ async def test_cmd_ingest_empty_folder_returns_zero(tmp_path):
         ),
         patch(
             "knowledge_agent.ingestion.bulk_ops.ingest_folder_plan",
-            new_callable=AsyncMock, return_value=fake_plan,
+            new_callable=AsyncMock,
+            return_value=fake_plan,
         ),
         patch(
             "knowledge_agent.ingestion.bulk_ops.ingest_folder_execute",
@@ -145,7 +145,8 @@ async def test_cmd_ingest_propagates_failure_count_to_exit_code(tmp_path):
 
     fake_plan = MagicMock(n_files=3, summary="Ingest 3 files.")
     fake_result = MagicMock(
-        n_succeeded=2, n_failed=1,
+        n_succeeded=2,
+        n_failed=1,
         failures=(("doc.pdf", "RuntimeError('boom')"),),
     )
     args = argparse.Namespace(
@@ -162,11 +163,13 @@ async def test_cmd_ingest_propagates_failure_count_to_exit_code(tmp_path):
         ),
         patch(
             "knowledge_agent.ingestion.bulk_ops.ingest_folder_plan",
-            new_callable=AsyncMock, return_value=fake_plan,
+            new_callable=AsyncMock,
+            return_value=fake_plan,
         ),
         patch(
             "knowledge_agent.ingestion.bulk_ops.ingest_folder_execute",
-            new_callable=AsyncMock, return_value=fake_result,
+            new_callable=AsyncMock,
+            return_value=fake_result,
         ),
         redirect_stdout(io.StringIO()),
     ):
@@ -217,7 +220,10 @@ async def test_cmd_query_returns_one_when_no_answer(tmp_path):
     config_path.write_text("dummy", encoding="utf-8")
 
     args = argparse.Namespace(
-        query="x", config=str(config_path), mode="auto", json=False,
+        query="x",
+        config=str(config_path),
+        mode="auto",
+        json=False,
     )
     with (
         patch(
@@ -242,17 +248,20 @@ async def test_cmd_health_all_ok_returns_zero():
     """All-OK report → exit 0, text contains every component."""
     from knowledge_agent.health import ComponentStatus, StatusReport
 
-    fake_report = StatusReport(components=(
-        ComponentStatus("neo4j", True, "ok"),
-        ComponentStatus("lancedb", True, "ok"),
-        ComponentStatus("llm_key", True, "anthropic: set"),
-        ComponentStatus("embed_key", True, "voyage: set"),
-    ))
+    fake_report = StatusReport(
+        components=(
+            ComponentStatus("neo4j", True, "ok"),
+            ComponentStatus("lancedb", True, "ok"),
+            ComponentStatus("llm_key", True, "anthropic: set"),
+            ComponentStatus("embed_key", True, "voyage: set"),
+        )
+    )
     args = argparse.Namespace()
     with (
         patch(
             "knowledge_agent.health.system_status",
-            new_callable=AsyncMock, return_value=fake_report,
+            new_callable=AsyncMock,
+            return_value=fake_report,
         ),
         redirect_stdout(io.StringIO()) as out,
     ):
@@ -266,17 +275,20 @@ async def test_cmd_health_any_component_fail_returns_one():
     """Any component reporting ok=False → exit 1."""
     from knowledge_agent.health import ComponentStatus, StatusReport
 
-    fake_report = StatusReport(components=(
-        ComponentStatus("neo4j", False, "RuntimeError('conn refused')"),
-        ComponentStatus("lancedb", True, "ok"),
-        ComponentStatus("llm_key", True, "anthropic: set"),
-        ComponentStatus("embed_key", True, "voyage: set"),
-    ))
+    fake_report = StatusReport(
+        components=(
+            ComponentStatus("neo4j", False, "RuntimeError('conn refused')"),
+            ComponentStatus("lancedb", True, "ok"),
+            ComponentStatus("llm_key", True, "anthropic: set"),
+            ComponentStatus("embed_key", True, "voyage: set"),
+        )
+    )
     args = argparse.Namespace()
     with (
         patch(
             "knowledge_agent.health.system_status",
-            new_callable=AsyncMock, return_value=fake_report,
+            new_callable=AsyncMock,
+            return_value=fake_report,
         ),
         redirect_stdout(io.StringIO()) as out,
     ):

@@ -164,7 +164,8 @@ def test_validate_entity_types_gliner_empty_list_is_fine():
 def test_validate_entity_types_gliner_biomed_accepts_anything():
     """GLiNER-BioMed open vocab — validator no-op for any labels."""
     validate_entity_types(
-        "gliner_biomed", ["GENE", "DISEASE", "MADE_UP"],
+        "gliner_biomed",
+        ["GENE", "DISEASE", "MADE_UP"],
     )  # no raise
 
 
@@ -178,7 +179,8 @@ def test_validate_entity_types_hunflair2_accepts_anything():
     all-or-nothing). Dispatcher validator is a no-op so no surprise
     error if user accidentally sets entity_types."""
     validate_entity_types(
-        "hunflair2", ["DISEASE", "MADE_UP", "asdf"],
+        "hunflair2",
+        ["DISEASE", "MADE_UP", "asdf"],
     )  # no raise
 
 
@@ -214,17 +216,21 @@ def test_effective_entity_types_add_merges_adapter_defaults(monkeypatch):
     """'add' mode = user's list + the adapter's DEFAULT_LABELS, deduped,
     user labels first."""
     monkeypatch.setattr(
-        _GET_EXTRACTOR, lambda n: _fake(default_labels=("PERSON", "ORG")),
+        _GET_EXTRACTOR,
+        lambda n: _fake(default_labels=("PERSON", "ORG")),
     )
     assert effective_entity_types("gliner", ["GENE"], "add") == [
-        "GENE", "PERSON", "ORG",
+        "GENE",
+        "PERSON",
+        "ORG",
     ]
 
 
 def test_effective_entity_types_add_dedupes(monkeypatch):
     """A user label already in the defaults isn't duplicated."""
     monkeypatch.setattr(
-        _GET_EXTRACTOR, lambda n: _fake(default_labels=("GENE", "ORG")),
+        _GET_EXTRACTOR,
+        lambda n: _fake(default_labels=("GENE", "ORG")),
     )
     assert effective_entity_types("gliner", ["GENE"], "add") == ["GENE", "ORG"]
 
@@ -306,10 +312,15 @@ async def test_extract_union_forwards_llm_kwargs_only_to_llm(monkeypatch):
     monkeypatch.setattr(_GET_EXTRACTOR, lambda n: mods[n])
 
     await extract_union(
-        "t", ["ner", "llm"], ["GENE"],
+        "t",
+        ["ner", "llm"],
+        ["GENE"],
         llm_kwargs={"model": "m", "temperature": 0.0},
     )
     ner.extract.assert_awaited_once_with("t", ["GENE"])
     llm.extract.assert_awaited_once_with(
-        "t", ["GENE"], model="m", temperature=0.0,
+        "t",
+        ["GENE"],
+        model="m",
+        temperature=0.0,
     )

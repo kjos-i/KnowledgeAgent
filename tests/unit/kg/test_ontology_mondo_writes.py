@@ -14,9 +14,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from unittest.mock import patch
 
 import pytest
-from unittest.mock import patch, AsyncMock
 
 from knowledge_agent.config import Settings
 from knowledge_agent.kg import ontology_mondo_writes
@@ -49,7 +49,7 @@ class RecordingSession:
             return self.canned_results[idx]
         return _RecordingResult()
 
-    async def __aenter__(self) -> "RecordingSession":
+    async def __aenter__(self) -> RecordingSession:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -60,9 +60,7 @@ class RecordingSession:
 class RecordingDriver:
     sessions: list[RecordingSession] = field(default_factory=list)
     raise_on_run: Exception | None = None
-    canned_results_per_session: list[list[_RecordingResult]] = field(
-        default_factory=list
-    )
+    canned_results_per_session: list[list[_RecordingResult]] = field(default_factory=list)
     closed: bool = False
 
     def session(self) -> RecordingSession:
@@ -72,9 +70,7 @@ class RecordingDriver:
             if idx < len(self.canned_results_per_session)
             else []
         )
-        sess = RecordingSession(
-            raise_on_run=self.raise_on_run, canned_results=canned
-        )
+        sess = RecordingSession(raise_on_run=self.raise_on_run, canned_results=canned)
         self.sessions.append(sess)
         return sess
 
@@ -124,9 +120,7 @@ def test_domain_tags_declared():
 
 async def test_is_imported_true_when_query_returns_present():
     driver = RecordingDriver(
-        canned_results_per_session=[
-            [_RecordingResult(rows=[{"present": True}])]
-        ]
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
     )
     client = _client_with_driver(driver)
     assert await ontology_mondo_writes.is_imported(client) is True
@@ -134,9 +128,7 @@ async def test_is_imported_true_when_query_returns_present():
 
 async def test_is_imported_false_when_query_returns_no_nodes():
     driver = RecordingDriver(
-        canned_results_per_session=[
-            [_RecordingResult(rows=[{"present": False}])]
-        ]
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]]
     )
     client = _client_with_driver(driver)
     assert await ontology_mondo_writes.is_imported(client) is False
@@ -151,9 +143,7 @@ async def test_is_imported_propagates_driver_exception():
 
 async def test_is_imported_query_uses_mondoterm_label():
     driver = RecordingDriver(
-        canned_results_per_session=[
-            [_RecordingResult(rows=[{"present": True}])]
-        ]
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
     )
     client = _client_with_driver(driver)
     await ontology_mondo_writes.is_imported(client)
@@ -244,9 +234,7 @@ async def test_write_terms_edge_query_uses_mondo_is_a_rel():
     assert ":MONDO_IS_A" in cypher
     assert "row.child" in cypher
     assert "row.parent" in cypher
-    assert params["rows"] == [
-        {"child": "MONDO:0005148", "parent": "MONDO:0000001"}
-    ]
+    assert params["rows"] == [{"child": "MONDO:0005148", "parent": "MONDO:0000001"}]
 
 
 async def test_write_terms_propagates_driver_exception():
@@ -264,14 +252,10 @@ async def test_write_terms_propagates_driver_exception():
 async def test_import_mondo_short_circuits_when_already_imported():
     """force=False and MONDO already imported -> no download/parse/write."""
     driver = RecordingDriver(
-        canned_results_per_session=[
-            [_RecordingResult(rows=[{"present": True}])]
-        ]
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
     )
     client = _client_with_driver(driver)
-    with patch(
-        "knowledge_agent.kg.ontology_writes.ensure_cached"
-    ) as mock_cache:
+    with patch("knowledge_agent.kg.ontology_writes.ensure_cached") as mock_cache:
         result = await ontology_mondo_writes.import_mondo(client, force=False)
 
     assert result is False  # no-op: typed-errors contract
@@ -303,9 +287,7 @@ async def test_import_mondo_force_drops_then_reimports():
 
 async def test_import_mondo_aborts_on_zero_terms():
     driver = RecordingDriver(
-        canned_results_per_session=[
-            [_RecordingResult(rows=[{"present": False}])]
-        ]
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]]
     )
     client = _client_with_driver(driver)
     with (
@@ -317,24 +299,24 @@ async def test_import_mondo_aborts_on_zero_terms():
             "knowledge_agent.kg.ontology_mondo_writes._read_and_extract",
             return_value=[],
         ),
+        pytest.raises(RuntimeError, match="extracted 0 terms"),
     ):
-        with pytest.raises(RuntimeError, match="extracted 0 terms"):
-            await ontology_mondo_writes.import_mondo(client, force=False)
+        await ontology_mondo_writes.import_mondo(client, force=False)
 
 
 async def test_import_mondo_propagates_download_exception():
     driver = RecordingDriver(
-        canned_results_per_session=[
-            [_RecordingResult(rows=[{"present": False}])]
-        ]
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]]
     )
     client = _client_with_driver(driver)
-    with patch(
-        "knowledge_agent.kg.ontology_writes.ensure_cached",
-        side_effect=RuntimeError("network down"),
+    with (
+        patch(
+            "knowledge_agent.kg.ontology_writes.ensure_cached",
+            side_effect=RuntimeError("network down"),
+        ),
+        pytest.raises(RuntimeError, match="network down"),
     ):
-        with pytest.raises(RuntimeError, match="network down"):
-            await ontology_mondo_writes.import_mondo(client, force=False)
+        await ontology_mondo_writes.import_mondo(client, force=False)
 
 
 # ---- delete_imported ----
@@ -362,9 +344,7 @@ async def test_delete_imported_propagates_driver_exception():
 
 async def test_client_is_mondo_imported_delegates_to_module():
     driver = RecordingDriver(
-        canned_results_per_session=[
-            [_RecordingResult(rows=[{"present": True}])]
-        ]
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
     )
     client = _client_with_driver(driver)
     assert await client.is_mondo_imported() is True
@@ -381,13 +361,9 @@ async def test_client_delete_mondo_delegates_to_module():
 
 async def test_client_import_mondo_delegates_to_module():
     driver = RecordingDriver(
-        canned_results_per_session=[
-            [_RecordingResult(rows=[{"present": True}])]
-        ]
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
     )
     client = _client_with_driver(driver)
-    with patch(
-        "knowledge_agent.kg.ontology_writes.ensure_cached"
-    ) as mock_cache:
+    with patch("knowledge_agent.kg.ontology_writes.ensure_cached") as mock_cache:
         assert await client.import_mondo(force=False) is False
     mock_cache.assert_not_called()

@@ -183,18 +183,14 @@ class LanceClient:
         propagate.
         """
         if not doc_id:
-            raise ValueError(
-                "LanceDB: delete_chunks_by_doc_id called with no doc_id"
-            )
+            raise ValueError("LanceDB: delete_chunks_by_doc_id called with no doc_id")
         conn = await self._ensure_conn()
         if CHUNKS_TABLE not in await conn.table_names():
             return
         table = await conn.open_table(CHUNKS_TABLE)
         await table.delete(f"doc_id = '{doc_id}'")
 
-    async def update_doc_metadata(
-        self, doc_id: str, fields: dict[str, Any]
-    ) -> None:
+    async def update_doc_metadata(self, doc_id: str, fields: dict[str, Any]) -> None:
         """Patch doc-level columns for every chunk row of a doc. Idempotent.
 
         Used by `pipeline.resolve_openalex` and `pipeline.lookup_known_doi`
@@ -219,18 +215,12 @@ class LanceClient:
         propagate.
         """
         if not doc_id:
-            raise ValueError(
-                "LanceDB: update_doc_metadata called with no doc_id"
-            )
+            raise ValueError("LanceDB: update_doc_metadata called with no doc_id")
         if not fields:
-            raise ValueError(
-                "LanceDB: update_doc_metadata called with no fields"
-            )
+            raise ValueError("LanceDB: update_doc_metadata called with no fields")
         conn = await self._ensure_conn()
         if CHUNKS_TABLE not in await conn.table_names():
-            raise RuntimeError(
-                "LanceDB: update_doc_metadata: chunks table doesn't exist"
-            )
+            raise RuntimeError("LanceDB: update_doc_metadata: chunks table doesn't exist")
         table = await conn.open_table(CHUNKS_TABLE)
         await table.update(where=f"doc_id = '{doc_id}'", values=fields)
 
@@ -320,9 +310,7 @@ class LanceClient:
             for d in seen.values()
         ]
 
-    async def get_chunks_by_doc_id(
-        self, doc_id: str
-    ) -> list[dict[str, Any]]:
+    async def get_chunks_by_doc_id(self, doc_id: str) -> list[dict[str, Any]]:
         """Fetch every chunk row for one doc_id, sorted by chunk_index.
 
         Used by partial-pipeline ops (`backfill_chunks`, `backfill_entities`,
@@ -342,18 +330,12 @@ class LanceClient:
         errors propagate to the caller.
         """
         if not doc_id:
-            raise ValueError(
-                "LanceDB: get_chunks_by_doc_id called with no doc_id"
-            )
+            raise ValueError("LanceDB: get_chunks_by_doc_id called with no doc_id")
         conn = await self._ensure_conn()
         if CHUNKS_TABLE not in await conn.table_names():
             return []
         table = await conn.open_table(CHUNKS_TABLE)
-        query = (
-            table.query()
-            .where(f"doc_id = '{doc_id}'")
-            .limit(_LANCEDB_SCAN_LIMIT)
-        )
+        query = table.query().where(f"doc_id = '{doc_id}'").limit(_LANCEDB_SCAN_LIMIT)
         rows = await query.to_list()
         rows.sort(key=lambda r: r["chunk_index"])
         return rows
@@ -391,24 +373,21 @@ class LanceClient:
             logger.info(
                 "LanceDB: vector index skipped - %d rows < %d threshold "
                 "(brute force scan is fast enough at this scale)",
-                row_count, threshold,
+                row_count,
+                threshold,
             )
         else:
             try:
                 await table.create_index(
                     column="embedding",
                 )
-                logger.info(
-                    "LanceDB: created vector index (%d rows)", row_count
-                )
+                logger.info("LanceDB: created vector index (%d rows)", row_count)
             except Exception as exc:
                 # Domain-aware swallow: most common cause is "index
                 # already exists". Idempotent path; let other errors
                 # surface via the outer optimize() call instead of
                 # raising here.
-                logger.info(
-                    "LanceDB: vector index create skipped: %r", exc
-                )
+                logger.info("LanceDB: vector index create skipped: %r", exc)
 
         # ---- FTS index (always attempted, no threshold).
         try:
@@ -446,23 +425,28 @@ class LanceClient:
         mode = mode or self._settings.lancedb_search_mode
         if mode == "hybrid":
             return await self.hybrid_search(
-                query, top_k, filters=filters, use_mmr=use_mmr,
+                query,
+                top_k,
+                filters=filters,
+                use_mmr=use_mmr,
             )
         if mode == "fts":
             if use_mmr:
-                logger.warning(
-                    "LanceDB: use_mmr=True ignored in fts mode (no vectors)"
-                )
+                logger.warning("LanceDB: use_mmr=True ignored in fts mode (no vectors)")
             return await self.fts_search(query, top_k, filters=filters)
         if mode == "vector":
             return await self.vector_search(
-                query, top_k, filters=filters, use_mmr=use_mmr,
+                query,
+                top_k,
+                filters=filters,
+                use_mmr=use_mmr,
             )
-        logger.warning(
-            "LanceDB: unknown retrieval mode %r; falling back to hybrid", mode
-        )
+        logger.warning("LanceDB: unknown retrieval mode %r; falling back to hybrid", mode)
         return await self.hybrid_search(
-            query, top_k, filters=filters, use_mmr=use_mmr,
+            query,
+            top_k,
+            filters=filters,
+            use_mmr=use_mmr,
         )
 
     async def hybrid_search(
@@ -493,17 +477,8 @@ class LanceClient:
             return []
         conn = await self._ensure_conn()
         table = await conn.open_table(CHUNKS_TABLE)
-        pool_size = (
-            top_k * settings.mmr_candidate_multiplier
-            if use_mmr
-            else top_k
-        )
-        search = (
-            table.query()
-            .nearest_to(query_vector)
-            .nearest_to_text(query)
-            .limit(pool_size)
-        )
+        pool_size = top_k * settings.mmr_candidate_multiplier if use_mmr else top_k
+        search = table.query().nearest_to(query_vector).nearest_to_text(query).limit(pool_size)
         if filters:
             where = _filters_to_sql(filters)
             if where:
@@ -511,7 +486,11 @@ class LanceClient:
         rows = await search.to_list()
         if use_mmr:
             return _mmr_rerank_rows(
-                rows, query_vector, top_k, settings.mmr_lambda, "hybrid",
+                rows,
+                query_vector,
+                top_k,
+                settings.mmr_lambda,
+                "hybrid",
             )
         return [_row_to_chunk(r, "hybrid") for r in rows]
 
@@ -563,11 +542,7 @@ class LanceClient:
             return []
         conn = await self._ensure_conn()
         table = await conn.open_table(CHUNKS_TABLE)
-        pool_size = (
-            top_k * settings.mmr_candidate_multiplier
-            if use_mmr
-            else top_k
-        )
+        pool_size = top_k * settings.mmr_candidate_multiplier if use_mmr else top_k
         search = table.query().nearest_to(query_vector).limit(pool_size)
         if filters:
             where = _filters_to_sql(filters)
@@ -576,7 +551,11 @@ class LanceClient:
         rows = await search.to_list()
         if use_mmr:
             return _mmr_rerank_rows(
-                rows, query_vector, top_k, settings.mmr_lambda, "vector",
+                rows,
+                query_vector,
+                top_k,
+                settings.mmr_lambda,
+                "vector",
             )
         return [_row_to_chunk(r, "vector") for r in rows]
 
@@ -722,16 +701,14 @@ def _mmr_rerank_rows(
         # Defensive: a row missing its embedding can't be MMR-ranked.
         # Fall back to the original (already-relevance-sorted) order.
         logger.warning(
-            "LanceDB: MMR pool had rows missing 'embedding'; "
-            "falling back to original order"
+            "LanceDB: MMR pool had rows missing 'embedding'; falling back to original order"
         )
         return [_row_to_chunk(r, mode) for r in rows[:top_k]]
 
     q_norm = _l2_norm(query_vector)
     cand_norms = [_l2_norm(v) for v in vectors]
     sim_to_query = [
-        _cosine_sim(query_vector, v, q_norm, cn)
-        for v, cn in zip(vectors, cand_norms, strict=False)
+        _cosine_sim(query_vector, v, q_norm, cn) for v, cn in zip(vectors, cand_norms, strict=False)
     ]
 
     selected: list[int] = []
@@ -744,10 +721,7 @@ def _mmr_rerank_rows(
         for i in range(pool_size):
             if is_selected[i]:
                 continue
-            score = (
-                lambda_ * sim_to_query[i]
-                - (1.0 - lambda_) * max_sim_to_selected[i]
-            )
+            score = lambda_ * sim_to_query[i] - (1.0 - lambda_) * max_sim_to_selected[i]
             if score > best_score:
                 best_score = score
                 best_idx = i

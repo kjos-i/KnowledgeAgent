@@ -1,4 +1,5 @@
 """`python -m knowledge_agent` entry — same as the `kg` console script."""
+
 import sys
 
 from knowledge_agent.cli import main

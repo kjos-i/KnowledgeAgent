@@ -18,9 +18,12 @@ the pipeline e2e via any ingest of a `.py` / `.js` / etc. file.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = pytest.mark.integration
 
@@ -73,7 +76,7 @@ if __name__ == "__main__":
 '''
 
 
-JS_SOURCE = '''\
+JS_SOURCE = """\
 // JavaScript example
 const PI = 3.14;
 
@@ -91,7 +94,7 @@ class Circle {
 }
 
 console.log(new Circle(2).area());
-'''
+"""
 
 
 def test_code_parser_python_yields_definition_chunks(tmp_path: Path) -> None:

@@ -87,29 +87,19 @@ async def _delete_smoke_nodes(client) -> None:
             f"WHERE d.doc_id IN $ids DELETE m",
             ids=[DOC_ALPHA, DOC_BETA],
         )
-        await session.run(
-            f"MATCH (e:{ENTITY_LABEL}) "
-            f"WHERE NOT (e)<-[:MENTIONS]-() "
-            f"DETACH DELETE e"
-        )
+        await session.run(f"MATCH (e:{ENTITY_LABEL}) WHERE NOT (e)<-[:MENTIONS]-() DETACH DELETE e")
         # Drop chunks + docs.
         await session.run(
-            f"MATCH (c:{CHUNK_LABEL}) "
-            f"WHERE c.doc_id IN $ids "
-            f"DETACH DELETE c",
+            f"MATCH (c:{CHUNK_LABEL}) WHERE c.doc_id IN $ids DETACH DELETE c",
             ids=[DOC_ALPHA, DOC_BETA],
         )
         await session.run(
-            f"MATCH (d:{DOCUMENT_LABEL}) "
-            f"WHERE d.doc_id IN $ids "
-            f"DETACH DELETE d",
+            f"MATCH (d:{DOCUMENT_LABEL}) WHERE d.doc_id IN $ids DETACH DELETE d",
             ids=[DOC_ALPHA, DOC_BETA],
         )
 
 
-async def _seed_doc(
-    client, doc_id: str, entities: list[tuple[str, str]]
-) -> str:
+async def _seed_doc(client, doc_id: str, entities: list[tuple[str, str]]) -> str:
     """Write a synthetic :Document + one :Chunk + :MENTIONS edges to
     each entity. Returns chunk_id."""
     chunk_id = make_chunk_id(doc_id, 0)
@@ -186,15 +176,17 @@ async def main() -> None:
     print(f"Seeding two synthetic docs sharing {len(SHARED_ENTITIES)} entities...")
     alpha_chunk = await _seed_doc(client, DOC_ALPHA, SHARED_ENTITIES + ALPHA_UNIQUE)
     beta_chunk = await _seed_doc(client, DOC_BETA, SHARED_ENTITIES + BETA_UNIQUE)
-    print(f"  alpha doc: {DOC_ALPHA} (chunk {alpha_chunk[:24]}..., "
-          f"{len(SHARED_ENTITIES) + len(ALPHA_UNIQUE)} entities)")
-    print(f"  beta doc : {DOC_BETA} (chunk {beta_chunk[:24]}..., "
-          f"{len(SHARED_ENTITIES) + len(BETA_UNIQUE)} entities)")
+    print(
+        f"  alpha doc: {DOC_ALPHA} (chunk {alpha_chunk[:24]}..., "
+        f"{len(SHARED_ENTITIES) + len(ALPHA_UNIQUE)} entities)"
+    )
+    print(
+        f"  beta doc : {DOC_BETA} (chunk {beta_chunk[:24]}..., "
+        f"{len(SHARED_ENTITIES) + len(BETA_UNIQUE)} entities)"
+    )
     print(f"  shared   : {[k for k, _ in SHARED_ENTITIES]}")
 
-    print(
-        f"Running recompute_cross_doc_edges(alpha, threshold={args.threshold})..."
-    )
+    print(f"Running recompute_cross_doc_edges(alpha, threshold={args.threshold})...")
     n = await client.recompute_cross_doc_edges(DOC_ALPHA, args.threshold)
     print(f"  :RELATED_TO edges written: {n}")
     expected_present = args.threshold <= len(SHARED_ENTITIES)

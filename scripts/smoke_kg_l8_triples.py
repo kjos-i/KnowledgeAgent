@@ -102,9 +102,7 @@ async def _delete_smoke_nodes(client) -> None:
         # 15 predicate types.
         rel_union = "|".join(TRIPLE_PREDICATE_RELS)
         await session.run(
-            f"MATCH ()-[r:{rel_union}]->() "
-            f"WHERE r.doc_id = $doc_id "
-            f"DELETE r",
+            f"MATCH ()-[r:{rel_union}]->() WHERE r.doc_id = $doc_id DELETE r",
             doc_id=SYNTHETIC_DOC_ID,
         )
         # Drop :MENTIONS from this chunk, then orphan-GC :Entity.
@@ -113,11 +111,7 @@ async def _delete_smoke_nodes(client) -> None:
             f"-[m:MENTIONS]->(e:{ENTITY_LABEL}) DELETE m",
             chunk_id=chunk_id,
         )
-        await session.run(
-            f"MATCH (e:{ENTITY_LABEL}) "
-            f"WHERE NOT (e)<-[:MENTIONS]-() "
-            f"DETACH DELETE e"
-        )
+        await session.run(f"MATCH (e:{ENTITY_LABEL}) WHERE NOT (e)<-[:MENTIONS]-() DETACH DELETE e")
         # Drop chunk + doc.
         await session.run(
             f"MATCH (c:{CHUNK_LABEL} {{doc_id: $doc_id}}) DETACH DELETE c",
@@ -183,10 +177,7 @@ async def _show_state(client) -> None:
         for p, n in sorted(by_predicate.items(), key=lambda kv: -kv[1]):
             print(f"    {p:>20}: {n}")
     for r in rows[:15]:
-        print(
-            f"    {r['subject']!r:>30} -[:{r['predicate']}]-> "
-            f"{r['object']!r}"
-        )
+        print(f"    {r['subject']!r:>30} -[:{r['predicate']}]-> {r['object']!r}")
     if len(rows) > 15:
         print(f"    ... and {len(rows) - 15} more")
 
@@ -212,10 +203,7 @@ async def main() -> None:
     triples = triples_extractor.extract(SYNTHETIC_CHUNK_TEXT, SYNTHETIC_ENTITIES)
     print(f"  extractor returned {len(triples)} triples")
     for t in triples[:10]:
-        print(
-            f"    {t.subject_key!r:>30} -[:{t.predicate}]-> "
-            f"{t.object_key!r}"
-        )
+        print(f"    {t.subject_key!r:>30} -[:{t.predicate}]-> {t.object_key!r}")
     if len(triples) > 10:
         print(f"    ... and {len(triples) - 10} more")
 

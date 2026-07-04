@@ -114,15 +114,12 @@ async def write_citations(client, doc_id: str, work: dict[str, Any]) -> None:
                 set_clauses.append("d.doi = $doi")
                 params["doi"] = doi
             await session.run(
-                f"MERGE (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) "
-                f"SET {', '.join(set_clauses)}",
+                f"MERGE (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) SET {', '.join(set_clauses)}",
                 **params,
             )
 
         if not references:
-            logger.info(
-                "KG: wrote document %s with 0 citations", doc_id
-            )
+            logger.info("KG: wrote document %s with 0 citations", doc_id)
             return
 
         # 2. Shadow documents. ON CREATE only - don't downgrade an
@@ -146,9 +143,7 @@ async def write_citations(client, doc_id: str, work: dict[str, Any]) -> None:
             doc_id=doc_id,
             cited_ids=references,
         )
-    logger.info(
-        "KG: wrote document %s with %d citations", doc_id, len(references)
-    )
+    logger.info("KG: wrote document %s with %d citations", doc_id, len(references))
 
 
 # ---- authorships (L2) ----
@@ -196,9 +191,7 @@ async def write_authorships(client, doc_id: str, work: dict[str, Any]) -> None:
         )
 
     if not authorships:
-        logger.info(
-            "KG: write_authorships found no authorships for %s", doc_id
-        )
+        logger.info("KG: write_authorships found no authorships for %s", doc_id)
         return
 
     async with client.driver.session() as session:
@@ -226,7 +219,8 @@ async def write_authorships(client, doc_id: str, work: dict[str, Any]) -> None:
         )
     logger.info(
         "KG: wrote authorships for %s (%d authors)",
-        doc_id, len(authorships),
+        doc_id,
+        len(authorships),
     )
 
 
@@ -278,9 +272,7 @@ async def write_venue(client, doc_id: str, work: dict[str, Any]) -> None:
             f"MERGE (d)-[:{PUBLISHED_IN_REL}]->(v)",
             **params,
         )
-    logger.info(
-        "KG: wrote venue %r for doc %s", venue_openalex_id, doc_id
-    )
+    logger.info("KG: wrote venue %r for doc %s", venue_openalex_id, doc_id)
 
 
 # ---- topics (L4) ----
@@ -346,9 +338,7 @@ async def write_topics(client, doc_id: str, work: dict[str, Any]) -> None:
             doc_id=doc_id,
             topics=topics,
         )
-    logger.info(
-        "KG: wrote topics for %s (%d topics)", doc_id, len(topics)
-    )
+    logger.info("KG: wrote topics for %s (%d topics)", doc_id, len(topics))
 
 
 # ---- delete (per-doc wipe + GC orphans across L1-L4) ----
@@ -383,8 +373,7 @@ async def delete_doc(client, doc_id: str) -> None:
     async with client.driver.session() as session:
         # 1. Wipe focal + its edges in one shot.
         await session.run(
-            f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) "
-            f"DETACH DELETE d",
+            f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) DETACH DELETE d",
             doc_id=doc_id,
         )
         # 2. GC orphans. Each query targets one label and uses the
@@ -393,17 +382,12 @@ async def delete_doc(client, doc_id: str) -> None:
         # guarantees no edges - if a new edge type is added later
         # without updating the WHERE, DELETE will error so the bug
         # surfaces instead of being silently masked.
+        await session.run(f"MATCH (a:{AUTHOR_LABEL}) WHERE NOT (a)-[:{AUTHORED_REL}]->() DELETE a")
         await session.run(
-            f"MATCH (a:{AUTHOR_LABEL}) "
-            f"WHERE NOT (a)-[:{AUTHORED_REL}]->() DELETE a"
+            f"MATCH (t:{TOPIC_LABEL}) WHERE NOT ()-[:{ABOUT_TOPIC_REL}]->(t) DELETE t"
         )
         await session.run(
-            f"MATCH (t:{TOPIC_LABEL}) "
-            f"WHERE NOT ()-[:{ABOUT_TOPIC_REL}]->(t) DELETE t"
-        )
-        await session.run(
-            f"MATCH (v:{VENUE_LABEL}) "
-            f"WHERE NOT ()-[:{PUBLISHED_IN_REL}]->(v) DELETE v"
+            f"MATCH (v:{VENUE_LABEL}) WHERE NOT ()-[:{PUBLISHED_IN_REL}]->(v) DELETE v"
         )
         # Shadow documents: in_corpus=false AND nothing cites them.
         await session.run(
@@ -448,45 +432,32 @@ async def delete_doc_l1_l4_edges(client, doc_id: str) -> None:
     async with client.driver.session() as session:
         # 1. Outgoing :CITES from this doc.
         await session.run(
-            f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}})"
-            f"-[r:{CITES_REL}]->() "
-            f"DELETE r",
+            f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}})-[r:{CITES_REL}]->() DELETE r",
             doc_id=doc_id,
         )
         # 2. Incoming :AUTHORED to this doc.
         await session.run(
-            f"MATCH ()-[r:{AUTHORED_REL}]->"
-            f"(d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) "
-            f"DELETE r",
+            f"MATCH ()-[r:{AUTHORED_REL}]->(d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) DELETE r",
             doc_id=doc_id,
         )
         # 3. Outgoing :PUBLISHED_IN from this doc.
         await session.run(
-            f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}})"
-            f"-[r:{PUBLISHED_IN_REL}]->() "
-            f"DELETE r",
+            f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}})-[r:{PUBLISHED_IN_REL}]->() DELETE r",
             doc_id=doc_id,
         )
         # 4. Outgoing :ABOUT_TOPIC from this doc.
         await session.run(
-            f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}})"
-            f"-[r:{ABOUT_TOPIC_REL}]->() "
-            f"DELETE r",
+            f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}})-[r:{ABOUT_TOPIC_REL}]->() DELETE r",
             doc_id=doc_id,
         )
         # 5. GC orphans across the L1-L4 reference vocab. Same WHERE-NOT
         # pattern as `delete_doc` so the post-state guarantee matches.
+        await session.run(f"MATCH (a:{AUTHOR_LABEL}) WHERE NOT (a)-[:{AUTHORED_REL}]->() DELETE a")
         await session.run(
-            f"MATCH (a:{AUTHOR_LABEL}) "
-            f"WHERE NOT (a)-[:{AUTHORED_REL}]->() DELETE a"
+            f"MATCH (t:{TOPIC_LABEL}) WHERE NOT ()-[:{ABOUT_TOPIC_REL}]->(t) DELETE t"
         )
         await session.run(
-            f"MATCH (t:{TOPIC_LABEL}) "
-            f"WHERE NOT ()-[:{ABOUT_TOPIC_REL}]->(t) DELETE t"
-        )
-        await session.run(
-            f"MATCH (v:{VENUE_LABEL}) "
-            f"WHERE NOT ()-[:{PUBLISHED_IN_REL}]->(v) DELETE v"
+            f"MATCH (v:{VENUE_LABEL}) WHERE NOT ()-[:{PUBLISHED_IN_REL}]->(v) DELETE v"
         )
         # Shadow docs: in_corpus=false AND nothing cites them.
         # The :CITES edges from this doc were removed in step 1, so any

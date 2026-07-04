@@ -65,9 +65,7 @@ def _synthetic_chunk(index: int, text: str) -> dict[str, Any]:
     }
 
 
-async def test_ensure_schema_creates_table(
-    lance_client: Any, clean_lance: None
-) -> None:
+async def test_ensure_schema_creates_table(lance_client: Any, clean_lance: None) -> None:
     """ensure_schema creates the chunks table when it doesn't exist."""
     assert CHUNKS_TABLE not in lance_client.conn.table_names()
 
@@ -76,9 +74,7 @@ async def test_ensure_schema_creates_table(
     assert CHUNKS_TABLE in lance_client.conn.table_names()
 
 
-async def test_ensure_schema_is_idempotent(
-    lance_client: Any, clean_lance: None
-) -> None:
+async def test_ensure_schema_is_idempotent(lance_client: Any, clean_lance: None) -> None:
     """Two ensure_schema calls succeed; the second is a no-op."""
     await lance_client.ensure_schema()
     # success: returns None (typed-errors contract)
@@ -95,9 +91,7 @@ async def test_drop_chunks_table_is_idempotent_on_missing(
     assert await lance_client.drop_chunks_table() is None
 
 
-async def test_write_chunks_appends_rows(
-    lance_client: Any, clean_lance: None
-) -> None:
+async def test_write_chunks_appends_rows(lance_client: Any, clean_lance: None) -> None:
     """write_chunks adds the rows to the table; row count reflects
     the append."""
     await lance_client.ensure_schema()
@@ -217,10 +211,12 @@ async def test_update_doc_metadata_rewrites_doc_level_fields(
     """update_doc_metadata changes the doc-level columns (title /
     year / venue / etc.) on every chunk row for the doc."""
     await lance_client.ensure_schema()
-    await lance_client.write_chunks([
-        _synthetic_chunk(0, "Original title chunk."),
-        _synthetic_chunk(1, "Same doc, second chunk."),
-    ])
+    await lance_client.write_chunks(
+        [
+            _synthetic_chunk(0, "Original title chunk."),
+            _synthetic_chunk(1, "Same doc, second chunk."),
+        ]
+    )
 
     new_fields = {
         "title": "Updated Title",
@@ -229,9 +225,7 @@ async def test_update_doc_metadata_rewrites_doc_level_fields(
         "metadata_status": "enriched",
     }
     # success: returns None (typed-errors contract)
-    assert await lance_client.update_doc_metadata(
-        SYNTHETIC_DOC_ID, new_fields
-    ) is None
+    assert await lance_client.update_doc_metadata(SYNTHETIC_DOC_ID, new_fields) is None
 
     rows = await lance_client.get_chunks_by_doc_id(SYNTHETIC_DOC_ID)
     assert all(r["title"] == "Updated Title" for r in rows)
@@ -247,10 +241,12 @@ async def test_ensure_indexes_below_threshold_returns_true_without_failure(
     waits for the row threshold. Either way the call returns None."""
     await lance_client.ensure_schema()
     # Write just a few chunks — below the IVF_PQ training threshold.
-    await lance_client.write_chunks([
-        _synthetic_chunk(0, "Tiny corpus."),
-        _synthetic_chunk(1, "Tiny corpus 2."),
-    ])
+    await lance_client.write_chunks(
+        [
+            _synthetic_chunk(0, "Tiny corpus."),
+            _synthetic_chunk(1, "Tiny corpus 2."),
+        ]
+    )
 
     # success: returns None (typed-errors contract)
     assert await lance_client.ensure_indexes() is None

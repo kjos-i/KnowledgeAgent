@@ -67,7 +67,6 @@ from knowledge_agent.kg.ontology_lifecycle import (  # noqa: E402
     import_ontology_plan,
 )
 
-
 ONTOLOGY = "eco"
 
 
@@ -82,15 +81,11 @@ async def main() -> None:
             "import step. Proceeding to inspection + cleanup."
         )
     else:
-        bail_if_not_confirmed(
-            f"Download + import {ONTOLOGY!r} into Neo4j now?"
-        )
+        bail_if_not_confirmed(f"Download + import {ONTOLOGY!r} into Neo4j now?")
         result = await import_ontology_execute(plan)
         print_result("import_ontology_execute", result)
         if not result.import_ok:
-            print(
-                f"\nImport failed. Check the result above + Neo4j logs."
-            )
+            print("\nImport failed. Check the result above + Neo4j logs.")
             sys.exit(1)
 
     header("STEP 2: inspect in Neo4j Browser")
@@ -104,10 +99,7 @@ async def main() -> None:
 
     input("\nPress Enter when you're done inspecting...")
 
-    if confirm_no_default(
-        f"Delete {ONTOLOGY!r} from Neo4j now? "
-        "(removes terms + their edges)"
-    ):
+    if confirm_no_default(f"Delete {ONTOLOGY!r} from Neo4j now? (removes terms + their edges)"):
         del_plan = await delete_ontology_plan(ONTOLOGY)
         print_plan(f"delete_ontology_plan({ONTOLOGY!r})", del_plan)
         if del_plan.is_imported:

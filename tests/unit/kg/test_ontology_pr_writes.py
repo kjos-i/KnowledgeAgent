@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from unittest.mock import patch
 
 import pytest
-from unittest.mock import patch, AsyncMock
 
 from knowledge_agent.config import Settings
 from knowledge_agent.kg import ontology_pr_writes
@@ -37,7 +37,7 @@ class RecordingSession:
             return self.canned_results[idx]
         return _RecordingResult()
 
-    async def __aenter__(self) -> "RecordingSession":
+    async def __aenter__(self) -> RecordingSession:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -55,7 +55,8 @@ class RecordingDriver:
         idx = len(self.sessions)
         canned = (
             self.canned_results_per_session[idx]
-            if idx < len(self.canned_results_per_session) else []
+            if idx < len(self.canned_results_per_session)
+            else []
         )
         sess = RecordingSession(raise_on_run=self.raise_on_run, canned_results=canned)
         self.sessions.append(sess)
@@ -84,8 +85,10 @@ def _client_with_driver(driver: RecordingDriver) -> Neo4jClient:
 
 def _term(id_: str, label: str, synonyms=(), parents=()) -> OntologyTerm:
     return OntologyTerm(
-        id=id_, label=label,
-        synonyms=tuple(synonyms), parents=tuple(parents),
+        id=id_,
+        label=label,
+        synonyms=tuple(synonyms),
+        parents=tuple(parents),
         definition=None,
     )
 
@@ -96,12 +99,16 @@ def test_domain_tags_declared():
 
 
 async def test_is_imported_true_when_query_returns_present():
-    driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
+    driver = RecordingDriver(
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
+    )
     assert await ontology_pr_writes.is_imported(_client_with_driver(driver)) is True
 
 
 async def test_is_imported_false_when_query_returns_no_nodes():
-    driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]])
+    driver = RecordingDriver(
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]]
+    )
     assert await ontology_pr_writes.is_imported(_client_with_driver(driver)) is False
 
 
@@ -112,7 +119,9 @@ async def test_is_imported_propagates_driver_exception():
 
 
 async def test_is_imported_query_uses_term_label():
-    driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
+    driver = RecordingDriver(
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
+    )
     client = _client_with_driver(driver)
     await ontology_pr_writes.is_imported(client)
     cypher, _ = driver.sessions[0].calls[0]
@@ -149,8 +158,14 @@ async def test_write_terms_node_query_uses_multilabel_and_id_carries_prefix():
     cypher, params = driver.sessions[0].calls[0]
     assert ":OntologyTerm" in cypher
     assert ":PRTerm" in cypher
-    assert params["rows"] == [{"id": "PR:000000123", "label": "Cytochrome P450",
-                               "synonyms": ["protein 1"], "definition": None}]
+    assert params["rows"] == [
+        {
+            "id": "PR:000000123",
+            "label": "Cytochrome P450",
+            "synonyms": ["protein 1"],
+            "definition": None,
+        }
+    ]
 
 
 async def test_write_terms_edge_query_uses_is_a_rel():
@@ -169,11 +184,14 @@ async def test_write_terms_propagates_driver_exception():
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     with pytest.raises(RuntimeError, match="boom"):
         await ontology_pr_writes.write_terms(
-            _client_with_driver(driver), [_term("PR:000000001", "protein")])
+            _client_with_driver(driver), [_term("PR:000000001", "protein")]
+        )
 
 
 async def test_import_short_circuits_when_already_imported():
-    driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
+    driver = RecordingDriver(
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
+    )
     with patch("knowledge_agent.kg.ontology_writes.ensure_cached") as mc:
         assert await ontology_pr_writes.import_pr(_client_with_driver(driver), force=False) is False
     mc.assert_not_called()
@@ -183,8 +201,10 @@ async def test_import_force_drops_then_reimports():
     driver = RecordingDriver()
     with (
         patch("knowledge_agent.kg.ontology_writes.ensure_cached", return_value="/fake/pr.obo"),
-        patch("knowledge_agent.kg.ontology_pr_writes._read_and_extract",
-              return_value=[_term("PR:000000001", "protein")]),
+        patch(
+            "knowledge_agent.kg.ontology_pr_writes._read_and_extract",
+            return_value=[_term("PR:000000001", "protein")],
+        ),
     ):
         assert await ontology_pr_writes.import_pr(_client_with_driver(driver), force=True) is True
     assert len(driver.sessions) == 2
@@ -194,7 +214,9 @@ async def test_import_force_drops_then_reimports():
 
 
 async def test_import_aborts_on_zero_terms():
-    driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]])
+    driver = RecordingDriver(
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]]
+    )
     with (
         patch("knowledge_agent.kg.ontology_writes.ensure_cached", return_value="/fake/pr.obo"),
         patch("knowledge_agent.kg.ontology_pr_writes._read_and_extract", return_value=[]),
@@ -204,11 +226,17 @@ async def test_import_aborts_on_zero_terms():
 
 
 async def test_import_propagates_download_exception():
-    driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]])
-    with patch("knowledge_agent.kg.ontology_writes.ensure_cached",
-               side_effect=RuntimeError("network down")):
-        with pytest.raises(RuntimeError, match="network down"):
-            await ontology_pr_writes.import_pr(_client_with_driver(driver), force=False)
+    driver = RecordingDriver(
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]]
+    )
+    with (
+        patch(
+            "knowledge_agent.kg.ontology_writes.ensure_cached",
+            side_effect=RuntimeError("network down"),
+        ),
+        pytest.raises(RuntimeError, match="network down"),
+    ):
+        await ontology_pr_writes.import_pr(_client_with_driver(driver), force=False)
 
 
 async def test_delete_imported_runs_one_detach_delete_query():
@@ -226,7 +254,9 @@ async def test_delete_imported_propagates_driver_exception():
 
 
 async def test_client_is_imported_delegates_to_module():
-    driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
+    driver = RecordingDriver(
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
+    )
     assert await _client_with_driver(driver).is_pr_imported() is True
 
 
@@ -240,7 +270,9 @@ async def test_client_delete_delegates_to_module():
 
 
 async def test_client_import_delegates_to_module():
-    driver = RecordingDriver(canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]])
+    driver = RecordingDriver(
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
+    )
     client = _client_with_driver(driver)
     with patch("knowledge_agent.kg.ontology_writes.ensure_cached") as mc:
         assert await client.import_pr(force=False) is False

@@ -26,6 +26,7 @@ updates a shared status text.
 Diagnostics fetch deferred to `build()` (first show) per the GUI
 view-startup feedback rule: no work in `_create_controls`.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -70,6 +71,9 @@ class AppTab:
 
     def __init__(self, app: GuiApp) -> None:
         self.app = app
+        # Strong refs to fire-and-forget background tasks so the event
+        # loop doesn't GC them mid-flight (see `_spawn` uses below).
+        self._bg_tasks: set[asyncio.Task] = set()
         self.status: ft.Text | None = None
         self.restore_last_corpus_checkbox: ft.Checkbox | None = None
         self.keep_loaded_checkbox: ft.Checkbox | None = None
@@ -115,7 +119,9 @@ class AppTab:
         self.chips_row = ft.Row(
             controls=[
                 ft.Text(
-                    "(running...)", italic=True, size=11,
+                    "(running...)",
+                    italic=True,
+                    size=11,
                     color=ft.Colors.GREY_500,
                 ),
             ],
@@ -134,30 +140,42 @@ class AppTab:
         # (switch active corpus) or Library → Create New Dataset (add
         # a new corpus).
         self.active_corpus_text = ft.Text(
-            "(loading…)", size=12,
-            color=ft.Colors.WHITE, selectable=True,
+            "(loading…)",
+            size=12,
+            color=ft.Colors.WHITE,
+            selectable=True,
         )
         self.neo4j_uri_text = ft.Text(
-            "(loading…)", size=12,
-            color=ft.Colors.WHITE, selectable=True,
+            "(loading…)",
+            size=12,
+            color=ft.Colors.WHITE,
+            selectable=True,
         )
         self.neo4j_user_text = ft.Text(
-            "(loading…)", size=12,
-            color=ft.Colors.WHITE, selectable=True,
+            "(loading…)",
+            size=12,
+            color=ft.Colors.WHITE,
+            selectable=True,
         )
         self.lancedb_path_text = ft.Text(
-            "(loading…)", size=12,
-            color=ft.Colors.WHITE, selectable=True,
+            "(loading…)",
+            size=12,
+            color=ft.Colors.WHITE,
+            selectable=True,
         )
         # Tuning knobs — also read-only (backend Settings defaults;
         # override via env vars).
         self.pool_size_text = ft.Text(
-            "(loading…)", size=12,
-            color=ft.Colors.WHITE, selectable=True,
+            "(loading…)",
+            size=12,
+            color=ft.Colors.WHITE,
+            selectable=True,
         )
         self.acq_timeout_text = ft.Text(
-            "(loading…)", size=12,
-            color=ft.Colors.WHITE, selectable=True,
+            "(loading…)",
+            size=12,
+            color=ft.Colors.WHITE,
+            selectable=True,
         )
 
     # ----- public API -------------------------------------------------------
@@ -175,7 +193,9 @@ class AppTab:
             except RuntimeError:
                 pass
             else:
-                asyncio.create_task(self._refresh_diagnostics())
+                task = asyncio.create_task(self._refresh_diagnostics())
+                self._bg_tasks.add(task)
+                task.add_done_callback(self._bg_tasks.discard)
 
         return ft.Column(
             scroll=ft.ScrollMode.AUTO,
@@ -193,13 +213,16 @@ class AppTab:
                 ft.Text("Diagnostics", weight=ft.FontWeight.BOLD),
                 ft.Text(
                     _DEBUG_BLURB,
-                    size=11, color=ft.Colors.GREY_500, italic=True,
+                    size=11,
+                    color=ft.Colors.GREY_500,
+                    italic=True,
                 ),
                 self.debug_mode_checkbox,
                 ft.Container(height=8),
                 ft.Text(
                     "System health — Neo4j, LanceDB, active provider keys:",
-                    size=11, color=ft.Colors.GREY_400,
+                    size=11,
+                    color=ft.Colors.GREY_400,
                 ),
                 self.chips_row,
                 ft.Row(controls=[self.rerun_button]),
@@ -211,7 +234,9 @@ class AppTab:
                 ),
                 ft.Text(
                     _CONNECTION_BLURB,
-                    size=11, color=ft.Colors.GREY_500, italic=True,
+                    size=11,
+                    color=ft.Colors.GREY_500,
+                    italic=True,
                 ),
                 _kv_row("Active corpus", self.active_corpus_text),
                 _kv_row("Neo4j URI", self.neo4j_uri_text),
@@ -219,7 +244,8 @@ class AppTab:
                 _kv_row("LanceDB path", self.lancedb_path_text),
                 _kv_row("Connection pool size", self.pool_size_text),
                 _kv_row(
-                    "Connection acquisition timeout", self.acq_timeout_text,
+                    "Connection acquisition timeout",
+                    self.acq_timeout_text,
                 ),
                 # ---- Shared status text --------------------------------
                 self.status,
@@ -230,15 +256,10 @@ class AppTab:
 
     def on_restore_last_corpus_changed(self, e: ft.Event) -> None:
         """Persist restore_last_corpus, with rollback on save failure."""
-        if (
-            self.status is None
-            or self.restore_last_corpus_checkbox is None
-        ):
+        if self.status is None or self.restore_last_corpus_checkbox is None:
             return
         previous = self.app.gui_config.restore_last_corpus
-        self.app.gui_config.restore_last_corpus = bool(
-            self.restore_last_corpus_checkbox.value
-        )
+        self.app.gui_config.restore_last_corpus = bool(self.restore_last_corpus_checkbox.value)
         try:
             save_config(self.app.gui_config)
         except ConfigError as exc:
@@ -259,9 +280,7 @@ class AppTab:
         if self.status is None or self.keep_loaded_checkbox is None:
             return
         previous = self.app.gui_config.keep_loaded_file_on_clear
-        self.app.gui_config.keep_loaded_file_on_clear = bool(
-            self.keep_loaded_checkbox.value
-        )
+        self.app.gui_config.keep_loaded_file_on_clear = bool(self.keep_loaded_checkbox.value)
         try:
             save_config(self.app.gui_config)
         except ConfigError as exc:
@@ -292,9 +311,7 @@ class AppTab:
             self.app.page.update()
             return
         self.status.value = (
-            "diagnostics on"
-            if self.app.gui_config.debug_mode
-            else "diagnostics off"
+            "diagnostics on" if self.app.gui_config.debug_mode else "diagnostics off"
         )
         self.app.page.update()
 
@@ -312,15 +329,16 @@ class AppTab:
         try:
             report = await system_status()
             self.chips_row.controls = [
-                _status_chip(c.name, c.ok, c.detail)
-                for c in report.components
+                _status_chip(c.name, c.ok, c.detail) for c in report.components
             ]
         except Exception as exc:
             logger.warning("system_status() failed: %r", exc)
             self.chips_row.controls = [
                 ft.Text(
                     _missing_field_message(exc),
-                    size=12, color=ft.Colors.AMBER_300, italic=True,
+                    size=12,
+                    color=ft.Colors.AMBER_300,
+                    italic=True,
                 ),
             ]
         finally:
@@ -342,8 +360,7 @@ class AppTab:
         cfg = self.app.gui_config
         if self.active_corpus_text is not None:
             self.active_corpus_text.value = (
-                cfg.active_corpus_name
-                or "(no corpus — create one in Library)"
+                cfg.active_corpus_name or "(no corpus — create one in Library)"
             )
         if self.neo4j_uri_text is not None:
             self.neo4j_uri_text.value = cfg.neo4j_uri
@@ -369,22 +386,16 @@ class AppTab:
             self.pool_size_text.value = str(
                 settings.neo4j_max_connection_pool_size,
             )
-            self.acq_timeout_text.value = (
-                f"{settings.neo4j_connection_acquisition_timeout}s"
-            )
+            self.acq_timeout_text.value = f"{settings.neo4j_connection_acquisition_timeout}s"
         except Exception as exc:
             logger.warning(
-                "connection display: settings load failed; falling "
-                "back to Field defaults: %r", exc,
+                "connection display: settings load failed; falling back to Field defaults: %r",
+                exc,
             )
             from knowledge_agent.config import Settings
 
-            pool_default = Settings.model_fields[
-                "neo4j_max_connection_pool_size"
-            ].default
-            acq_default = Settings.model_fields[
-                "neo4j_connection_acquisition_timeout"
-            ].default
+            pool_default = Settings.model_fields["neo4j_max_connection_pool_size"].default
+            acq_default = Settings.model_fields["neo4j_connection_acquisition_timeout"].default
             self.pool_size_text.value = f"{pool_default} (default)"
             self.acq_timeout_text.value = f"{acq_default}s (default)"
 
@@ -403,18 +414,10 @@ class AppTab:
 # clearer "missing X — set in Y tab" messages instead of raw pydantic errors.
 # NEO4J connection params all point at Library now — they're per-corpus.
 _FIELD_GUIDANCE: dict[str, str] = {
-    "neo4j_password": (
-        "Neo4j password not set — create a corpus in Library"
-    ),
-    "neo4j_uri": (
-        "Neo4j URI not set — create a corpus in Library"
-    ),
-    "neo4j_user": (
-        "Neo4j user not set — create a corpus in Library"
-    ),
-    "lancedb_path": (
-        "LanceDB path not set — create a corpus in Library"
-    ),
+    "neo4j_password": ("Neo4j password not set — create a corpus in Library"),
+    "neo4j_uri": ("Neo4j URI not set — create a corpus in Library"),
+    "neo4j_user": ("Neo4j user not set — create a corpus in Library"),
+    "lancedb_path": ("LanceDB path not set — create a corpus in Library"),
 }
 
 
@@ -454,13 +457,17 @@ def _kv_row(label: str, value: object) -> ft.Control:
     else:
         value_widget = ft.Text(
             str(value),
-            size=12, color=ft.Colors.WHITE, selectable=True,
+            size=12,
+            color=ft.Colors.WHITE,
+            selectable=True,
         )
     return ft.Row(
         controls=[
             ft.Text(
                 f"{label}:",
-                size=12, color=ft.Colors.GREY_400, width=220,
+                size=12,
+                color=ft.Colors.GREY_400,
+                width=220,
             ),
             value_widget,
         ],

@@ -169,9 +169,7 @@ async def main() -> None:
         first_path.rename(moved_path)
         plan = await bulk_ops.sync_plan(corpus_folder, "Document", "Paper")
         _print_plan("sync_plan (expect MOVED after rename)", plan)
-        assert plan.n_moved == 1, (
-            f"expected MOVED=1 after rename, got moved={plan.n_moved}"
-        )
+        assert plan.n_moved == 1, f"expected MOVED=1 after rename, got moved={plan.n_moved}"
         result = await bulk_ops.sync_execute(plan, config)
         _print_result("sync_execute", result)
 
@@ -195,10 +193,7 @@ async def main() -> None:
 
     # 7. PAUSE FOR INSPECTION + OPTIONAL CLEANUP -------------------------
     print("\n---")
-    print(
-        "Smoke complete. Doc is already deleted. "
-        "MeSH is still imported in Neo4j."
-    )
+    print("Smoke complete. Doc is already deleted. MeSH is still imported in Neo4j.")
     try:
         input(
             "Press Enter to delete MeSH and finish cleanup "

@@ -16,7 +16,7 @@
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.7.4
+    rev: v0.15.13
     hooks:
       # Lint — same checks as `ruff check .`. The rules + ignores live in
       # `[tool.ruff.lint]` in pyproject.toml so there's one source of truth.

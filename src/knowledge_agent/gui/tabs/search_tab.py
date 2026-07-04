@@ -9,15 +9,16 @@ the full window for dense data tables; Search keeps the side-by-side
 split because reading the result alongside composing the next query
 is the core workflow.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import flet as ft
-
 from knowledge_agent.gui._widgets import ResizableSplit
 
 if TYPE_CHECKING:
+    import flet as ft
+
     from knowledge_agent.gui.app import GuiApp
 
 

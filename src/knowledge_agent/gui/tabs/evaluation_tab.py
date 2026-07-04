@@ -13,15 +13,16 @@ wires it into the UI after that ships:
 
 Top-level tab because eval-result tables need the full window.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import flet as ft
-
 from knowledge_agent.gui.views._frame import empty_state, view_with_header
 
 if TYPE_CHECKING:
+    import flet as ft
+
     from knowledge_agent.gui.app import GuiApp
 
 

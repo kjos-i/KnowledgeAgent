@@ -25,6 +25,7 @@ persisted to disk. Persist to GuiConfig if user demand justifies it.
 
 Close-button / collapse-to-strip pattern is deferred — see [[gui-slice3-library-design]]'s open questions for the discussion.
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -32,7 +33,6 @@ from typing import Literal
 import flet as ft
 
 from knowledge_agent.gui._styles import FRAME_BORDER_COLOR
-
 
 Orientation = Literal["horizontal", "vertical"]
 
@@ -68,7 +68,8 @@ class ResizableSplit:
         """Assemble first + divider + second into a Row or Column."""
         if self.orientation == "horizontal":
             self._first_container = ft.Container(
-                content=self.first, width=self._current_size,
+                content=self.first,
+                width=self._current_size,
             )
             second_container = ft.Container(content=self.second, expand=True)
             divider = self._build_horizontal_divider()
@@ -80,7 +81,8 @@ class ResizableSplit:
             )
         # vertical
         self._first_container = ft.Container(
-            content=self.first, height=self._current_size,
+            content=self.first,
+            height=self._current_size,
         )
         second_container = ft.Container(content=self.second, expand=True)
         divider = self._build_vertical_divider()
@@ -118,7 +120,9 @@ class ResizableSplit:
     def _on_horizontal_drag(self, e: ft.DragUpdateEvent) -> None:
         delta = e.primary_delta or 0
         new_size = _clamp(
-            int(self._current_size + delta), self._min_size, self._max_size,
+            int(self._current_size + delta),
+            self._min_size,
+            self._max_size,
         )
         if new_size == self._current_size or self._first_container is None:
             return
@@ -129,7 +133,9 @@ class ResizableSplit:
     def _on_vertical_drag(self, e: ft.DragUpdateEvent) -> None:
         delta = e.primary_delta or 0
         new_size = _clamp(
-            int(self._current_size + delta), self._min_size, self._max_size,
+            int(self._current_size + delta),
+            self._min_size,
+            self._max_size,
         )
         if new_size == self._current_size or self._first_container is None:
             return

@@ -28,48 +28,45 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from knowledge_agent.config import get_settings
 from knowledge_agent.entity_extractors import (
     extract_union,
     validate_entity_types,
 )
-from knowledge_agent.entity_extractors.base import Mention
 from knowledge_agent.entity_extractors.extractor_lifecycle import (
     EXTRACTOR_REGISTRY,
     WeightsNotDownloadedError,
     is_extractor_ready,
 )
-from knowledge_agent.kg.reconcile import (
-    reconcile_cross_doc_to_config,
-    reconcile_cross_doc_xrefs_to_config,
-    reconcile_entities_to_config,
-    reconcile_ontologies_to_config,
-    reconcile_triples_to_config,
-)
 from knowledge_agent.errors import ErrorDetail
-from knowledge_agent.ingestion.embed import embed_chunks, embed_texts
+from knowledge_agent.ingestion import triples_extractor
+from knowledge_agent.ingestion.embed import embed_chunks
 from knowledge_agent.ingestion.ids import compute_doc_id, make_chunk_id
 from knowledge_agent.ingestion.metadata import (
     extract_doi_candidates,
-    resolve_doi,
     resolve_metadata,
 )
+from knowledge_agent.ingestion.metadata_resolution import (
+    _build_authors_display as _build_authors_display,
+)
+
 # OpenAlex resolution lives in its own module since 2026-06-29 — the
 # orchestrator (this file) now only USES these functions; the
-# implementations live next door. Re-exported below for backward
-# compatibility so `pipeline.resolve_openalex(...)` / `lookup_known_doi`
-# still work (bulk_ops + tests reach them through pipeline).
+# implementations live next door. Re-exported below (via redundant
+# alias) for backward compatibility so `pipeline.resolve_openalex(...)`,
+# `lookup_known_doi` and `_build_authors_display` still work — bulk_ops
+# + tests reach them through pipeline.
 from knowledge_agent.ingestion.metadata_resolution import (
-    _AUTHORS_DISPLAY_MAX,
-    _apply_resolved_work,
-    _build_authors_display,
     _doc_metadata_fields_from_work,
-    lookup_known_doi,
-    resolve_openalex,
 )
-from knowledge_agent.ingestion import triples_extractor
+from knowledge_agent.ingestion.metadata_resolution import (
+    lookup_known_doi as lookup_known_doi,
+)
+from knowledge_agent.ingestion.metadata_resolution import (
+    resolve_openalex as resolve_openalex,
+)
 from knowledge_agent.ingestion.parse import (
     ParsedChunk,
     parse_document,
@@ -77,17 +74,23 @@ from knowledge_agent.ingestion.parse import (
 )
 from knowledge_agent.kg.client import get_kg_client
 from knowledge_agent.kg.corpus_config import CorpusConfig
-from knowledge_agent.kg.openalex_writes import (
-    _clean_doi_for_storage,
-    _extract_openalex_id,
+from knowledge_agent.kg.reconcile import (
+    reconcile_cross_doc_to_config,
+    reconcile_cross_doc_xrefs_to_config,
+    reconcile_entities_to_config,
+    reconcile_ontologies_to_config,
+    reconcile_triples_to_config,
 )
 from knowledge_agent.kg.schema import (
     MAIN_LABELS,
     PAPER_LABEL,
     SUB_LABEL_TO_MAIN,
 )
-from knowledge_agent.kg.triples_writes import ExtractedTriple
 from knowledge_agent.search.client import get_search_client
+
+if TYPE_CHECKING:
+    from knowledge_agent.entity_extractors.base import Mention
+    from knowledge_agent.kg.triples_writes import ExtractedTriple
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +108,9 @@ async def _try_kg_write(coro_fn, *args, log_prefix: str, doc_id: str):
     except Exception as exc:
         logger.warning(
             "ingest_document (%s): %s failed: %r",
-            doc_id, log_prefix, exc,
+            doc_id,
+            log_prefix,
+            exc,
         )
         return False, ErrorDetail.from_exception(exc)
 
@@ -213,15 +218,11 @@ async def delete_doc(doc_id: str) -> bool:
     # Sequential awaits preserve the load-bearing ordering above; do
     # NOT change to asyncio.gather without re-checking that constraint.
     results = [
-        await _safe("lancedb.delete_chunks",
-                    search_client.delete_chunks_by_doc_id(doc_id)),
+        await _safe("lancedb.delete_chunks", search_client.delete_chunks_by_doc_id(doc_id)),
         await _safe("kg.delete_doc", kg_client.delete_doc(doc_id)),
-        await _safe("kg.delete_chunks",
-                    kg_client.delete_chunks_by_doc_id(doc_id)),
-        await _safe("kg.delete_triples",
-                    kg_client.delete_triples_by_doc_id(doc_id)),
-        await _safe("kg.delete_entities",
-                    kg_client.delete_entities_by_doc_id(doc_id)),
+        await _safe("kg.delete_chunks", kg_client.delete_chunks_by_doc_id(doc_id)),
+        await _safe("kg.delete_triples", kg_client.delete_triples_by_doc_id(doc_id)),
+        await _safe("kg.delete_entities", kg_client.delete_entities_by_doc_id(doc_id)),
     ]
     return all(results)
 
@@ -260,14 +261,10 @@ async def re_embed(doc_id: str, config: CorpusConfig) -> dict[str, Any]:
     try:
         chunk_rows = await search_client.get_chunks_by_doc_id(doc_id)
     except Exception as exc:
-        logger.warning(
-            "re_embed (%s): LanceDB read failed: %r; aborting", doc_id, exc
-        )
+        logger.warning("re_embed (%s): LanceDB read failed: %r; aborting", doc_id, exc)
         return {"embed_ok": False, "lancedb_ok": False, "n_chunks": 0}
     if not chunk_rows:
-        logger.warning(
-            "re_embed (%s): no chunks in LanceDB; nothing to re-embed", doc_id
-        )
+        logger.warning("re_embed (%s): no chunks in LanceDB; nothing to re-embed", doc_id)
         return {"embed_ok": False, "lancedb_ok": False, "n_chunks": 0}
 
     n_chunks = len(chunk_rows)
@@ -299,9 +296,7 @@ async def re_embed(doc_id: str, config: CorpusConfig) -> dict[str, Any]:
         try:
             await search_client.ensure_indexes()
         except Exception as exc:
-            logger.warning(
-                "re_embed (%s): ensure_indexes failed: %r", doc_id, exc
-            )
+            logger.warning("re_embed (%s): ensure_indexes failed: %r", doc_id, exc)
 
     return {
         "embed_ok": True,
@@ -310,9 +305,7 @@ async def re_embed(doc_id: str, config: CorpusConfig) -> dict[str, Any]:
     }
 
 
-async def backfill_chunks(
-    doc_id: str, config: CorpusConfig
-) -> dict[str, Any]:
+async def backfill_chunks(doc_id: str, config: CorpusConfig) -> dict[str, Any]:
     """Re-write KG L5 (`:Chunk`) + downstream layers from existing LanceDB
     chunks. Per-doc partial op.
 
@@ -340,9 +333,7 @@ async def backfill_chunks(
         the entities layer is disabled OR `chunks_ok` is False).
     """
     if not config.layers.chunks:
-        logger.info(
-            "backfill_chunks (%s): chunks layer disabled; skip", doc_id
-        )
+        logger.info("backfill_chunks (%s): chunks layer disabled; skip", doc_id)
         return {"chunks_ok": False, "entities": {}}
 
     search_client = get_search_client()
@@ -351,7 +342,8 @@ async def backfill_chunks(
     except Exception as exc:
         logger.warning(
             "backfill_chunks (%s): LanceDB read failed: %r; aborting",
-            doc_id, exc,
+            doc_id,
+            exc,
         )
         return {"chunks_ok": False, "entities": {}}
     if not chunk_rows:
@@ -384,9 +376,7 @@ async def backfill_chunks(
         await kg_client.write_chunks(doc_id, chunks, main_label, sub_label)
         chunks_ok = True
     except Exception as exc:
-        logger.warning(
-            "backfill_chunks (%s): KG L5 write failed: %r", doc_id, exc
-        )
+        logger.warning("backfill_chunks (%s): KG L5 write failed: %r", doc_id, exc)
         chunks_ok = False
 
     entities_result: dict[str, Any] = {}
@@ -396,9 +386,7 @@ async def backfill_chunks(
     return {"chunks_ok": chunks_ok, "entities": entities_result}
 
 
-async def backfill_entities(
-    doc_id: str, config: CorpusConfig
-) -> dict[str, Any]:
+async def backfill_entities(doc_id: str, config: CorpusConfig) -> dict[str, Any]:
     """Re-extract L6 entities for one doc's existing chunks; re-link L7.
 
     Per-doc partial op. Use when:
@@ -424,11 +412,12 @@ async def backfill_entities(
     """
     if not config.layers.entities:
         logger.info(
-            "backfill_entities (%s): entities layer disabled; skip", doc_id,
+            "backfill_entities (%s): entities layer disabled; skip",
+            doc_id,
         )
         return {"entities_ok": False, "n_mentions": 0, "ontology": {}}
 
-    assert config.entities is not None  # noqa: S101 - guaranteed by config validator
+    assert config.entities is not None
 
     search_client = get_search_client()
     try:
@@ -436,7 +425,8 @@ async def backfill_entities(
     except Exception as exc:
         logger.warning(
             "backfill_entities (%s): LanceDB read failed: %r; aborting",
-            doc_id, exc,
+            doc_id,
+            exc,
         )
         return {"entities_ok": False, "n_mentions": 0, "ontology": {}}
     if not chunk_rows:
@@ -450,9 +440,7 @@ async def backfill_entities(
     try:
         await kg_client.delete_entities_by_doc_id(doc_id)
     except Exception as exc:
-        logger.warning(
-            "backfill_entities (%s): delete_entities failed: %r", doc_id, exc
-        )
+        logger.warning("backfill_entities (%s): delete_entities failed: %r", doc_id, exc)
         return {"entities_ok": False, "n_mentions": 0, "ontology": {}}
 
     extractor_names = config.entities.extractors
@@ -488,7 +476,9 @@ async def backfill_entities(
         except Exception as exc:
             logger.warning(
                 "backfill_entities (%s): extraction failed for chunk %s: %r; skipping",
-                doc_id, chunk_id, exc,
+                doc_id,
+                chunk_id,
+                exc,
             )
             mentions = []
         chunk_mentions.append((chunk_id, mentions))
@@ -498,9 +488,7 @@ async def backfill_entities(
         await kg_client.write_entities(doc_id, chunk_mentions)
         entities_ok = True
     except Exception as exc:
-        logger.warning(
-            "backfill_entities (%s): write_entities failed: %r", doc_id, exc
-        )
+        logger.warning("backfill_entities (%s): write_entities failed: %r", doc_id, exc)
         entities_ok = False
 
     ontology_results: dict[str, dict[str, Any]] = {}
@@ -526,9 +514,7 @@ async def backfill_entities(
     }
 
 
-async def backfill_ontology(
-    doc_id: str, config: CorpusConfig
-) -> dict[str, dict[str, Any]]:
+async def backfill_ontology(doc_id: str, config: CorpusConfig) -> dict[str, dict[str, Any]]:
     """Re-run L7 ontology linking for one doc's existing entities.
 
     Per-doc partial op. Use when:
@@ -571,7 +557,8 @@ async def backfill_ontology(
         except Exception as exc:
             logger.warning(
                 "backfill_ontology (%s): ensure_imported failed: %r",
-                ontology_name, exc,
+                ontology_name,
+                exc,
             )
             import_ok = False
 
@@ -590,7 +577,8 @@ async def backfill_ontology(
             except Exception as exc:
                 logger.warning(
                     "backfill_ontology (%s): linking pass failed: %r",
-                    ontology_name, exc,
+                    ontology_name,
+                    exc,
                 )
 
         results[ontology_name] = {
@@ -601,9 +589,7 @@ async def backfill_ontology(
     return results
 
 
-async def backfill_triples(
-    doc_id: str, config: CorpusConfig
-) -> dict[str, Any]:
+async def backfill_triples(doc_id: str, config: CorpusConfig) -> dict[str, Any]:
     """Re-extract L8 triples for one doc from chunk text + L6 entities.
 
     Per-doc partial op. Use when:
@@ -640,7 +626,8 @@ async def backfill_triples(
     """
     if not config.layers.triples:
         logger.info(
-            "backfill_triples (%s): triples layer disabled; skip", doc_id,
+            "backfill_triples (%s): triples layer disabled; skip",
+            doc_id,
         )
         return {"triples_ok": False, "n_triples": 0}
 
@@ -650,7 +637,8 @@ async def backfill_triples(
     except Exception as exc:
         logger.warning(
             "backfill_triples (%s): LanceDB read failed: %r; aborting",
-            doc_id, exc,
+            doc_id,
+            exc,
         )
         return {"triples_ok": False, "n_triples": 0}
     if not chunk_rows:
@@ -669,7 +657,8 @@ async def backfill_triples(
     except Exception as exc:
         logger.warning(
             "backfill_triples (%s): get_entities_by_chunk failed: %r",
-            doc_id, exc,
+            doc_id,
+            exc,
         )
         return {"triples_ok": False, "n_triples": 0}
 
@@ -677,9 +666,7 @@ async def backfill_triples(
     try:
         await kg_client.delete_triples_by_doc_id(doc_id)
     except Exception as exc:
-        logger.warning(
-            "backfill_triples (%s): delete_triples failed: %r", doc_id, exc
-        )
+        logger.warning("backfill_triples (%s): delete_triples failed: %r", doc_id, exc)
         return {"triples_ok": False, "n_triples": 0}
 
     chunk_triples: list[tuple[str, list[ExtractedTriple]]] = []
@@ -700,7 +687,9 @@ async def backfill_triples(
         except Exception as exc:
             logger.warning(
                 "backfill_triples (%s): extraction failed for chunk %s: %r; skipping",
-                doc_id, chunk_id, exc,
+                doc_id,
+                chunk_id,
+                exc,
             )
             triples = []
         chunk_triples.append((chunk_id, triples))
@@ -710,17 +699,13 @@ async def backfill_triples(
         await kg_client.write_triples(doc_id, chunk_triples)
         triples_ok = True
     except Exception as exc:
-        logger.warning(
-            "backfill_triples (%s): write_triples failed: %r", doc_id, exc
-        )
+        logger.warning("backfill_triples (%s): write_triples failed: %r", doc_id, exc)
         triples_ok = False
 
     return {"triples_ok": triples_ok, "n_triples": n_triples}
 
 
-async def backfill_cross_doc(
-    doc_id: str, config: CorpusConfig
-) -> dict[str, Any]:
+async def backfill_cross_doc(doc_id: str, config: CorpusConfig) -> dict[str, Any]:
     """Wipe + rewrite L9 `:RELATED_TO` edges for one doc.
 
     Per-doc partial op. Use when:
@@ -751,7 +736,8 @@ async def backfill_cross_doc(
     """
     if not config.layers.cross_doc:
         logger.info(
-            "backfill_cross_doc (%s): cross_doc layer disabled; skip", doc_id,
+            "backfill_cross_doc (%s): cross_doc layer disabled; skip",
+            doc_id,
         )
         return {"cross_doc_ok": False, "n_edges": 0}
 
@@ -761,15 +747,15 @@ async def backfill_cross_doc(
         n = await kg_client.recompute_cross_doc_edges(doc_id, threshold)
     except Exception as exc:
         logger.warning(
-            "backfill_cross_doc (%s): recompute failed: %r", doc_id, exc,
+            "backfill_cross_doc (%s): recompute failed: %r",
+            doc_id,
+            exc,
         )
         return {"cross_doc_ok": False, "n_edges": 0}
     return {"cross_doc_ok": True, "n_edges": n}
 
 
-async def backfill_cross_doc_xrefs(
-    doc_id: str, config: CorpusConfig
-) -> dict[str, Any]:
+async def backfill_cross_doc_xrefs(doc_id: str, config: CorpusConfig) -> dict[str, Any]:
     """Wipe + rewrite L10 `:RELATED_BY_XREF` edges for one doc.
 
     Per-doc partial op. Use when:
@@ -806,8 +792,8 @@ async def backfill_cross_doc_xrefs(
     """
     if not config.layers.cross_doc_xrefs:
         logger.info(
-            "backfill_cross_doc_xrefs (%s): cross_doc_xrefs layer "
-            "disabled; skip", doc_id,
+            "backfill_cross_doc_xrefs (%s): cross_doc_xrefs layer disabled; skip",
+            doc_id,
         )
         return {"cross_doc_xrefs_ok": False, "n_edges": 0}
 
@@ -818,7 +804,8 @@ async def backfill_cross_doc_xrefs(
     except Exception as exc:
         logger.warning(
             "backfill_cross_doc_xrefs (%s): recompute failed: %r",
-            doc_id, exc,
+            doc_id,
+            exc,
         )
         return {"cross_doc_xrefs_ok": False, "n_edges": 0}
     return {"cross_doc_xrefs_ok": True, "n_edges": n}
@@ -873,9 +860,7 @@ async def ingest_document(
 
     # ---- 0. Validate inputs before any side effects.
     if main_label not in MAIN_LABELS:
-        raise ValueError(
-            f"main_label must be one of {MAIN_LABELS}, got {main_label!r}"
-        )
+        raise ValueError(f"main_label must be one of {MAIN_LABELS}, got {main_label!r}")
     if sub_label is not None:
         if sub_label not in config.allowed_types:
             raise ValueError(
@@ -886,8 +871,7 @@ async def ingest_document(
         expected_main = SUB_LABEL_TO_MAIN.get(sub_label)
         if expected_main != main_label:
             raise ValueError(
-                f"sub_label {sub_label!r} belongs under "
-                f":{expected_main}, not :{main_label}."
+                f"sub_label {sub_label!r} belongs under :{expected_main}, not :{main_label}."
             )
     ext = path.suffix.lower().lstrip(".")
     if ext not in supported_extensions():
@@ -896,7 +880,7 @@ async def ingest_document(
             f"Supported: {sorted(supported_extensions())}."
         )
     if config.layers.entities:
-        assert config.entities is not None  # noqa: S101
+        assert config.entities is not None
         # Multi-extractor: every selected adapter must pass the same
         # kickoff checks. Loop over the ordered `extractors` list so a
         # misconfigured or not-yet-downloaded adapter anywhere in the
@@ -915,10 +899,7 @@ async def ingest_document(
                 continue
             entry = EXTRACTOR_REGISTRY.get(ex_name, {})
             provenance = entry.get("provenance")
-            model_name = (
-                provenance.model_name if provenance is not None
-                else "<bundled>"
-            )
+            model_name = provenance.model_name if provenance is not None else "<bundled>"
             if (
                 not entry.get("bundled")
                 and callable(entry.get("is_installed_fn"))
@@ -955,7 +936,8 @@ async def ingest_document(
     if wiped_onts:
         logger.info(
             "aingest %s: reconcile wiped disabled ontologies: %s",
-            doc_id[:12], ", ".join(wiped_onts),
+            doc_id[:12],
+            ", ".join(wiped_onts),
         )
     await reconcile_entities_to_config(kg_client, config)
     await reconcile_triples_to_config(kg_client, config)
@@ -969,15 +951,10 @@ async def ingest_document(
     # existing labels are gone. Only touches labels; every other
     # per-doc write still uses the fresh config / chunks / etc.
     if preserve_existing_labels:
-        stored_main, stored_sub = (
-            await kg_client.get_focal_labels_by_doc_id(doc_id)
-        )
-        if stored_main is not None and (
-            stored_main != main_label or stored_sub != sub_label
-        ):
+        stored_main, stored_sub = await kg_client.get_focal_labels_by_doc_id(doc_id)
+        if stored_main is not None and (stored_main != main_label or stored_sub != sub_label):
             logger.info(
-                "aingest %s: preserving existing labels "
-                "(:%s%s) over passed (:%s%s)",
+                "aingest %s: preserving existing labels (:%s%s) over passed (:%s%s)",
                 doc_id[:12],
                 stored_main,
                 f":{stored_sub}" if stored_sub else "",
@@ -1002,7 +979,10 @@ async def ingest_document(
         # LanceDB dir — figures are our artefact, not LanceDB internals.
         figures_dir = settings.lancedb_path.parent / "figures" / doc_id
     chunks = await asyncio.to_thread(
-        parse_document, path, config, figures_dir=figures_dir,
+        parse_document,
+        path,
+        config,
+        figures_dir=figures_dir,
     )
 
     # ---- 2b. Delete stale across BOTH stores ----
@@ -1013,10 +993,10 @@ async def ingest_document(
     # entity orphan GC (the GC uses plain DELETE which errors on
     # entities still connected to surviving L8 edges).
     async def _kg_wipe() -> None:
-        await kg_client.delete_doc(doc_id)                # L1-L4
-        await kg_client.delete_chunks_by_doc_id(doc_id)   # L5
+        await kg_client.delete_doc(doc_id)  # L1-L4
+        await kg_client.delete_chunks_by_doc_id(doc_id)  # L5
         await kg_client.delete_triples_by_doc_id(doc_id)  # L8
-        await kg_client.delete_entities_by_doc_id(doc_id) # L6
+        await kg_client.delete_entities_by_doc_id(doc_id)  # L6
 
     await asyncio.gather(
         search_client.delete_chunks_by_doc_id(doc_id),
@@ -1045,9 +1025,7 @@ async def ingest_document(
         embeddings = await embed_chunks(chunks)
         embed_ok = True
     except Exception as exc:
-        logger.warning(
-            "aingest_document (%s): embed_chunks failed: %r", doc_id, exc
-        )
+        logger.warning("aingest_document (%s): embed_chunks failed: %r", doc_id, exc)
         embed_error = ErrorDetail.from_exception(exc)
 
     # ---- 5. LanceDB write ----
@@ -1056,8 +1034,14 @@ async def ingest_document(
     if embed_ok and embeddings is not None:
         rows = await asyncio.to_thread(
             _build_lance_rows,
-            doc_id, chunks, embeddings, work, metadata_status,
-            main_label, sub_label, path,
+            doc_id,
+            chunks,
+            embeddings,
+            work,
+            metadata_status,
+            main_label,
+            sub_label,
+            path,
         )
         try:
             await search_client.ensure_schema()
@@ -1066,7 +1050,8 @@ async def ingest_document(
         except Exception as exc:
             logger.warning(
                 "aingest_document (%s): LanceDB write failed: %r",
-                doc_id, exc,
+                doc_id,
+                exc,
             )
             lancedb_error = ErrorDetail.from_exception(exc)
         if lancedb_ok and config.optimize_indexes_per_ingest:
@@ -1075,7 +1060,8 @@ async def ingest_document(
             except Exception as exc:
                 logger.warning(
                     "aingest_document (%s): aensure_indexes failed: %r",
-                    doc_id, exc,
+                    doc_id,
+                    exc,
                 )
 
     # ---- 6. KG writes ----
@@ -1084,7 +1070,8 @@ async def ingest_document(
     except Exception as exc:
         logger.warning(
             "aingest_document (%s): aensure_constraints failed: %r",
-            doc_id, exc,
+            doc_id,
+            exc,
         )
 
     # 6a. L1-L4 OpenAlex writes (4 independent writes -> gather)
@@ -1096,27 +1083,35 @@ async def ingest_document(
     kg_venue_error: ErrorDetail | None = None
     kg_topics_ok: bool = False
     kg_topics_error: ErrorDetail | None = None
-    if (
-        sub_label == PAPER_LABEL
-        and config.layers.openalex_papers
-        and work is not None
-    ):
+    if sub_label == PAPER_LABEL and config.layers.openalex_papers and work is not None:
         results = await asyncio.gather(
             _try_kg_write(
-                kg_client.write_citations, doc_id, work,
-                log_prefix="KG L1 citations", doc_id=doc_id,
+                kg_client.write_citations,
+                doc_id,
+                work,
+                log_prefix="KG L1 citations",
+                doc_id=doc_id,
             ),
             _try_kg_write(
-                kg_client.write_authorships, doc_id, work,
-                log_prefix="KG L2 authorships", doc_id=doc_id,
+                kg_client.write_authorships,
+                doc_id,
+                work,
+                log_prefix="KG L2 authorships",
+                doc_id=doc_id,
             ),
             _try_kg_write(
-                kg_client.write_venue, doc_id, work,
-                log_prefix="KG L3 venue", doc_id=doc_id,
+                kg_client.write_venue,
+                doc_id,
+                work,
+                log_prefix="KG L3 venue",
+                doc_id=doc_id,
             ),
             _try_kg_write(
-                kg_client.write_topics, doc_id, work,
-                log_prefix="KG L4 topics", doc_id=doc_id,
+                kg_client.write_topics,
+                doc_id,
+                work,
+                log_prefix="KG L4 topics",
+                doc_id=doc_id,
             ),
         )
         (kg_citations_ok, kg_citations_error) = results[0]
@@ -1129,14 +1124,13 @@ async def ingest_document(
     kg_chunks_error: ErrorDetail | None = None
     if config.layers.chunks:
         try:
-            await kg_client.write_chunks(
-                doc_id, chunks, main_label, sub_label
-            )
+            await kg_client.write_chunks(doc_id, chunks, main_label, sub_label)
             kg_chunks_ok = True
         except Exception as exc:
             logger.warning(
                 "aingest_document (%s): KG L5 write failed: %r",
-                doc_id, exc,
+                doc_id,
+                exc,
             )
             kg_chunks_error = ErrorDetail.from_exception(exc)
 
@@ -1146,7 +1140,7 @@ async def ingest_document(
     n_entity_mentions = 0
     chunk_mentions: list[tuple[str, list[Mention]]] = []
     if config.layers.entities and kg_chunks_ok:
-        assert config.entities is not None  # noqa: S101
+        assert config.entities is not None
         extractor_names = config.entities.extractors
         entity_types = config.entities.entity_types
         entity_types_mode = config.entities.entity_types_mode
@@ -1180,18 +1174,14 @@ async def ingest_document(
                     )
                 except Exception as exc:
                     logger.warning(
-                        "L6: extraction failed for chunk %s: %r; "
-                        "skipping",
-                        chunk_id, exc,
+                        "L6: extraction failed for chunk %s: %r; skipping",
+                        chunk_id,
+                        exc,
                     )
                     mentions = []
             return chunk_id, mentions
 
-        chunk_mentions = list(
-            await asyncio.gather(
-                *(_extract_entities_one(c) for c in chunks)
-            )
-        )
+        chunk_mentions = list(await asyncio.gather(*(_extract_entities_one(c) for c in chunks)))
         n_entity_mentions = sum(len(m) for _, m in chunk_mentions)
         try:
             await kg_client.write_entities(doc_id, chunk_mentions)
@@ -1199,7 +1189,8 @@ async def ingest_document(
         except Exception as exc:
             logger.warning(
                 "aingest_document (%s): KG L6 write failed: %r",
-                doc_id, exc,
+                doc_id,
+                exc,
             )
             kg_entities_error = ErrorDetail.from_exception(exc)
 
@@ -1219,7 +1210,8 @@ async def ingest_document(
             except Exception as exc:
                 logger.warning(
                     "L7 (%s): ensure_imported failed: %r",
-                    ontology_name, exc,
+                    ontology_name,
+                    exc,
                 )
                 import_ok = False
 
@@ -1235,7 +1227,8 @@ async def ingest_document(
                 except Exception as exc:
                     logger.warning(
                         "L7 (%s): linking pass failed: %r",
-                        ontology_name, exc,
+                        ontology_name,
+                        exc,
                     )
 
             kg_ontology_results[ontology_name] = {
@@ -1249,17 +1242,11 @@ async def ingest_document(
     kg_triples_error: ErrorDetail | None = None
     n_triples_written = 0
     if config.layers.triples and kg_entities_ok:
-        sem_l8 = asyncio.Semaphore(
-            settings.pipeline_max_concurrent_chunks
-        )
-        chunk_text_by_id = {
-            make_chunk_id(doc_id, c.chunk_index): c.text for c in chunks
-        }
+        sem_l8 = asyncio.Semaphore(settings.pipeline_max_concurrent_chunks)
+        chunk_text_by_id = {make_chunk_id(doc_id, c.chunk_index): c.text for c in chunks}
 
         async def _extract_triples_one(chunk_id, mentions):
-            entity_vocab = [
-                (m.raw_text.lower(), m.entity_type) for m in mentions
-            ]
+            entity_vocab = [(m.raw_text.lower(), m.entity_type) for m in mentions]
             if not entity_vocab:
                 return chunk_id, []
             async with sem_l8:
@@ -1272,20 +1259,15 @@ async def ingest_document(
                     )
                 except Exception as exc:
                     logger.warning(
-                        "L8: extraction failed for chunk %s: %r; "
-                        "skipping",
-                        chunk_id, exc,
+                        "L8: extraction failed for chunk %s: %r; skipping",
+                        chunk_id,
+                        exc,
                     )
                     triples = []
             return chunk_id, triples
 
         chunk_triples = list(
-            await asyncio.gather(
-                *(
-                    _extract_triples_one(cid, m)
-                    for cid, m in chunk_mentions
-                )
-            )
+            await asyncio.gather(*(_extract_triples_one(cid, m) for cid, m in chunk_mentions))
         )
         n_triples_written = sum(len(t) for _, t in chunk_triples)
         try:
@@ -1294,7 +1276,8 @@ async def ingest_document(
         except Exception as exc:
             logger.warning(
                 "aingest_document (%s): KG L8 write_triples failed: %r",
-                doc_id, exc,
+                doc_id,
+                exc,
             )
             kg_triples_error = ErrorDetail.from_exception(exc)
 
@@ -1312,26 +1295,28 @@ async def ingest_document(
         if do_l9:
             tasks.append(
                 await kg_client.recompute_cross_doc_edges(
-                    doc_id, config.cross_doc.threshold,
+                    doc_id,
+                    config.cross_doc.threshold,
                 )
             )
         if do_l10:
             tasks.append(
                 await kg_client.recompute_cross_doc_xrefs_edges(
-                    doc_id, config.cross_doc_xrefs.threshold,
+                    doc_id,
+                    config.cross_doc_xrefs.threshold,
                 )
             )
         if tasks:
-            cross_results = await asyncio.gather(
-                *tasks, return_exceptions=True
-            )
+            cross_results = await asyncio.gather(*tasks, return_exceptions=True)
             i = 0
             if do_l9:
-                r = cross_results[i]; i += 1
+                r = cross_results[i]
+                i += 1
                 if isinstance(r, Exception):
                     logger.warning(
                         "aingest_document (%s): KG L9 recompute failed: %r",
-                        doc_id, r,
+                        doc_id,
+                        r,
                     )
                     kg_cross_doc_error = ErrorDetail.from_exception(r)
                 else:
@@ -1342,7 +1327,8 @@ async def ingest_document(
                 if isinstance(r, Exception):
                     logger.warning(
                         "aingest_document (%s): KG L10 recompute failed: %r",
-                        doc_id, r,
+                        doc_id,
+                        r,
                     )
                     kg_cross_doc_xrefs_error = ErrorDetail.from_exception(r)
                 else:
@@ -1381,9 +1367,7 @@ async def ingest_document(
         n_cross_doc_edges_written=n_cross_doc_edges_written,
         kg_cross_doc_xrefs_ok=kg_cross_doc_xrefs_ok,
         kg_cross_doc_xrefs_error=kg_cross_doc_xrefs_error,
-        n_cross_doc_xrefs_edges_written=(
-            n_cross_doc_xrefs_edges_written
-        ),
+        n_cross_doc_xrefs_edges_written=(n_cross_doc_xrefs_edges_written),
     )
 
 

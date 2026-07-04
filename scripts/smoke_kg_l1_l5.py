@@ -143,8 +143,7 @@ async def _delete_smoke_nodes(client) -> None:
         # :Chunk nodes for this doc_id (must go before the focal so the
         # PART_OF edges don't dangle; DETACH DELETE handles it either way).
         await session.run(
-            f"MATCH (c:{CHUNK_LABEL} {{doc_id: $doc_id}}) "
-            f"DETACH DELETE c",
+            f"MATCH (c:{CHUNK_LABEL} {{doc_id: $doc_id}}) DETACH DELETE c",
             doc_id=SYNTHETIC_DOC_ID,
         )
         await session.run(
@@ -155,19 +154,13 @@ async def _delete_smoke_nodes(client) -> None:
             doc_id=SYNTHETIC_DOC_ID,
         )
         await session.run(
-            f"MATCH (a:{AUTHOR_LABEL}) "
-            f"WHERE a.openalex_id STARTS WITH 'A999' "
-            f"DETACH DELETE a"
+            f"MATCH (a:{AUTHOR_LABEL}) WHERE a.openalex_id STARTS WITH 'A999' DETACH DELETE a"
         )
         await session.run(
-            f"MATCH (v:{VENUE_LABEL}) "
-            f"WHERE v.openalex_id STARTS WITH 'S999' "
-            f"DETACH DELETE v"
+            f"MATCH (v:{VENUE_LABEL}) WHERE v.openalex_id STARTS WITH 'S999' DETACH DELETE v"
         )
         await session.run(
-            f"MATCH (t:{TOPIC_LABEL}) "
-            f"WHERE t.openalex_id STARTS WITH 'T999' "
-            f"DETACH DELETE t"
+            f"MATCH (t:{TOPIC_LABEL}) WHERE t.openalex_id STARTS WITH 'T999' DETACH DELETE t"
         )
 
 
@@ -226,9 +219,7 @@ async def main() -> None:
     print("  write_topics -> ok")
 
     print("L5: writing 3 chunks + PART_OF edges...")
-    await client.write_chunks(
-        SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper"
-    )
+    await client.write_chunks(SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper")
     print("  write_chunks -> ok")
 
     print()
@@ -240,9 +231,7 @@ async def main() -> None:
     print("  MATCH (a:Author) WHERE a.openalex_id STARTS WITH 'A999' RETURN a")
     print("  MATCH (v:Venue) WHERE v.openalex_id STARTS WITH 'S999' RETURN v")
     print("  MATCH (t:Topic) WHERE t.openalex_id STARTS WITH 'T999' RETURN t")
-    print(
-        f"  MATCH (c:Chunk {{doc_id: '{SYNTHETIC_DOC_ID}'}}) RETURN c"
-    )
+    print(f"  MATCH (c:Chunk {{doc_id: '{SYNTHETIC_DOC_ID}'}}) RETURN c")
     print(
         "Expected: 4 :Document + 3 :Author + 1 :Venue + 2 :Topic + 3 :Chunk, "
         "3 :CITES + 3 :AUTHORED + 1 :PUBLISHED_IN + 2 :ABOUT_TOPIC + 3 :PART_OF."

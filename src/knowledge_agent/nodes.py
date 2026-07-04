@@ -48,9 +48,8 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from knowledge_agent.config import get_settings
+from knowledge_agent.errors import ErrorDetail
 from knowledge_agent.kg.client import get_kg_client
-from knowledge_agent.llm_factory import get_llm as _get_llm
-from knowledge_agent.llm_factory import with_retry as _with_retry
 from knowledge_agent.kg.cypher_safety import (
     is_cypher_read_only,
     wrap_with_limit,
@@ -58,6 +57,8 @@ from knowledge_agent.kg.cypher_safety import (
 from knowledge_agent.kg.schema_as_prompt import (
     format_schema_for_prompt,
 )
+from knowledge_agent.llm_factory import get_llm as _get_llm
+from knowledge_agent.llm_factory import with_retry as _with_retry
 from knowledge_agent.models import (
     AgentAnswer,
     ChunkSource,
@@ -68,7 +69,6 @@ from knowledge_agent.models import (
     RetrievedChunk,
     SearchQueryRewrite,
 )
-from knowledge_agent.errors import ErrorDetail
 from knowledge_agent.search.client import get_search_client
 from knowledge_agent.state import AgentState, effective_mode
 
@@ -205,9 +205,7 @@ async def query_builder_node(state: AgentState) -> dict[str, Any]:
         logger.info("query_builder: skipped (using raw query verbatim)")
         return {"search_query": state["query"]}
 
-    llm = _get_llm(
-        settings.query_builder_model, settings.query_builder_temperature
-    )
+    llm = _get_llm(settings.query_builder_model, settings.query_builder_temperature)
     structured = _with_retry(llm.with_structured_output(SearchQueryRewrite))
     result = await structured.ainvoke(
         [
@@ -301,14 +299,10 @@ async def cypher_builder_node(state: AgentState) -> dict[str, Any]:
             "invoking the graph."
         )
 
-    mode_rules = (
-        _MODE_RULES_DOC_ID if mode in _CROSS_STORE_MODES else ""
-    )
-    system_msg = (
-        _CYPHER_BUILDER_SYSTEM_TEMPLATE
-        .replace("<SCHEMA>", format_schema_for_prompt(corpus_config))
-        .replace("<MODE_RULES>", mode_rules)
-    )
+    mode_rules = _MODE_RULES_DOC_ID if mode in _CROSS_STORE_MODES else ""
+    system_msg = _CYPHER_BUILDER_SYSTEM_TEMPLATE.replace(
+        "<SCHEMA>", format_schema_for_prompt(corpus_config)
+    ).replace("<MODE_RULES>", mode_rules)
 
     chunks = state.get("retrieved_chunks") or []
     if mode == "lancedb_then_neo4j" and chunks:
@@ -322,9 +316,7 @@ async def cypher_builder_node(state: AgentState) -> dict[str, Any]:
     else:
         user_msg = state["query"]
 
-    llm = _get_llm(
-        settings.cypher_builder_model, settings.cypher_builder_temperature
-    )
+    llm = _get_llm(settings.cypher_builder_model, settings.cypher_builder_temperature)
     structured = _with_retry(llm.with_structured_output(CypherQueryRewrite))
     result = await structured.ainvoke(
         [
@@ -334,7 +326,9 @@ async def cypher_builder_node(state: AgentState) -> dict[str, Any]:
     )
     logger.info(
         "cypher_builder: mode=%s, %r -> %r",
-        mode, state["query"], result.cypher_query,
+        mode,
+        state["query"],
+        result.cypher_query,
     )
     return {"cypher_query": result.cypher_query}
 
@@ -379,7 +373,8 @@ async def neo4j_retriever_node(state: AgentState) -> dict[str, Any]:
     except Exception as exc:
         logger.warning(
             "neo4j_retriever: query failed: %r; cypher=%r",
-            exc, wrapped,
+            exc,
+            wrapped,
         )
         return {
             "kg_hits": [],
@@ -387,9 +382,7 @@ async def neo4j_retriever_node(state: AgentState) -> dict[str, Any]:
         }
 
     hits = [KGHit(data=row) for row in rows]
-    logger.info(
-        "neo4j_retriever: %d row(s) for cypher=%r", len(hits), cypher
-    )
+    logger.info("neo4j_retriever: %d row(s) for cypher=%r", len(hits), cypher)
     return {"kg_hits": hits}
 
 
@@ -455,7 +448,10 @@ async def lancedb_retriever_node(state: AgentState) -> dict[str, Any]:
     client = get_search_client()
     try:
         hits = await client.retrieve(
-            query=query, top_k=top_k, use_mmr=use_mmr, filters=filters,
+            query=query,
+            top_k=top_k,
+            use_mmr=use_mmr,
+            filters=filters,
         )
     except Exception as exc:
         # Search-path methods now raise on failure (typed-errors
@@ -464,7 +460,9 @@ async def lancedb_retriever_node(state: AgentState) -> dict[str, Any]:
         # can distinguish 'Lance failed' from 'no chunks matched'.
         logger.warning(
             "lancedb_retriever: search failed: %r; query=%r filters=%r",
-            exc, query, filters,
+            exc,
+            query,
+            filters,
         )
         return {
             "retrieved_chunks": [],
@@ -472,7 +470,9 @@ async def lancedb_retriever_node(state: AgentState) -> dict[str, Any]:
         }
     logger.info(
         "lancedb_retriever: %r -> %d hits (filters=%r)",
-        query, len(hits), filters,
+        query,
+        len(hits),
+        filters,
     )
     return {"retrieved_chunks": hits}
 
@@ -569,7 +569,8 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
     if direct:
         logger.info(
             "synthesizer: skipped (direct_retrieval; %d chunks, %d kg_hits -> sources)",
-            len(chunks), len(kg_hits),
+            len(chunks),
+            len(kg_hits),
         )
         # direct_retrieval bypasses the LLM; every retrieved chunk
         # becomes a ChunkSource. Populate the multimodal fields
@@ -594,9 +595,7 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
             )
         }
 
-    llm = _get_llm(
-        settings.synthesizer_model, settings.synthesizer_temperature
-    )
+    llm = _get_llm(settings.synthesizer_model, settings.synthesizer_temperature)
     structured = _with_retry(llm.with_structured_output(AgentAnswer))
     user_msg = (
         f"Question: {state['query']}\n\n"
@@ -621,20 +620,26 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
     # object see the LLM's exact output.
     if result.chunk_sources:
         chunk_index_by_id = {c.chunk_id: c for c in chunks}
-        result = result.model_copy(update={
-            "chunk_sources": [
-                cs.model_copy(update={
-                    "content_type": chunk_index_by_id[cs.chunk_id].content_type,
-                    "image_ref": chunk_index_by_id[cs.chunk_id].image_ref,
-                    "page": chunk_index_by_id[cs.chunk_id].page,
-                })
-                if cs.chunk_id in chunk_index_by_id
-                else cs
-                for cs in result.chunk_sources
-            ],
-        })
+        result = result.model_copy(
+            update={
+                "chunk_sources": [
+                    cs.model_copy(
+                        update={
+                            "content_type": chunk_index_by_id[cs.chunk_id].content_type,
+                            "image_ref": chunk_index_by_id[cs.chunk_id].image_ref,
+                            "page": chunk_index_by_id[cs.chunk_id].page,
+                        }
+                    )
+                    if cs.chunk_id in chunk_index_by_id
+                    else cs
+                    for cs in result.chunk_sources
+                ],
+            }
+        )
     logger.info(
         "synthesizer: produced %d-char answer with %d chunk sources, %d kg sources",
-        len(result.answer), len(result.chunk_sources), len(result.kg_sources),
+        len(result.answer),
+        len(result.chunk_sources),
+        len(result.kg_sources),
     )
     return {"final_answer": result}

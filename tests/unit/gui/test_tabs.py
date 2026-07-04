@@ -3,9 +3,10 @@
 Static construction only. Each stub returns a `view_with_header` so we
 verify the header text + that the body is the empty-state container.
 """
+
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from typing import TYPE_CHECKING
 
 import flet as ft
 
@@ -14,6 +15,9 @@ from knowledge_agent.gui.right_panel import RightPanel
 from knowledge_agent.gui.tabs.evaluation_tab import EvaluationTab
 from knowledge_agent.gui.tabs.library_tab import LibraryTab
 from knowledge_agent.gui.tabs.search_tab import SearchTab
+
+if TYPE_CHECKING:
+    from unittest.mock import MagicMock
 
 
 def test_library_tab_delegates_to_library_view(fake_app: MagicMock):

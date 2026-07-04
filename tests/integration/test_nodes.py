@@ -32,8 +32,7 @@ Skipped by default; opt in via `pytest -m integration`.
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -41,6 +40,9 @@ from knowledge_agent.graph import graph
 from knowledge_agent.ingestion.pipeline import ingest_document
 from knowledge_agent.kg.corpus_config import CorpusConfig, LayerFlags
 from knowledge_agent.models import AgentAnswer
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = pytest.mark.integration
 
@@ -63,7 +65,9 @@ def _minimal_corpus_config() -> CorpusConfig:
 
 @pytest.fixture
 def seeded_corpus(
-    kg_client: Any, lance_client: Any, ensure_constraints: None,
+    kg_client: Any,
+    lance_client: Any,
+    ensure_constraints: None,
     sample_pdf: Path,
 ) -> str:
     """Wipe both stores, ingest the session sample PDF, return its
@@ -82,7 +86,10 @@ def seeded_corpus(
 
         config = _minimal_corpus_config()
         result = await ingest_document(
-            sample_pdf, config, "Document", "Paper",
+            sample_pdf,
+            config,
+            "Document",
+            "Paper",
         )
         assert result.lancedb_ok is True
         return result.doc_id
@@ -95,10 +102,14 @@ def test_agent_lancedb_only_returns_structured_answer(
 ) -> None:
     """A query in `lancedb_only` mode produces a final state with a
     populated `AgentAnswer` — the synthesizer's structured output."""
-    state = asyncio.run(graph.ainvoke({
-        "query": "What does the article say about chronic disease and nutrition?",
-        "retrieval_mode": "lancedb_only",
-    }))
+    state = asyncio.run(
+        graph.ainvoke(
+            {
+                "query": "What does the article say about chronic disease and nutrition?",
+                "retrieval_mode": "lancedb_only",
+            }
+        )
+    )
 
     answer = state.get("final_answer")
     assert answer is not None
@@ -115,10 +126,14 @@ def test_agent_lancedb_only_populates_search_query_and_retrieved_chunks(
     """The graph fills in the intermediate state fields:
     `search_query` (from query_builder) + `retrieved_chunks`
     (from lancedb_retriever)."""
-    state = asyncio.run(graph.ainvoke({
-        "query": "nutrition and chronic disease prevention",
-        "retrieval_mode": "lancedb_only",
-    }))
+    state = asyncio.run(
+        graph.ainvoke(
+            {
+                "query": "nutrition and chronic disease prevention",
+                "retrieval_mode": "lancedb_only",
+            }
+        )
+    )
 
     assert state.get("search_query")  # non-empty
     assert state.get("retrieved_chunks") is not None
@@ -131,11 +146,15 @@ def test_agent_skip_query_builder_uses_raw_query(
     """When `skip_query_builder=True` is set via state, the raw user
     query is used as the search query (no Haiku call to rewrite it)."""
     raw = "nutrition chronic disease"
-    state = asyncio.run(graph.ainvoke({
-        "query": raw,
-        "retrieval_mode": "lancedb_only",
-        "skip_query_builder": True,
-    }))
+    state = asyncio.run(
+        graph.ainvoke(
+            {
+                "query": raw,
+                "retrieval_mode": "lancedb_only",
+                "skip_query_builder": True,
+            }
+        )
+    )
 
     assert state.get("search_query") == raw
 
@@ -146,11 +165,15 @@ def test_agent_direct_retrieval_skips_synthesizer(
     """When `direct_retrieval=True`, the synthesizer is skipped: the
     final state's `final_answer` has empty `answer` and the retrieved
     chunks are returned as sources for the caller to render."""
-    state = asyncio.run(graph.ainvoke({
-        "query": "nutrition chronic disease",
-        "retrieval_mode": "lancedb_only",
-        "direct_retrieval": True,
-    }))
+    state = asyncio.run(
+        graph.ainvoke(
+            {
+                "query": "nutrition chronic disease",
+                "retrieval_mode": "lancedb_only",
+                "direct_retrieval": True,
+            }
+        )
+    )
 
     answer = state.get("final_answer")
     assert answer is not None
@@ -177,11 +200,15 @@ def test_agent_neo4j_only_returns_structured_answer_with_kg_sources(
     → synthesizer (Sonnet). chunk_sources should be empty (no lance
     leg), kg_sources may be empty or populated depending on the LLM-
     generated Cypher hitting the corpus."""
-    state = asyncio.run(graph.ainvoke({
-        "query": "Who authored papers about nutrition and chronic disease?",
-        "retrieval_mode": "neo4j_only",
-        "corpus_config": _minimal_corpus_config(),
-    }))
+    state = asyncio.run(
+        graph.ainvoke(
+            {
+                "query": "Who authored papers about nutrition and chronic disease?",
+                "retrieval_mode": "neo4j_only",
+                "corpus_config": _minimal_corpus_config(),
+            }
+        )
+    )
 
     answer = state.get("final_answer")
     assert answer is not None
@@ -201,11 +228,15 @@ def test_agent_lancedb_then_neo4j_runs_both_legs_in_order(
     """`lancedb_then_neo4j` runs LanceDB first, then KG enriches via
     the Lance hits' doc_ids. Both `search_query` + `cypher_query` and
     both `retrieved_chunks` + `kg_hits` populated."""
-    state = asyncio.run(graph.ainvoke({
-        "query": "What is the role of nutrition in chronic disease?",
-        "retrieval_mode": "lancedb_then_neo4j",
-        "corpus_config": _minimal_corpus_config(),
-    }))
+    state = asyncio.run(
+        graph.ainvoke(
+            {
+                "query": "What is the role of nutrition in chronic disease?",
+                "retrieval_mode": "lancedb_then_neo4j",
+                "corpus_config": _minimal_corpus_config(),
+            }
+        )
+    )
 
     answer = state.get("final_answer")
     assert answer is not None
@@ -225,11 +256,15 @@ def test_agent_neo4j_then_lancedb_runs_kg_first_then_lance(
     """`neo4j_then_lancedb`: KG first, then LanceDB scoped to KG-
     returned doc_ids. Same surface contract as `lancedb_then_neo4j`
     (both query types + both retriever outputs)."""
-    state = asyncio.run(graph.ainvoke({
-        "query": "List authors who wrote about chronic disease.",
-        "retrieval_mode": "neo4j_then_lancedb",
-        "corpus_config": _minimal_corpus_config(),
-    }))
+    state = asyncio.run(
+        graph.ainvoke(
+            {
+                "query": "List authors who wrote about chronic disease.",
+                "retrieval_mode": "neo4j_then_lancedb",
+                "corpus_config": _minimal_corpus_config(),
+            }
+        )
+    )
 
     answer = state.get("final_answer")
     assert answer is not None
@@ -246,11 +281,15 @@ def test_agent_parallel_fused_runs_both_legs_in_parallel(
     """`parallel_fused`: both legs run in parallel, synthesizer
     fuses. Both state fields populated; the synthesizer's
     AgentAnswer may carry both source types."""
-    state = asyncio.run(graph.ainvoke({
-        "query": "Comprehensive overview of nutrition and chronic disease.",
-        "retrieval_mode": "parallel_fused",
-        "corpus_config": _minimal_corpus_config(),
-    }))
+    state = asyncio.run(
+        graph.ainvoke(
+            {
+                "query": "Comprehensive overview of nutrition and chronic disease.",
+                "retrieval_mode": "parallel_fused",
+                "corpus_config": _minimal_corpus_config(),
+            }
+        )
+    )
 
     answer = state.get("final_answer")
     assert answer is not None
@@ -267,11 +306,15 @@ def test_agent_auto_mode_routes_via_classifier(
     """`auto` mode runs `mode_classifier_node` (Haiku) first, which
     sets `routed_mode` to one of the 5 concrete modes. The graph
     then dispatches accordingly."""
-    state = asyncio.run(graph.ainvoke({
-        "query": "Which authors wrote about chronic disease?",
-        "retrieval_mode": "auto",
-        "corpus_config": _minimal_corpus_config(),
-    }))
+    state = asyncio.run(
+        graph.ainvoke(
+            {
+                "query": "Which authors wrote about chronic disease?",
+                "retrieval_mode": "auto",
+                "corpus_config": _minimal_corpus_config(),
+            }
+        )
+    )
 
     answer = state.get("final_answer")
     assert answer is not None

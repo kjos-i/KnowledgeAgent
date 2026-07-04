@@ -136,7 +136,5 @@ def effective_mode(state: AgentState, settings: Settings) -> str:
     router) reads the active mode the same way.
     """
     return (
-        state.get("routed_mode")
-        or state.get("retrieval_mode")
-        or settings.default_retrieval_mode
+        state.get("routed_mode") or state.get("retrieval_mode") or settings.default_retrieval_mode
     )

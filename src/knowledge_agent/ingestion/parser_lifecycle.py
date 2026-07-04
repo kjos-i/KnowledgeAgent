@@ -77,8 +77,8 @@ def _asr_is_installed() -> bool:
     left to track.)
     """
     try:
-        import whisper  # noqa: F401
         import imageio_ffmpeg  # noqa: F401
+        import whisper  # noqa: F401
     except ImportError:
         return False
     return True
@@ -120,11 +120,7 @@ def ensure_bundled_ffmpeg_on_path() -> str | None:
     # duplicate the entry.
     parts = current_path.split(os.pathsep)
     if binary_dir not in parts:
-        os.environ["PATH"] = (
-            current_path + os.pathsep + binary_dir
-            if current_path
-            else binary_dir
-        )
+        os.environ["PATH"] = current_path + os.pathsep + binary_dir if current_path else binary_dir
     return binary
 
 
@@ -166,9 +162,7 @@ def _check_system_deps(deps: tuple[str, ...]) -> dict[str, str | None]:
     return {dep: shutil.which(dep) for dep in deps}
 
 
-def _system_dep_hint(
-    dep: str, hints: dict[str, dict[str, str]]
-) -> str:
+def _system_dep_hint(dep: str, hints: dict[str, dict[str, str]]) -> str:
     """Pick the install hint matching the current OS, or fall back to all."""
     per_os = hints.get(dep, {})
     if not per_os:
@@ -180,9 +174,7 @@ def _system_dep_hint(
 # ---- subprocess wrapper (mockable) ----
 
 
-async def _run_pip(
-    args: list[str], timeout: float = 600.0
-) -> tuple[bool, str]:
+async def _run_pip(args: list[str], timeout: float = 600.0) -> tuple[bool, str]:
     """Run `python -m pip <args>` async; return (success, combined output).
 
     `sys.executable` ensures the pip call targets the SAME interpreter
@@ -195,7 +187,7 @@ async def _run_pip(
     On timeout the child is killed with `proc.kill()` + reaped via
     `proc.wait()` so no zombie remains.
     """
-    cmd = [sys.executable, "-m", "pip"] + args
+    cmd = [sys.executable, "-m", "pip", *args]
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -204,15 +196,15 @@ async def _run_pip(
         )
         try:
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout,
+                proc.communicate(),
+                timeout=timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             return False, f"pip command timed out after {timeout}s"
-        output = (
-            (stdout.decode("utf-8", errors="replace") if stdout else "")
-            + (stderr.decode("utf-8", errors="replace") if stderr else "")
+        output = (stdout.decode("utf-8", errors="replace") if stdout else "") + (
+            stderr.decode("utf-8", errors="replace") if stderr else ""
         )
         return proc.returncode == 0, output
     except Exception as exc:
@@ -227,8 +219,7 @@ def _registry_entry(name: str) -> dict[str, Any]:
     entry = PARSER_LIFECYCLE_REGISTRY.get(name)
     if entry is None:
         raise ValueError(
-            f"Unknown parser extra {name!r}. "
-            f"Known: {sorted(PARSER_LIFECYCLE_REGISTRY)}."
+            f"Unknown parser extra {name!r}. Known: {sorted(PARSER_LIFECYCLE_REGISTRY)}."
         )
     return entry
 
@@ -255,9 +246,7 @@ class InstallParserExtraPlan:
 
     @property
     def missing_system_deps(self) -> tuple[str, ...]:
-        return tuple(
-            d for d, p in self.system_deps_status.items() if p is None
-        )
+        return tuple(d for d, p in self.system_deps_status.items() if p is None)
 
     @property
     def summary(self) -> str:
@@ -265,8 +254,7 @@ class InstallParserExtraPlan:
         sys_hint_block = ""
         if missing:
             hints = "; ".join(
-                f"{d}: `{_system_dep_hint(d, self.system_deps_hints)}`"
-                for d in missing
+                f"{d}: `{_system_dep_hint(d, self.system_deps_hints)}`" for d in missing
             )
             sys_hint_block = (
                 f" System binaries missing on PATH: {', '.join(missing)}. "
@@ -325,8 +313,10 @@ async def install_parser_extra_execute(
     if plan.already_installed:
         return InstallParserExtraResult(
             extra_name=plan.extra_name,
-            did_install=False, install_ok=True,
-            restart_required=False, pip_output="",
+            did_install=False,
+            install_ok=True,
+            restart_required=False,
+            pip_output="",
         )
 
     target = f"{distribution_name}[{plan.pip_extras}]"
@@ -398,12 +388,12 @@ async def uninstall_parser_extra_execute(
     if not plan.installed:
         return UninstallParserExtraResult(
             extra_name=plan.extra_name,
-            did_uninstall=False, uninstall_ok=True,
-            restart_required=False, pip_output="",
+            did_uninstall=False,
+            uninstall_ok=True,
+            restart_required=False,
+            pip_output="",
         )
-    ok, output = await _run_pip(
-        ["uninstall", "-y", *plan.packages_to_remove]
-    )
+    ok, output = await _run_pip(["uninstall", "-y", *plan.packages_to_remove])
     return UninstallParserExtraResult(
         extra_name=plan.extra_name,
         did_uninstall=True,

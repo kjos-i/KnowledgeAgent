@@ -105,8 +105,10 @@ def test_mode_radio_change_persists(fake_app):
 
 def test_entity_types_edit_preserves_extractors_and_mode(fake_app):
     ed = _load(
-        _editor(fake_app), ["hunflair2", "llm"],
-        entity_types=["GENE"], mode="add",
+        _editor(fake_app),
+        ["hunflair2", "llm"],
+        entity_types=["GENE"],
+        mode="add",
     )
     ed.entity_types_field.value = "DISEASE, CHEMICAL"
     ed._on_entity_types_blur(None)

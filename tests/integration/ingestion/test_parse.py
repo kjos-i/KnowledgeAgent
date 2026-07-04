@@ -16,7 +16,7 @@ Skipped by default; opt in via `pytest -m integration`.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -24,6 +24,9 @@ from knowledge_agent.ingestion.parse import (
     parse_document,
     supported_extensions,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = pytest.mark.integration
 
@@ -185,8 +188,8 @@ def _asr_available() -> bool:
     """Mirrors `parser_lifecycle._asr_is_installed` so the integration
     tests opt-out cleanly when the user hasn't installed parsers-asr."""
     try:
-        import whisper  # noqa: F401
         import imageio_ffmpeg  # noqa: F401
+        import whisper  # noqa: F401
     except ImportError:
         return False
     return True

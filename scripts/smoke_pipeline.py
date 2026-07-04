@@ -205,10 +205,7 @@ async def main() -> None:
         ),
         ontology={"mesh": OntologyConfig(matching="exact")},
     )
-    print(
-        f"Config    : allowed_types={config.allowed_types}, "
-        f"layers={config.layers.model_dump()}"
-    )
+    print(f"Config    : allowed_types={config.allowed_types}, layers={config.layers.model_dump()}")
     print()
 
     result = await ingest_document(target, config, "Document", "Paper")
@@ -226,7 +223,7 @@ async def main() -> None:
     print(f"  kg_entities_ok    : {result.kg_entities_ok}")
     print(f"  n_entity_mentions : {result.n_entity_mentions}")
     if result.kg_ontology_results:
-        print(f"  kg_ontology_results:")
+        print("  kg_ontology_results:")
         for name, info in result.kg_ontology_results.items():
             print(
                 f"    {name:8s} : imported={info['imported']}, "
@@ -269,10 +266,7 @@ async def main() -> None:
         print("Top 10 entities by mention count:")
         print(f"  {'entity_type':<10s}  {'mentions':>8s}  key")
         for row in records:
-            print(
-                f"  {row['entity_type']:<10s}  "
-                f"{row['mentions']:>8d}  {row['key']!r}"
-            )
+            print(f"  {row['entity_type']:<10s}  {row['mentions']:>8d}  {row['key']!r}")
 
     # L7 canonical-links eyeball check: show a few examples of
     # (:Entity)-[:CANONICAL_TO]->(:MeSHTerm) for this doc so we can see
@@ -293,10 +287,7 @@ async def main() -> None:
             records = await result_cursor.data()
         print()
         print("Top 10 entity -> MeSH canonical links:")
-        print(
-            f"  {'strategy':<8s}  {'mesh_id':<14s}  {'entity key':<24s}"
-            f"  mesh_label"
-        )
+        print(f"  {'strategy':<8s}  {'mesh_id':<14s}  {'entity key':<24s}  mesh_label")
         for row in records:
             print(
                 f"  {row['strategy']:<8s}  {row['mesh_id']:<14s}  "
@@ -306,16 +297,14 @@ async def main() -> None:
     print()
     print("Inspect in your tools:")
     print(f"  LanceDB: chunks where doc_id = {result.doc_id!r}")
-    print(
-        f"  Neo4j:   MATCH (d:Document {{doc_id: '{result.doc_id}'}}) RETURN d"
-    )
+    print(f"  Neo4j:   MATCH (d:Document {{doc_id: '{result.doc_id}'}}) RETURN d")
     print(
         f"  Neo4j:   MATCH (c:Chunk {{doc_id: '{result.doc_id}'}})"
         f"-[:MENTIONS]->(e:Entity) RETURN c.chunk_index, e.key, e.entity_type"
     )
     print(
-        f"  Neo4j:   MATCH (e:Entity)-[:CANONICAL_TO]->(t:MeSHTerm) "
-        f"RETURN e.key, t.id, t.label LIMIT 20"
+        "  Neo4j:   MATCH (e:Entity)-[:CANONICAL_TO]->(t:MeSHTerm) "
+        "RETURN e.key, t.id, t.label LIMIT 20"
     )
     print()
 

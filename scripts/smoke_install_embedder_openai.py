@@ -28,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _install_smoke_lib import (  # noqa: E402
+from _install_smoke_lib import (
     bail_if_not_confirmed,
     confirm_no_default,
     header,
@@ -36,34 +36,28 @@ from _install_smoke_lib import (  # noqa: E402
     print_result,
 )
 
-from knowledge_agent import embedder_factory  # noqa: E402
-from knowledge_agent.config import get_settings  # noqa: E402
-from knowledge_agent.embedder_lifecycle import (  # noqa: E402
+from knowledge_agent import embedder_factory
+from knowledge_agent.config import get_settings
+from knowledge_agent.embedder_lifecycle import (
     install_embedder_provider_execute,
     install_embedder_provider_plan,
     uninstall_embedder_provider_execute,
     uninstall_embedder_provider_plan,
 )
 
-
 PROVIDER = "openai"
 
 
 async def main() -> None:
     if not get_settings().openai_api_key:
-        print(
-            "OPENAI_API_KEY is not set in .env. Add it before running "
-            "this smoke."
-        )
+        print("OPENAI_API_KEY is not set in .env. Add it before running this smoke.")
         sys.exit(1)
 
     plan = install_embedder_provider_plan(PROVIDER)
     print_plan(f"install_embedder_provider_plan({PROVIDER!r})", plan)
 
     if plan.already_installed:
-        print(
-            "\nAdapter already installed — skipping install step."
-        )
+        print("\nAdapter already installed — skipping install step.")
     else:
         bail_if_not_confirmed("Proceed with pip install?")
         result = await install_embedder_provider_execute(plan)

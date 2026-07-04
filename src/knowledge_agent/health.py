@@ -29,12 +29,12 @@ Component checks run concurrently via `asyncio.gather` — the slowest
 check (Neo4j network round-trip) doesn't gate the others. Wall-time
 is the slowest single check, not the sum.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any
 
 from knowledge_agent.config import Settings, get_settings
 
@@ -95,7 +95,8 @@ async def _check_neo4j() -> ComponentStatus:
         if rows and rows[0].get("ok") == 1:
             return ComponentStatus("neo4j", True, "RETURN 1 round-trip OK")
         return ComponentStatus(
-            "neo4j", False,
+            "neo4j",
+            False,
             f"unexpected result from RETURN 1: {rows!r}",
         )
     except Exception as exc:
@@ -111,7 +112,9 @@ async def _check_lancedb() -> ComponentStatus:
         conn = await client._ensure_conn()
         tables = await conn.table_names()
         return ComponentStatus(
-            "lancedb", True, f"connected ({len(tables)} table(s))",
+            "lancedb",
+            True,
+            f"connected ({len(tables)} table(s))",
         )
     except Exception as exc:
         return ComponentStatus("lancedb", False, repr(exc))
@@ -151,13 +154,16 @@ def _check_provider_key(
     name = f"{role}_key"
     if key_attr is None:
         return ComponentStatus(
-            name, True, f"{provider}: local (no key required)",
+            name,
+            True,
+            f"{provider}: local (no key required)",
         )
     key = getattr(settings, key_attr, None)
     if key:
         return ComponentStatus(name, True, f"{provider}: set")
     return ComponentStatus(
-        name, False,
+        name,
+        False,
         f"{provider}: MISSING (set {key_attr.upper()} in .env)",
     )
 
@@ -190,10 +196,16 @@ async def system_status() -> StatusReport:
         _check_lancedb(),
     )
     llm_status = _check_provider_key(
-        "llm", llm_provider, llm_key_attr, settings,
+        "llm",
+        llm_provider,
+        llm_key_attr,
+        settings,
     )
     embed_status = _check_provider_key(
-        "embed", embed_provider, embed_key_attr, settings,
+        "embed",
+        embed_provider,
+        embed_key_attr,
+        settings,
     )
 
     return StatusReport(

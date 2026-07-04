@@ -46,10 +46,10 @@ from knowledge_agent.kg.schema import (
     MESH_BROADER_REL,
     MESH_TERM_LABEL,
     ONTOLOGY_TERM_LABEL,
+    ONTOLOGY_XREF_RELS,
     PAPER_LABEL,
     PART_OF_REL,
     PUBLISHED_IN_REL,
-    ONTOLOGY_XREF_RELS,
     RELATED_BY_XREF_REL,
     RELATED_TO_REL,
     TOPIC_LABEL,
@@ -59,7 +59,6 @@ from knowledge_agent.kg.schema import (
 from knowledge_agent.kg.schema_as_prompt import (
     format_schema_for_prompt,
 )
-
 
 # ---- shared fixtures (in-memory configs covering the layer combinations) ----
 
@@ -72,12 +71,8 @@ def _full_config() -> CorpusConfig:
     Used by every existing drift / checklist test."""
     return CorpusConfig(
         allowed_types=_ALL_SUBS,
-        layers=LayerFlags(
-            openalex_papers=True, chunks=True, entities=True
-        ),
-        entities=EntityConfig(
-            extractor="llm", entity_types=["GENE", "DISEASE"]
-        ),
+        layers=LayerFlags(openalex_papers=True, chunks=True, entities=True),
+        entities=EntityConfig(extractor="llm", entity_types=["GENE", "DISEASE"]),
     )
 
 
@@ -388,9 +383,7 @@ def test_entities_on_lists_configured_entity_types_in_block():
     config = CorpusConfig(
         allowed_types=["Paper"],
         layers=LayerFlags(chunks=True, entities=True),
-        entities=EntityConfig(
-            extractor="llm", entity_types=["GENE", "DISEASE", "CHEMICAL"]
-        ),
+        entities=EntityConfig(extractor="llm", entity_types=["GENE", "DISEASE", "CHEMICAL"]),
     )
     prompt = format_schema_for_prompt(config)
     assert "GENE" in prompt
@@ -418,9 +411,7 @@ def test_entities_on_with_empty_entity_types_flags_open_vocab():
 def _config_with_mesh() -> CorpusConfig:
     return CorpusConfig(
         allowed_types=["Paper"],
-        layers=LayerFlags(
-            chunks=True, entities=True, ontology_mesh=True
-        ),
+        layers=LayerFlags(chunks=True, entities=True, ontology_mesh=True),
         entities=EntityConfig(extractor="llm", entity_types=["DISEASE"]),
         ontology={"mesh": OntologyConfig(matching="exact")},
     )
@@ -529,8 +520,7 @@ def test_triples_off_omits_predicate_edges():
         # the bare word - "BINDS_TO" might appear in unrelated text in
         # principle, but `:BINDS_TO` is unique to the triples block.
         assert f":{pred}" not in prompt, (
-            f"Predicate :{pred} should not appear when triples layer "
-            f"is off"
+            f"Predicate :{pred} should not appear when triples layer is off"
         )
 
 
@@ -631,6 +621,7 @@ def _config_with_xrefs(mode: str) -> CorpusConfig:
     """Build a config with the xrefs layer in the given mode and
     one ontology enabled (so the corpus is realistic)."""
     from knowledge_agent.kg.corpus_config import OntologyConfig
+
     return CorpusConfig(
         allowed_types=["Paper"],
         layers=LayerFlags(
@@ -708,6 +699,7 @@ def _config_with_cross_doc_xrefs() -> CorpusConfig:
     xrefs="use" plus at least one ontology (validator enforces the
     chain)."""
     from knowledge_agent.kg.corpus_config import OntologyConfig
+
     return CorpusConfig(
         allowed_types=["Paper"],
         layers=LayerFlags(
@@ -775,6 +767,7 @@ def test_cross_doc_xrefs_can_be_enabled_alongside_l9():
     """Both L9 and L10 can be on simultaneously - the prompt renders
     both edge blocks (they're complementary signals)."""
     from knowledge_agent.kg.corpus_config import OntologyConfig
+
     config = CorpusConfig(
         layers=LayerFlags(
             chunks=True,

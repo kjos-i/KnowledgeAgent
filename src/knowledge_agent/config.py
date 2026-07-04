@@ -72,8 +72,7 @@ class Settings(BaseSettings):
     voyage_api_key: str | None = Field(
         default=None,
         description=(
-            "Voyage AI API key. Required when "
-            "`embedding_provider='voyage'`. Validated lazily."
+            "Voyage AI API key. Required when `embedding_provider='voyage'`. Validated lazily."
         ),
     )
     openai_api_key: str | None = Field(
@@ -116,9 +115,7 @@ class Settings(BaseSettings):
             "invokes an uninstalled provider. See `llm_lifecycle.py`."
         ),
     )
-    embedding_provider: Literal[
-        "voyage", "openai", "google", "huggingface"
-    ] = Field(
+    embedding_provider: Literal["voyage", "openai", "google", "huggingface"] = Field(
         default="voyage",
         description=(
             "Active embedding provider. Same no-auto-install rule as "
@@ -200,9 +197,7 @@ class Settings(BaseSettings):
     # ----- Ontology downloads (L7). Source ontology files (MeSH RDF, GO
     # OBO, ChEBI, etc.) are downloaded once and reused across ingestion runs.
     ontology_downloads_dir: Path = Field(
-        default=(
-            Path.home() / ".research-literature-agent" / "ontology-downloads"
-        ),
+        default=(Path.home() / ".research-literature-agent" / "ontology-downloads"),
         description=(
             "Directory for downloaded ontology source files. Each enabled "
             "L7 ontology layer downloads its file here on first use; "

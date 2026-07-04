@@ -14,7 +14,6 @@ from knowledge_agent.embedder_lifecycle import (
     EMBEDDER_PROVIDER_REGISTRY,
     HF_EMBEDDING_MODELS,
     DownloadHFModelPlan,
-    SwitchEmbedderPlan,
     UninstallEmbedderProviderPlan,
     download_hf_model_execute,
     download_hf_model_plan,
@@ -25,7 +24,6 @@ from knowledge_agent.embedder_lifecycle import (
     uninstall_embedder_provider_plan,
 )
 
-
 _PIP_PATCH = "knowledge_agent.embedder_lifecycle._run_pip"
 
 
@@ -33,9 +31,7 @@ _PIP_PATCH = "knowledge_agent.embedder_lifecycle._run_pip"
 
 
 def test_registry_has_four_providers():
-    assert set(EMBEDDER_PROVIDER_REGISTRY) == {
-        "voyage", "openai", "google", "huggingface"
-    }
+    assert set(EMBEDDER_PROVIDER_REGISTRY) == {"voyage", "openai", "google", "huggingface"}
 
 
 def test_no_provider_is_bundled_after_2026_06_29_refactor():
@@ -146,7 +142,9 @@ async def test_execute_runs_pip_with_correct_extra():
     ):
         plan = install_embedder_provider_plan("openai")
     with patch(
-        _PIP_PATCH, new_callable=AsyncMock, return_value=(True, "ok"),
+        _PIP_PATCH,
+        new_callable=AsyncMock,
+        return_value=(True, "ok"),
     ) as pip:
         result = await install_embedder_provider_execute(plan)
     args = pip.call_args.args[0]
@@ -200,12 +198,16 @@ async def test_uninstall_runs_pip_when_inactive_and_installed():
         is_active=False,
     )
     with patch(
-        _PIP_PATCH, new_callable=AsyncMock, return_value=(True, "ok"),
+        _PIP_PATCH,
+        new_callable=AsyncMock,
+        return_value=(True, "ok"),
     ) as pip:
         result = await uninstall_embedder_provider_execute(plan)
     pip.assert_called_once()
     assert pip.call_args.args[0] == [
-        "uninstall", "-y", "langchain-google-genai",
+        "uninstall",
+        "-y",
+        "langchain-google-genai",
     ]
     assert result.uninstall_ok is True
 

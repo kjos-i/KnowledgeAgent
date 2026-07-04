@@ -115,15 +115,15 @@ class LayerFlags(BaseModel):
             "`hasDbXref`, SKOS `closeMatch` / `exactMatch`). This "
             "flag controls whether those declarations are materialised "
             "into the graph at import time.\n"
-            "- `\"none\"` (default): don't extract xrefs at all. No "
+            '- `"none"` (default): don\'t extract xrefs at all. No '
             "  property storage, no edges. Re-enabling later requires "
             "  force re-importing affected ontologies.\n"
-            "- `\"collect_only\"`: extract xrefs, store the verbatim "
+            '- `"collect_only"`: extract xrefs, store the verbatim '
             "  list as a `dangling_xrefs` property on each source term, "
             "  but DON'T write resolved edges yet. Lets the user flip "
-            "  to `\"use\"` later via the fast `backfill_xrefs` "
+            '  to `"use"` later via the fast `backfill_xrefs` '
             "  bulk_op (no re-import needed).\n"
-            "- `\"use\"`: extract xrefs, store the property, AND write "
+            '- `"use"`: extract xrefs, store the property, AND write '
             "  resolved `:<X>_XREF` edges immediately at import for "
             "  every xref whose target already exists. Targets that "
             "  don't exist yet (e.g. an ontology not imported) stay "
@@ -145,7 +145,7 @@ class LayerFlags(BaseModel):
             "Surfaces cross-ontology equivalence that L9's raw-entity "
             "signal can't reach (same drug under MeSH and ChEBI, same "
             "disease under MONDO and DOID). Requires `entities=true` "
-            "AND `xrefs=\"use\"` (xref edges must exist). Threshold "
+            'AND `xrefs="use"` (xref edges must exist). Threshold '
             "configurable via the `[cross_doc_xrefs]` section. "
             "Recomputed per-doc on ingest / backfill. No LLM cost: "
             "pure Cypher pass. Heavy on a large corpus (~minutes to "
@@ -629,7 +629,7 @@ class CorpusConfig(BaseModel):
         ge=64,
         description=(
             "Max tokens per chunk (HybridChunker only — ignored when "
-            "`chunker_strategy=\"hierarchical\"`). Higher = broader "
+            '`chunker_strategy="hierarchical"`). Higher = broader '
             "context per chunk, fewer chunks total, more storage per "
             "chunk. Per-corpus. Changing this on a corpus with existing "
             "chunks yields inconsistent chunk sizes across ingests "
@@ -640,7 +640,7 @@ class CorpusConfig(BaseModel):
         default=True,
         description=(
             "HybridChunker knob (ignored when "
-            "`chunker_strategy=\"hierarchical\"`). When true, adjacent "
+            '`chunker_strategy="hierarchical"`). When true, adjacent '
             "chunks in the same section that both fit under "
             "`chunk_max_tokens` are greedy-merged into one — fewer, "
             "larger chunks. False leaves each structure-aligned unit "
@@ -899,12 +899,12 @@ class CorpusConfig(BaseModel):
             if self.layers.xrefs != "use":
                 raise ValueError(
                     "layers.cross_doc_xrefs=true requires "
-                    "layers.xrefs=\"use\" - L10's equivalence join "
+                    'layers.xrefs="use" - L10\'s equivalence join '
                     "relies on the :<X>_XREF edges that the xrefs "
                     "layer writes in 'use' mode. With xrefs=\"none\" "
-                    "or \"collect_only\", no xref edges exist and "
+                    'or "collect_only", no xref edges exist and '
                     "L10 would only catch identity equivalence. Set "
-                    "xrefs=\"use\" (running backfill_xrefs after if "
+                    'xrefs="use" (running backfill_xrefs after if '
                     "ontologies are already imported), or turn "
                     "cross_doc_xrefs off."
                 )
@@ -952,10 +952,7 @@ class CorpusConfig(BaseModel):
         are preserved."""
         if self.layers.cross_doc and self.cross_doc is None:
             self.cross_doc = CrossDocConfig()
-        if (
-            self.layers.cross_doc_xrefs
-            and self.cross_doc_xrefs is None
-        ):
+        if self.layers.cross_doc_xrefs and self.cross_doc_xrefs is None:
             self.cross_doc_xrefs = CrossDocXrefsConfig()
         return self
 

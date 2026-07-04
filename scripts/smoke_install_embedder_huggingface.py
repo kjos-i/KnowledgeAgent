@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _install_smoke_lib import (  # noqa: E402
+from _install_smoke_lib import (
     bail_if_not_confirmed,
     confirm_no_default,
     header,
@@ -33,9 +33,9 @@ from _install_smoke_lib import (  # noqa: E402
     print_result,
 )
 
-from knowledge_agent import embedder_factory  # noqa: E402
-from knowledge_agent.config import get_settings  # noqa: E402
-from knowledge_agent.embedder_lifecycle import (  # noqa: E402
+from knowledge_agent import embedder_factory
+from knowledge_agent.config import get_settings
+from knowledge_agent.embedder_lifecycle import (
     HF_EMBEDDING_MODELS,
     download_hf_model_execute,
     download_hf_model_plan,
@@ -44,7 +44,6 @@ from knowledge_agent.embedder_lifecycle import (  # noqa: E402
     uninstall_embedder_provider_execute,
     uninstall_embedder_provider_plan,
 )
-
 
 PROVIDER = "huggingface"
 # Smallest curated model = fastest smoke. Bump to BAAI/bge-m3 etc.
@@ -60,10 +59,7 @@ async def main() -> None:
     if plan.already_installed:
         print("\nLibs already installed — skipping.")
     else:
-        print(
-            "\nNOTE: this install pulls torch — expect ~2-3 GB "
-            "depending on the CUDA wheel."
-        )
+        print("\nNOTE: this install pulls torch — expect ~2-3 GB depending on the CUDA wheel.")
         bail_if_not_confirmed("Proceed with pip install?")
         result = await install_embedder_provider_execute(plan)
         print_result("install_embedder_provider_execute", result)
@@ -72,15 +68,10 @@ async def main() -> None:
             sys.exit(1)
 
     header(f"STEP 2: download model {SMOKE_MODEL}")
-    print(
-        f"All 4 curated HF embedding models in the menu:"
-    )
+    print("All 4 curated HF embedding models in the menu:")
     for model_id, prov in HF_EMBEDDING_MODELS.items():
         marker = " <-- this smoke uses this one" if model_id == SMOKE_MODEL else ""
-        print(
-            f"  {model_id:<55s} {prov.download_size_mb:>5} MB  "
-            f"{prov.dimensions}-dim{marker}"
-        )
+        print(f"  {model_id:<55s} {prov.download_size_mb:>5} MB  {prov.dimensions}-dim{marker}")
 
     dl_plan = download_hf_model_plan(SMOKE_MODEL)
     print_plan(f"download_hf_model_plan({SMOKE_MODEL!r})", dl_plan)
@@ -105,10 +96,7 @@ async def main() -> None:
     )
     assert len(vectors) == 1, "expected one vector for one text"
     expected_dim = HF_EMBEDDING_MODELS[SMOKE_MODEL].dimensions
-    print(
-        f"\nVector length: {len(vectors[0])} "
-        f"(expected {expected_dim})"
-    )
+    print(f"\nVector length: {len(vectors[0])} (expected {expected_dim})")
     print(f"First 5 dims: {vectors[0][:5]}")
 
     input("\nPress Enter when you're done inspecting...")

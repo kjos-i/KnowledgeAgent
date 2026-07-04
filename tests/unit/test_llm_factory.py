@@ -10,14 +10,12 @@ from unittest.mock import patch
 
 import pytest
 
-from knowledge_agent import llm_factory
 from knowledge_agent.llm_factory import (
     ConfigError,
     _validate_provider_config,
     clear_cache,
     get_llm,
 )
-
 
 # init_chat_model is imported lazily inside `_build_llm`, so we patch
 # the source module — not knowledge_agent.llm_factory — to intercept.
@@ -71,66 +69,62 @@ def _clear_factory_cache():
 
 def test_anthropic_missing_key_raises_config_error():
     settings = _FakeSettings(llm_provider="anthropic", anthropic_api_key="")
-    with patch(
-        "knowledge_agent.llm_factory.get_settings", return_value=settings
+    with (
+        patch("knowledge_agent.llm_factory.get_settings", return_value=settings),
+        pytest.raises(ConfigError, match="ANTHROPIC_API_KEY"),
     ):
-        with pytest.raises(ConfigError, match="ANTHROPIC_API_KEY"):
-            _validate_provider_config("anthropic")
+        _validate_provider_config("anthropic")
 
 
 def test_openai_missing_key_raises_config_error():
     settings = _FakeSettings(llm_provider="openai", openai_api_key=None)
-    with patch(
-        "knowledge_agent.llm_factory.get_settings", return_value=settings
+    with (
+        patch("knowledge_agent.llm_factory.get_settings", return_value=settings),
+        pytest.raises(ConfigError, match="OPENAI_API_KEY"),
     ):
-        with pytest.raises(ConfigError, match="OPENAI_API_KEY"):
-            _validate_provider_config("openai")
+        _validate_provider_config("openai")
 
 
 def test_google_missing_key_raises_config_error():
     settings = _FakeSettings(llm_provider="google", google_api_key=None)
-    with patch(
-        "knowledge_agent.llm_factory.get_settings", return_value=settings
+    with (
+        patch("knowledge_agent.llm_factory.get_settings", return_value=settings),
+        pytest.raises(ConfigError, match="GOOGLE_API_KEY"),
     ):
-        with pytest.raises(ConfigError, match="GOOGLE_API_KEY"):
-            _validate_provider_config("google")
+        _validate_provider_config("google")
 
 
 def test_ollama_missing_base_url_raises_config_error():
     settings = _FakeSettings(llm_provider="ollama", ollama_base_url="")
-    with patch(
-        "knowledge_agent.llm_factory.get_settings", return_value=settings
+    with (
+        patch("knowledge_agent.llm_factory.get_settings", return_value=settings),
+        pytest.raises(ConfigError, match="OLLAMA_BASE_URL"),
     ):
-        with pytest.raises(ConfigError, match="OLLAMA_BASE_URL"):
-            _validate_provider_config("ollama")
+        _validate_provider_config("ollama")
 
 
 def test_unknown_provider_raises_config_error():
     settings = _FakeSettings(llm_provider="anthropic")
-    with patch(
-        "knowledge_agent.llm_factory.get_settings", return_value=settings
+    with (
+        patch("knowledge_agent.llm_factory.get_settings", return_value=settings),
+        pytest.raises(ConfigError, match="unknown llm_provider"),
     ):
-        with pytest.raises(ConfigError, match="unknown llm_provider"):
-            _validate_provider_config("not-a-real-provider")
+        _validate_provider_config("not-a-real-provider")
 
 
 # ---- dispatch ----
 
 
 def test_get_llm_dispatches_anthropic_with_api_key():
-    settings = _FakeSettings(
-        llm_provider="anthropic", anthropic_api_key="sk-anthropic"
-    )
+    settings = _FakeSettings(llm_provider="anthropic", anthropic_api_key="sk-anthropic")
     with (
-        patch(
-            "knowledge_agent.llm_factory.get_settings", return_value=settings
-        ),
+        patch("knowledge_agent.llm_factory.get_settings", return_value=settings),
         patch(_INIT_PATCH) as mock_init,
     ):
         mock_init.return_value = "fake-llm"
         result = get_llm("claude-sonnet-4-6", 0.0)
     assert result == "fake-llm"
-    args, kwargs = mock_init.call_args
+    _args, kwargs = mock_init.call_args
     assert kwargs["model"] == "claude-sonnet-4-6"
     assert kwargs["model_provider"] == "anthropic"
     assert kwargs["api_key"] == "sk-anthropic"
@@ -143,13 +137,11 @@ def test_get_llm_dispatches_openai_with_api_key():
         openai_api_key="sk-openai",
     )
     with (
-        patch(
-            "knowledge_agent.llm_factory.get_settings", return_value=settings
-        ),
+        patch("knowledge_agent.llm_factory.get_settings", return_value=settings),
         patch(_INIT_PATCH) as mock_init,
     ):
         get_llm("gpt-4o", 0.7)
-    args, kwargs = mock_init.call_args
+    _args, kwargs = mock_init.call_args
     assert kwargs["model_provider"] == "openai"
     assert kwargs["api_key"] == "sk-openai"
     assert kwargs["temperature"] == 0.7
@@ -161,13 +153,11 @@ def test_get_llm_dispatches_ollama_with_base_url_not_api_key():
         ollama_base_url="http://gpu-box:11434",
     )
     with (
-        patch(
-            "knowledge_agent.llm_factory.get_settings", return_value=settings
-        ),
+        patch("knowledge_agent.llm_factory.get_settings", return_value=settings),
         patch(_INIT_PATCH) as mock_init,
     ):
         get_llm("qwen2.5:7b", 0.0)
-    args, kwargs = mock_init.call_args
+    _args, kwargs = mock_init.call_args
     assert kwargs["model_provider"] == "ollama"
     assert "api_key" not in kwargs
     assert kwargs["base_url"] == "http://gpu-box:11434"
@@ -179,9 +169,7 @@ def test_get_llm_dispatches_ollama_with_base_url_not_api_key():
 def test_get_llm_caches_by_model_and_temperature():
     settings = _FakeSettings(llm_provider="anthropic")
     with (
-        patch(
-            "knowledge_agent.llm_factory.get_settings", return_value=settings
-        ),
+        patch("knowledge_agent.llm_factory.get_settings", return_value=settings),
         patch(_INIT_PATCH) as mock_init,
     ):
         mock_init.return_value = "fake-llm"
@@ -194,9 +182,7 @@ def test_get_llm_caches_by_model_and_temperature():
 def test_clear_cache_drops_cached_clients():
     settings = _FakeSettings(llm_provider="anthropic")
     with (
-        patch(
-            "knowledge_agent.llm_factory.get_settings", return_value=settings
-        ),
+        patch("knowledge_agent.llm_factory.get_settings", return_value=settings),
         patch(_INIT_PATCH) as mock_init,
     ):
         mock_init.return_value = "fake-llm"

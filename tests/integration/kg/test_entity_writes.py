@@ -79,18 +79,18 @@ async def test_write_entities_creates_entity_nodes_and_mentions_edges(
     AND ONE :MENTIONS edge (the MERGE on (chunk, entity) deduplicates).
     """
     chunk_id = _seed_chunk(kg_client, SYNTHETIC_DOC_ID)
-    ok = await kg_client.write_entities(
-        SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_MENTIONS)]
-    )
+    ok = await kg_client.write_entities(SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_MENTIONS)])
     assert ok is None  # success: returns None (typed-errors contract)
 
     with kg_client.driver.session() as session:
-        rows = list(session.run(
-            "MATCH (c:Chunk {chunk_id: $chunk_id})-[m:MENTIONS]->(e:Entity) "
-            "RETURN e.key AS key, e.entity_type AS type, m.offset AS offset "
-            "ORDER BY m.offset",
-            chunk_id=chunk_id,
-        ))
+        rows = list(
+            session.run(
+                "MATCH (c:Chunk {chunk_id: $chunk_id})-[m:MENTIONS]->(e:Entity) "
+                "RETURN e.key AS key, e.entity_type AS type, m.offset AS offset "
+                "ORDER BY m.offset",
+                chunk_id=chunk_id,
+            )
+        )
     # 3 distinct entities + 3 :MENTIONS edges (aspirin dedupes).
     assert len(rows) == 3
     distinct_entities = {(r["key"], r["type"]) for r in rows}
@@ -101,9 +101,7 @@ async def test_write_entities_creates_entity_nodes_and_mentions_edges(
     }
     # offset is set ON CREATE only — first mention wins. The first
     # aspirin Mention (offset=0) is what the edge records.
-    aspirin_offset = next(
-        r["offset"] for r in rows if r["key"] == "aspirin"
-    )
+    aspirin_offset = next(r["offset"] for r in rows if r["key"] == "aspirin")
     assert aspirin_offset == 0
 
 
@@ -128,8 +126,7 @@ async def test_write_entities_lowercases_keys(
             "MATCH (e:Entity {entity_type: 'gene'}) RETURN count(e) AS n"
         ).single()["n"]
         n_mentions = session.run(
-            "MATCH (c:Chunk {chunk_id: $chunk_id})-[m:MENTIONS]->(:Entity) "
-            "RETURN count(m) AS n",
+            "MATCH (c:Chunk {chunk_id: $chunk_id})-[m:MENTIONS]->(:Entity) RETURN count(m) AS n",
             chunk_id=chunk_id,
         ).single()["n"]
     assert n_entities == 1
@@ -142,20 +139,13 @@ async def test_write_entities_is_idempotent(
     """Re-running write_entities on the same chunk_mentions does NOT
     duplicate :Entity nodes or :MENTIONS edges."""
     chunk_id = _seed_chunk(kg_client, SYNTHETIC_DOC_ID)
-    await kg_client.write_entities(
-        SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_MENTIONS)]
-    )
-    await kg_client.write_entities(
-        SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_MENTIONS)]
-    )
+    await kg_client.write_entities(SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_MENTIONS)])
+    await kg_client.write_entities(SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_MENTIONS)])
 
     with kg_client.driver.session() as session:
-        n_entities = session.run(
-            "MATCH (e:Entity) RETURN count(e) AS n"
-        ).single()["n"]
+        n_entities = session.run("MATCH (e:Entity) RETURN count(e) AS n").single()["n"]
         n_mentions = session.run(
-            "MATCH (c:Chunk {chunk_id: $chunk_id})-[m:MENTIONS]->(:Entity) "
-            "RETURN count(m) AS n",
+            "MATCH (c:Chunk {chunk_id: $chunk_id})-[m:MENTIONS]->(:Entity) RETURN count(m) AS n",
             chunk_id=chunk_id,
         ).single()["n"]
     assert n_entities == 3
@@ -171,20 +161,15 @@ async def test_delete_entities_by_doc_id_orphan_gcs_entities(
     chunks AND garbage-collects :Entity nodes that have no remaining
     inbound :MENTIONS edges from any chunk."""
     chunk_id = _seed_chunk(kg_client, SYNTHETIC_DOC_ID)
-    await kg_client.write_entities(
-        SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_MENTIONS)]
-    )
+    await kg_client.write_entities(SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_MENTIONS)])
 
     ok = await kg_client.delete_entities_by_doc_id(SYNTHETIC_DOC_ID)
     assert ok is None  # success: returns None (typed-errors contract)
 
     with kg_client.driver.session() as session:
-        n_entities = session.run(
-            "MATCH (e:Entity) RETURN count(e) AS n"
-        ).single()["n"]
+        n_entities = session.run("MATCH (e:Entity) RETURN count(e) AS n").single()["n"]
         n_mentions = session.run(
-            "MATCH (c:Chunk {doc_id: $doc_id})-[m:MENTIONS]->() "
-            "RETURN count(m) AS n",
+            "MATCH (c:Chunk {doc_id: $doc_id})-[m:MENTIONS]->() RETURN count(m) AS n",
             doc_id=SYNTHETIC_DOC_ID,
         ).single()["n"]
     # All 3 entities had only this doc's mentions → all gone.
@@ -211,12 +196,11 @@ async def test_delete_entities_preserves_entities_shared_with_other_docs(
     await kg_client.delete_entities_by_doc_id(SYNTHETIC_DOC_ID)
 
     with kg_client.driver.session() as session:
-        n_entities = session.run(
-            "MATCH (e:Entity {key: 'aspirin'}) RETURN count(e) AS n"
-        ).single()["n"]
+        n_entities = session.run("MATCH (e:Entity {key: 'aspirin'}) RETURN count(e) AS n").single()[
+            "n"
+        ]
         n_mentions_other = session.run(
-            "MATCH (c:Chunk {doc_id: $doc_id})-[m:MENTIONS]->(:Entity) "
-            "RETURN count(m) AS n",
+            "MATCH (c:Chunk {doc_id: $doc_id})-[m:MENTIONS]->(:Entity) RETURN count(m) AS n",
             doc_id=other_doc,
         ).single()["n"]
     assert n_entities == 1  # survived because other_doc still mentions it

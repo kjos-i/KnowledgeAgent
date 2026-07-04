@@ -104,7 +104,8 @@ DEFAULT_SHARED_COUNT_THRESHOLD = 2
 _XREF_REL_PIPE = "|".join(ONTOLOGY_XREF_RELS)
 
 
-async def recompute_cross_doc_xrefs_edges(client,
+async def recompute_cross_doc_xrefs_edges(
+    client,
     doc_id: str,
     threshold: int = DEFAULT_SHARED_COUNT_THRESHOLD,
 ) -> int:
@@ -143,13 +144,10 @@ async def recompute_cross_doc_xrefs_edges(client,
         `_error: ErrorDetail | None` result field.
     """
     if not doc_id:
-        raise ValueError(
-            "KG: recompute_cross_doc_xrefs_edges called with no doc_id"
-        )
+        raise ValueError("KG: recompute_cross_doc_xrefs_edges called with no doc_id")
     if threshold < 1:
         raise ValueError(
-            f"KG: recompute_cross_doc_xrefs_edges threshold must be >= 1, "
-            f"got {threshold}"
+            f"KG: recompute_cross_doc_xrefs_edges threshold must be >= 1, got {threshold}"
         )
     async with client.driver.session() as session:
         # Step 1: wipe existing L10 edges incident to this doc.
@@ -191,14 +189,16 @@ async def recompute_cross_doc_xrefs_edges(client,
         row = await result.single()
         n = int(row["n"]) if row else 0
     logger.info(
-        "KG: recomputed L10 :RELATED_BY_XREF edges for doc %s -> %d edges "
-        "(threshold=%d)",
-        doc_id, n, threshold,
+        "KG: recomputed L10 :RELATED_BY_XREF edges for doc %s -> %d edges (threshold=%d)",
+        doc_id,
+        n,
+        threshold,
     )
     return n
 
 
-async def recompute_cross_doc_xrefs_global(client,
+async def recompute_cross_doc_xrefs_global(
+    client,
     threshold: int = DEFAULT_SHARED_COUNT_THRESHOLD,
 ) -> int:
     """Graph-wide rebuild of `:RELATED_BY_XREF` edges.
@@ -235,15 +235,12 @@ async def recompute_cross_doc_xrefs_global(client,
     """
     if threshold < 1:
         raise ValueError(
-            f"KG: recompute_cross_doc_xrefs_global threshold must be >= 1, "
-            f"got {threshold}"
+            f"KG: recompute_cross_doc_xrefs_global threshold must be >= 1, got {threshold}"
         )
     async with client.driver.session() as session:
         # Step 1: wipe all L10 edges. One MATCH across both
         # focal labels via the type predicate.
-        await session.run(
-            f"MATCH ()-[r:{RELATED_BY_XREF_REL}]-() DELETE r"
-        )
+        await session.run(f"MATCH ()-[r:{RELATED_BY_XREF_REL}]-() DELETE r")
         # Step 2: recompute over all doc pairs.
         result = await session.run(
             f"MATCH (this:{DOCUMENT_LABEL}|{ARTIFACT_LABEL})"
@@ -271,8 +268,8 @@ async def recompute_cross_doc_xrefs_global(client,
         row = await result.single()
         n = int(row["n"]) if row else 0
     logger.info(
-        "KG: recomputed L10 :RELATED_BY_XREF graph-wide -> %d edges "
-        "(threshold=%d)",
-        n, threshold,
+        "KG: recomputed L10 :RELATED_BY_XREF graph-wide -> %d edges (threshold=%d)",
+        n,
+        threshold,
     )
     return n

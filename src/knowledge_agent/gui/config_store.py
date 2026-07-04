@@ -23,8 +23,10 @@ Slice 1 scope: just the fields needed for the Search tab (retrieval
 toggles + chat-router temperature + debug). Later slices extend
 `GuiConfig` with corpus list, install-related toggles, etc.
 """
+
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -120,8 +122,12 @@ class GuiConfig(BaseModel):
         description="Default retrieval depth per query.",
     )
     retrieval_mode: Literal[
-        "auto", "lancedb_only", "neo4j_only",
-        "lancedb_then_neo4j", "neo4j_then_lancedb", "parallel_fused",
+        "auto",
+        "lancedb_only",
+        "neo4j_only",
+        "lancedb_then_neo4j",
+        "neo4j_then_lancedb",
+        "parallel_fused",
     ] = Field(
         default="auto",
         description=(
@@ -172,8 +178,7 @@ class GuiConfig(BaseModel):
         default=100,
         ge=1,
         description=(
-            "Vector-search breadth (kNN candidate pool size). Must be "
-            ">= rrf_rank_window_size."
+            "Vector-search breadth (kNN candidate pool size). Must be >= rrf_rank_window_size."
         ),
     )
     rrf_rank_constant: int = Field(
@@ -208,8 +213,7 @@ class GuiConfig(BaseModel):
         ge=0.0,
         le=1.0,
         description=(
-            "MMR relevance/diversity tradeoff. 1.0 = pure relevance, "
-            "0.0 = pure diversity."
+            "MMR relevance/diversity tradeoff. 1.0 = pure relevance, 0.0 = pure diversity."
         ),
     )
     mmr_candidate_multiplier: int = Field(
@@ -256,7 +260,9 @@ class GuiConfig(BaseModel):
         description="Model used by the mode-classifier node.",
     )
     mode_classifier_temperature: float = Field(
-        default=0.0, ge=0.0, le=1.0,
+        default=0.0,
+        ge=0.0,
+        le=1.0,
         description="Temperature for the mode-classifier LLM.",
     )
     query_builder_model: str = Field(
@@ -264,7 +270,9 @@ class GuiConfig(BaseModel):
         description="Model used by the query-builder node.",
     )
     query_builder_temperature: float = Field(
-        default=0.0, ge=0.0, le=1.0,
+        default=0.0,
+        ge=0.0,
+        le=1.0,
         description="Temperature for the query-builder LLM.",
     )
     cypher_builder_model: str = Field(
@@ -272,7 +280,9 @@ class GuiConfig(BaseModel):
         description="Model used by the cypher-builder node.",
     )
     cypher_builder_temperature: float = Field(
-        default=0.0, ge=0.0, le=1.0,
+        default=0.0,
+        ge=0.0,
+        le=1.0,
         description="Temperature for the cypher-builder LLM.",
     )
     synthesizer_model: str = Field(
@@ -280,30 +290,38 @@ class GuiConfig(BaseModel):
         description="Model used by the synthesizer node.",
     )
     synthesizer_temperature: float = Field(
-        default=0.0, ge=0.0, le=1.0,
+        default=0.0,
+        ge=0.0,
+        le=1.0,
         description="Temperature for the synthesizer LLM.",
     )
     anthropic_requests_per_second: float | None = Field(
-        default=None, gt=0.0,
+        default=None,
+        gt=0.0,
         description=(
             "Anthropic LLM rate cap (req/sec). None disables the "
             "InMemoryRateLimiter for that provider."
         ),
     )
     openai_requests_per_second: float | None = Field(
-        default=None, gt=0.0,
+        default=None,
+        gt=0.0,
         description="OpenAI LLM+embedding rate cap (req/sec).",
     )
     google_requests_per_second: float | None = Field(
-        default=None, gt=0.0,
+        default=None,
+        gt=0.0,
         description="Google (Gemini) LLM+embedding rate cap (req/sec).",
     )
     ollama_requests_per_second: float | None = Field(
-        default=None, gt=0.0,
+        default=None,
+        gt=0.0,
         description="Ollama LLM rate cap (req/sec).",
     )
     llm_max_retries: int = Field(
-        default=3, ge=1, le=10,
+        default=3,
+        ge=1,
+        le=10,
         description=(
             "Max attempts (incl. the first) per LLM call. Applied via "
             "`.with_retry(stop_after_attempt=N, "
@@ -316,9 +334,7 @@ class GuiConfig(BaseModel):
     # per-provider field (kept in sync by `on_active_provider_changed`
     # in the Embedding tab). Per-provider fields persist each provider's
     # model choice so a A→B→A switch restores A's previous choice.
-    embedding_provider: Literal[
-        "voyage", "openai", "google", "huggingface"
-    ] = Field(
+    embedding_provider: Literal["voyage", "openai", "google", "huggingface"] = Field(
         default="voyage",
         description=(
             "Active embedding provider. Switching saves the choice + "
@@ -337,8 +353,7 @@ class GuiConfig(BaseModel):
     voyage_embedding_model: str = Field(
         default="voyage-multimodal-3",
         description=(
-            "Voyage model — persisted per-provider so a switch away "
-            "and back restores this choice."
+            "Voyage model — persisted per-provider so a switch away and back restores this choice."
         ),
     )
     openai_embedding_model: str = Field(
@@ -354,7 +369,8 @@ class GuiConfig(BaseModel):
         description="HuggingFace embedding model (downloaded on first use).",
     )
     voyage_requests_per_second: float | None = Field(
-        default=None, gt=0.0,
+        default=None,
+        gt=0.0,
         description=(
             "Voyage embedding rate cap (req/sec). None disables the "
             "limiter. Voyage uses its native client; the limiter wraps "
@@ -413,7 +429,7 @@ class GuiConfig(BaseModel):
     # GUI needs to switch corpora. The active corpus's URI/user/path/
     # corpus.toml-path are mirrored to the top-level fields above so
     # the existing bridges (apply_connection_to_env) keep working.
-    corpora: list["CorpusEntry"] = Field(
+    corpora: list[CorpusEntry] = Field(
         default_factory=list,
         description=(
             "Registered corpora. Added via Library → Create New Dataset. "
@@ -539,10 +555,8 @@ def save_config(cfg: GuiConfig) -> None:
     except OSError as exc:
         # Tidy up partial file so a retry starts clean.
         if tmp.exists():
-            try:
+            with contextlib.suppress(OSError):
                 tmp.unlink()
-            except OSError:
-                pass
         raise ConfigError(f"could not write settings.json: {exc}") from exc
 
 
@@ -589,16 +603,12 @@ def set_api_key(name: str, value: str) -> None:
             # Already absent — fine.
             pass
         except keyring.errors.KeyringError as exc:
-            raise ConfigError(
-                f"could not delete keyring entry {name!r}: {exc}"
-            ) from exc
+            raise ConfigError(f"could not delete keyring entry {name!r}: {exc}") from exc
         return
     try:
         keyring.set_password(APP_ID, name, value)
     except keyring.errors.KeyringError as exc:
-        raise ConfigError(
-            f"could not save keyring entry {name!r}: {exc}"
-        ) from exc
+        raise ConfigError(f"could not save keyring entry {name!r}: {exc}") from exc
 
 
 def apply_keys_to_env() -> None:
@@ -617,7 +627,7 @@ def apply_keys_to_env() -> None:
             os.environ[env_var] = value
 
 
-def apply_retrieval_to_env(cfg: "GuiConfig") -> None:
+def apply_retrieval_to_env(cfg: GuiConfig) -> None:
     """Bridge GuiConfig's retrieval knobs to the matching env vars.
 
     Same shape as `apply_connection_to_env()` — copies the persisted
@@ -643,7 +653,7 @@ def apply_retrieval_to_env(cfg: "GuiConfig") -> None:
     os.environ["DIRECT_RETRIEVAL"] = str(cfg.direct_retrieve).lower()
 
 
-def apply_llm_to_env(cfg: "GuiConfig") -> None:
+def apply_llm_to_env(cfg: GuiConfig) -> None:
     """Bridge GuiConfig's LLM fields to the matching env vars.
 
     Active provider + ollama URL + per-node model + temperature pairs
@@ -677,7 +687,7 @@ def apply_llm_to_env(cfg: "GuiConfig") -> None:
             os.environ[var] = str(value)
 
 
-def apply_embedding_to_env(cfg: "GuiConfig") -> None:
+def apply_embedding_to_env(cfg: GuiConfig) -> None:
     """Bridge GuiConfig's embedding fields to the matching env vars.
 
     Active provider + per-provider models + active model bridge
@@ -696,7 +706,7 @@ def apply_embedding_to_env(cfg: "GuiConfig") -> None:
         os.environ[var] = str(cfg.voyage_requests_per_second)
 
 
-def apply_connection_to_env(cfg: "GuiConfig") -> None:
+def apply_connection_to_env(cfg: GuiConfig) -> None:
     """Bridge GuiConfig's connection params to the matching env vars.
 
     Called at GUI startup AFTER `disable_env_file()`. Same role as
@@ -717,12 +727,10 @@ def apply_connection_to_env(cfg: "GuiConfig") -> None:
         # (which is config files) — data goes under user_data_dir.
         from platformdirs import user_data_dir
 
-        os.environ["LANCEDB_PATH"] = str(
-            Path(user_data_dir(APP_ID, appauthor=False)) / "lancedb"
-        )
+        os.environ["LANCEDB_PATH"] = str(Path(user_data_dir(APP_ID, appauthor=False)) / "lancedb")
 
 
-def apply_active_corpus_password_to_env(cfg: "GuiConfig") -> bool:
+def apply_active_corpus_password_to_env(cfg: GuiConfig) -> bool:
     """Bridge the ACTIVE corpus's Neo4j password (keyring) -> env.
 
     `NEO4J_PASSWORD` is a per-corpus keyring secret, NOT part of the
@@ -753,7 +761,7 @@ def apply_active_corpus_password_to_env(cfg: "GuiConfig") -> bool:
     return False
 
 
-def apply_ontology_downloads_dir_to_env(cfg: "GuiConfig") -> None:
+def apply_ontology_downloads_dir_to_env(cfg: GuiConfig) -> None:
     """Bridge `GuiConfig.ontology_downloads_dir` to `ONTOLOGY_DOWNLOADS_DIR`.
 
     None (the default) — env var is DELETED so backend Settings falls
@@ -769,5 +777,3 @@ def apply_ontology_downloads_dir_to_env(cfg: "GuiConfig") -> None:
         os.environ.pop("ONTOLOGY_DOWNLOADS_DIR", None)
     else:
         os.environ["ONTOLOGY_DOWNLOADS_DIR"] = str(cfg.ontology_downloads_dir)
-
-

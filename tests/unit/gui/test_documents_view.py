@@ -21,19 +21,31 @@ from knowledge_agent.gui.library.documents_view import (
 def _rows() -> list[dict]:
     return [
         {
-            "doc_id": "d1", "title": "Aspirin and the heart",
-            "source_path": "/papers/aspirin.pdf", "sub_label": "Paper",
-            "main_label": "Document", "metadata_status": "enriched",
-            "ingested_at": "2026-07-03T10:00:00", "n_chunks": 12,
-            "n_figures": 3, "doi": "10.1/asp", "year": 2020,
-            "authors_display": "Jane Doe", "venue": "Cardiology",
-            "source_url": "https://doi.org/10.1/asp", "language": "en",
+            "doc_id": "d1",
+            "title": "Aspirin and the heart",
+            "source_path": "/papers/aspirin.pdf",
+            "sub_label": "Paper",
+            "main_label": "Document",
+            "metadata_status": "enriched",
+            "ingested_at": "2026-07-03T10:00:00",
+            "n_chunks": 12,
+            "n_figures": 3,
+            "doi": "10.1/asp",
+            "year": 2020,
+            "authors_display": "Jane Doe",
+            "venue": "Cardiology",
+            "source_url": "https://doi.org/10.1/asp",
+            "language": "en",
         },
         {
-            "doc_id": "d2", "title": "Notes on mercury",
-            "source_path": "/notes/mercury.md", "sub_label": "Note",
-            "main_label": "Document", "metadata_status": "manual",
-            "ingested_at": "2026-07-01T09:00:00", "n_chunks": 4,
+            "doc_id": "d2",
+            "title": "Notes on mercury",
+            "source_path": "/notes/mercury.md",
+            "sub_label": "Note",
+            "main_label": "Document",
+            "metadata_status": "manual",
+            "ingested_at": "2026-07-01T09:00:00",
+            "n_chunks": 4,
             "n_figures": 0,
         },
     ]
@@ -49,8 +61,13 @@ def _view(fake_app, rows=None):
 def _edit_fields(**overrides) -> dict[str, ft.TextField]:
     """Build the modal's fields dict (all keys the patch collector reads)."""
     base = {
-        "title": "", "authors_display": "", "year": "",
-        "venue": "", "doi": "", "source_url": "", "language": "",
+        "title": "",
+        "authors_display": "",
+        "year": "",
+        "venue": "",
+        "doi": "",
+        "source_url": "",
+        "language": "",
     }
     base.update(overrides)
     return {k: ft.TextField(value=v) for k, v in base.items()}
@@ -124,9 +141,7 @@ def test_render_doc_card_has_three_action_buttons(fake_app):
 
 def test_reingest_no_source_path_sets_status(fake_app):
     dv = _view(fake_app)
-    dv._open_reingest_confirm(
-        {"doc_id": "d1", "title": "T", "source_path": ""}
-    )
+    dv._open_reingest_confirm({"doc_id": "d1", "title": "T", "source_path": ""})
     assert "source path" in dv.op_status.value.lower()
 
 
@@ -163,9 +178,13 @@ def test_collect_edit_patch_reads_all_fields(fake_app):
     dv._active_edit = {
         "doc_id": "d1",
         "fields": _edit_fields(
-            title="New title", authors_display="A; B", year="2021",
-            venue="Nature", doi="10.1/x",
-            source_url="https://doi.org/10.1/x", language="en",
+            title="New title",
+            authors_display="A; B",
+            year="2021",
+            venue="Nature",
+            doi="10.1/x",
+            source_url="https://doi.org/10.1/x",
+            language="en",
         ),
     }
     patch = dv._collect_edit_patch()
@@ -186,8 +205,12 @@ def test_collect_edit_patch_blank_strings_cleared_year_omitted(fake_app):
     dv._active_edit = {"doc_id": "d1", "fields": _edit_fields()}  # all blank
     patch = dv._collect_edit_patch()
     assert patch == {
-        "title": "", "authors_display": "", "venue": "",
-        "doi": "", "source_url": "", "language": "",
+        "title": "",
+        "authors_display": "",
+        "venue": "",
+        "doi": "",
+        "source_url": "",
+        "language": "",
         "metadata_status": "manual",
     }
     assert "year" not in patch  # blank year → left unchanged
@@ -196,7 +219,8 @@ def test_collect_edit_patch_blank_strings_cleared_year_omitted(fake_app):
 def test_collect_edit_patch_unparseable_year_omitted(fake_app):
     dv = _view(fake_app)
     dv._active_edit = {
-        "doc_id": "d1", "fields": _edit_fields(year="twenty"),
+        "doc_id": "d1",
+        "fields": _edit_fields(year="twenty"),
     }
     patch = dv._collect_edit_patch()
     assert "year" not in patch
@@ -227,10 +251,7 @@ def test_fmt_date_takes_date_head():
 
 def test_fetch_error_control_explains_missing_password():
     ctrl = DocumentsView._fetch_error_control(
-        ValueError(
-            "1 validation error for Settings\n"
-            "neo4j_password\n  Field required"
-        )
+        ValueError("1 validation error for Settings\nneo4j_password\n  Field required")
     )
     assert "password" in ctrl.value.lower()
 

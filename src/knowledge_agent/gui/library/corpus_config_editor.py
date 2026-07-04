@@ -41,10 +41,10 @@ persist half-formed state to corpus.toml.
 Empty state (no active corpus): the editor renders a hint instead
 of the sections.
 """
+
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import flet as ft
@@ -55,13 +55,13 @@ from knowledge_agent.entity_extractors.extractor_lifecycle import (
     EXTRACTOR_REGISTRY,
     is_extractor_ready,
 )
-from knowledge_agent.gui.settings.llm_tab import LLM_AVAILABLE_MODELS
 from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     PANEL_BG,
     centered_label,
 )
 from knowledge_agent.gui.library.create_new_dataset import _write_corpus_toml
+from knowledge_agent.gui.settings.llm_tab import LLM_AVAILABLE_MODELS
 from knowledge_agent.kg.corpus_config import (
     CorpusConfig,
     CrossDocConfig,
@@ -243,37 +243,51 @@ class CorpusConfigEditor:
         # Section subtitles — Text instances so the collapsed state
         # of each ExpansionTile shows what's active.
         self.labels_subtitle = ft.Text(
-            "", size=11, color=ft.Colors.GREY_400,
+            "",
+            size=11,
+            color=ft.Colors.GREY_400,
         )
         self.openalex_subtitle = ft.Text(
-            "", size=11, color=ft.Colors.GREY_400,
+            "",
+            size=11,
+            color=ft.Colors.GREY_400,
         )
         self.chunks_subtitle = ft.Text(
-            "", size=11, color=ft.Colors.GREY_400,
+            "",
+            size=11,
+            color=ft.Colors.GREY_400,
         )
         self.entities_subtitle = ft.Text(
-            "", size=11, color=ft.Colors.GREY_400,
+            "",
+            size=11,
+            color=ft.Colors.GREY_400,
         )
         self.ontology_subtitle = ft.Text(
-            "", size=11, color=ft.Colors.GREY_400,
+            "",
+            size=11,
+            color=ft.Colors.GREY_400,
         )
         self.triples_subtitle = ft.Text(
-            "", size=11, color=ft.Colors.GREY_400,
+            "",
+            size=11,
+            color=ft.Colors.GREY_400,
         )
         self.cross_doc_subtitle = ft.Text(
-            "", size=11, color=ft.Colors.GREY_400,
+            "",
+            size=11,
+            color=ft.Colors.GREY_400,
         )
         self.cross_doc_xrefs_subtitle = ft.Text(
-            "", size=11, color=ft.Colors.GREY_400,
+            "",
+            size=11,
+            color=ft.Colors.GREY_400,
         )
 
         # ----- Labels and sub-labels (per-run args) -----
         self.main_label_dropdown = ft.Dropdown(
             label="Main label",
             value=DOCUMENT_LABEL,
-            options=[
-                ft.DropdownOption(key=lbl, text=lbl) for lbl in MAIN_LABELS
-            ],
+            options=[ft.DropdownOption(key=lbl, text=lbl) for lbl in MAIN_LABELS],
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
@@ -302,7 +316,9 @@ class CorpusConfigEditor:
         )
         self.sub_label_hint = ft.Text(
             "",
-            size=11, color=ft.Colors.GREY_500, italic=True,
+            size=11,
+            color=ft.Colors.GREY_500,
+            italic=True,
         )
         # Read-only display of `CorpusConfig.allowed_types` — the
         # backend field that filters the sub-label dropdown options.
@@ -310,7 +326,8 @@ class CorpusConfigEditor:
         # who want to restrict hand-edit corpus.toml).
         self.allowed_types_display = ft.Text(
             "",
-            size=11, color=ft.Colors.GREY_400,
+            size=11,
+            color=ft.Colors.GREY_400,
         )
 
         # Dirty-state indicator + Discard button. Both hidden/disabled
@@ -428,7 +445,8 @@ class CorpusConfigEditor:
                 vertical_alignment=ft.CrossAxisAlignment.START,
                 controls=[
                     ft.Icon(
-                        ft.Icons.INFO_OUTLINE, size=16,
+                        ft.Icons.INFO_OUTLINE,
+                        size=16,
                         color=ft.Colors.AMBER_400,
                     ),
                     ft.Text(
@@ -438,7 +456,9 @@ class CorpusConfigEditor:
                         "little new coverage, especially two NERs in the "
                         "same domain. Add only if the extra recall is "
                         "worth it.",
-                        size=10, color=ft.Colors.AMBER_200, italic=True,
+                        size=10,
+                        color=ft.Colors.AMBER_200,
+                        italic=True,
                         expand=True,
                     ),
                 ],
@@ -478,9 +498,7 @@ class CorpusConfigEditor:
         # LLM tab pattern.
         provider_options = [
             ft.DropdownOption(key=m, text=m)
-            for m in LLM_AVAILABLE_MODELS.get(
-                self.app.gui_config.llm_provider, ()
-            )
+            for m in LLM_AVAILABLE_MODELS.get(self.app.gui_config.llm_provider, ())
         ]
         self.entity_extractor_model_field = ft.Dropdown(
             label="entity_extractor_model",
@@ -495,10 +513,15 @@ class CorpusConfigEditor:
         )
         self.entity_extractor_temperature_readout = ft.Text(
             _fmt_float(0.0),
-            size=12, color=ft.Colors.WHITE, width=42,
+            size=12,
+            color=ft.Colors.WHITE,
+            width=42,
         )
         self.entity_extractor_temperature_slider = ft.Slider(
-            value=0.0, min=0.0, max=1.0, divisions=20,
+            value=0.0,
+            min=0.0,
+            max=1.0,
+            divisions=20,
             on_change=self._on_entity_extractor_temperature_slide,
             on_change_end=self._on_entity_extractor_temperature_committed,
         )
@@ -517,10 +540,15 @@ class CorpusConfigEditor:
         )
         self.triples_extractor_temperature_readout = ft.Text(
             _fmt_float(0.0),
-            size=12, color=ft.Colors.WHITE, width=42,
+            size=12,
+            color=ft.Colors.WHITE,
+            width=42,
         )
         self.triples_extractor_temperature_slider = ft.Slider(
-            value=0.0, min=0.0, max=1.0, divisions=20,
+            value=0.0,
+            min=0.0,
+            max=1.0,
+            divisions=20,
             on_change=self._on_triples_extractor_temperature_slide,
             on_change_end=self._on_triples_extractor_temperature_committed,
         )
@@ -539,20 +567,23 @@ class CorpusConfigEditor:
                 controls=[
                     ft.Text(
                         "LLM extractor settings",
-                        size=11, weight=ft.FontWeight.BOLD,
+                        size=11,
+                        weight=ft.FontWeight.BOLD,
                         color=ft.Colors.GREY_400,
                     ),
                     ft.Text(
-                        "Empty entity_types (above) = LLM categorises "
-                        "freely (open vocabulary).",
-                        size=10, color=ft.Colors.GREY_500, italic=True,
+                        "Empty entity_types (above) = LLM categorises freely (open vocabulary).",
+                        size=10,
+                        color=ft.Colors.GREY_500,
+                        italic=True,
                     ),
                     self.entity_extractor_model_field,
                     ft.Row(
                         controls=[
                             ft.Text(
                                 "entity_extractor_temperature",
-                                size=12, color=ft.Colors.GREY_300,
+                                size=12,
+                                color=ft.Colors.GREY_300,
                                 width=220,
                             ),
                             ft.Container(
@@ -577,7 +608,8 @@ class CorpusConfigEditor:
                 controls=[
                     ft.Text(
                         "GLiNER extractor settings",
-                        size=11, weight=ft.FontWeight.BOLD,
+                        size=11,
+                        weight=ft.FontWeight.BOLD,
                         color=ft.Colors.GREY_400,
                     ),
                     ft.Text(
@@ -588,7 +620,9 @@ class CorpusConfigEditor:
                         "/ CELL_TYPE / ANATOMY. The Replace / Add toggle "
                         "above controls whether your typed labels replace "
                         "those defaults or extend them.",
-                        size=10, color=ft.Colors.GREY_500, italic=True,
+                        size=10,
+                        color=ft.Colors.GREY_500,
+                        italic=True,
                     ),
                 ],
             ),
@@ -603,14 +637,16 @@ class CorpusConfigEditor:
                 controls=[
                     ft.Text(
                         "HunFlair2 extractor settings",
-                        size=11, weight=ft.FontWeight.BOLD,
+                        size=11,
+                        weight=ft.FontWeight.BOLD,
                         color=ft.Colors.GREY_400,
                     ),
                     ft.Text(
                         "HunFlair2 emits a fixed 5-label set: DISEASE, "
                         "CHEMICAL, GENE, SPECIES, CELL_LINE. "
                         "`entity_types` has no effect here.",
-                        size=11, color=ft.Colors.GREY_300,
+                        size=11,
+                        color=ft.Colors.GREY_300,
                     ),
                 ],
             ),
@@ -766,9 +802,10 @@ class CorpusConfigEditor:
         active_name = self.app.gui_config.active_corpus_name
         if active_name is None:
             return ft.Text(
-                "No active corpus — pick one above (or create one) to "
-                "edit its config.",
-                size=12, color=ft.Colors.GREY_500, italic=True,
+                "No active corpus — pick one above (or create one) to edit its config.",
+                size=12,
+                color=ft.Colors.GREY_500,
+                italic=True,
             )
         if active_name != self._loaded_for_corpus:
             self._reload_for_active_corpus(active_name)
@@ -816,7 +853,9 @@ class CorpusConfigEditor:
                             "Applied to every file in the next ingest. "
                             "Not persisted to corpus.toml — pick fresh "
                             "each run.",
-                            size=11, color=ft.Colors.GREY_500, italic=True,
+                            size=11,
+                            color=ft.Colors.GREY_500,
+                            italic=True,
                         ),
                         ft.Row(
                             controls=[
@@ -833,7 +872,8 @@ class CorpusConfigEditor:
                         # which sub-labels the dropdown offers).
                         ft.Container(
                             padding=ft.Padding.symmetric(
-                                vertical=6, horizontal=8,
+                                vertical=6,
+                                horizontal=8,
                             ),
                             border=ft.Border.all(1, ft.Colors.GREY_800),
                             border_radius=4,
@@ -841,8 +881,7 @@ class CorpusConfigEditor:
                                 spacing=3,
                                 controls=[
                                     ft.Text(
-                                        "Corpus allowed_types "
-                                        "(read-only):",
+                                        "Corpus allowed_types (read-only):",
                                         size=11,
                                         weight=ft.FontWeight.BOLD,
                                         color=ft.Colors.GREY_400,
@@ -873,12 +912,15 @@ class CorpusConfigEditor:
                             "topic graph from a single OpenAlex API "
                             "lookup per doc. Turn on for scientific "
                             "papers.",
-                            size=11, color=ft.Colors.GREY_500, italic=True,
+                            size=11,
+                            color=ft.Colors.GREY_500,
+                            italic=True,
                         ),
-                        _globals_block([
-                            ("openalex_mailto",
-                             self._read_global("openalex_mailto")),
-                        ]),
+                        _globals_block(
+                            [
+                                ("openalex_mailto", self._read_global("openalex_mailto")),
+                            ]
+                        ),
                     ],
                 ),
                 # ---- Section 3: Chunks (L5) ----
@@ -891,7 +933,9 @@ class CorpusConfigEditor:
                             "Per-chunk :Chunk nodes joinable with LanceDB "
                             "via `chunk_id`. Required for retrieval — "
                             "effectively always on.",
-                            size=11, color=ft.Colors.GREY_500, italic=True,
+                            size=11,
+                            color=ft.Colors.GREY_500,
+                            italic=True,
                         ),
                         ft.Row(
                             controls=[
@@ -923,9 +967,10 @@ class CorpusConfigEditor:
                         self.optimize_indexes_checkbox,
                         _globals_block(
                             [
-                                ("min_rows_for_vector_index",
-                                 self._read_global(
-                                     "min_rows_for_vector_index")),
+                                (
+                                    "min_rows_for_vector_index",
+                                    self._read_global("min_rows_for_vector_index"),
+                                ),
                             ],
                             note=(
                                 "LanceDB IVF_PQ needs ~256 rows to "
@@ -942,9 +987,10 @@ class CorpusConfigEditor:
                     controls=[
                         self.entities_checkbox,
                         ft.Text(
-                            "Chunk-level entity extraction. Requires the "
-                            "chunks layer.",
-                            size=11, color=ft.Colors.GREY_500, italic=True,
+                            "Chunk-level entity extraction. Requires the chunks layer.",
+                            size=11,
+                            color=ft.Colors.GREY_500,
+                            italic=True,
                         ),
                         # Multi-extractor: select any subset + order them
                         # (top = base, owns overlapping spans; later ones
@@ -953,7 +999,8 @@ class CorpusConfigEditor:
                             "Extractors (priority order — top owns "
                             "overlapping entities; drag lower ones fill "
                             "gaps):",
-                            size=11, color=ft.Colors.GREY_400,
+                            size=11,
+                            color=ft.Colors.GREY_400,
                         ),
                         self.extractor_rows_column,
                         self.extractor_info_banner,
@@ -986,7 +1033,9 @@ class CorpusConfigEditor:
                             "checkboxes below only toggle whether the "
                             "already-installed ontology gets linked "
                             "against for this corpus.",
-                            size=11, color=ft.Colors.GREY_500, italic=True,
+                            size=11,
+                            color=ft.Colors.GREY_500,
+                            italic=True,
                         ),
                         # Nested collapsible sub-folder — 18 ontology
                         # rows with checkbox + matching Dropdown each.
@@ -1007,9 +1056,11 @@ class CorpusConfigEditor:
                             "Materialise `:<X>_XREF` edges between term "
                             "nodes across ontologies (MeSH ↔ MONDO, "
                             "MONDO ↔ ChEBI, ...). L10 cross-doc xrefs "
-                            "requires this be set to \"Materialize "
-                            "edges now\".",
-                            size=11, color=ft.Colors.GREY_500, italic=True,
+                            'requires this be set to "Materialize '
+                            'edges now".',
+                            size=11,
+                            color=ft.Colors.GREY_500,
+                            italic=True,
                         ),
                         self.xrefs_radio,
                     ],
@@ -1026,14 +1077,17 @@ class CorpusConfigEditor:
                             "the entities layer. The 15 predicate types "
                             "(INHIBITS / ACTIVATES / ...) are fixed at "
                             "the code level.",
-                            size=11, color=ft.Colors.GREY_500, italic=True,
+                            size=11,
+                            color=ft.Colors.GREY_500,
+                            italic=True,
                         ),
                         self.triples_extractor_model_field,
                         ft.Row(
                             controls=[
                                 ft.Text(
                                     "triples_extractor_temperature",
-                                    size=12, color=ft.Colors.GREY_300,
+                                    size=12,
+                                    color=ft.Colors.GREY_300,
                                     width=220,
                                 ),
                                 ft.Container(
@@ -1056,7 +1110,9 @@ class CorpusConfigEditor:
                         ft.Text(
                             ":RELATED_TO edges between docs sharing ≥ N "
                             "L6 entities. Requires the entities layer.",
-                            size=11, color=ft.Colors.GREY_500, italic=True,
+                            size=11,
+                            color=ft.Colors.GREY_500,
+                            italic=True,
                         ),
                         self.cross_doc_threshold_field,
                     ],
@@ -1071,8 +1127,10 @@ class CorpusConfigEditor:
                             ":RELATED_BY_XREF edges between docs sharing "
                             "≥ N canonical concepts (via xref "
                             "equivalence). Requires entities + "
-                            "xrefs=\"use\".",
-                            size=11, color=ft.Colors.GREY_500, italic=True,
+                            'xrefs="use".',
+                            size=11,
+                            color=ft.Colors.GREY_500,
+                            italic=True,
                         ),
                         self.cross_doc_xrefs_threshold_field,
                     ],
@@ -1114,9 +1172,7 @@ class CorpusConfigEditor:
             self._corpus_config = None
             self._baseline_config = None
             self._loaded_for_corpus = name
-            self.status.value = (
-                f"corpus.toml not found at {entry.corpus_config_path}"
-            )
+            self.status.value = f"corpus.toml not found at {entry.corpus_config_path}"
             return
         except Exception as exc:
             logger.warning("load_corpus_config failed: %r", exc)
@@ -1145,9 +1201,7 @@ class CorpusConfigEditor:
         # default 'exact' otherwise).
         for key, dropdown in self.ontology_matching_dropdowns.items():
             ont_cfg = cfg.ontology.get(key)
-            dropdown.value = (
-                ont_cfg.matching if ont_cfg is not None else "exact"
-            )
+            dropdown.value = ont_cfg.matching if ont_cfg is not None else "exact"
         # Layer flags.
         if self.chunks_checkbox is not None:
             self.chunks_checkbox.value = cfg.layers.chunks
@@ -1188,9 +1242,7 @@ class CorpusConfigEditor:
         if self.entity_extractor_model_field is not None:
             self.entity_extractor_model_field.value = cfg.entity_extractor_model
         if self.entity_extractor_temperature_slider is not None:
-            self.entity_extractor_temperature_slider.value = (
-                cfg.entity_extractor_temperature
-            )
+            self.entity_extractor_temperature_slider.value = cfg.entity_extractor_temperature
         if self.entity_extractor_temperature_readout is not None:
             self.entity_extractor_temperature_readout.value = _fmt_float(
                 cfg.entity_extractor_temperature,
@@ -1199,9 +1251,7 @@ class CorpusConfigEditor:
         if self.triples_extractor_model_field is not None:
             self.triples_extractor_model_field.value = cfg.triples_extractor_model
         if self.triples_extractor_temperature_slider is not None:
-            self.triples_extractor_temperature_slider.value = (
-                cfg.triples_extractor_temperature
-            )
+            self.triples_extractor_temperature_slider.value = cfg.triples_extractor_temperature
         if self.triples_extractor_temperature_readout is not None:
             self.triples_extractor_temperature_readout.value = _fmt_float(
                 cfg.triples_extractor_temperature,
@@ -1210,25 +1260,20 @@ class CorpusConfigEditor:
         if self.allowed_types_display is not None:
             allowed = list(cfg.allowed_types)
             if allowed:
-                self.allowed_types_display.value = (
-                    f"{', '.join(allowed)} ({len(allowed)} items)"
-                )
+                self.allowed_types_display.value = f"{', '.join(allowed)} ({len(allowed)} items)"
             else:
                 self.allowed_types_display.value = "(empty)"
         # Entity extraction — ordered multi-extractor selection.
         self._selected_extractors = (
-            list(cfg.entities.extractors)
-            if cfg.entities is not None else ["llm"]
+            list(cfg.entities.extractors) if cfg.entities is not None else ["llm"]
         )
         if self.entity_types_field is not None:
             self.entity_types_field.value = (
-                ", ".join(cfg.entities.entity_types)
-                if cfg.entities is not None else ""
+                ", ".join(cfg.entities.entity_types) if cfg.entities is not None else ""
             )
         if self.entity_types_mode_radio is not None:
             self.entity_types_mode_radio.value = (
-                cfg.entities.entity_types_mode
-                if cfg.entities is not None else "replace"
+                cfg.entities.entity_types_mode if cfg.entities is not None else "replace"
             )
         # Cross-doc thresholds.
         if self.cross_doc_threshold_field is not None:
@@ -1237,8 +1282,7 @@ class CorpusConfigEditor:
             )
         if self.cross_doc_xrefs_threshold_field is not None:
             self.cross_doc_xrefs_threshold_field.value = str(
-                cfg.cross_doc_xrefs.threshold
-                if cfg.cross_doc_xrefs is not None else 2
+                cfg.cross_doc_xrefs.threshold if cfg.cross_doc_xrefs is not None else 2
             )
         self._rebuild_extractor_widget()
         self._refresh_subtitles()
@@ -1263,26 +1307,24 @@ class CorpusConfigEditor:
         # openalex_papers.
         if self.openalex_subtitle is not None:
             self.openalex_subtitle.value = _cur_new_bool(
-                base.layers.openalex_papers, cfg.layers.openalex_papers,
+                base.layers.openalex_papers,
+                cfg.layers.openalex_papers,
             )
         # Chunks: layer flag + chunker choice + a "+N knob changes" hint
         # so users notice pending edits without clicking through. Only
         # the layer bool and chunker_strategy are surfaced; token / OCR
         # / merge / scale / optimize knob deltas are counted.
         if self.chunks_subtitle is not None:
-            base_str = (
-                _fmt_bool(base.layers.chunks)
-                + f" · {base.chunker_strategy}"
-            )
-            cur_str = (
-                _fmt_bool(cfg.layers.chunks)
-                + f" · {cfg.chunker_strategy}"
-            )
+            base_str = _fmt_bool(base.layers.chunks) + f" · {base.chunker_strategy}"
+            cur_str = _fmt_bool(cfg.layers.chunks) + f" · {cfg.chunker_strategy}"
             knob_deltas = 0
             for name in (
-                "chunk_max_tokens", "merge_peers",
-                "enable_pdf_ocr", "enable_image_ocr",
-                "images_scale", "min_figure_bytes",
+                "chunk_max_tokens",
+                "merge_peers",
+                "enable_pdf_ocr",
+                "enable_image_ocr",
+                "images_scale",
+                "min_figure_bytes",
                 "optimize_indexes_per_ingest",
             ):
                 if getattr(base, name) != getattr(cfg, name):
@@ -1296,12 +1338,10 @@ class CorpusConfigEditor:
         # LLM model / temperature are pending changes.
         if self.entities_subtitle is not None:
             base_extractor = (
-                " → ".join(base.entities.extractors)
-                if base.entities is not None else "not set"
+                " → ".join(base.entities.extractors) if base.entities is not None else "not set"
             )
             cur_extractor = (
-                " → ".join(cfg.entities.extractors)
-                if cfg.entities is not None else "not set"
+                " → ".join(cfg.entities.extractors) if cfg.entities is not None else "not set"
             )
             base_str = _fmt_bool(base.layers.entities) + f" · {base_extractor}"
             cur_str = _fmt_bool(cfg.layers.entities) + f" · {cur_extractor}"
@@ -1320,28 +1360,23 @@ class CorpusConfigEditor:
         # Ontology linking.
         if self.ontology_subtitle is not None:
             base_onts = [
-                display for key, display in _ONTOLOGY_DISPLAY.items()
+                display
+                for key, display in _ONTOLOGY_DISPLAY.items()
                 if getattr(base.layers, f"ontology_{key}", False)
             ]
             cur_onts = [
-                display for key, display in _ONTOLOGY_DISPLAY.items()
+                display
+                for key, display in _ONTOLOGY_DISPLAY.items()
                 if getattr(cfg.layers, f"ontology_{key}", False)
             ]
             # Count non-default (fuzzy) matching settings for a "+N fuzzy"
             # hint in the subtitle so it's obvious when defaults were
             # overridden.
-            n_fuzzy = sum(
-                1 for oc in cfg.ontology.values()
-                if oc.matching == "fuzzy"
-            )
+            n_fuzzy = sum(1 for oc in cfg.ontology.values() if oc.matching == "fuzzy")
             base_str = (
-                (", ".join(base_onts) if base_onts else "none")
-                + f" · xrefs={base.layers.xrefs}"
-            )
-            cur_str = (
-                (", ".join(cur_onts) if cur_onts else "none")
-                + f" · xrefs={cfg.layers.xrefs}"
-            )
+                ", ".join(base_onts) if base_onts else "none"
+            ) + f" · xrefs={base.layers.xrefs}"
+            cur_str = (", ".join(cur_onts) if cur_onts else "none") + f" · xrefs={cfg.layers.xrefs}"
             if n_fuzzy:
                 cur_str += f" · {n_fuzzy} fuzzy"
             self.ontology_subtitle.value = _cur_new(base_str, cur_str)
@@ -1363,33 +1398,27 @@ class CorpusConfigEditor:
             self.triples_subtitle.value = _cur_new(base_str, cur_str)
         # Cross-doc.
         if self.cross_doc_subtitle is not None:
-            base_thr = (
-                base.cross_doc.threshold if base.cross_doc is not None
-                else 2
-            )
-            cur_thr = (
-                cfg.cross_doc.threshold if cfg.cross_doc is not None
-                else 2
-            )
+            base_thr = base.cross_doc.threshold if base.cross_doc is not None else 2
+            cur_thr = cfg.cross_doc.threshold if cfg.cross_doc is not None else 2
             base_str = _fmt_bool(base.layers.cross_doc) + f" · threshold={base_thr}"
             cur_str = _fmt_bool(cfg.layers.cross_doc) + f" · threshold={cur_thr}"
             self.cross_doc_subtitle.value = _cur_new(base_str, cur_str)
         # Cross-doc xrefs.
         if self.cross_doc_xrefs_subtitle is not None:
-            base_thr = (
-                base.cross_doc_xrefs.threshold
-                if base.cross_doc_xrefs is not None else 2
+            base_thr = base.cross_doc_xrefs.threshold if base.cross_doc_xrefs is not None else 2
+            cur_thr = cfg.cross_doc_xrefs.threshold if cfg.cross_doc_xrefs is not None else 2
+            base_str = (
+                _fmt_bool(
+                    base.layers.cross_doc_xrefs,
+                )
+                + f" · threshold={base_thr}"
             )
-            cur_thr = (
-                cfg.cross_doc_xrefs.threshold
-                if cfg.cross_doc_xrefs is not None else 2
+            cur_str = (
+                _fmt_bool(
+                    cfg.layers.cross_doc_xrefs,
+                )
+                + f" · threshold={cur_thr}"
             )
-            base_str = _fmt_bool(
-                base.layers.cross_doc_xrefs,
-            ) + f" · threshold={base_thr}"
-            cur_str = _fmt_bool(
-                cfg.layers.cross_doc_xrefs,
-            ) + f" · threshold={cur_thr}"
             self.cross_doc_xrefs_subtitle.value = _cur_new(base_str, cur_str)
 
     def _refresh_labels_subtitle(self) -> None:
@@ -1399,13 +1428,8 @@ class CorpusConfigEditor:
             return
         main, sub, overwrite = self._read_ingest_controls()
         sub_str = sub if sub is not None else "(none)"
-        overwrite_str = (
-            "overwrite existing labels" if overwrite
-            else "preserve existing labels"
-        )
-        self.labels_subtitle.value = (
-            f"Main: {main} · Sub: {sub_str} · {overwrite_str}"
-        )
+        overwrite_str = "overwrite existing labels" if overwrite else "preserve existing labels"
+        self.labels_subtitle.value = f"Main: {main} · Sub: {sub_str} · {overwrite_str}"
 
     def _read_global(self, field_name: str) -> str:
         """Read the current value of a global Settings field, or fall
@@ -1501,16 +1525,15 @@ class CorpusConfigEditor:
     def _read_ingest_controls(self) -> tuple[str, str | None, bool]:
         main = (
             self.main_label_dropdown.value
-            if self.main_label_dropdown is not None else DOCUMENT_LABEL
+            if self.main_label_dropdown is not None
+            else DOCUMENT_LABEL
         )
         raw_sub = (
-            self.sub_label_dropdown.value
-            if self.sub_label_dropdown is not None else _SUB_NONE_KEY
+            self.sub_label_dropdown.value if self.sub_label_dropdown is not None else _SUB_NONE_KEY
         )
         sub = None if raw_sub == _SUB_NONE_KEY else raw_sub
         overwrite = (
-            bool(self.overwrite_checkbox.value)
-            if self.overwrite_checkbox is not None else False
+            bool(self.overwrite_checkbox.value) if self.overwrite_checkbox is not None else False
         )
         return main, sub, overwrite
 
@@ -1522,10 +1545,7 @@ class CorpusConfigEditor:
         main = self.main_label_dropdown.value or DOCUMENT_LABEL
         cfg = self._corpus_config
         allowed = list(cfg.allowed_types) if cfg is not None else []
-        compatible = [
-            sub for sub in allowed
-            if SUB_LABEL_TO_MAIN.get(sub) == main
-        ]
+        compatible = [sub for sub in allowed if SUB_LABEL_TO_MAIN.get(sub) == main]
         new_options = [
             ft.DropdownOption(key=_SUB_NONE_KEY, text=_SUB_NONE_TEXT),
         ] + [ft.DropdownOption(key=sub, text=sub) for sub in compatible]
@@ -1652,9 +1672,7 @@ class CorpusConfigEditor:
             self.extractor_rows_column.controls = self._build_extractor_rows()
         if self.extractor_info_banner is not None:
             # Inform (don't restrict) from the 3rd selected extractor on.
-            self.extractor_info_banner.visible = (
-                len(self._selected_extractors) >= 3
-            )
+            self.extractor_info_banner.visible = len(self._selected_extractors) >= 3
         self._refresh_extractor_groups()
 
     def _build_extractor_rows(self) -> list[ft.Control]:
@@ -1662,9 +1680,7 @@ class CorpusConfigEditor:
         + priority number + up/down reorder. Selected adapters come
         first in priority order, then the rest in registry order."""
         selected = self._selected_extractors
-        ordered = list(selected) + [
-            k for k in EXTRACTOR_REGISTRY if k not in selected
-        ]
+        ordered = list(selected) + [k for k in EXTRACTOR_REGISTRY if k not in selected]
         rows: list[ft.Control] = []
         for key in ordered:
             display = EXTRACTOR_REGISTRY[key]["display_name"]
@@ -1676,10 +1692,7 @@ class CorpusConfigEditor:
                 on_change=lambda e, k=key: self._on_extractor_toggle(k),
             )
             if not ready:
-                name_text = (
-                    f"{display} — install + download weights in "
-                    f"Library → Installs"
-                )
+                name_text = f"{display} — install + download weights in Library → Installs"
             elif pos is None:
                 name_text = display
             else:
@@ -1691,13 +1704,15 @@ class CorpusConfigEditor:
                 expand=True,
             )
             up = ft.IconButton(
-                icon=ft.Icons.ARROW_UPWARD, icon_size=16,
+                icon=ft.Icons.ARROW_UPWARD,
+                icon_size=16,
                 tooltip="Higher priority (owns overlaps)",
                 disabled=(pos is None or pos == 0),
                 on_click=lambda e, k=key: self._on_extractor_move(k, -1),
             )
             down = ft.IconButton(
-                icon=ft.Icons.ARROW_DOWNWARD, icon_size=16,
+                icon=ft.Icons.ARROW_DOWNWARD,
+                icon_size=16,
                 tooltip="Lower priority (fills gaps)",
                 disabled=(pos is None or pos >= len(selected) - 1),
                 on_click=lambda e, k=key: self._on_extractor_move(k, 1),
@@ -1724,9 +1739,7 @@ class CorpusConfigEditor:
         new_entities = EntityConfig(
             extractors=list(self._selected_extractors),
             entity_types=(cur.entity_types if cur is not None else []),
-            entity_types_mode=(
-                cur.entity_types_mode if cur is not None else "replace"
-            ),
+            entity_types_mode=(cur.entity_types_mode if cur is not None else "replace"),
         )
         self._corpus_config = self._corpus_config.model_copy(
             update={"entities": new_entities},
@@ -1746,9 +1759,7 @@ class CorpusConfigEditor:
                 self._rebuild_extractor_widget()
                 self.app.page.update()
                 return
-            self._selected_extractors = [
-                k for k in self._selected_extractors if k != key
-            ]
+            self._selected_extractors = [k for k in self._selected_extractors if k != key]
         else:
             self._selected_extractors = [*self._selected_extractors, key]
         self._commit_extractors()
@@ -1770,10 +1781,7 @@ class CorpusConfigEditor:
     def _on_entity_types_mode_changed(self, e: ft.Event) -> None:
         """Replace / Add toggle for how a non-empty types list interacts
         with each adapter's DEFAULT_LABELS."""
-        if (
-            self._corpus_config is None
-            or self.entity_types_mode_radio is None
-        ):
+        if self._corpus_config is None or self.entity_types_mode_radio is None:
             return
         new_mode = self.entity_types_mode_radio.value or "replace"
         cur = self._corpus_config.entities
@@ -1781,8 +1789,7 @@ class CorpusConfigEditor:
             return
         new_entities = EntityConfig(
             extractors=(
-                list(cur.extractors) if cur is not None
-                else list(self._selected_extractors)
+                list(cur.extractors) if cur is not None else list(self._selected_extractors)
             ),
             entity_types=(cur.entity_types if cur is not None else []),
             entity_types_mode=new_mode,
@@ -1798,10 +1805,7 @@ class CorpusConfigEditor:
         raw = self.entity_types_field.value or ""
         types = [t.strip() for t in raw.split(",") if t.strip()]
         current_entities = self._corpus_config.entities
-        if (
-            current_entities is not None
-            and current_entities.entity_types == types
-        ):
+        if current_entities is not None and current_entities.entity_types == types:
             return
         new_entities = EntityConfig(
             extractors=(
@@ -1811,8 +1815,7 @@ class CorpusConfigEditor:
             ),
             entity_types=types,
             entity_types_mode=(
-                current_entities.entity_types_mode
-                if current_entities is not None else "replace"
+                current_entities.entity_types_mode if current_entities is not None else "replace"
             ),
         )
         self._corpus_config = self._corpus_config.model_copy(
@@ -1823,15 +1826,13 @@ class CorpusConfigEditor:
     # ----- Cross-doc threshold handlers -----------------------------------
 
     def _on_cross_doc_threshold_blur(self, e: ft.Event) -> None:
-        if (
-            self._corpus_config is None
-            or self.cross_doc_threshold_field is None
-        ):
+        if self._corpus_config is None or self.cross_doc_threshold_field is None:
             return
         raw = (self.cross_doc_threshold_field.value or "").strip()
         current = (
             self._corpus_config.cross_doc.threshold
-            if self._corpus_config.cross_doc is not None else 2
+            if self._corpus_config.cross_doc is not None
+            else 2
         )
         try:
             new_value = max(1, int(raw))
@@ -1851,15 +1852,13 @@ class CorpusConfigEditor:
         self._after_mutation()
 
     def _on_cross_doc_xrefs_threshold_blur(self, e: ft.Event) -> None:
-        if (
-            self._corpus_config is None
-            or self.cross_doc_xrefs_threshold_field is None
-        ):
+        if self._corpus_config is None or self.cross_doc_xrefs_threshold_field is None:
             return
         raw = (self.cross_doc_xrefs_threshold_field.value or "").strip()
         current = (
             self._corpus_config.cross_doc_xrefs.threshold
-            if self._corpus_config.cross_doc_xrefs is not None else 2
+            if self._corpus_config.cross_doc_xrefs is not None
+            else 2
         )
         try:
             new_value = max(1, int(raw))
@@ -1901,11 +1900,14 @@ class CorpusConfigEditor:
                     controls=[
                         ft.Text(
                             name,
-                            size=11, color=ft.Colors.GREY_400, width=260,
+                            size=11,
+                            color=ft.Colors.GREY_400,
+                            width=260,
                         ),
                         ft.Text(
                             self._read_global(name),
-                            size=11, color=ft.Colors.GREY_300,
+                            size=11,
+                            color=ft.Colors.GREY_300,
                         ),
                     ],
                 ),
@@ -1914,14 +1916,17 @@ class CorpusConfigEditor:
             "Process-wide (shared across all corpora, not per-corpus). "
             "Edit via `.env` / global Settings; the Ollama daemon probe "
             "uses its own timeout=1.0 override.",
-            size=10, color=ft.Colors.GREY_500, italic=True,
+            size=10,
+            color=ft.Colors.GREY_500,
+            italic=True,
         )
         return ft.ExpansionTile(
             title=ft.Text("Ingest infrastructure (read-only)"),
             controls=[
                 ft.Container(
                     padding=ft.Padding.symmetric(
-                        vertical=6, horizontal=8,
+                        vertical=6,
+                        horizontal=8,
                     ),
                     border=ft.Border.all(1, ft.Colors.GREY_800),
                     border_radius=4,
@@ -1980,10 +1985,7 @@ class CorpusConfigEditor:
         if new_value not in ("exact", "fuzzy"):
             return
         current_ont_cfg = self._corpus_config.ontology.get(key)
-        current_matching = (
-            current_ont_cfg.matching if current_ont_cfg is not None
-            else "exact"
-        )
+        current_matching = current_ont_cfg.matching if current_ont_cfg is not None else "exact"
         if new_value == current_matching:
             return
         new_ontology = dict(self._corpus_config.ontology)
@@ -2039,10 +2041,7 @@ class CorpusConfigEditor:
             self.entity_types_mode_radio.visible = gliner_on
 
     def _on_entity_extractor_model_blur(self, e: ft.Event) -> None:
-        if (
-            self._corpus_config is None
-            or self.entity_extractor_model_field is None
-        ):
+        if self._corpus_config is None or self.entity_extractor_model_field is None:
             return
         raw = (self.entity_extractor_model_field.value or "").strip()
         current = self._corpus_config.entity_extractor_model
@@ -2071,10 +2070,7 @@ class CorpusConfigEditor:
 
     def _on_entity_extractor_temperature_committed(self, e: ft.Event) -> None:
         """Commit the slider's final value on release."""
-        if (
-            self._corpus_config is None
-            or self.entity_extractor_temperature_slider is None
-        ):
+        if self._corpus_config is None or self.entity_extractor_temperature_slider is None:
             return
         new_value = float(self.entity_extractor_temperature_slider.value)
         current = self._corpus_config.entity_extractor_temperature
@@ -2086,10 +2082,7 @@ class CorpusConfigEditor:
         self._after_mutation()
 
     def _on_triples_extractor_model_blur(self, e: ft.Event) -> None:
-        if (
-            self._corpus_config is None
-            or self.triples_extractor_model_field is None
-        ):
+        if self._corpus_config is None or self.triples_extractor_model_field is None:
             return
         raw = (self.triples_extractor_model_field.value or "").strip()
         current = self._corpus_config.triples_extractor_model
@@ -2118,10 +2111,7 @@ class CorpusConfigEditor:
 
     def _on_triples_extractor_temperature_committed(self, e: ft.Event) -> None:
         """Commit the slider's final value on release."""
-        if (
-            self._corpus_config is None
-            or self.triples_extractor_temperature_slider is None
-        ):
+        if self._corpus_config is None or self.triples_extractor_temperature_slider is None:
             return
         new_value = float(self.triples_extractor_temperature_slider.value)
         current = self._corpus_config.triples_extractor_temperature
@@ -2135,10 +2125,7 @@ class CorpusConfigEditor:
     # ----- Chunks (L5) per-corpus field handlers --------------------------
 
     def _on_chunker_strategy_changed(self, e: ft.Event) -> None:
-        if (
-            self._corpus_config is None
-            or self.chunker_strategy_dropdown is None
-        ):
+        if self._corpus_config is None or self.chunker_strategy_dropdown is None:
             return
         new_value = self.chunker_strategy_dropdown.value
         if new_value not in ("hybrid", "hierarchical"):
@@ -2151,10 +2138,7 @@ class CorpusConfigEditor:
         self._after_mutation()
 
     def _on_chunk_max_tokens_blur(self, e: ft.Event) -> None:
-        if (
-            self._corpus_config is None
-            or self.chunk_max_tokens_field is None
-        ):
+        if self._corpus_config is None or self.chunk_max_tokens_field is None:
             return
         raw = (self.chunk_max_tokens_field.value or "").strip()
         current = self._corpus_config.chunk_max_tokens
@@ -2175,10 +2159,7 @@ class CorpusConfigEditor:
         self._after_mutation()
 
     def _on_min_figure_bytes_blur(self, e: ft.Event) -> None:
-        if (
-            self._corpus_config is None
-            or self.min_figure_bytes_field is None
-        ):
+        if self._corpus_config is None or self.min_figure_bytes_field is None:
             return
         raw = (self.min_figure_bytes_field.value or "").strip()
         current = self._corpus_config.min_figure_bytes
@@ -2201,10 +2182,7 @@ class CorpusConfigEditor:
         self._after_mutation()
 
     def _on_images_scale_blur(self, e: ft.Event) -> None:
-        if (
-            self._corpus_config is None
-            or self.images_scale_field is None
-        ):
+        if self._corpus_config is None or self.images_scale_field is None:
             return
         raw = (self.images_scale_field.value or "").strip()
         current = self._corpus_config.images_scale
@@ -2289,21 +2267,28 @@ class CorpusConfigEditor:
         def _grey(cb: ft.Checkbox | None, ok: bool, tip: str) -> None:
             if cb is None:
                 return
-            cb.label_style = None if ok else ft.TextStyle(
-                color=ft.Colors.GREY_600,
+            cb.label_style = (
+                None
+                if ok
+                else ft.TextStyle(
+                    color=ft.Colors.GREY_600,
+                )
             )
             cb.tooltip = None if ok else tip
 
         _grey(
-            self.entities_checkbox, chunks_on,
+            self.entities_checkbox,
+            chunks_on,
             "Requires the chunks layer",
         )
         _grey(
-            self.triples_checkbox, entities_on,
+            self.triples_checkbox,
+            entities_on,
             "Requires the entities layer",
         )
         _grey(
-            self.cross_doc_checkbox, entities_on,
+            self.cross_doc_checkbox,
+            entities_on,
             "Requires the entities layer",
         )
         for cb in self.ontology_checkboxes.values():
@@ -2319,7 +2304,9 @@ class CorpusConfigEditor:
             _grey(self.cross_doc_xrefs_checkbox, ok, tip)
 
     def _dependency_error_for(
-        self, field_name: str, new_value: bool,
+        self,
+        field_name: str,
+        new_value: bool,
     ) -> str | None:
         """If turning `field_name` to `new_value` violates a cross-field
         rule, return the message to show. Turning fields OFF never
@@ -2329,45 +2316,27 @@ class CorpusConfigEditor:
         cfg = self._corpus_config
         if field_name == "entities":
             if not cfg.layers.chunks:
-                return (
-                    "The entities layer requires the chunks layer. "
-                    "Turn chunks on first."
-                )
+                return "The entities layer requires the chunks layer. Turn chunks on first."
         elif field_name == "triples":
             if not cfg.layers.entities:
-                return (
-                    "The triples layer requires the entities layer. "
-                    "Turn entities on first."
-                )
+                return "The triples layer requires the entities layer. Turn entities on first."
         elif field_name == "cross_doc":
             if not cfg.layers.entities:
-                return (
-                    "cross_doc requires the entities layer. "
-                    "Turn entities on first."
-                )
+                return "cross_doc requires the entities layer. Turn entities on first."
         elif field_name == "cross_doc_xrefs":
             if not cfg.layers.entities:
-                return (
-                    "cross_doc_xrefs requires the entities layer. "
-                    "Turn entities on first."
-                )
+                return "cross_doc_xrefs requires the entities layer. Turn entities on first."
             if cfg.layers.xrefs != "use":
-                return (
-                    'cross_doc_xrefs requires xrefs = "use". '
-                    "Set xrefs to 'use' first."
-                )
-        elif field_name.startswith("ontology_"):
-            if not cfg.layers.entities:
-                return (
-                    "Ontology layers require the entities layer. "
-                    "Turn entities on first."
-                )
+                return "cross_doc_xrefs requires xrefs = \"use\". Set xrefs to 'use' first."
+        elif field_name.startswith("ontology_") and not cfg.layers.entities:
+            return "Ontology layers require the entities layer. Turn entities on first."
         return None
 
     def _show_dependency_dialog(self, message: str) -> None:
         """Modal warning explaining a dependency violation. One [OK]
         button — the reverted control state is already restored by
         the caller."""
+
         def _close(_ev):
             self.app.page.pop_dialog()
 
@@ -2401,7 +2370,9 @@ def _fmt_bool(v: bool) -> str:
 
 
 def _globals_block(
-    pairs: list[tuple[str, str]], *, note: str | None = None,
+    pairs: list[tuple[str, str]],
+    *,
+    note: str | None = None,
 ) -> ft.Control:
     """A compact read-only block showing `field: value` rows for global
     settings that affect a layer. Editing them belongs elsewhere
@@ -2410,7 +2381,9 @@ def _globals_block(
     rows: list[ft.Control] = [
         ft.Text(
             "Global (read-only):",
-            size=11, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_400,
+            size=11,
+            weight=ft.FontWeight.BOLD,
+            color=ft.Colors.GREY_400,
         ),
     ]
     for name, value in pairs:
@@ -2420,7 +2393,9 @@ def _globals_block(
                 controls=[
                     ft.Text(
                         name,
-                        size=11, color=ft.Colors.GREY_400, width=220,
+                        size=11,
+                        color=ft.Colors.GREY_400,
+                        width=220,
                     ),
                     ft.Text(value, size=11, color=ft.Colors.GREY_300),
                 ],
@@ -2430,7 +2405,9 @@ def _globals_block(
         rows.append(
             ft.Text(
                 note,
-                size=10, color=ft.Colors.GREY_500, italic=True,
+                size=10,
+                color=ft.Colors.GREY_500,
+                italic=True,
             ),
         )
     return ft.Container(
@@ -2475,5 +2452,3 @@ def _format_validation_error(exc: ValidationError) -> str:
         msg = errs[0].get("msg", str(exc))
         return msg.split("[type=")[0].strip()
     return str(exc)
-
-

@@ -6,11 +6,10 @@ via LangChain wrappers. All four are exercised under patches so
 no real API calls are made.
 """
 
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from knowledge_agent import embedder_factory
 from knowledge_agent.embedder_factory import (
     clear_cache,
     embed_chunks,
@@ -61,52 +60,48 @@ async def test_empty_texts_returns_empty_no_validation_no_api_call():
 
 
 async def test_voyage_missing_api_key_raises_config_error():
-    settings = _FakeSettings(
-        embedding_provider="voyage", voyage_api_key=""
-    )
-    with patch(
-        "knowledge_agent.embedder_factory.get_settings",
-        return_value=settings,
+    settings = _FakeSettings(embedding_provider="voyage", voyage_api_key="")
+    with (
+        patch(
+            "knowledge_agent.embedder_factory.get_settings",
+            return_value=settings,
+        ),
+        pytest.raises(ConfigError, match="VOYAGE_API_KEY"),
     ):
-        with pytest.raises(ConfigError, match="VOYAGE_API_KEY"):
-            await embed_texts(["hello"])
+        await embed_texts(["hello"])
 
 
 async def test_openai_missing_api_key_raises_config_error():
-    settings = _FakeSettings(
-        embedding_provider="openai", openai_api_key=None
-    )
-    with patch(
-        "knowledge_agent.embedder_factory.get_settings",
-        return_value=settings,
+    settings = _FakeSettings(embedding_provider="openai", openai_api_key=None)
+    with (
+        patch(
+            "knowledge_agent.embedder_factory.get_settings",
+            return_value=settings,
+        ),
+        pytest.raises(ConfigError, match="OPENAI_API_KEY"),
     ):
-        with pytest.raises(ConfigError, match="OPENAI_API_KEY"):
-            await embed_texts(["hello"])
+        await embed_texts(["hello"])
 
 
 async def test_google_missing_api_key_raises_config_error():
-    settings = _FakeSettings(
-        embedding_provider="google", google_api_key=None
-    )
-    with patch(
-        "knowledge_agent.embedder_factory.get_settings",
-        return_value=settings,
+    settings = _FakeSettings(embedding_provider="google", google_api_key=None)
+    with (
+        patch(
+            "knowledge_agent.embedder_factory.get_settings",
+            return_value=settings,
+        ),
+        pytest.raises(ConfigError, match="GOOGLE_API_KEY"),
     ):
-        with pytest.raises(ConfigError, match="GOOGLE_API_KEY"):
-            await embed_texts(["hello"])
+        await embed_texts(["hello"])
 
 
 # ---- dispatch: voyage (native client path) ----
 
 
 async def test_voyage_dispatch_calls_multimodal_embed():
-    settings = _FakeSettings(
-        embedding_provider="voyage", voyage_api_key="pa-stub"
-    )
+    settings = _FakeSettings(embedding_provider="voyage", voyage_api_key="pa-stub")
     fake_client = MagicMock()
-    fake_client.multimodal_embed.return_value = MagicMock(
-        embeddings=[[0.1, 0.2], [0.3, 0.4]]
-    )
+    fake_client.multimodal_embed.return_value = MagicMock(embeddings=[[0.1, 0.2], [0.3, 0.4]])
     with (
         patch(
             "knowledge_agent.embedder_factory.get_settings",
@@ -227,13 +222,9 @@ async def test_embed_chunks_empty_returns_empty_no_api_call():
 async def test_embed_chunks_voyage_multimodal_builds_mixed_inputs(tmp_path):
     """Voyage path: figure with text → [text, image]; figure with empty
     text → [image]; text-only chunk → [text]. Each aligned 1:1."""
-    settings = _FakeSettings(
-        embedding_provider="voyage", voyage_api_key="pa-stub"
-    )
+    settings = _FakeSettings(embedding_provider="voyage", voyage_api_key="pa-stub")
     fake_client = MagicMock()
-    fake_client.multimodal_embed.return_value = MagicMock(
-        embeddings=[[0.1], [0.2], [0.3]]
-    )
+    fake_client.multimodal_embed.return_value = MagicMock(embeddings=[[0.1], [0.2], [0.3]])
     fig1 = tmp_path / "1.png"
     fig1.write_bytes(b"fake-png-bytes")
     fig2 = tmp_path / "2.png"
@@ -241,8 +232,8 @@ async def test_embed_chunks_voyage_multimodal_builds_mixed_inputs(tmp_path):
 
     chunks = [
         _FakeChunk(text="caption", image_ref=str(fig1)),  # figure + caption
-        _FakeChunk(text="", image_ref=str(fig2)),         # figure + empty text
-        _FakeChunk(text="hello"),                         # plain text chunk
+        _FakeChunk(text="", image_ref=str(fig2)),  # figure + empty text
+        _FakeChunk(text="hello"),  # plain text chunk
     ]
     with (
         patch(
@@ -254,7 +245,8 @@ async def test_embed_chunks_voyage_multimodal_builds_mixed_inputs(tmp_path):
             return_value=fake_client,
         ),
         patch(
-            "PIL.Image.open", side_effect=_fake_pil_open,
+            "PIL.Image.open",
+            side_effect=_fake_pil_open,
         ),
     ):
         result = await embed_chunks(chunks)
@@ -304,9 +296,9 @@ async def test_embed_chunks_non_voyage_warns_on_figure(caplog):
     )
     # Warning surfaced once per call, naming the provider.
     warnings = [
-        r for r in caplog.records
-        if r.levelname == "WARNING"
-        and "does not support multimodal" in r.getMessage()
+        r
+        for r in caplog.records
+        if r.levelname == "WARNING" and "does not support multimodal" in r.getMessage()
     ]
     assert len(warnings) == 1
     assert "openai" in warnings[0].getMessage()
@@ -315,13 +307,9 @@ async def test_embed_chunks_non_voyage_warns_on_figure(caplog):
 async def test_embed_chunks_accepts_dict_rows_from_lancedb():
     """re_embed feeds LanceDB row dicts to `embed_chunks`; must
     duck-type on `text` + `image_ref` keys."""
-    settings = _FakeSettings(
-        embedding_provider="voyage", voyage_api_key="pa-stub"
-    )
+    settings = _FakeSettings(embedding_provider="voyage", voyage_api_key="pa-stub")
     fake_client = MagicMock()
-    fake_client.multimodal_embed.return_value = MagicMock(
-        embeddings=[[0.7]]
-    )
+    fake_client.multimodal_embed.return_value = MagicMock(embeddings=[[0.7]])
     rows = [{"text": "row text", "image_ref": None}]
     with (
         patch(

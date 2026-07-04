@@ -94,9 +94,7 @@ def _validate_provider_config(provider: str) -> None:
     settings = get_settings()
     if provider == "anthropic":
         if not settings.anthropic_api_key:
-            raise ConfigError(
-                "LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is empty"
-            )
+            raise ConfigError("LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is empty")
     elif provider == "openai":
         if not settings.openai_api_key:
             raise ConfigError(
@@ -116,9 +114,7 @@ def _validate_provider_config(provider: str) -> None:
         # is the wrong place. `init_chat_model` will raise a clear
         # `ConnectionError` at first inference if the daemon is down.
         if not settings.ollama_base_url:
-            raise ConfigError(
-                "LLM_PROVIDER=ollama but OLLAMA_BASE_URL is empty"
-            )
+            raise ConfigError("LLM_PROVIDER=ollama but OLLAMA_BASE_URL is empty")
     else:
         # Unreachable given the Literal type on `settings.llm_provider`,
         # but the runtime guard keeps mypy happy and catches any future
@@ -127,9 +123,7 @@ def _validate_provider_config(provider: str) -> None:
 
 
 @lru_cache(maxsize=8)
-def _get_rate_limiter(
-    provider: str, requests_per_second: float
-) -> "InMemoryRateLimiter":
+def _get_rate_limiter(provider: str, requests_per_second: float) -> InMemoryRateLimiter:
     """Build and cache a per-provider token-bucket rate limiter.
 
     Cached so all `_build_llm(provider, ...)` cache misses share ONE
@@ -151,7 +145,7 @@ def _get_rate_limiter(
     return InMemoryRateLimiter(requests_per_second=requests_per_second)
 
 
-def _rate_limiter_for(provider: str) -> "InMemoryRateLimiter | None":
+def _rate_limiter_for(provider: str) -> InMemoryRateLimiter | None:
     """Resolve the rate limiter for the active provider, or None.
 
     Settings field is `<provider>_requests_per_second`; `None` (the
@@ -173,9 +167,7 @@ def _rate_limiter_for(provider: str) -> "InMemoryRateLimiter | None":
 
 
 @lru_cache(maxsize=16)
-def _build_llm(
-    provider: str, model: str, temperature: float
-) -> "BaseChatModel":
+def _build_llm(provider: str, model: str, temperature: float) -> BaseChatModel:
     """Construct and cache the LangChain chat-model client.
 
     Cache key includes `provider` so a settings.llm_provider swap at
@@ -213,7 +205,7 @@ def _build_llm(
     return init_chat_model(**kwargs)
 
 
-def get_llm(model: str, temperature: float) -> "BaseChatModel":
+def get_llm(model: str, temperature: float) -> BaseChatModel:
     """Return the LLM client for the active provider.
 
     Args:
@@ -234,7 +226,7 @@ def get_llm(model: str, temperature: float) -> "BaseChatModel":
     return _build_llm(provider, model, temperature)
 
 
-def with_retry(runnable: "Runnable") -> "Runnable":
+def with_retry(runnable: Runnable) -> Runnable:
     """Wrap any LangChain `Runnable` with the standard retry policy.
 
     Applied at every LLM call site AFTER `.with_structured_output(...)`

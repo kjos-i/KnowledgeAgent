@@ -20,15 +20,8 @@ drops oboInOwl synonyms on OWL inputs, which OBI / EFO need.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from knowledge_agent.kg.ontology_helpers import OntologyTerm
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    import pronto
-
 
 logger = logging.getLogger(__name__)
 
@@ -87,23 +80,15 @@ def extract_terms_obo(
             continue
         # Pronto exposes synonyms as Synonym objects; .description is the
         # string. Lowercase for downstream case-insensitive matching.
-        synonyms = tuple(
-            sorted({s.description.lower() for s in term.synonyms if s.description})
-        )
+        synonyms = tuple(sorted({s.description.lower() for s in term.synonyms if s.description}))
         parents = tuple(
-            sorted(
-                p.id
-                for p in term.superclasses(distance=1, with_self=False)
-                if p.id
-            )
+            sorted(p.id for p in term.superclasses(distance=1, with_self=False) if p.id)
         )
         # L7 cross-ontology xrefs. Pronto parses OBO `xref:` lines into
         # `Xref` objects with an `.id` attribute carrying the prefixed
         # canonical ID (e.g. "MESH:D003920"). Stored verbatim - no
         # normalisation. Deduped via set, sorted for determinism.
-        xrefs = tuple(
-            sorted({x.id for x in (term.xrefs or ()) if getattr(x, "id", None)})
-        )
+        xrefs = tuple(sorted({x.id for x in (term.xrefs or ()) if getattr(x, "id", None)}))
         terms.append(
             OntologyTerm(
                 id=term.id,
@@ -116,6 +101,7 @@ def extract_terms_obo(
         )
     logger.info(
         "ontology: extracted %d terms from OBO ontology (prefix=%s)",
-        len(terms), id_prefix,
+        len(terms),
+        id_prefix,
     )
     return terms

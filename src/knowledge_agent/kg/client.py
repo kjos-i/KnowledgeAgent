@@ -135,6 +135,7 @@ class Neo4jClient:
         propagate). Delegates to `openalex_writes.write_citations`.
         """
         return await openalex_writes.write_citations(self, doc_id, work)
+
     async def write_authorships(self, doc_id: str, work: dict[str, Any]) -> None:
         """L2: :Author nodes + :AUTHORED edges (with position, is_corresponding).
 
@@ -142,6 +143,7 @@ class Neo4jClient:
         propagate). Delegates to `openalex_writes.write_authorships`.
         """
         return await openalex_writes.write_authorships(self, doc_id, work)
+
     async def write_venue(self, doc_id: str, work: dict[str, Any]) -> None:
         """L3: :Venue node + :PUBLISHED_IN edge.
 
@@ -149,6 +151,7 @@ class Neo4jClient:
         propagate). Delegates to `openalex_writes.write_venue`.
         """
         return await openalex_writes.write_venue(self, doc_id, work)
+
     async def write_topics(self, doc_id: str, work: dict[str, Any]) -> None:
         """L4: :Topic nodes + :ABOUT_TOPIC edges (with score).
 
@@ -156,6 +159,7 @@ class Neo4jClient:
         propagate). Delegates to `openalex_writes.write_topics`.
         """
         return await openalex_writes.write_topics(self, doc_id, work)
+
     async def delete_doc(self, doc_id: str) -> None:
         """Wipe a paper's L1-L4 KG data: focal :Document + edges + GC orphans.
 
@@ -167,6 +171,7 @@ class Neo4jClient:
         propagate). Delegates to `openalex_writes.delete_doc`.
         """
         return await openalex_writes.delete_doc(self, doc_id)
+
     async def delete_doc_l1_l4_edges(self, doc_id: str) -> None:
         """Wipe L1-L4 edges only; preserve focal :Document + :PART_OF.
 
@@ -177,6 +182,7 @@ class Neo4jClient:
         propagate). Delegates to `openalex_writes.delete_doc_l1_l4_edges`.
         """
         return await openalex_writes.delete_doc_l1_l4_edges(self, doc_id)
+
     async def delete_chunks_by_doc_id(self, doc_id: str) -> None:
         """L5: wipe every :Chunk node for `doc_id`. Idempotent.
 
@@ -190,7 +196,8 @@ class Neo4jClient:
         return await chunk_writes.delete_chunks_by_doc_id(self, doc_id)
 
     async def get_focal_labels_by_doc_id(
-        self, doc_id: str,
+        self,
+        doc_id: str,
     ) -> tuple[str | None, str | None]:
         """Read the focal doc node's `(main_label, sub_label)`.
 
@@ -202,6 +209,7 @@ class Neo4jClient:
         propagate). Delegates to `chunk_writes.get_focal_labels_by_doc_id`.
         """
         return await chunk_writes.get_focal_labels_by_doc_id(self, doc_id)
+
     async def write_chunks(
         self,
         doc_id: str,
@@ -238,6 +246,7 @@ class Neo4jClient:
         propagate). Delegates to `entity_writes.delete_entities_by_doc_id`.
         """
         return await entity_writes.delete_entities_by_doc_id(self, doc_id)
+
     async def write_entities(
         self,
         doc_id: str,
@@ -258,9 +267,7 @@ class Neo4jClient:
 
     # ---- L8 triples writes - implementations in `triples_writes.py` ----
 
-    async def get_entities_by_chunk(
-        self, doc_id: str
-    ) -> dict[str, list[tuple[str, str]]]:
+    async def get_entities_by_chunk(self, doc_id: str) -> dict[str, list[tuple[str, str]]]:
         """L8 backfill helper: read this doc's L6 entity vocabulary
         grouped by chunk_id. Returns `{chunk_id: [(key, type), ...]}`.
 
@@ -283,12 +290,11 @@ class Neo4jClient:
         propagate). Delegates to `triples_writes.delete_triples_by_doc_id`.
         """
         return await triples_writes.delete_triples_by_doc_id(self, doc_id)
+
     async def write_triples(
         self,
         doc_id: str,
-        chunk_triples: list[
-            tuple[str, list[triples_writes.ExtractedTriple]]
-        ],
+        chunk_triples: list[tuple[str, list[triples_writes.ExtractedTriple]]],
     ) -> None:
         """L8: typed entity-to-entity edges from per-chunk LLM extraction.
 
@@ -331,9 +337,7 @@ class Neo4jClient:
     async def recompute_cross_doc_xrefs_edges(
         self,
         doc_id: str,
-        threshold: int = (
-            cross_doc_xrefs_writes.DEFAULT_SHARED_COUNT_THRESHOLD
-        ),
+        threshold: int = (cross_doc_xrefs_writes.DEFAULT_SHARED_COUNT_THRESHOLD),
     ) -> int:
         """L10: wipe + recompute `:RELATED_BY_XREF` edges incident to
         this doc.
@@ -366,6 +370,7 @@ class Neo4jClient:
         Delegates to `ontology_mesh_writes.is_imported`.
         """
         return await ontology_mesh_writes.is_imported(self)
+
     async def import_mesh(self, *, force: bool = False) -> bool:
         """Download + parse + write the MeSH ontology to Neo4j.
 
@@ -378,6 +383,7 @@ class Neo4jClient:
         Delegates to `ontology_mesh_writes.import_mesh`.
         """
         return await ontology_mesh_writes.import_mesh(self, force=force)
+
     async def delete_mesh(self) -> None:
         """Drop every `:MeSHTerm` node + its edges. Idempotent.
 
@@ -388,12 +394,14 @@ class Neo4jClient:
         Delegates to `ontology_mesh_writes.delete_imported`.
         """
         return await ontology_mesh_writes.delete_imported(self)
+
     async def is_go_imported(self) -> bool:
         """True when at least one `:GOTerm` node exists in Neo4j.
 
         Delegates to `ontology_go_writes.is_imported`.
         """
         return await ontology_go_writes.is_imported(self)
+
     async def import_go(self, *, force: bool = False) -> bool:
         """Download + parse + write the Gene Ontology to Neo4j.
 
@@ -406,18 +414,21 @@ class Neo4jClient:
         Delegates to `ontology_go_writes.import_go`.
         """
         return await ontology_go_writes.import_go(self, force=force)
+
     async def delete_go(self) -> None:
         """Drop every `:GOTerm` node + its edges. Idempotent.
 
         Delegates to `ontology_go_writes.delete_imported`.
         """
         return await ontology_go_writes.delete_imported(self)
+
     async def is_hpo_imported(self) -> bool:
         """True when at least one `:HPOTerm` node exists in Neo4j.
 
         Delegates to `ontology_hpo_writes.is_imported`.
         """
         return await ontology_hpo_writes.is_imported(self)
+
     async def import_hpo(self, *, force: bool = False) -> bool:
         """Download + parse + write the Human Phenotype Ontology to Neo4j.
 
@@ -430,18 +441,21 @@ class Neo4jClient:
         Delegates to `ontology_hpo_writes.import_hpo`.
         """
         return await ontology_hpo_writes.import_hpo(self, force=force)
+
     async def delete_hpo(self) -> None:
         """Drop every `:HPOTerm` node + its edges. Idempotent.
 
         Delegates to `ontology_hpo_writes.delete_imported`.
         """
         return await ontology_hpo_writes.delete_imported(self)
+
     async def is_uberon_imported(self) -> bool:
         """True when at least one `:UBERONTerm` node exists in Neo4j.
 
         Delegates to `ontology_uberon_writes.is_imported`.
         """
         return await ontology_uberon_writes.is_imported(self)
+
     async def import_uberon(self, *, force: bool = False) -> bool:
         """Download + parse + write the Uber Anatomy Ontology to Neo4j.
 
@@ -454,18 +468,21 @@ class Neo4jClient:
         Delegates to `ontology_uberon_writes.import_uberon`.
         """
         return await ontology_uberon_writes.import_uberon(self, force=force)
+
     async def delete_uberon(self) -> None:
         """Drop every `:UBERONTerm` node + its edges. Idempotent.
 
         Delegates to `ontology_uberon_writes.delete_imported`.
         """
         return await ontology_uberon_writes.delete_imported(self)
+
     async def is_mondo_imported(self) -> bool:
         """True when at least one `:MONDOTerm` node exists in Neo4j.
 
         Delegates to `ontology_mondo_writes.is_imported`.
         """
         return await ontology_mondo_writes.is_imported(self)
+
     async def import_mondo(self, *, force: bool = False) -> bool:
         """Download + parse + write the Mondo Disease Ontology to Neo4j.
 
@@ -478,18 +495,21 @@ class Neo4jClient:
         Delegates to `ontology_mondo_writes.import_mondo`.
         """
         return await ontology_mondo_writes.import_mondo(self, force=force)
+
     async def delete_mondo(self) -> None:
         """Drop every `:MONDOTerm` node + its edges. Idempotent.
 
         Delegates to `ontology_mondo_writes.delete_imported`.
         """
         return await ontology_mondo_writes.delete_imported(self)
+
     async def is_chebi_imported(self) -> bool:
         """True when at least one `:ChEBITerm` node exists in Neo4j.
 
         Delegates to `ontology_chebi_writes.is_imported`.
         """
         return await ontology_chebi_writes.is_imported(self)
+
     async def import_chebi(self, *, force: bool = False) -> bool:
         """Download + parse + write the ChEBI ontology (LITE variant) to Neo4j.
 
@@ -502,18 +522,21 @@ class Neo4jClient:
         Delegates to `ontology_chebi_writes.import_chebi`.
         """
         return await ontology_chebi_writes.import_chebi(self, force=force)
+
     async def delete_chebi(self) -> None:
         """Drop every `:ChEBITerm` node + its edges. Idempotent.
 
         Delegates to `ontology_chebi_writes.delete_imported`.
         """
         return await ontology_chebi_writes.delete_imported(self)
+
     async def is_eco_imported(self) -> bool:
         """True when at least one `:ECOTerm` node exists in Neo4j.
 
         Delegates to `ontology_eco_writes.is_imported`.
         """
         return await ontology_eco_writes.is_imported(self)
+
     async def import_eco(self, *, force: bool = False) -> bool:
         """Download + parse + write the Evidence & Conclusion Ontology to Neo4j.
 
@@ -526,18 +549,21 @@ class Neo4jClient:
         Delegates to `ontology_eco_writes.import_eco`.
         """
         return await ontology_eco_writes.import_eco(self, force=force)
+
     async def delete_eco(self) -> None:
         """Drop every `:ECOTerm` node + its edges. Idempotent.
 
         Delegates to `ontology_eco_writes.delete_imported`.
         """
         return await ontology_eco_writes.delete_imported(self)
+
     async def is_so_imported(self) -> bool:
         """True when at least one `:SOTerm` node exists in Neo4j.
 
         Delegates to `ontology_so_writes.is_imported`.
         """
         return await ontology_so_writes.is_imported(self)
+
     async def import_so(self, *, force: bool = False) -> bool:
         """Download + parse + write the Sequence Ontology to Neo4j.
 
@@ -546,18 +572,21 @@ class Neo4jClient:
         Delegates to `ontology_so_writes.import_so`.
         """
         return await ontology_so_writes.import_so(self, force=force)
+
     async def delete_so(self) -> None:
         """Drop every `:SOTerm` node + its edges. Idempotent.
 
         Delegates to `ontology_so_writes.delete_imported`.
         """
         return await ontology_so_writes.delete_imported(self)
+
     async def is_pr_imported(self) -> bool:
         """True when at least one `:PRTerm` node exists in Neo4j.
 
         Delegates to `ontology_pr_writes.is_imported`.
         """
         return await ontology_pr_writes.is_imported(self)
+
     async def import_pr(self, *, force: bool = False) -> bool:
         """Download + parse + write the Protein Ontology to Neo4j.
 
@@ -566,18 +595,21 @@ class Neo4jClient:
         Delegates to `ontology_pr_writes.import_pr`.
         """
         return await ontology_pr_writes.import_pr(self, force=force)
+
     async def delete_pr(self) -> None:
         """Drop every `:PRTerm` node + its edges. Idempotent.
 
         Delegates to `ontology_pr_writes.delete_imported`.
         """
         return await ontology_pr_writes.delete_imported(self)
+
     async def is_cl_imported(self) -> bool:
         """True when at least one `:CLTerm` node exists in Neo4j.
 
         Delegates to `ontology_cl_writes.is_imported`.
         """
         return await ontology_cl_writes.is_imported(self)
+
     async def import_cl(self, *, force: bool = False) -> bool:
         """Download + parse + write the Cell Ontology to Neo4j.
 
@@ -586,18 +618,21 @@ class Neo4jClient:
         Delegates to `ontology_cl_writes.import_cl`.
         """
         return await ontology_cl_writes.import_cl(self, force=force)
+
     async def delete_cl(self) -> None:
         """Drop every `:CLTerm` node + its edges. Idempotent.
 
         Delegates to `ontology_cl_writes.delete_imported`.
         """
         return await ontology_cl_writes.delete_imported(self)
+
     async def is_po_imported(self) -> bool:
         """True when at least one `:POTerm` node exists in Neo4j.
 
         Delegates to `ontology_po_writes.is_imported`.
         """
         return await ontology_po_writes.is_imported(self)
+
     async def import_po(self, *, force: bool = False) -> bool:
         """Download + parse + write the Plant Ontology to Neo4j.
 
@@ -606,18 +641,21 @@ class Neo4jClient:
         Delegates to `ontology_po_writes.import_po`.
         """
         return await ontology_po_writes.import_po(self, force=force)
+
     async def delete_po(self) -> None:
         """Drop every `:POTerm` node + its edges. Idempotent.
 
         Delegates to `ontology_po_writes.delete_imported`.
         """
         return await ontology_po_writes.delete_imported(self)
+
     async def is_foodon_imported(self) -> bool:
         """True when at least one `:FOODONTerm` node exists in Neo4j.
 
         Delegates to `ontology_foodon_writes.is_imported`.
         """
         return await ontology_foodon_writes.is_imported(self)
+
     async def import_foodon(self, *, force: bool = False) -> bool:
         """Download + parse + write the Food Ontology to Neo4j.
 
@@ -626,18 +664,21 @@ class Neo4jClient:
         Delegates to `ontology_foodon_writes.import_foodon`.
         """
         return await ontology_foodon_writes.import_foodon(self, force=force)
+
     async def delete_foodon(self) -> None:
         """Drop every `:FOODONTerm` node + its edges. Idempotent.
 
         Delegates to `ontology_foodon_writes.delete_imported`.
         """
         return await ontology_foodon_writes.delete_imported(self)
+
     async def is_envo_imported(self) -> bool:
         """True when at least one `:ENVOTerm` node exists in Neo4j.
 
         Delegates to `ontology_envo_writes.is_imported`.
         """
         return await ontology_envo_writes.is_imported(self)
+
     async def import_envo(self, *, force: bool = False) -> bool:
         """Download + parse + write the Environment Ontology to Neo4j.
 
@@ -646,18 +687,21 @@ class Neo4jClient:
         Delegates to `ontology_envo_writes.import_envo`.
         """
         return await ontology_envo_writes.import_envo(self, force=force)
+
     async def delete_envo(self) -> None:
         """Drop every `:ENVOTerm` node + its edges. Idempotent.
 
         Delegates to `ontology_envo_writes.delete_imported`.
         """
         return await ontology_envo_writes.delete_imported(self)
+
     async def is_ncbitaxon_imported(self) -> bool:
         """True when at least one `:NCBITaxonTerm` node exists in Neo4j.
 
         Delegates to `ontology_ncbitaxon_writes.is_imported`.
         """
         return await ontology_ncbitaxon_writes.is_imported(self)
+
     async def import_ncbitaxon(self, *, force: bool = False) -> bool:
         """Download + parse + write NCBI Taxonomy to Neo4j.
 
@@ -670,18 +714,21 @@ class Neo4jClient:
         Delegates to `ontology_ncbitaxon_writes.import_ncbitaxon`.
         """
         return await ontology_ncbitaxon_writes.import_ncbitaxon(self, force=force)
+
     async def delete_ncbitaxon(self) -> None:
         """Drop every `:NCBITaxonTerm` node + its edges. Idempotent.
 
         Delegates to `ontology_ncbitaxon_writes.delete_imported`.
         """
         return await ontology_ncbitaxon_writes.delete_imported(self)
+
     async def is_obi_imported(self) -> bool:
         """True when at least one `:OBITerm` node exists in Neo4j.
 
         Delegates to `ontology_obi_writes.is_imported`.
         """
         return await ontology_obi_writes.is_imported(self)
+
     async def import_obi(self, *, force: bool = False) -> bool:
         """Download + parse + write the Ontology for Biomedical
         Investigations to Neo4j.
@@ -694,18 +741,21 @@ class Neo4jClient:
         Delegates to `ontology_obi_writes.import_obi`.
         """
         return await ontology_obi_writes.import_obi(self, force=force)
+
     async def delete_obi(self) -> None:
         """Drop every `:OBITerm` node + its edges. Idempotent.
 
         Delegates to `ontology_obi_writes.delete_imported`.
         """
         return await ontology_obi_writes.delete_imported(self)
+
     async def is_efo_imported(self) -> bool:
         """True when at least one `:EFOTerm` node exists in Neo4j.
 
         Delegates to `ontology_efo_writes.is_imported`.
         """
         return await ontology_efo_writes.is_imported(self)
+
     async def import_efo(self, *, force: bool = False) -> bool:
         """Download + parse + write the Experimental Factor Ontology to Neo4j.
 
@@ -717,18 +767,21 @@ class Neo4jClient:
         Delegates to `ontology_efo_writes.import_efo`.
         """
         return await ontology_efo_writes.import_efo(self, force=force)
+
     async def delete_efo(self) -> None:
         """Drop every `:EFOTerm` node + its edges. Idempotent.
 
         Delegates to `ontology_efo_writes.delete_imported`.
         """
         return await ontology_efo_writes.delete_imported(self)
+
     async def is_dron_imported(self) -> bool:
         """True when at least one `:DRONTerm` node exists in Neo4j.
 
         Delegates to `ontology_dron_writes.is_imported`.
         """
         return await ontology_dron_writes.is_imported(self)
+
     async def import_dron(self, *, force: bool = False) -> bool:
         """Download + parse + write the Drug Ontology (DRON) to Neo4j.
 
@@ -740,18 +793,21 @@ class Neo4jClient:
         Delegates to `ontology_dron_writes.import_dron`.
         """
         return await ontology_dron_writes.import_dron(self, force=force)
+
     async def delete_dron(self) -> None:
         """Drop every `:DRONTerm` node + its edges. Idempotent.
 
         Delegates to `ontology_dron_writes.delete_imported`.
         """
         return await ontology_dron_writes.delete_imported(self)
+
     async def is_fibo_imported(self) -> bool:
         """True when at least one `:FIBOTerm` node exists in Neo4j.
 
         Delegates to `ontology_fibo_writes.is_imported`.
         """
         return await ontology_fibo_writes.is_imported(self)
+
     async def import_fibo(self, *, force: bool = False) -> bool:
         """Download (multi-file via GitHub walker) + parse + write the
         Financial Industry Business Ontology to Neo4j.
@@ -766,12 +822,14 @@ class Neo4jClient:
         Delegates to `ontology_fibo_writes.import_fibo`.
         """
         return await ontology_fibo_writes.import_fibo(self, force=force)
+
     async def delete_fibo(self) -> None:
         """Drop every `:FIBOTerm` node + its edges. Idempotent.
 
         Delegates to `ontology_fibo_writes.delete_imported`.
         """
         return await ontology_fibo_writes.delete_imported(self)
+
     async def count_ontology_terms(self, ontology_name: str) -> int:
         """Count the term nodes of a given ontology.
 
@@ -783,6 +841,7 @@ class Neo4jClient:
         Delegates to `ontology_linking.count_ontology_terms`.
         """
         return await ontology_linking.count_ontology_terms(self, ontology_name)
+
     async def count_canonical_links(self, ontology_name: str) -> int:
         """Count `:CANONICAL_TO` edges pointing at a given ontology's terms.
 
@@ -793,6 +852,7 @@ class Neo4jClient:
         Delegates to `ontology_linking.count_canonical_links`.
         """
         return await ontology_linking.count_canonical_links(self, ontology_name)
+
     async def count_mentions(self) -> int:
         """Count `:MENTIONS` edges (chunk → entity) across the graph.
 
@@ -802,11 +862,10 @@ class Neo4jClient:
         contract); the GUI caller catches and shows `—`.
         """
         async with self.driver.session() as session:
-            result = await session.run(
-                "MATCH ()-[r:MENTIONS]->() RETURN count(r) AS n"
-            )
+            result = await session.run("MATCH ()-[r:MENTIONS]->() RETURN count(r) AS n")
             record = await result.single()
             return int(record["n"]) if record else 0
+
     async def ensure_ontology_imported(
         self,
         ontology_name: str,
@@ -828,7 +887,9 @@ class Neo4jClient:
         parse / write failures propagate). Delegates to
         `ontology_linking.ensure_ontology_imported`.
         """
-        return await ontology_linking.ensure_ontology_imported(self, ontology_name, xrefs_mode=xrefs_mode)
+        return await ontology_linking.ensure_ontology_imported(
+            self, ontology_name, xrefs_mode=xrefs_mode
+        )
 
     async def link_entities_to_ontology(
         self,
@@ -849,14 +910,16 @@ class Neo4jClient:
         strategy ('exact' / 'fuzzy') comes from the per-corpus
         `OntologyConfig.matching` setting.
         """
-        return await ontology_linking.link_entities(self, ontology_name, matching_strategy, # type: ignore[arg-type]
-            doc_id=doc_id)
+        return await ontology_linking.link_entities(
+            self,
+            ontology_name,
+            matching_strategy,  # type: ignore[arg-type]
+            doc_id=doc_id,
+        )
 
     # ---- reads (agent path) ----
 
-    async def read_query(
-        self, cypher: str, **params: Any
-    ) -> list[dict[str, Any]]:
+    async def read_query(self, cypher: str, **params: Any) -> list[dict[str, Any]]:
         """Execute a Cypher query in a read-only transaction.
 
         Uses `session.execute_read(...)`, which Neo4j refuses to use for
@@ -873,9 +936,11 @@ class Neo4jClient:
         Keeping the raise here means tests can assert error behaviour
         without it being swallowed in the client.
         """
+
         async def _txn(tx) -> list[dict[str, Any]]:
             result = await tx.run(cypher, **params)
             return await result.data()
+
         async with self.driver.session() as session:
             return await session.execute_read(_txn)
 

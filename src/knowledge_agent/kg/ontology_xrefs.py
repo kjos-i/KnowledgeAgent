@@ -70,7 +70,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-async def backfill_resolved_xrefs(client,
+async def backfill_resolved_xrefs(
+    client,
 ) -> dict[str, dict[str, int]]:
     """Walk every shipped ontology, resolve dangling xrefs into edges.
 
@@ -118,10 +119,14 @@ async def backfill_resolved_xrefs(client,
         for term_label in ONTOLOGY_SUB_LABELS:
             xref_rel = _xref_rel_from_term_label(term_label)
             attempted = await _backfill_one_ontology(
-                session, term_label=term_label, xref_rel=xref_rel,
+                session,
+                term_label=term_label,
+                xref_rel=xref_rel,
             )
             cleaned = await _strip_resolved_entries(
-                session, term_label=term_label, xref_rel=xref_rel,
+                session,
+                term_label=term_label,
+                xref_rel=xref_rel,
             )
             if attempted is None or cleaned is None:
                 # Per-ontology failure: record zeros, keep going.
@@ -140,13 +145,18 @@ async def backfill_resolved_xrefs(client,
     logger.info(
         "backfill_resolved_xrefs: %d edges attempted across %d ontologies; "
         "stripped resolved entries from %d source nodes",
-        total_attempted, len(results), total_cleaned,
+        total_attempted,
+        len(results),
+        total_cleaned,
     )
     return results
 
 
 async def _backfill_one_ontology(
-    session, *, term_label: str, xref_rel: str,
+    session,
+    *,
+    term_label: str,
+    xref_rel: str,
 ) -> int | None:
     """Resolve dangling xrefs for one ontology sub-label.
 
@@ -174,13 +184,17 @@ async def _backfill_one_ontology(
     except Exception as exc:
         logger.warning(
             "backfill_resolved_xrefs (%s): resolve pass failed: %r",
-            term_label, exc,
+            term_label,
+            exc,
         )
         return None
 
 
 async def _strip_resolved_entries(
-    session, *, term_label: str, xref_rel: str,
+    session,
+    *,
+    term_label: str,
+    xref_rel: str,
 ) -> int | None:
     """Remove already-resolved entries from `dangling_xrefs`.
 
@@ -216,7 +230,8 @@ async def _strip_resolved_entries(
     except Exception as exc:
         logger.warning(
             "backfill_resolved_xrefs (%s): strip pass failed: %r",
-            term_label, exc,
+            term_label,
+            exc,
         )
         return None
 
@@ -226,7 +241,9 @@ async def _strip_resolved_entries(
 # ---------------------------------------------------------------------------
 
 
-async def clear_xref_edges_for_ontology(client, term_label: str,
+async def clear_xref_edges_for_ontology(
+    client,
+    term_label: str,
 ) -> int:
     """Delete every outgoing xref edge from one ontology + clear the
     `dangling_xrefs` property on its terms.
@@ -260,9 +277,7 @@ async def clear_xref_edges_for_ontology(client, term_label: str,
     xref_rel = _xref_rel_from_term_label(term_label)
     async with client.driver.session() as session:
         edge_result = await session.run(
-            f"MATCH (s:{term_label})-[r:{xref_rel}]->() "
-            f"DELETE r "
-            f"RETURN count(r) AS n"
+            f"MATCH (s:{term_label})-[r:{xref_rel}]->() DELETE r RETURN count(r) AS n"
         )
         edge_row = await edge_result.single()
         n_edges = int(edge_row["n"]) if edge_row else 0
@@ -279,7 +294,10 @@ async def clear_xref_edges_for_ontology(client, term_label: str,
     logger.info(
         "clear_xref_edges_for_ontology (%s): deleted %d :%s edges, "
         "cleared dangling_xrefs on %d source nodes",
-        term_label, n_edges, xref_rel, n_props,
+        term_label,
+        n_edges,
+        xref_rel,
+        n_props,
     )
     return n_edges + n_props
 
@@ -289,7 +307,9 @@ async def clear_xref_edges_for_ontology(client, term_label: str,
 # ---------------------------------------------------------------------------
 
 
-async def count_dangling_xrefs(client, term_label: str,
+async def count_dangling_xrefs(
+    client,
+    term_label: str,
 ) -> int:
     """Source nodes with a non-empty `dangling_xrefs` list.
 
@@ -300,9 +320,7 @@ async def count_dangling_xrefs(client, term_label: str,
     failures propagate.
     """
     if term_label not in ONTOLOGY_SUB_LABELS:
-        raise ValueError(
-            f"count_dangling_xrefs: unknown term_label {term_label!r}"
-        )
+        raise ValueError(f"count_dangling_xrefs: unknown term_label {term_label!r}")
     async with client.driver.session() as session:
         result = await session.run(
             f"MATCH (s:{term_label}) "
@@ -314,7 +332,9 @@ async def count_dangling_xrefs(client, term_label: str,
         return int(row["n"]) if row else 0
 
 
-async def count_xref_edges(client, term_label: str | None = None,
+async def count_xref_edges(
+    client,
+    term_label: str | None = None,
 ) -> int:
     """Live xref-edge count.
 
@@ -331,22 +351,16 @@ async def count_xref_edges(client, term_label: str | None = None,
             # Union the 18 typed-edge MATCHes. Pipe syntax inside
             # the relationship pattern keeps it to one query.
             pipe = "|".join(ONTOLOGY_XREF_RELS)
-            result = await session.run(
-                f"MATCH ()-[r:{pipe}]->() "
-                f"RETURN count(r) AS n"
-            )
+            result = await session.run(f"MATCH ()-[r:{pipe}]->() RETURN count(r) AS n")
             row = await result.single()
             return int(row["n"]) if row else 0
 
     if term_label not in ONTOLOGY_SUB_LABELS:
-        raise ValueError(
-            f"count_xref_edges: unknown term_label {term_label!r}"
-        )
+        raise ValueError(f"count_xref_edges: unknown term_label {term_label!r}")
     xref_rel = _xref_rel_from_term_label(term_label)
     async with client.driver.session() as session:
         result = await session.run(
-            f"MATCH (s:{term_label})-[r:{xref_rel}]->() "
-            f"RETURN count(r) AS n"
+            f"MATCH (s:{term_label})-[r:{xref_rel}]->() RETURN count(r) AS n"
         )
         row = await result.single()
         return int(row["n"]) if row else 0

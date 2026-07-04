@@ -24,6 +24,7 @@ def _fake_picture(byte_count: int, caption: str = "cap"):
     `byte_count` bytes so the filter's `out.stat().st_size` check reads
     exactly that number.
     """
+
     def save(path, *_a, **_kw):
         Path(path).write_bytes(b"x" * byte_count)
 
@@ -82,13 +83,22 @@ def _run_parse(
     fake_chunker = MagicMock()
     fake_chunker.chunk.return_value = []  # No text chunks in this test.
 
-    with patch.object(
-        docling_parser, "_get_converter", return_value=fake_converter,
-    ), patch.object(
-        docling_parser, "_get_chunker", return_value=fake_chunker,
+    with (
+        patch.object(
+            docling_parser,
+            "_get_converter",
+            return_value=fake_converter,
+        ),
+        patch.object(
+            docling_parser,
+            "_get_chunker",
+            return_value=fake_chunker,
+        ),
     ):
         chunks = docling_parser.parse(
-            fake_pdf, _fake_config(min_figure_bytes), figures_dir=figures_dir,
+            fake_pdf,
+            _fake_config(min_figure_bytes),
+            figures_dir=figures_dir,
         )
     return chunks, figures_dir
 
@@ -100,7 +110,9 @@ def test_min_figure_bytes_drops_below_threshold(tmp_path: Path) -> None:
     big = _fake_picture(byte_count=4000)
 
     chunks, figures_dir = _run_parse(
-        tmp_path, [tiny, big], min_figure_bytes=2048,
+        tmp_path,
+        [tiny, big],
+        min_figure_bytes=2048,
     )
 
     # Only the big picture survives on disk (index 1 was the second
@@ -120,7 +132,9 @@ def test_min_figure_bytes_zero_disables_filter(tmp_path: Path) -> None:
     also_tiny = _fake_picture(byte_count=500)
 
     chunks, figures_dir = _run_parse(
-        tmp_path, [tiny, also_tiny], min_figure_bytes=0,
+        tmp_path,
+        [tiny, also_tiny],
+        min_figure_bytes=0,
     )
 
     saved = sorted((figures_dir).glob("*.png"))
@@ -138,7 +152,9 @@ def test_min_figure_bytes_equal_to_size_is_dropped(tmp_path: Path) -> None:
     below = _fake_picture(byte_count=2047)
 
     chunks, figures_dir = _run_parse(
-        tmp_path, [at_threshold, below], min_figure_bytes=2048,
+        tmp_path,
+        [at_threshold, below],
+        min_figure_bytes=2048,
     )
 
     saved = sorted((figures_dir).glob("*.png"))

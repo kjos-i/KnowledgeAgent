@@ -119,9 +119,7 @@ def _configured_settings(**overrides: Any) -> Settings:
     return Settings(**defaults)
 
 
-def _client_with_driver(
-    settings: Settings, driver: RecordingDriver
-) -> Neo4jClient:
+def _client_with_driver(settings: Settings, driver: RecordingDriver) -> Neo4jClient:
     """Build a Neo4jClient with a pre-injected stub driver."""
     client = Neo4jClient(settings=settings)
     # Bypass the @property's lazy GraphDatabase.driver() call by setting the
@@ -817,14 +815,10 @@ async def test_delete_doc_l1_l4_edges_gc_queries_mirror_delete_doc():
     client = _client_with_driver(_configured_settings(), driver)
     await client.delete_doc_l1_l4_edges(DOC_ID)
     gc_queries = [c[0] for c in driver.sessions[0].calls[4:8]]
-    assert any("MATCH (a:Author)" in q and "NOT (a)-[:AUTHORED]->()" in q
-               for q in gc_queries)
-    assert any("MATCH (t:Topic)" in q and "NOT ()-[:ABOUT_TOPIC]->(t)" in q
-               for q in gc_queries)
-    assert any("MATCH (v:Venue)" in q and "NOT ()-[:PUBLISHED_IN]->(v)" in q
-               for q in gc_queries)
-    assert any("in_corpus = false" in q and "NOT ()-[:CITES]->(d)" in q
-               for q in gc_queries)
+    assert any("MATCH (a:Author)" in q and "NOT (a)-[:AUTHORED]->()" in q for q in gc_queries)
+    assert any("MATCH (t:Topic)" in q and "NOT ()-[:ABOUT_TOPIC]->(t)" in q for q in gc_queries)
+    assert any("MATCH (v:Venue)" in q and "NOT ()-[:PUBLISHED_IN]->(v)" in q for q in gc_queries)
+    assert any("in_corpus = false" in q and "NOT ()-[:CITES]->(d)" in q for q in gc_queries)
 
 
 async def test_delete_doc_l1_l4_edges_propagates_cypher_exception():
@@ -900,9 +894,7 @@ async def test_write_chunks_unknown_main_label_raises():
     driver = RecordingDriver()
     client = _client_with_driver(_configured_settings(), driver)
     with pytest.raises(ValueError, match="invalid main_label"):
-        await client.write_chunks(
-            DOC_ID, [FakeChunk(0, "Intro", 1)], "NotALabel", "Paper"
-        )
+        await client.write_chunks(DOC_ID, [FakeChunk(0, "Intro", 1)], "NotALabel", "Paper")
     assert len(driver.sessions) == 0
 
 
@@ -982,9 +974,7 @@ async def test_write_chunks_propagates_cypher_exception():
     driver = RecordingDriver(raise_on_run=RuntimeError("boom"))
     client = _client_with_driver(_configured_settings(), driver)
     with pytest.raises(RuntimeError, match="boom"):
-        await client.write_chunks(
-            DOC_ID, [FakeChunk(0, "Intro", 1)], "Document", "Paper"
-        )
+        await client.write_chunks(DOC_ID, [FakeChunk(0, "Intro", 1)], "Document", "Paper")
 
 
 # ---- read_query ----

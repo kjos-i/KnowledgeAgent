@@ -6,15 +6,16 @@ Dataset / Installs sub-tabs + Documents browser) lives in
 `GuiApp` wiring (which constructs LibraryTab) doesn't change shape
 when new sub-tabs are added.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import flet as ft
-
 from knowledge_agent.gui.library import LibraryView
 
 if TYPE_CHECKING:
+    import flet as ft
+
     from knowledge_agent.gui.app import GuiApp
 
 

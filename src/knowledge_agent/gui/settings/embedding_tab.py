@@ -19,6 +19,7 @@ switch fails. Per-call dim guard isn't surfaced here yet — slice 4.
 Active provider's Uninstall is disabled (same rule as LLM tab) —
 switch to another first.
 """
+
 from __future__ import annotations
 
 import logging
@@ -48,7 +49,10 @@ logger = logging.getLogger(__name__)
 
 
 _PROVIDER_ORDER: tuple[str, ...] = (
-    "voyage", "openai", "google", "huggingface",
+    "voyage",
+    "openai",
+    "google",
+    "huggingface",
 )
 
 
@@ -121,13 +125,17 @@ class EmbeddingTab:
         self.active_provider_container = ft.Container(
             content=ft.Text(
                 "(checking install state...)",
-                size=12, color=ft.Colors.GREY_500, italic=True,
+                size=12,
+                color=ft.Colors.GREY_500,
+                italic=True,
             ),
         )
 
         for provider in _PROVIDER_ORDER:
             self.provider_status_texts[provider] = ft.Text(
-                "(checking…)", size=12, color=ft.Colors.GREY_500,
+                "(checking…)",
+                size=12,
+                color=ft.Colors.GREY_500,
                 italic=True,
             )
             self.provider_install_buttons[provider] = ft.Button(
@@ -146,9 +154,7 @@ class EmbeddingTab:
             value=cfg.embedding_model,
             options=[
                 ft.DropdownOption(key=m, text=m)
-                for m in EMBEDDING_AVAILABLE_MODELS.get(
-                    cfg.embedding_provider, ()
-                )
+                for m in EMBEDDING_AVAILABLE_MODELS.get(cfg.embedding_provider, ())
             ],
             editable=True,
             enable_filter=True,
@@ -195,7 +201,9 @@ class EmbeddingTab:
                     "Switching is immediate. The dimension guard "
                     "(slice 4) will block a switch when the new "
                     "provider's dim doesn't match the LanceDB schema.",
-                    size=11, color=ft.Colors.GREY_500, italic=True,
+                    size=11,
+                    color=ft.Colors.GREY_500,
+                    italic=True,
                 ),
                 self.active_provider_container,
                 ft.Divider(),
@@ -204,11 +212,11 @@ class EmbeddingTab:
                 ft.Text(
                     "Install / Uninstall dialogs ship in slice 4 — the "
                     "buttons stage the action for now.",
-                    size=11, color=ft.Colors.GREY_500, italic=True,
+                    size=11,
+                    color=ft.Colors.GREY_500,
+                    italic=True,
                 ),
-                *[
-                    self._render_provider_row(p) for p in _PROVIDER_ORDER
-                ],
+                *[self._render_provider_row(p) for p in _PROVIDER_ORDER],
                 ft.Divider(),
                 # ---- Model ---------------------------------------------
                 ft.Text("Model", weight=ft.FontWeight.BOLD),
@@ -216,7 +224,9 @@ class EmbeddingTab:
                     "Pick from the menu or type a custom name. The "
                     "model + its dimension must match the chunks "
                     "already in your LanceDB corpus.",
-                    size=11, color=ft.Colors.GREY_500, italic=True,
+                    size=11,
+                    color=ft.Colors.GREY_500,
+                    italic=True,
                 ),
                 self.model_field,
                 ft.Divider(),
@@ -226,7 +236,9 @@ class EmbeddingTab:
                     "Voyage uses its native client (not LangChain), so "
                     "its rate limit lives here separately from the LLM "
                     "tab's per-provider rates.",
-                    size=11, color=ft.Colors.GREY_500, italic=True,
+                    size=11,
+                    color=ft.Colors.GREY_500,
+                    italic=True,
                 ),
                 self.voyage_rate_field,
                 # ---- Shared status text --------------------------------
@@ -260,13 +272,12 @@ class EmbeddingTab:
         for provider in _PROVIDER_ORDER:
             entry = EMBEDDER_PROVIDER_REGISTRY[provider]
             try:
-                self._installed_state[provider] = bool(
-                    entry["is_installed_fn"]()
-                )
+                self._installed_state[provider] = bool(entry["is_installed_fn"]())
             except Exception as exc:
                 logger.warning(
                     "embedder is_installed_fn(%s) failed: %r",
-                    provider, exc,
+                    provider,
+                    exc,
                 )
                 self._installed_state[provider] = False
 
@@ -290,8 +301,7 @@ class EmbeddingTab:
             if installed and provider == active:
                 uninstall_btn.disabled = True
                 uninstall_btn.tooltip = (
-                    "Active provider can't be uninstalled — switch "
-                    "to another first."
+                    "Active provider can't be uninstalled — switch to another first."
                 )
             else:
                 uninstall_btn.disabled = False
@@ -300,14 +310,14 @@ class EmbeddingTab:
     def _sync_active_provider_radio(self) -> None:
         if self.active_provider_container is None:
             return
-        installed = [
-            p for p in _PROVIDER_ORDER if self._installed_state.get(p)
-        ]
+        installed = [p for p in _PROVIDER_ORDER if self._installed_state.get(p)]
         if not installed:
             self.active_provider_container.content = ft.Text(
                 "No providers installed yet — pick one below and click "
                 "Install when slice 4 ships the dialogs.",
-                size=12, color=ft.Colors.AMBER_300, italic=True,
+                size=12,
+                color=ft.Colors.AMBER_300,
+                italic=True,
             )
             return
         current = self.app.gui_config.embedding_provider
@@ -378,8 +388,7 @@ class EmbeddingTab:
             return
         # Refresh the dropdown options + value.
         self.model_field.options = [
-            ft.DropdownOption(key=m, text=m)
-            for m in EMBEDDING_AVAILABLE_MODELS.get(new_value, ())
+            ft.DropdownOption(key=m, text=m) for m in EMBEDDING_AVAILABLE_MODELS.get(new_value, ())
         ]
         self.model_field.value = new_model
         self._sync_provider_rows()
@@ -389,18 +398,14 @@ class EmbeddingTab:
         """Slice 2 stub — install dialogs ship in slice 4."""
         if self.status is None:
             return
-        self.status.value = (
-            f"Install dialog for {provider} ships in slice 4."
-        )
+        self.status.value = f"Install dialog for {provider} ships in slice 4."
         self.app.page.update()
 
     def on_uninstall_clicked(self, provider: str) -> None:
         """Slice 2 stub — uninstall dialogs ship in slice 4."""
         if self.status is None:
             return
-        self.status.value = (
-            f"Uninstall dialog for {provider} ships in slice 4."
-        )
+        self.status.value = f"Uninstall dialog for {provider} ships in slice 4."
         self.app.page.update()
 
     def on_model_blur(self, e: ft.Event) -> None:
@@ -418,18 +423,19 @@ class EmbeddingTab:
         if raw == self.app.gui_config.embedding_model:
             return
         previous_model = self.app.gui_config.embedding_model
-        per_provider_attr = _PER_PROVIDER_MODEL_ATTR[
-            self.app.gui_config.embedding_provider
-        ]
+        per_provider_attr = _PER_PROVIDER_MODEL_ATTR[self.app.gui_config.embedding_provider]
         previous_per_provider = getattr(
-            self.app.gui_config, per_provider_attr,
+            self.app.gui_config,
+            per_provider_attr,
         )
         self.app.gui_config.embedding_model = raw
         setattr(self.app.gui_config, per_provider_attr, raw)
         if not self._commit(f"embedding model: {raw}"):
             self.app.gui_config.embedding_model = previous_model
             setattr(
-                self.app.gui_config, per_provider_attr, previous_per_provider,
+                self.app.gui_config,
+                per_provider_attr,
+                previous_per_provider,
             )
             self.model_field.value = previous_model
             self.app.page.update()
@@ -447,24 +453,16 @@ class EmbeddingTab:
                 if new_value <= 0:
                     raise ValueError("must be positive")
             except (ValueError, TypeError):
-                self.voyage_rate_field.value = (
-                    "" if current is None else str(current)
-                )
-                self.status.value = (
-                    "Voyage rate limit must be a positive number "
-                    "or empty"
-                )
+                self.voyage_rate_field.value = "" if current is None else str(current)
+                self.status.value = "Voyage rate limit must be a positive number or empty"
                 self.app.page.update()
                 return
         if new_value == current:
             return
         self.app.gui_config.voyage_requests_per_second = new_value
         if not self._commit(
-            f"Voyage rate limit: "
-            f"{'unlimited' if new_value is None else new_value}"
+            f"Voyage rate limit: {'unlimited' if new_value is None else new_value}"
         ):
             self.app.gui_config.voyage_requests_per_second = current
-            self.voyage_rate_field.value = (
-                "" if current is None else str(current)
-            )
+            self.voyage_rate_field.value = "" if current is None else str(current)
             self.app.page.update()

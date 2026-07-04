@@ -14,7 +14,7 @@ extractor call — 2026-07-02 refactor removed the get_settings() global
 read. Tests pass them explicitly.
 """
 
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from knowledge_agent.entity_extractors import llm
 from knowledge_agent.entity_extractors.base import Mention
@@ -22,7 +22,6 @@ from knowledge_agent.entity_extractors.llm import (
     _ExtractedMention,
     _ExtractedMentions,
 )
-
 
 # Constants for the model + temperature kwargs. Value doesn't matter
 # except in `test_extract_propagates_model_and_temperature_to_get_llm`.
@@ -114,12 +113,15 @@ async def test_extract_returns_empty_when_no_mentions_found():
         "knowledge_agent.entity_extractors.llm._get_llm",
         return_value=mock_llm,
     ):
-        assert await llm.extract(
-            "Just a plain sentence.",
-            ["GENE"],
-            model=_TEST_MODEL,
-            temperature=_TEST_TEMPERATURE,
-        ) == []
+        assert (
+            await llm.extract(
+                "Just a plain sentence.",
+                ["GENE"],
+                model=_TEST_MODEL,
+                temperature=_TEST_TEMPERATURE,
+            )
+            == []
+        )
 
 
 async def test_extract_propagates_model_and_temperature_to_get_llm():
@@ -146,7 +148,10 @@ async def test_extract_uses_structured_output_with_extracted_mentions_schema():
         return_value=mock_llm,
     ):
         await llm.extract(
-            "text", [], model=_TEST_MODEL, temperature=_TEST_TEMPERATURE,
+            "text",
+            [],
+            model=_TEST_MODEL,
+            temperature=_TEST_TEMPERATURE,
         )
 
     mock_llm.with_structured_output.assert_called_once_with(_ExtractedMentions)
@@ -177,9 +182,7 @@ async def test_extract_passes_chunk_text_in_human_message():
 async def test_extract_offset_and_confidence_always_none_for_llm():
     """Adapter never populates offset / confidence - those are NER-only
     fields. Even if the underlying output had them, the adapter strips."""
-    output = _ExtractedMentions(
-        mentions=[_ExtractedMention(raw_text="TP53", entity_type="GENE")]
-    )
+    output = _ExtractedMentions(mentions=[_ExtractedMention(raw_text="TP53", entity_type="GENE")])
     mock_llm = _mock_llm_returning(output)
     with patch(
         "knowledge_agent.entity_extractors.llm._get_llm",
@@ -209,6 +212,12 @@ async def test_extract_defensive_fallback_on_non_extracted_mentions_result():
         "knowledge_agent.entity_extractors.llm._get_llm",
         return_value=mock_llm,
     ):
-        assert await llm.extract(
-            "text", [], model=_TEST_MODEL, temperature=_TEST_TEMPERATURE,
-        ) == []
+        assert (
+            await llm.extract(
+                "text",
+                [],
+                model=_TEST_MODEL,
+                temperature=_TEST_TEMPERATURE,
+            )
+            == []
+        )

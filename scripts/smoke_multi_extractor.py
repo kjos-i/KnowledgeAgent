@@ -187,9 +187,7 @@ async def main() -> None:
 
     print("First 25 mentions with provenance:")
     for r in rows:
-        print(
-            f"  {r['type']:>12}  {r['key'][:34]:<34}  sources={r['sources']}"
-        )
+        print(f"  {r['type']:>12}  {r['key'][:34]:<34}  sources={r['sources']}")
     print()
 
     print("Inspect in Neo4j Desktop → Query:")

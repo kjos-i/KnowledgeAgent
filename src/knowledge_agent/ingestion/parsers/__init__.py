@@ -37,9 +37,7 @@ PARSER_MODULES: tuple[str, ...] = (
 
 def _load(module_name: str) -> ModuleType:
     """Import a strategy module by name. Cached by Python's import system."""
-    return importlib.import_module(
-        f"knowledge_agent.ingestion.parsers.{module_name}"
-    )
+    return importlib.import_module(f"knowledge_agent.ingestion.parsers.{module_name}")
 
 
 def supported_extensions() -> set[str]:
@@ -89,8 +87,7 @@ def parse_document(
                 return module.parse(path, docling_cfg, figures_dir)
             return module.parse(path)
     raise UnsupportedFormatError(
-        f"No parser registered for extension {ext!r}. "
-        f"Supported: {sorted(supported_extensions())}."
+        f"No parser registered for extension {ext!r}. Supported: {sorted(supported_extensions())}."
     )
 
 

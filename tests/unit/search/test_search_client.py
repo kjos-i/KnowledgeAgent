@@ -116,9 +116,7 @@ class RecordingTable:
             self.query_builder = _RecordingQueryBuilder()
         return self.query_builder
 
-    async def search(
-        self, *args: Any, **kwargs: Any
-    ) -> _RecordingQueryBuilder:
+    async def search(self, *args: Any, **kwargs: Any) -> _RecordingQueryBuilder:
         self.last_search_args = args
         self.last_search_kwargs = dict(kwargs)
         if self.query_builder is None:
@@ -147,9 +145,7 @@ class RecordingConnection:
     async def table_names(self) -> list[str]:
         return list(self.tables.keys())
 
-    async def create_table(
-        self, name: str, schema: Any = None, **_kwargs: Any
-    ) -> RecordingTable:
+    async def create_table(self, name: str, schema: Any = None, **_kwargs: Any) -> RecordingTable:
         if self.raise_on_create is not None:
             raise self.raise_on_create
         table = RecordingTable()
@@ -181,9 +177,7 @@ def _configured_settings(**overrides: Any) -> Settings:
     return Settings(**defaults)
 
 
-def _client_with_conn(
-    settings: Settings, conn: RecordingConnection
-) -> LanceClient:
+def _client_with_conn(settings: Settings, conn: RecordingConnection) -> LanceClient:
     """LanceClient with a pre-injected stub connection (skips lazy open)."""
     client = LanceClient(settings=settings)
     client._conn = conn  # type: ignore[assignment]
@@ -350,8 +344,18 @@ async def test_list_indexed_docs_aggregates_unique_doc_ids():
     """Multiple chunk rows per doc -> one summary entry per doc_id."""
     qb = _RecordingQueryBuilder(
         rows_to_return=[
-            {"doc_id": "d1", "source_path": "/x/1.pdf", "title": "T1", "metadata_status": "enriched"},
-            {"doc_id": "d1", "source_path": "/x/1.pdf", "title": "T1", "metadata_status": "enriched"},
+            {
+                "doc_id": "d1",
+                "source_path": "/x/1.pdf",
+                "title": "T1",
+                "metadata_status": "enriched",
+            },
+            {
+                "doc_id": "d1",
+                "source_path": "/x/1.pdf",
+                "title": "T1",
+                "metadata_status": "enriched",
+            },
             {"doc_id": "d2", "source_path": "/x/2.pdf", "title": "T2", "metadata_status": "manual"},
         ]
     )
@@ -407,15 +411,23 @@ async def test_list_indexed_docs_returns_type_date_and_figure_count():
     qb = _RecordingQueryBuilder(
         rows_to_return=[
             {
-                "doc_id": "d1", "source_path": "/x/1.pdf", "title": "T1",
-                "sub_label": "Paper", "main_label": "Document",
-                "metadata_status": "enriched", "ingested_at": "2026-07-03",
+                "doc_id": "d1",
+                "source_path": "/x/1.pdf",
+                "title": "T1",
+                "sub_label": "Paper",
+                "main_label": "Document",
+                "metadata_status": "enriched",
+                "ingested_at": "2026-07-03",
                 "content_type": "text",
             },
             {
-                "doc_id": "d1", "source_path": "/x/1.pdf", "title": "T1",
-                "sub_label": "Paper", "main_label": "Document",
-                "metadata_status": "enriched", "ingested_at": "2026-07-03",
+                "doc_id": "d1",
+                "source_path": "/x/1.pdf",
+                "title": "T1",
+                "sub_label": "Paper",
+                "main_label": "Document",
+                "metadata_status": "enriched",
+                "ingested_at": "2026-07-03",
                 "content_type": "figure",
             },
         ]
@@ -439,12 +451,19 @@ async def test_list_indexed_docs_returns_editable_metadata_fields():
     qb = _RecordingQueryBuilder(
         rows_to_return=[
             {
-                "doc_id": "d1", "source_path": "/x/1.pdf", "title": "T1",
-                "sub_label": "Paper", "main_label": "Document",
-                "metadata_status": "enriched", "ingested_at": "2026-07-03",
-                "content_type": "text", "doi": "10.1/x", "year": 2020,
+                "doc_id": "d1",
+                "source_path": "/x/1.pdf",
+                "title": "T1",
+                "sub_label": "Paper",
+                "main_label": "Document",
+                "metadata_status": "enriched",
+                "ingested_at": "2026-07-03",
+                "content_type": "text",
+                "doi": "10.1/x",
+                "year": 2020,
                 "authors_display": "Jane Doe; John Smith",
-                "venue": "Science", "source_url": "https://doi.org/10.1/x",
+                "venue": "Science",
+                "source_url": "https://doi.org/10.1/x",
                 "language": "en",
             },
         ]
@@ -602,10 +621,18 @@ async def test_update_doc_metadata_missing_table_raises():
 def _chunk_row(chunk_id: str, text: str) -> dict[str, Any]:
     """Minimal lance row matching the fields `_row_to_chunk` reads."""
     return {
-        "chunk_id": chunk_id, "doc_id": "doc1", "text": text,
-        "title": "T", "year": 2026, "authors_display": "A",
-        "doi": None, "openalex_id": None, "venue": None,
-        "source_url": None, "section": None, "page": None,
+        "chunk_id": chunk_id,
+        "doc_id": "doc1",
+        "text": text,
+        "title": "T",
+        "year": 2026,
+        "authors_display": "A",
+        "doi": None,
+        "openalex_id": None,
+        "venue": None,
+        "source_url": None,
+        "section": None,
+        "page": None,
         # Mode-specific score column is added per-test.
     }
 
@@ -649,11 +676,11 @@ async def test_vector_search_returns_empty_when_voyage_returns_none(monkeypatch)
     """Empty / failed Voyage embedding -> early return [] WITHOUT
     touching lance. Documented success no-op for the empty-query path
     (separate from the lance-failure path which raises)."""
+
     async def _fake_embed(_text: str) -> None:
         return None
-    monkeypatch.setattr(
-        "knowledge_agent.search.client._embed_query", _fake_embed
-    )
+
+    monkeypatch.setattr("knowledge_agent.search.client._embed_query", _fake_embed)
     conn = RecordingConnection(tables={CHUNKS_TABLE: RecordingTable()})
     client = _client_with_conn(_configured_settings(), conn)
     assert await client.vector_search("query", top_k=5) == []
@@ -663,11 +690,11 @@ async def test_vector_search_propagates_lance_exception(monkeypatch):
     """Lance failure during vector search -> raises (typed-errors
     contract). Voyage succeeds first; the failure surfaces from the
     lance query builder."""
+
     async def _fake_embed(_text: str) -> list[float]:
         return [0.1] * 1024
-    monkeypatch.setattr(
-        "knowledge_agent.search.client._embed_query", _fake_embed
-    )
+
+    monkeypatch.setattr("knowledge_agent.search.client._embed_query", _fake_embed)
     qb = _RecordingQueryBuilder(raise_on_to_arrow=RuntimeError("lance boom"))
     table = RecordingTable(query_builder=qb)
     conn = RecordingConnection(tables={CHUNKS_TABLE: table})
@@ -680,11 +707,11 @@ async def test_hybrid_search_returns_chunks_on_success(monkeypatch):
     """Happy path: hybrid mode wires both the query vector AND the
     text into the search builder, and maps rows to `RetrievedChunk`
     with the `_relevance_score` field as `score`."""
+
     async def _fake_embed(_text: str) -> list[float]:
         return [0.5] * 1024
-    monkeypatch.setattr(
-        "knowledge_agent.search.client._embed_query", _fake_embed
-    )
+
+    monkeypatch.setattr("knowledge_agent.search.client._embed_query", _fake_embed)
     rows = [
         {**_chunk_row("c1", "alpha"), "_relevance_score": 0.91},
     ]
@@ -781,9 +808,7 @@ def test_chunks_schema_required_fields_non_nullable():
         "ingested_at",
     ]
     for name in required:
-        assert schema.field(name).nullable is False, (
-            f"{name} must be non-nullable"
-        )
+        assert schema.field(name).nullable is False, f"{name} must be non-nullable"
 
 
 def test_chunks_schema_sub_label_is_nullable():
@@ -812,9 +837,7 @@ def test_chunks_schema_optional_fields_nullable():
         "source_path",
     ]
     for name in optional:
-        assert schema.field(name).nullable is True, (
-            f"{name} must be nullable"
-        )
+        assert schema.field(name).nullable is True, f"{name} must be nullable"
 
 
 def test_content_types_constants():

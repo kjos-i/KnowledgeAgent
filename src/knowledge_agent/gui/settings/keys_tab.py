@@ -27,6 +27,7 @@ Eye toggle: Flet 0.85's built-in `can_reveal_password` doesn't render
 the icon reliably under `InputBorder.OUTLINE`, so we render an
 explicit suffix `IconButton` that flips `password` + the icon.
 """
+
 from __future__ import annotations
 
 import logging
@@ -130,9 +131,7 @@ class KeysTab:
         self._key_revealed[name] = revealed
         field = self.key_fields[name]
         field.password = not revealed
-        field.suffix.icon = (
-            ft.Icons.VISIBILITY if revealed else ft.Icons.VISIBILITY_OFF
-        )
+        field.suffix.icon = ft.Icons.VISIBILITY if revealed else ft.Icons.VISIBILITY_OFF
         self.app.page.update()
 
     def on_key_blur(self, name: str) -> None:

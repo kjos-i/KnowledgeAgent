@@ -3,6 +3,7 @@ centered empty-state body. Used by Latest / File / (future Library /
 Settings / Diagnostics / Info) views so their visual structure stays
 consistent.
 """
+
 import flet as ft
 
 

@@ -14,13 +14,13 @@ modules in `_ASYNC_BEARING_MODULES`, collect every top-level
 set every sync call site must avoid. Adding a new async API to
 one of those modules is auto-picked-up — no test edit needed.
 """
+
 from __future__ import annotations
 
 import ast
 from pathlib import Path
 
 import pytest
-
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SRC_ROOT = _REPO_ROOT / "src" / "knowledge_agent"
@@ -118,11 +118,7 @@ class _SyncCallsFinder(ast.NodeVisitor):
         self._sync_stack.pop()
 
     def visit_Call(self, node: ast.Call) -> None:
-        if (
-            self._sync_stack
-            and self._sync_stack[-1]
-            and self._asyncio_run_depth == 0
-        ):
+        if self._sync_stack and self._sync_stack[-1] and self._asyncio_run_depth == 0:
             name: str | None = None
             if isinstance(node.func, ast.Attribute):
                 name = node.func.attr
@@ -167,16 +163,12 @@ def test_no_sync_function_calls_async_api_without_await() -> None:
             finder.visit(tree)
             for lineno, name in finder.problems:
                 rel = py.relative_to(_REPO_ROOT)
-                offenders.append(
-                    f"  {rel.as_posix()}:{lineno}: sync call to async {name!r}"
-                )
+                offenders.append(f"  {rel.as_posix()}:{lineno}: sync call to async {name!r}")
 
     if offenders:
         pytest.fail(
             "Sync function calls an async API without `await`. These "
             "produce coroutines instead of the expected return values "
             "and fail later with cryptic 'coroutine' errors at the "
-            "boundary catch:\n\n"
-            + "\n".join(offenders)
-            + "\n\nFix: see this test's docstring."
+            "boundary catch:\n\n" + "\n".join(offenders) + "\n\nFix: see this test's docstring."
         )

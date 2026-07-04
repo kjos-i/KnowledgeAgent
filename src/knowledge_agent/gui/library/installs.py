@@ -42,17 +42,18 @@ call. Ontology state is a disk probe (via
 `ontology_lifecycle.is_ontology_downloaded` / `get_ontology_download_bytes`),
 so the tab renders synchronously — no background task needed.
 """
+
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import flet as ft
 
-from pathlib import Path
-
-from knowledge_agent.config import Settings, get_settings, reset_after_key_change
+from knowledge_agent.config import reset_after_key_change
 from knowledge_agent.entity_extractors.extractor_lifecycle import (
     EXTRACTOR_REGISTRY,
     delete_extractor_weights_execute,
@@ -131,6 +132,7 @@ def _resolve_hf_hub_cache_dir() -> Path | None:
     """
     try:
         from huggingface_hub import constants as _hf_constants
+
         return Path(_hf_constants.HF_HUB_CACHE)
     except ImportError:
         return None
@@ -150,6 +152,7 @@ def _resolve_ollama_models_dir() -> Path:
     Ollama creates it on first pull.
     """
     import os
+
     env_override = os.environ.get("OLLAMA_MODELS")
     if env_override:
         return Path(env_override)
@@ -217,10 +220,14 @@ class InstallsTab:
             on_blur=self._on_downloads_dir_blur,
         )
         self.hf_hub_display = ft.Text(
-            "(checking…)", size=11, color=ft.Colors.GREY_300,
+            "(checking…)",
+            size=11,
+            color=ft.Colors.GREY_300,
         )
         self.ollama_models_display = ft.Text(
-            "(checking…)", size=11, color=ft.Colors.GREY_300,
+            "(checking…)",
+            size=11,
+            color=ft.Colors.GREY_300,
         )
 
         # Ontology: 2 buttons per row (Download / Delete download),
@@ -228,7 +235,10 @@ class InstallsTab:
         # "Install" button here.
         for name in _ONTOLOGY_ORDER:
             self.ontology_status_texts[name] = ft.Text(
-                "(checking…)", size=11, color=ft.Colors.GREY_500, italic=True,
+                "(checking…)",
+                size=11,
+                color=ft.Colors.GREY_500,
+                italic=True,
             )
             self.ontology_download_buttons[name] = ft.Button(
                 content=centered_label("Download"),
@@ -243,7 +253,10 @@ class InstallsTab:
         # flipped by visibility based on compound state.
         for name in _EXTRACTOR_ORDER:
             self.extractor_status_texts[name] = ft.Text(
-                "(checking…)", size=11, color=ft.Colors.GREY_500, italic=True,
+                "(checking…)",
+                size=11,
+                color=ft.Colors.GREY_500,
+                italic=True,
             )
             self.extractor_install_buttons[name] = ft.Button(
                 content=centered_label("Install"),
@@ -266,7 +279,10 @@ class InstallsTab:
         # install_parser_extra_* (wired below).
         for name in _PARSER_ORDER:
             self.parser_status_texts[name] = ft.Text(
-                "(checking…)", size=11, color=ft.Colors.GREY_500, italic=True,
+                "(checking…)",
+                size=11,
+                color=ft.Colors.GREY_500,
+                italic=True,
             )
             self.parser_install_buttons[name] = ft.Button(
                 content=centered_label("Install"),
@@ -297,7 +313,9 @@ class InstallsTab:
                 "Where each install target keeps its files. The first "
                 "is editable — the other two are managed by their "
                 "libraries (HF Hub / Ollama) and shown for reference.",
-                size=11, color=ft.Colors.GREY_500, italic=True,
+                size=11,
+                color=ft.Colors.GREY_500,
+                italic=True,
             ),
             # ontology_downloads_dir — editable
             self.downloads_dir_field,
@@ -307,7 +325,9 @@ class InstallsTab:
                 controls=[
                     ft.Text(
                         "HF Hub cache (extractor weights):",
-                        size=12, color=ft.Colors.GREY_400, width=280,
+                        size=12,
+                        color=ft.Colors.GREY_400,
+                        width=280,
                     ),
                     self.hf_hub_display,
                 ],
@@ -318,7 +338,9 @@ class InstallsTab:
                 controls=[
                     ft.Text(
                         "Ollama models (local LLMs):",
-                        size=12, color=ft.Colors.GREY_400, width=280,
+                        size=12,
+                        color=ft.Colors.GREY_400,
+                        width=280,
                     ),
                     self.ollama_models_display,
                 ],
@@ -327,75 +349,93 @@ class InstallsTab:
         ]
 
         # ---- Ontologies (18) ---------------------------------------
-        controls.extend([
-            ft.Text("Ontologies (18)", weight=ft.FontWeight.BOLD),
-            ft.Text(
-                "Download the source file(s) to disk here. Neo4j term "
-                "nodes are written during ingest — not by these buttons "
-                "— so downloading is safe (no schema change).",
-                size=11, color=ft.Colors.GREY_500, italic=True,
-            ),
-        ])
-        for name in _ONTOLOGY_ORDER:
-            controls.append(self._simple_row(
-                _ONTOLOGY_DISPLAY[name],
-                self.ontology_status_texts[name],
-                (
-                    self.ontology_download_buttons[name],
-                    self.ontology_delete_buttons[name],
+        controls.extend(
+            [
+                ft.Text("Ontologies (18)", weight=ft.FontWeight.BOLD),
+                ft.Text(
+                    "Download the source file(s) to disk here. Neo4j term "
+                    "nodes are written during ingest — not by these buttons "
+                    "— so downloading is safe (no schema change).",
+                    size=11,
+                    color=ft.Colors.GREY_500,
+                    italic=True,
                 ),
-            ))
+            ]
+        )
+        for name in _ONTOLOGY_ORDER:
+            controls.append(
+                self._simple_row(
+                    _ONTOLOGY_DISPLAY[name],
+                    self.ontology_status_texts[name],
+                    (
+                        self.ontology_download_buttons[name],
+                        self.ontology_delete_buttons[name],
+                    ),
+                )
+            )
         controls.append(ft.Divider())
 
         # ---- Entity extractors (4) ---------------------------------
-        controls.extend([
-            ft.Text("Entity extractors (4)", weight=ft.FontWeight.BOLD),
-            ft.Text(
-                "L6 adapters. LLM is bundled. GLiNER / GLiNER-BioMed / "
-                "HunFlair2 need BOTH the pip extras (adapter library) "
-                "AND their pinned model weights downloaded. No "
-                "auto-download at first inference — extraction raises "
-                "if weights are missing.",
-                size=11, color=ft.Colors.GREY_500, italic=True,
-            ),
-        ])
+        controls.extend(
+            [
+                ft.Text("Entity extractors (4)", weight=ft.FontWeight.BOLD),
+                ft.Text(
+                    "L6 adapters. LLM is bundled. GLiNER / GLiNER-BioMed / "
+                    "HunFlair2 need BOTH the pip extras (adapter library) "
+                    "AND their pinned model weights downloaded. No "
+                    "auto-download at first inference — extraction raises "
+                    "if weights are missing.",
+                    size=11,
+                    color=ft.Colors.GREY_500,
+                    italic=True,
+                ),
+            ]
+        )
         for name in _EXTRACTOR_ORDER:
             display = EXTRACTOR_REGISTRY[name]["display_name"]
-            controls.append(self._simple_row(
-                display,
-                self.extractor_status_texts[name],
-                (
-                    self.extractor_install_buttons[name],
-                    self.extractor_uninstall_buttons[name],
-                    self.extractor_download_buttons[name],
-                    self.extractor_delete_buttons[name],
-                ),
-            ))
+            controls.append(
+                self._simple_row(
+                    display,
+                    self.extractor_status_texts[name],
+                    (
+                        self.extractor_install_buttons[name],
+                        self.extractor_uninstall_buttons[name],
+                        self.extractor_download_buttons[name],
+                        self.extractor_delete_buttons[name],
+                    ),
+                )
+            )
         controls.append(ft.Divider())
 
         # ---- Parsers (2) -------------------------------------------
-        controls.extend([
-            ft.Text("Parsers (2)", weight=ft.FontWeight.BOLD),
-            ft.Text(
-                "Optional docling extras. ASR (audio + video "
-                "transcription): pip install of the extra pulls "
-                "openai-whisper + bundled ffmpeg. Whisper model "
-                "weights (~1.5 GB) are downloaded by Docling on first "
-                "ingest use — not managed here. AST-aware code parsing "
-                "ships its tree-sitter grammars inside the pip wheel.",
-                size=11, color=ft.Colors.GREY_500, italic=True,
-            ),
-        ])
+        controls.extend(
+            [
+                ft.Text("Parsers (2)", weight=ft.FontWeight.BOLD),
+                ft.Text(
+                    "Optional docling extras. ASR (audio + video "
+                    "transcription): pip install of the extra pulls "
+                    "openai-whisper + bundled ffmpeg. Whisper model "
+                    "weights (~1.5 GB) are downloaded by Docling on first "
+                    "ingest use — not managed here. AST-aware code parsing "
+                    "ships its tree-sitter grammars inside the pip wheel.",
+                    size=11,
+                    color=ft.Colors.GREY_500,
+                    italic=True,
+                ),
+            ]
+        )
         for name in _PARSER_ORDER:
             display = PARSER_LIFECYCLE_REGISTRY[name]["display_name"]
-            controls.append(self._simple_row(
-                display,
-                self.parser_status_texts[name],
-                (
-                    self.parser_install_buttons[name],
-                    self.parser_uninstall_buttons[name],
-                ),
-            ))
+            controls.append(
+                self._simple_row(
+                    display,
+                    self.parser_status_texts[name],
+                    (
+                        self.parser_install_buttons[name],
+                        self.parser_uninstall_buttons[name],
+                    ),
+                )
+            )
         controls.append(self.status)
         # `expand=True` on the inner Column is REQUIRED for scrolling to
         # work — without it the Column shrinks to intrinsic content
@@ -444,15 +484,11 @@ class InstallsTab:
         if self.hf_hub_display is not None:
             hf = _resolve_hf_hub_cache_dir()
             if hf is None:
-                self.hf_hub_display.value = (
-                    "(huggingface_hub not installed)"
-                )
+                self.hf_hub_display.value = "(huggingface_hub not installed)"
             else:
                 self.hf_hub_display.value = str(hf)
         if self.ollama_models_display is not None:
-            self.ollama_models_display.value = str(
-                _resolve_ollama_models_dir()
-            )
+            self.ollama_models_display.value = str(_resolve_ollama_models_dir())
 
     def _on_downloads_dir_blur(self, e: ft.Event) -> None:
         """Persist `ontology_downloads_dir` to GuiConfig on blur.
@@ -479,9 +515,7 @@ class InstallsTab:
         except ConfigError as exc:
             # Rollback: field + config.
             self.app.gui_config.ontology_downloads_dir = previous
-            self.downloads_dir_field.value = (
-                "" if previous is None else str(previous)
-            )
+            self.downloads_dir_field.value = "" if previous is None else str(previous)
             self._set_status(
                 f"Could not save ontology_downloads_dir: {exc}",
                 ok=False,
@@ -493,13 +527,9 @@ class InstallsTab:
         except Exception as exc:
             logger.warning("reset_after_key_change failed: %r", exc)
         if new_value is None:
-            self._set_status(
-                "ontology_downloads_dir reset — using backend default."
-            )
+            self._set_status("ontology_downloads_dir reset — using backend default.")
         else:
-            self._set_status(
-                f"Saved ontology_downloads_dir: {new_value}"
-            )
+            self._set_status(f"Saved ontology_downloads_dir: {new_value}")
         # Re-run the ontology disk probes against the new path so the
         # rows update immediately.
         self._sync_ontology_state()
@@ -526,31 +556,20 @@ class InstallsTab:
             if bundled:
                 status_text.value = "bundled (always available)"
                 status_text.color = ft.Colors.GREY_400
-            elif pip_installed and (
-                not has_weights_concept or weights_present
-            ):
-                size_clause = (
-                    f" ({_fmt_bytes(weights_bytes)})"
-                    if has_weights_concept else ""
-                )
+            elif pip_installed and (not has_weights_concept or weights_present):
+                size_clause = f" ({_fmt_bytes(weights_bytes)})" if has_weights_concept else ""
                 status_text.value = f"✓ ready — pip + weights{size_clause}"
                 status_text.color = ft.Colors.GREEN_300
             elif pip_installed and not weights_present:
-                status_text.value = (
-                    "○ pip installed; weights not downloaded"
-                )
+                status_text.value = "○ pip installed; weights not downloaded"
                 status_text.color = ft.Colors.AMBER_300
             elif not pip_installed and weights_present:
                 status_text.value = (
-                    f"○ weights downloaded "
-                    f"({_fmt_bytes(weights_bytes)}); "
-                    "pip not installed"
+                    f"○ weights downloaded ({_fmt_bytes(weights_bytes)}); pip not installed"
                 )
                 status_text.color = ft.Colors.AMBER_300
             else:
-                status_text.value = (
-                    "○ not installed (pip + weights both needed)"
-                )
+                status_text.value = "○ not installed (pip + weights both needed)"
                 status_text.color = ft.Colors.GREY_400
 
             # Buttons. Bundled hides all four (nothing to do).
@@ -584,8 +603,7 @@ class InstallsTab:
                 # 1.5 GB fetch on their first ingest.
                 if name == "asr":
                     status_text.value = (
-                        "✓ installed — Docling downloads Whisper "
-                        "(~1.5 GB) on first ingest"
+                        "✓ installed — Docling downloads Whisper (~1.5 GB) on first ingest"
                     )
                 else:
                     status_text.value = "✓ installed"
@@ -617,15 +635,17 @@ class InstallsTab:
             )
 
     def _update_ontology_row(
-        self, name: str, *, downloaded: bool, on_disk_bytes: int,
+        self,
+        name: str,
+        *,
+        downloaded: bool,
+        on_disk_bytes: int,
     ) -> None:
         status_text = self.ontology_status_texts[name]
         download_btn = self.ontology_download_buttons[name]
         delete_btn = self.ontology_delete_buttons[name]
         if downloaded:
-            status_text.value = (
-                f"✓ downloaded ({_fmt_bytes(on_disk_bytes)})"
-            )
+            status_text.value = f"✓ downloaded ({_fmt_bytes(on_disk_bytes)})"
             status_text.color = ft.Colors.GREEN_300
         else:
             status_text.value = "○ not downloaded"
@@ -641,10 +661,8 @@ class InstallsTab:
             return False
 
     def _safe_update(self) -> None:
-        try:
+        with contextlib.suppress(Exception):
             self.app.page.update()
-        except Exception:
-            pass
 
     # ----- handlers --------------------------------------------------------
 
@@ -652,9 +670,7 @@ class InstallsTab:
         if self.status is None:
             return
         self.status.value = msg
-        self.status.color = (
-            ft.Colors.GREY_400 if ok else ft.Colors.AMBER_300
-        )
+        self.status.color = ft.Colors.GREY_400 if ok else ft.Colors.AMBER_300
         self._safe_update()
 
     def _show_confirm_dialog(
@@ -677,6 +693,7 @@ class InstallsTab:
         appear in a CLI dry-run. Rendered in a scrollable Column so
         long provenance blocks (rich MeSH / FIBO summaries) still fit.
         """
+
         def _cancel(_ev):
             self.app.page.pop_dialog()
 
@@ -711,9 +728,7 @@ class InstallsTab:
             title=f"Download {name}?",
             body=plan.summary,
             confirm_label="Download",
-            on_confirm=lambda: asyncio.create_task(
-                self._run_ontology_download(name)
-            ),
+            on_confirm=lambda: asyncio.create_task(self._run_ontology_download(name)),
         )
 
     async def _run_ontology_download(self, name: str) -> None:
@@ -725,10 +740,8 @@ class InstallsTab:
         if plan.provenance is not None and plan.provenance.heavy_warning:
             warning = f" — WARNING: {plan.provenance.heavy_warning}"
         target_mb = plan.download_size_mb
-        self._set_status(
-            f"Downloading {name!r} source file "
-            f"(~{target_mb} MB){warning}…"
-        )
+        self._set_status(f"Downloading {name!r} source file (~{target_mb} MB){warning}…")
+
         # Progress polling (same shape as extractor download): poll
         # disk-size every 2s while the fetch runs in its worker thread.
         async def _poll() -> None:
@@ -739,11 +752,11 @@ class InstallsTab:
                     if on_disk > 0:
                         mb = on_disk / (1024 * 1024)
                         self._set_status(
-                            f"Downloading {name!r}: "
-                            f"{mb:.0f} MB / ~{target_mb} MB{warning}"
+                            f"Downloading {name!r}: {mb:.0f} MB / ~{target_mb} MB{warning}"
                         )
             except asyncio.CancelledError:
                 pass
+
         poll_task = asyncio.create_task(_poll())
         try:
             result = await download_ontology_download_execute(plan)
@@ -768,9 +781,7 @@ class InstallsTab:
             title=f"Delete {name} download?",
             body=plan.summary,
             confirm_label="Delete download",
-            on_confirm=lambda: asyncio.create_task(
-                self._run_ontology_delete(name)
-            ),
+            on_confirm=lambda: asyncio.create_task(self._run_ontology_delete(name)),
         )
 
     async def _run_ontology_delete(self, name: str) -> None:
@@ -778,9 +789,7 @@ class InstallsTab:
         if not plan.is_downloaded:
             self._set_status(f"{name!r} has nothing to delete.")
             return
-        self._set_status(
-            f"Deleting {name!r} download ({_fmt_bytes(plan.on_disk_bytes)})…"
-        )
+        self._set_status(f"Deleting {name!r} download ({_fmt_bytes(plan.on_disk_bytes)})…")
         result = await delete_ontology_download_execute(plan)
         if not result.delete_ok:
             self._set_status(
@@ -802,9 +811,7 @@ class InstallsTab:
             title=f"Install {name}?",
             body=plan.summary,
             confirm_label="Install",
-            on_confirm=lambda: asyncio.create_task(
-                self._run_extractor_install(name)
-            ),
+            on_confirm=lambda: asyncio.create_task(self._run_extractor_install(name)),
         )
 
     async def _run_extractor_install(self, name: str) -> None:
@@ -814,13 +821,13 @@ class InstallsTab:
         if not result.install_ok:
             tail = result.pip_output[-200:] if result.pip_output else ""
             self._set_status(
-                f"Install {name!r} failed: {tail}", ok=False,
+                f"Install {name!r} failed: {tail}",
+                ok=False,
             )
             return
         if result.restart_required:
             self._set_status(
-                f"Installed {name!r}. Restart the app for the new "
-                "package to take effect."
+                f"Installed {name!r}. Restart the app for the new package to take effect."
             )
         else:
             self._set_status(f"{name!r} was already installed.")
@@ -833,9 +840,7 @@ class InstallsTab:
             title=f"Uninstall {name}?",
             body=plan.summary,
             confirm_label="Uninstall",
-            on_confirm=lambda: asyncio.create_task(
-                self._run_extractor_uninstall(name)
-            ),
+            on_confirm=lambda: asyncio.create_task(self._run_extractor_uninstall(name)),
         )
 
     async def _run_extractor_uninstall(self, name: str) -> None:
@@ -845,13 +850,11 @@ class InstallsTab:
         if not result.uninstall_ok:
             tail = result.pip_output[-200:] if result.pip_output else ""
             self._set_status(
-                f"Uninstall {name!r} failed: {tail}", ok=False,
+                f"Uninstall {name!r} failed: {tail}",
+                ok=False,
             )
             return
-        self._set_status(
-            f"Uninstalled {name!r}. Restart the app to fully release "
-            "the module."
-        )
+        self._set_status(f"Uninstalled {name!r}. Restart the app to fully release the module.")
         self._sync_extractor_state()
         self._safe_update()
 
@@ -861,9 +864,7 @@ class InstallsTab:
             title=f"Download {name} weights?",
             body=plan.summary,
             confirm_label="Download weights",
-            on_confirm=lambda: asyncio.create_task(
-                self._run_extractor_download(name)
-            ),
+            on_confirm=lambda: asyncio.create_task(self._run_extractor_download(name)),
         )
 
     async def _run_extractor_download(self, name: str) -> None:
@@ -872,10 +873,8 @@ class InstallsTab:
             self._set_status(f"{name!r} has no downloadable weights.")
             return
         target_mb = plan.provenance.download_size_mb
-        self._set_status(
-            f"Downloading {plan.provenance.model_name} "
-            f"(~{target_mb} MB)…"
-        )
+        self._set_status(f"Downloading {plan.provenance.model_name} (~{target_mb} MB)…")
+
         # Progress polling: while the HF snapshot download runs in its
         # worker thread, poll disk-size every 2s so the user sees
         # incremental progress in the status line. Cancelled cleanly
@@ -893,6 +892,7 @@ class InstallsTab:
                         )
             except asyncio.CancelledError:
                 pass
+
         poll_task = asyncio.create_task(_poll())
         try:
             result = await download_extractor_weights_execute(plan)
@@ -900,13 +900,12 @@ class InstallsTab:
             poll_task.cancel()
         if not result.download_ok:
             self._set_status(
-                f"Download {name!r} weights failed: "
-                f"{result.download_error}", ok=False,
+                f"Download {name!r} weights failed: {result.download_error}",
+                ok=False,
             )
             return
         self._set_status(
-            f"Downloaded {name!r} weights "
-            f"({_fmt_bytes(result.on_disk_bytes)} on disk)."
+            f"Downloaded {name!r} weights ({_fmt_bytes(result.on_disk_bytes)} on disk)."
         )
         self._sync_extractor_state()
         self._safe_update()
@@ -926,9 +925,7 @@ class InstallsTab:
             title=f"Delete {name} weights?",
             body=summary,
             confirm_label="Delete weights",
-            on_confirm=lambda: asyncio.create_task(
-                self._run_extractor_delete(name)
-            ),
+            on_confirm=lambda: asyncio.create_task(self._run_extractor_delete(name)),
         )
 
     async def _run_extractor_delete(self, name: str) -> None:
@@ -936,20 +933,15 @@ class InstallsTab:
         if not plan.is_downloaded:
             self._set_status(f"{name!r} has no weights to delete.")
             return
-        self._set_status(
-            f"Deleting {name!r} weights ({_fmt_bytes(plan.on_disk_bytes)})…"
-        )
+        self._set_status(f"Deleting {name!r} weights ({_fmt_bytes(plan.on_disk_bytes)})…")
         result = await delete_extractor_weights_execute(plan)
         if not result.delete_ok:
             self._set_status(
-                f"Delete {name!r} weights failed: "
-                f"{result.delete_error}", ok=False,
+                f"Delete {name!r} weights failed: {result.delete_error}",
+                ok=False,
             )
             return
-        self._set_status(
-            f"Freed {_fmt_bytes(result.freed_bytes)} by deleting "
-            f"{name!r} weights."
-        )
+        self._set_status(f"Freed {_fmt_bytes(result.freed_bytes)} by deleting {name!r} weights.")
         self._sync_extractor_state()
         self._safe_update()
 
@@ -960,9 +952,7 @@ class InstallsTab:
             title=f"Install parser extra {name}?",
             body=plan.summary,
             confirm_label="Install",
-            on_confirm=lambda: asyncio.create_task(
-                self._run_parser_install(name)
-            ),
+            on_confirm=lambda: asyncio.create_task(self._run_parser_install(name)),
         )
 
     async def _run_parser_install(self, name: str) -> None:
@@ -972,13 +962,13 @@ class InstallsTab:
         if not result.install_ok:
             tail = result.pip_output[-200:] if result.pip_output else ""
             self._set_status(
-                f"Install parser {name!r} failed: {tail}", ok=False,
+                f"Install parser {name!r} failed: {tail}",
+                ok=False,
             )
             return
         if result.restart_required:
             self._set_status(
-                f"Installed parser {name!r}. Restart the app for the "
-                "new extra to take effect."
+                f"Installed parser {name!r}. Restart the app for the new extra to take effect."
             )
         else:
             self._set_status(f"Parser {name!r} was already installed.")
@@ -991,9 +981,7 @@ class InstallsTab:
             title=f"Uninstall parser extra {name}?",
             body=plan.summary,
             confirm_label="Uninstall",
-            on_confirm=lambda: asyncio.create_task(
-                self._run_parser_uninstall(name)
-            ),
+            on_confirm=lambda: asyncio.create_task(self._run_parser_uninstall(name)),
         )
 
     async def _run_parser_uninstall(self, name: str) -> None:
@@ -1003,12 +991,12 @@ class InstallsTab:
         if not result.uninstall_ok:
             tail = result.pip_output[-200:] if result.pip_output else ""
             self._set_status(
-                f"Uninstall parser {name!r} failed: {tail}", ok=False,
+                f"Uninstall parser {name!r} failed: {tail}",
+                ok=False,
             )
             return
         self._set_status(
-            f"Uninstalled parser {name!r}. Restart the app to fully "
-            "release the module."
+            f"Uninstalled parser {name!r}. Restart the app to fully release the module."
         )
         self._sync_parser_state()
         self._safe_update()

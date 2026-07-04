@@ -14,22 +14,19 @@ QueueListener thread bleed across tests.
 from __future__ import annotations
 
 import asyncio
-import importlib.metadata
+import contextlib
 import logging
 import sys
 import threading
 import time
-import warnings
-from collections.abc import Iterator
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from typing import TYPE_CHECKING
 
 import pytest
 
 from knowledge_agent import logging_setup
 from knowledge_agent.logging_setup import (
-    APP_NAME,
     CRASH_SUBDIR,
     ENV_LOG_CONSOLE,
     ENV_LOG_DIR,
@@ -37,13 +34,15 @@ from knowledge_agent.logging_setup import (
     ENV_PACKAGED,
     LIBRARY_NOISE_CLAMP,
     LOG_FILE_NAME,
+    LoggingSettings,
     RedactingFormatter,
     RingBufferHandler,
     _detect_packaged,
     init_logging,
-    LoggingSettings,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 # ---------------------------------------------------------------------------
 # Global-state isolation fixture.
@@ -51,9 +50,7 @@ from knowledge_agent.logging_setup import (
 
 
 @pytest.fixture
-def reset_logging_state(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[Path]:
+def reset_logging_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """Save + restore every global mutated by `init_logging()`.
 
     Points the log dir at a fresh tmp_path so tests don't write to the
@@ -67,10 +64,7 @@ def reset_logging_state(
     saved_root_level = logging.root.level
     saved_listener = logging_setup._LISTENER
     saved_initialized = logging_setup._INITIALIZED
-    saved_lib_levels = {
-        name: logging.getLogger(name).level
-        for name in LIBRARY_NOISE_CLAMP
-    }
+    saved_lib_levels = {name: logging.getLogger(name).level for name in LIBRARY_NOISE_CLAMP}
 
     # Point the log dir at tmp_path. Tests that need a different
     # location can override KAGENT_LOG_DIR again.
@@ -85,10 +79,8 @@ def reset_logging_state(
     finally:
         # Stop the listener so writes flush.
         if logging_setup._LISTENER is not None:
-            try:
+            with contextlib.suppress(Exception):
                 logging_setup._LISTENER.stop()
-            except Exception:
-                pass
         # Restore module state.
         logging_setup._LISTENER = saved_listener
         logging_setup._INITIALIZED = saved_initialized
@@ -320,9 +312,7 @@ def test_ring_buffer_concurrent_emits_land_in_deque() -> None:
     threads = []
     for tid in range(8):
         t = threading.Thread(
-            target=lambda tid=tid: [
-                handler.emit(_make_record(f"t{tid}-{i}")) for i in range(100)
-            ]
+            target=lambda tid=tid: [handler.emit(_make_record(f"t{tid}-{i}")) for i in range(100)]
         )
         threads.append(t)
         t.start()
@@ -438,9 +428,7 @@ def test_threading_excepthook_writes_crash_file(
 def test_asyncio_exception_handler_writes_crash_file(
     reset_logging_state: Path,
 ) -> None:
-    asyncio_handler = init_logging(
-        LoggingSettings(log_dir=reset_logging_state)
-    )
+    asyncio_handler = init_logging(LoggingSettings(log_dir=reset_logging_state))
 
     async def _run() -> None:
         loop = asyncio.get_running_loop()
@@ -452,10 +440,8 @@ def test_asyncio_exception_handler_writes_crash_file(
         task = asyncio.create_task(crasher())
         # Let it raise + bubble up so the loop sees an unretrieved
         # task exception.
-        try:
+        with contextlib.suppress(RuntimeError):
             await task
-        except RuntimeError:
-            pass
         # An unhandled task exception case — invoke the handler
         # directly so we don't rely on garbage collector timing.
         loop.call_exception_handler(
@@ -482,7 +468,7 @@ def test_asyncio_exception_handler_writes_crash_file(
 def test_crash_cleanup_age_and_count(reset_logging_state: Path) -> None:
     crash_dir = reset_logging_state / CRASH_SUBDIR
     crash_dir.mkdir(parents=True, exist_ok=True)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # 60 files, 1 per day, oldest 60 days back.
     for days_ago in range(60):
         stamp = (now - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H-%M-%SZ")
@@ -554,9 +540,7 @@ def test_home_dir_redacted_in_file_but_preserved_in_ring(
     monkeypatch.setattr(
         logging_setup,
         "_HOME_RE",
-        __import__("re").compile(
-            __import__("re").escape(fake_home), __import__("re").IGNORECASE
-        ),
+        __import__("re").compile(__import__("re").escape(fake_home), __import__("re").IGNORECASE),
     )
     init_logging(LoggingSettings(log_dir=reset_logging_state, log_level="DEBUG"))
     logging.getLogger("pii_test").info("found file at %s/data.txt", fake_home)
@@ -650,14 +634,10 @@ def test_listener_flushes_queue_on_stop(reset_logging_state: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_logging_settings_loads_from_toml(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_logging_settings_loads_from_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     toml_path = tmp_path / "settings.toml"
     toml_path.write_text(
-        '[logging]\n'
-        'log_level = "WARNING"\n'
-        'crash_retention_days = 7\n',
+        '[logging]\nlog_level = "WARNING"\ncrash_retention_days = 7\n',
         encoding="utf-8",
     )
     # Make sure env vars don't override.
@@ -671,9 +651,7 @@ def test_logging_settings_env_overrides_toml(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     toml_path = tmp_path / "settings.toml"
-    toml_path.write_text(
-        '[logging]\nlog_level = "WARNING"\n', encoding="utf-8"
-    )
+    toml_path.write_text('[logging]\nlog_level = "WARNING"\n', encoding="utf-8")
     monkeypatch.setenv(ENV_LOG_LEVEL, "DEBUG")
     settings = LoggingSettings.load(toml_path)
     assert settings.log_level == "DEBUG"
@@ -695,9 +673,7 @@ def test_logging_settings_empty_string_log_dir_treated_as_none(
     """TOML round-trip can materialise empty strings — must mean
     'auto-resolve', not 'use cwd'."""
     toml_path = tmp_path / "settings.toml"
-    toml_path.write_text(
-        '[logging]\nlog_dir = ""\n', encoding="utf-8"
-    )
+    toml_path.write_text('[logging]\nlog_dir = ""\n', encoding="utf-8")
     monkeypatch.delenv(ENV_LOG_DIR, raising=False)
     settings = LoggingSettings.load(toml_path)
     assert settings.log_dir is None

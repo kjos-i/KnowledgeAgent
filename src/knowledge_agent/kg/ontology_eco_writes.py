@@ -19,25 +19,28 @@ Lifecycle delegates to the shared `write_ontology_terms` family helpers in
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from knowledge_agent.kg.ontology_helpers import (
     OntologyTerm,
+    delete_ontology_terms,
     ensure_cached,
     extract_terms_obo,
-    delete_ontology_terms,
     import_ontology_data,
     is_ontology_imported,
-    write_ontology_terms,
     read_obo,
+    write_ontology_terms,
 )
 from knowledge_agent.kg.ontology_provenance import OntologyProvenance
 from knowledge_agent.kg.schema import ECO_IS_A_REL, ECO_TERM_LABEL
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 logger = logging.getLogger(__name__)
 
 # Re-exported for backward-compatible test patching.
-_ = ensure_cached  # noqa: F841
+_ = ensure_cached
 
 
 # ---------------------------------------------------------------------------
@@ -56,8 +59,6 @@ ECO_ID_PREFIX = "ECO"
 DOWNLOAD_SIZE_MB = 5
 
 _ONTOLOGY_NAME = "ECO"
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +87,7 @@ _ECO_PROVENANCE = OntologyProvenance(
     domain_tags=DOMAIN_TAGS,
     covers_labels=_ECO_COVERS_LABELS,
     description=(
-                "Evidence codes that qualify annotations (experimental "
+        "Evidence codes that qualify annotations (experimental "
         "evidence, sequence orthology, author statement). Useful as "
         "provenance metadata, NOT for entity canonicalisation — no "
         "shipped extractor emits matching labels. "
@@ -102,11 +103,14 @@ _ECO_PROVENANCE = OntologyProvenance(
 async def is_imported(client) -> bool:
     """True when at least one `:ECOTerm` node exists in Neo4j."""
     return await is_ontology_imported(
-        client, term_label=ECO_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
+        client,
+        term_label=ECO_TERM_LABEL,
+        ontology_name=_ONTOLOGY_NAME,
     )
 
 
-async def import_eco(client,
+async def import_eco(
+    client,
     *,
     force: bool = False,
     xrefs_mode: str = "none",
@@ -128,18 +132,22 @@ async def import_eco(client,
 async def delete_imported(client) -> None:
     """DETACH DELETE every :ECOTerm node + its :ECO_IS_A edges."""
     await delete_ontology_terms(
-        client, term_label=ECO_TERM_LABEL, ontology_name=_ONTOLOGY_NAME,
+        client,
+        term_label=ECO_TERM_LABEL,
+        ontology_name=_ONTOLOGY_NAME,
     )
 
 
-async def write_terms(client,
+async def write_terms(
+    client,
     terms: list[OntologyTerm],
     *,
     xrefs_mode: str = "none",
 ) -> None:
     """Write `:OntologyTerm:ECOTerm` nodes + `:ECO_IS_A` edges."""
     await write_ontology_terms(
-        client, terms,
+        client,
+        terms,
         term_label=ECO_TERM_LABEL,
         hierarchy_rel=ECO_IS_A_REL,
         ontology_name=_ONTOLOGY_NAME,

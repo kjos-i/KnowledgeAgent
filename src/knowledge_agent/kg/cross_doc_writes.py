@@ -68,7 +68,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_SHARED_COUNT_THRESHOLD = 2
 
 
-async def recompute_cross_doc_edges(client,
+async def recompute_cross_doc_edges(
+    client,
     doc_id: str,
     threshold: int = DEFAULT_SHARED_COUNT_THRESHOLD,
 ) -> int:
@@ -114,10 +115,7 @@ async def recompute_cross_doc_edges(client,
     if not doc_id:
         raise ValueError("KG: recompute_cross_doc_edges called with no doc_id")
     if threshold < 1:
-        raise ValueError(
-            f"KG: recompute_cross_doc_edges threshold must be >= 1, "
-            f"got {threshold}"
-        )
+        raise ValueError(f"KG: recompute_cross_doc_edges threshold must be >= 1, got {threshold}")
     async with client.driver.session() as session:
         # Step 1: wipe existing edges incident to this doc. The
         # undirected `[r:RELATED_TO]-` pattern catches edges
@@ -155,8 +153,9 @@ async def recompute_cross_doc_edges(client,
         # `row is None` here implies driver-level corruption.
         n = int(row["n"]) if row else 0
     logger.info(
-        "KG: recomputed L9 :RELATED_TO edges for doc %s -> %d edges "
-        "(threshold=%d)",
-        doc_id, n, threshold,
+        "KG: recomputed L9 :RELATED_TO edges for doc %s -> %d edges (threshold=%d)",
+        doc_id,
+        n,
+        threshold,
     )
     return n

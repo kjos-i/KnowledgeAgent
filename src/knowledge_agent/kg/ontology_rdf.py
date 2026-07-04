@@ -33,15 +33,9 @@ from __future__ import annotations
 
 import gzip
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from knowledge_agent.kg.ontology_helpers import OntologyTerm
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    import rdflib
-
 
 logger = logging.getLogger(__name__)
 
@@ -93,9 +87,7 @@ def extract_terms_owl(
         "http://www.geneontology.org/formats/oboInOwl#hasNarrowSynonym",
         "http://purl.obolibrary.org/obo/IAO_0000118",  # "alternative term"
     ),
-    xref_properties: tuple[str, ...] = (
-        "http://www.geneontology.org/formats/oboInOwl#hasDbXref",
-    ),
+    xref_properties: tuple[str, ...] = ("http://www.geneontology.org/formats/oboInOwl#hasDbXref",),
     definition_property: str = "http://purl.obolibrary.org/obo/IAO_0000115",
     id_extractor: Any = None,
 ) -> list[OntologyTerm]:
@@ -170,9 +162,7 @@ def extract_terms_owl(
             continue
 
         # Skip obsolete classes.
-        deprecated = next(
-            iter(graph.objects(class_uri, deprecated_prop)), None
-        )
+        deprecated = next(iter(graph.objects(class_uri, deprecated_prop)), None)
         if deprecated is not None and str(deprecated).lower() == "true":
             continue
 
@@ -230,7 +220,8 @@ def extract_terms_owl(
 
     logger.info(
         "ontology: extracted %d terms from OWL graph (prefix=%s)",
-        len(terms), id_prefix,
+        len(terms),
+        id_prefix,
     )
     return terms
 
@@ -250,10 +241,7 @@ def _owl_id_extractor(uri: Any) -> str:
     raw last segment - the caller filters empty / unwanted IDs.
     """
     text = str(uri)
-    if "#" in text:
-        last = text.rsplit("#", 1)[1]
-    else:
-        last = text.rsplit("/", 1)[1]
+    last = text.rsplit("#", 1)[1] if "#" in text else text.rsplit("/", 1)[1]
     # OBO style: "OBI_0000489" -> "OBI:0000489".
     if "_" in last:
         prefix, _, suffix = last.partition("_")
@@ -267,13 +255,9 @@ def extract_terms_skos(
     id_prefix: str,
     *,
     label_property: str = "http://www.w3.org/2004/02/skos/core#prefLabel",
-    synonym_properties: tuple[str, ...] = (
-        "http://www.w3.org/2004/02/skos/core#altLabel",
-    ),
+    synonym_properties: tuple[str, ...] = ("http://www.w3.org/2004/02/skos/core#altLabel",),
     hierarchy_property: str = "http://www.w3.org/2004/02/skos/core#broader",
-    definition_property: str = (
-        "http://www.w3.org/2004/02/skos/core#scopeNote"
-    ),
+    definition_property: str = ("http://www.w3.org/2004/02/skos/core#scopeNote"),
     id_extractor: Any = None,
 ) -> list[OntologyTerm]:
     """Extract `OntologyTerm` records from a SKOS-shaped RDF graph.
@@ -354,7 +338,8 @@ def extract_terms_skos(
         )
     logger.info(
         "ontology: extracted %d terms from SKOS-shaped RDF graph (prefix=%s)",
-        len(terms), id_prefix,
+        len(terms),
+        id_prefix,
     )
     return terms
 

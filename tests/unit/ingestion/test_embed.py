@@ -10,16 +10,13 @@ For coverage of the OpenAI / Google / HuggingFace dispatch branches
 see `tests/unit/test_embedder_factory.py`.
 """
 
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import Mock, patch
 
 import pytest
 
 from knowledge_agent.ingestion.embed import embed_texts
 
-
-_VOYAGE_CLIENT_PATCH = (
-    "knowledge_agent.embedder_factory._build_voyage_client"
-)
+_VOYAGE_CLIENT_PATCH = "knowledge_agent.embedder_factory._build_voyage_client"
 _SETTINGS_PATCH = "knowledge_agent.embedder_factory.get_settings"
 
 

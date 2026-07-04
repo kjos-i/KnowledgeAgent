@@ -21,7 +21,6 @@ from knowledge_agent.config import Settings
 from knowledge_agent.kg import cross_doc_xrefs_writes
 from knowledge_agent.kg.client import Neo4jClient
 
-
 # ---- Test harness (mirrors cross_doc_writes tests) ----
 
 
@@ -120,7 +119,9 @@ async def test_per_doc_threshold_zero_raises():
     client = _client_with_driver(driver)
     with pytest.raises(ValueError, match=">= 1"):
         await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_edges(
-            client, DOC_ID, threshold=0,
+            client,
+            DOC_ID,
+            threshold=0,
         )
     assert driver.sessions == []
 
@@ -130,7 +131,9 @@ async def test_per_doc_threshold_negative_raises():
     client = _client_with_driver(driver)
     with pytest.raises(ValueError, match=">= 1"):
         await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_edges(
-            client, DOC_ID, threshold=-1,
+            client,
+            DOC_ID,
+            threshold=-1,
         )
     assert driver.sessions == []
 
@@ -149,10 +152,7 @@ async def test_per_doc_returns_zero_when_single_returns_no_row():
     raising for real failures."""
     driver = RecordingDriver(single_returns=[None, None])
     client = _client_with_driver(driver)
-    assert (
-        await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_edges(client, DOC_ID)
-        == 0
-    )
+    assert await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_edges(client, DOC_ID) == 0
 
 
 # ---- Per-doc: two-step Cypher ----
@@ -162,7 +162,8 @@ async def test_per_doc_runs_two_queries_delete_then_merge():
     driver = _driver_with_per_doc_count(3)
     client = _client_with_driver(driver)
     result = await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_edges(
-        client, DOC_ID,
+        client,
+        DOC_ID,
     )
     assert result == 3
     assert len(driver.sessions[0].calls) == 2
@@ -177,7 +178,8 @@ async def test_per_doc_zero_edges_is_valid_outcome():
     driver = _driver_with_per_doc_count(0)
     client = _client_with_driver(driver)
     result = await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_edges(
-        client, DOC_ID,
+        client,
+        DOC_ID,
     )
     assert result == 0
 
@@ -246,7 +248,9 @@ async def test_per_doc_merge_query_uses_threshold_param():
     driver = _driver_with_per_doc_count(5)
     client = _client_with_driver(driver)
     await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_edges(
-        client, DOC_ID, threshold=4,
+        client,
+        DOC_ID,
+        threshold=4,
     )
     merge_cypher, params = driver.sessions[0].calls[1]
     assert "size(shared_concepts) >= $threshold" in merge_cypher
@@ -276,10 +280,7 @@ async def test_per_doc_uses_default_threshold_when_not_provided():
     client = _client_with_driver(driver)
     await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_edges(client, DOC_ID)
     _merge_cypher, params = driver.sessions[0].calls[1]
-    assert (
-        params["threshold"]
-        == cross_doc_xrefs_writes.DEFAULT_SHARED_COUNT_THRESHOLD
-    )
+    assert params["threshold"] == cross_doc_xrefs_writes.DEFAULT_SHARED_COUNT_THRESHOLD
     assert params["threshold"] == 2
 
 
@@ -291,7 +292,8 @@ async def test_global_threshold_zero_raises():
     client = _client_with_driver(driver)
     with pytest.raises(ValueError, match=">= 1"):
         await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(
-            client, threshold=0,
+            client,
+            threshold=0,
         )
     assert driver.sessions == []
 
@@ -347,10 +349,7 @@ async def test_global_returns_zero_when_single_returns_no_row():
     (not None)."""
     driver = RecordingDriver(single_returns=[None, None])
     client = _client_with_driver(driver)
-    assert (
-        await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(client)
-        == 0
-    )
+    assert await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(client) == 0
 
 
 # ---- Client delegate ----

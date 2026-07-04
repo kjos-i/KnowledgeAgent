@@ -201,7 +201,7 @@ async def test_kg_chunk_write_propagates_when_session_raises(
     from knowledge_agent.kg import chunk_writes
 
     class _FakeSession:
-        def __enter__(self) -> "_FakeSession":
+        def __enter__(self) -> _FakeSession:
             return self
 
         def __exit__(self, *args: Any) -> None:
@@ -211,7 +211,7 @@ async def test_kg_chunk_write_propagates_when_session_raises(
             raise RuntimeError("simulated Neo4j connection drop")
 
     class _FakeDriver:
-        def session(self) -> "_FakeSession":
+        def session(self) -> _FakeSession:
             return _FakeSession()
 
     class _FakeClient:
@@ -225,7 +225,11 @@ async def test_kg_chunk_write_propagates_when_session_raises(
 
     with pytest.raises(RuntimeError, match="simulated Neo4j connection drop"):
         await chunk_writes.write_chunks(
-            _FakeClient(), "doc-1", [_Chunk()], "Document", "Paper",
+            _FakeClient(),
+            "doc-1",
+            [_Chunk()],
+            "Document",
+            "Paper",
         )
 
 
@@ -235,7 +239,7 @@ async def test_kg_delete_chunks_propagates_when_session_raises() -> None:
     from knowledge_agent.kg import chunk_writes
 
     class _FakeSession:
-        def __enter__(self) -> "_FakeSession":
+        def __enter__(self) -> _FakeSession:
             return self
 
         def __exit__(self, *args: Any) -> None:
@@ -245,7 +249,7 @@ async def test_kg_delete_chunks_propagates_when_session_raises() -> None:
             raise RuntimeError("simulated drop")
 
     class _FakeDriver:
-        def session(self) -> "_FakeSession":
+        def session(self) -> _FakeSession:
             return _FakeSession()
 
     class _FakeClient:
@@ -268,7 +272,11 @@ async def test_kg_writes_reject_empty_doc_id_with_value_error() -> None:
         await chunk_writes.delete_chunks_by_doc_id(_FakeClient(), "")
     with pytest.raises(ValueError, match="no doc_id"):
         await chunk_writes.write_chunks(
-            _FakeClient(), "", [], "Document", "Paper",
+            _FakeClient(),
+            "",
+            [],
+            "Document",
+            "Paper",
         )
 
 
@@ -279,7 +287,8 @@ async def test_kg_writes_reject_empty_doc_id_with_value_error() -> None:
 
 
 async def test_read_query_raises_on_cypher_error(
-    kg_client: Any, ensure_constraints: None,
+    kg_client: Any,
+    ensure_constraints: None,
 ) -> None:
     """`read_query` deliberately does NOT fail-soft (per its
     docstring). A bad Cypher string raises, which the caller
@@ -298,7 +307,8 @@ async def test_read_query_raises_on_cypher_error(
 
 
 async def test_lance_write_chunks_raises_when_table_missing(
-    lance_client: Any, clean_lance: None,
+    lance_client: Any,
+    clean_lance: None,
 ) -> None:
     """If the chunks table doesn't exist (no ensure_schema yet),
     write_chunks propagates LanceDB's table-missing error rather than
@@ -310,25 +320,41 @@ async def test_lance_write_chunks_raises_when_table_missing(
     """
     # clean_lance dropped the table; we deliberately skip ensure_schema.
     with pytest.raises(Exception):
-        await lance_client.write_chunks([{
-            "chunk_id": "x#0", "doc_id": "x", "chunk_index": 0,
-            "section": None, "page": None,
-            "char_start": 0, "char_end": 0,
-            "content_type": "text", "image_ref": None,
-            "text": "hello",
-            "embedding": [0.0] * 1024,
-            "main_label": "Document", "sub_label": "Paper",
-            "doi": None, "openalex_id": None,
-            "title": None, "year": None,
-            "authors_display": None, "venue": None,
-            "source_url": None, "metadata_status": "baseline",
-            "language": "en", "source_path": "x",
-            "ingested_at": __import__("datetime").datetime.now(),
-        }])
+        await lance_client.write_chunks(
+            [
+                {
+                    "chunk_id": "x#0",
+                    "doc_id": "x",
+                    "chunk_index": 0,
+                    "section": None,
+                    "page": None,
+                    "char_start": 0,
+                    "char_end": 0,
+                    "content_type": "text",
+                    "image_ref": None,
+                    "text": "hello",
+                    "embedding": [0.0] * 1024,
+                    "main_label": "Document",
+                    "sub_label": "Paper",
+                    "doi": None,
+                    "openalex_id": None,
+                    "title": None,
+                    "year": None,
+                    "authors_display": None,
+                    "venue": None,
+                    "source_url": None,
+                    "metadata_status": "baseline",
+                    "language": "en",
+                    "source_path": "x",
+                    "ingested_at": __import__("datetime").datetime.now(),
+                }
+            ]
+        )
 
 
 async def test_lance_get_chunks_by_doc_id_on_missing_table_returns_empty(
-    lance_client: Any, clean_lance: None,
+    lance_client: Any,
+    clean_lance: None,
 ) -> None:
     """`get_chunks_by_doc_id` on a missing table returns an empty list
     (not a raise). Sync/backfill workflows rely on this when the corpus
@@ -386,7 +412,8 @@ async def test_ingest_document_rejects_unsupported_extension(tmp_path: Any) -> N
     (parse, embed, write). Catches misuse before any cost is paid."""
     from knowledge_agent.ingestion.pipeline import ingest_document
     from knowledge_agent.kg.corpus_config import (
-        CorpusConfig, LayerFlags,
+        CorpusConfig,
+        LayerFlags,
     )
 
     bogus = tmp_path / "data.zzz"
@@ -403,7 +430,8 @@ async def test_ingest_document_rejects_invalid_main_label(tmp_path: Any) -> None
     check — fail before parsing."""
     from knowledge_agent.ingestion.pipeline import ingest_document
     from knowledge_agent.kg.corpus_config import (
-        CorpusConfig, LayerFlags,
+        CorpusConfig,
+        LayerFlags,
     )
 
     fake = tmp_path / "data.pdf"

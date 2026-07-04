@@ -12,7 +12,6 @@ import pytest
 
 from knowledge_agent.ingestion.parsers import json_parser
 
-
 # ---- EXTENSIONS ----
 
 
@@ -123,12 +122,7 @@ def test_ndjson_extension_uses_same_path(tmp_path: Path):
 def test_jsonl_skips_blank_lines_without_gaps(tmp_path: Path):
     path = tmp_path / "sparse.jsonl"
     path.write_text(
-        '{"a": 1}\n'
-        "\n"
-        "   \n"
-        '{"a": 2}\n'
-        "\n"
-        '{"a": 3}\n',
+        '{"a": 1}\n\n   \n{"a": 2}\n\n{"a": 3}\n',
         encoding="utf-8",
     )
     chunks = json_parser.parse(path)
@@ -160,8 +154,10 @@ def test_malformed_json_raises_through_to_caller(tmp_path: Path):
 def _dispatcher_config():
     """CorpusConfig instance whose fields the json parser ignores."""
     from knowledge_agent.kg.corpus_config import CorpusConfig, LayerFlags
+
     return CorpusConfig(
-        allowed_types=["Paper"], layers=LayerFlags(chunks=True),
+        allowed_types=["Paper"],
+        layers=LayerFlags(chunks=True),
     )
 
 

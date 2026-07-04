@@ -55,7 +55,6 @@ from knowledge_agent.kg.openalex_writes import (
 from knowledge_agent.kg.schema import PAPER_LABEL
 from knowledge_agent.search.client import get_search_client
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -96,8 +95,10 @@ async def lookup_known_doi(doc_id: str, doi: str) -> dict[str, Any]:
     if not doi:
         logger.warning("lookup_known_doi (%s): empty DOI; aborting", doc_id)
         return {
-            "work_resolved": False, "metadata_patched": False,
-            "kg_l1_l4_ok": False, "new_status": None,
+            "work_resolved": False,
+            "metadata_patched": False,
+            "kg_l1_l4_ok": False,
+            "new_status": None,
         }
 
     search_client = get_search_client()
@@ -105,19 +106,26 @@ async def lookup_known_doi(doc_id: str, doi: str) -> dict[str, Any]:
         chunk_rows = await search_client.get_chunks_by_doc_id(doc_id)
     except Exception as exc:
         logger.warning(
-            "lookup_known_doi (%s): LanceDB read failed: %r", doc_id, exc,
+            "lookup_known_doi (%s): LanceDB read failed: %r",
+            doc_id,
+            exc,
         )
         return {
-            "work_resolved": False, "metadata_patched": False,
-            "kg_l1_l4_ok": False, "new_status": None,
+            "work_resolved": False,
+            "metadata_patched": False,
+            "kg_l1_l4_ok": False,
+            "new_status": None,
         }
     if not chunk_rows:
         logger.warning(
-            "lookup_known_doi (%s): no chunks in LanceDB; aborting", doc_id,
+            "lookup_known_doi (%s): no chunks in LanceDB; aborting",
+            doc_id,
         )
         return {
-            "work_resolved": False, "metadata_patched": False,
-            "kg_l1_l4_ok": False, "new_status": None,
+            "work_resolved": False,
+            "metadata_patched": False,
+            "kg_l1_l4_ok": False,
+            "new_status": None,
         }
 
     sub_label = chunk_rows[0].get("sub_label")
@@ -125,30 +133,31 @@ async def lookup_known_doi(doc_id: str, doi: str) -> dict[str, Any]:
     try:
         work = await resolve_doi(doi)
     except Exception as exc:
-        logger.warning(
-            "lookup_known_doi (%s): resolve_doi %r failed: %r", doc_id, doi, exc
-        )
+        logger.warning("lookup_known_doi (%s): resolve_doi %r failed: %r", doc_id, doi, exc)
         return {
-            "work_resolved": False, "metadata_patched": False,
-            "kg_l1_l4_ok": False, "new_status": None,
+            "work_resolved": False,
+            "metadata_patched": False,
+            "kg_l1_l4_ok": False,
+            "new_status": None,
         }
     if work is None:
         logger.info(
             "lookup_known_doi (%s): DOI %r did not resolve; state unchanged",
-            doc_id, doi,
+            doc_id,
+            doi,
         )
         return {
-            "work_resolved": False, "metadata_patched": False,
-            "kg_l1_l4_ok": False, "new_status": None,
+            "work_resolved": False,
+            "metadata_patched": False,
+            "kg_l1_l4_ok": False,
+            "new_status": None,
         }
 
     applied = await _apply_resolved_work(doc_id, work, sub_label)
     return {"work_resolved": True, **applied}
 
 
-async def resolve_openalex(
-    doc_id: str, *, skip_manual: bool = False
-) -> dict[str, Any]:
+async def resolve_openalex(doc_id: str, *, skip_manual: bool = False) -> dict[str, Any]:
     """Retry OpenAlex resolution for one doc; patch LanceDB + KG L1-L4.
 
     Per-doc partial op. Use when:
@@ -189,20 +198,27 @@ async def resolve_openalex(
         chunk_rows = await search_client.get_chunks_by_doc_id(doc_id)
     except Exception as exc:
         logger.warning(
-            "resolve_openalex (%s): LanceDB read failed: %r", doc_id, exc,
+            "resolve_openalex (%s): LanceDB read failed: %r",
+            doc_id,
+            exc,
         )
         return {
-            "skipped": False, "work_resolved": False,
-            "metadata_patched": False, "kg_l1_l4_ok": False,
+            "skipped": False,
+            "work_resolved": False,
+            "metadata_patched": False,
+            "kg_l1_l4_ok": False,
             "new_status": None,
         }
     if not chunk_rows:
         logger.warning(
-            "resolve_openalex (%s): no chunks in LanceDB; aborting", doc_id,
+            "resolve_openalex (%s): no chunks in LanceDB; aborting",
+            doc_id,
         )
         return {
-            "skipped": False, "work_resolved": False,
-            "metadata_patched": False, "kg_l1_l4_ok": False,
+            "skipped": False,
+            "work_resolved": False,
+            "metadata_patched": False,
+            "kg_l1_l4_ok": False,
             "new_status": None,
         }
 
@@ -213,8 +229,10 @@ async def resolve_openalex(
             doc_id,
         )
         return {
-            "skipped": True, "work_resolved": False,
-            "metadata_patched": False, "kg_l1_l4_ok": False,
+            "skipped": True,
+            "work_resolved": False,
+            "metadata_patched": False,
+            "kg_l1_l4_ok": False,
             "new_status": None,
         }
 
@@ -233,7 +251,10 @@ async def resolve_openalex(
         except Exception as exc:
             logger.warning(
                 "resolve_openalex (%s): stored-DOI %r lookup failed: %r; "
-                "falling back to chunk-text scan", doc_id, stored_doi, exc,
+                "falling back to chunk-text scan",
+                doc_id,
+                stored_doi,
+                exc,
             )
     if work is None:
         chunks = [
@@ -254,8 +275,10 @@ async def resolve_openalex(
             doc_id,
         )
         return {
-            "skipped": False, "work_resolved": False,
-            "metadata_patched": False, "kg_l1_l4_ok": False,
+            "skipped": False,
+            "work_resolved": False,
+            "metadata_patched": False,
+            "kg_l1_l4_ok": False,
             "new_status": None,
         }
 
@@ -295,7 +318,8 @@ async def _apply_resolved_work(
     except Exception as exc:
         logger.warning(
             "_apply_resolved_work (%s): update_doc_metadata failed: %r",
-            doc_id, exc,
+            doc_id,
+            exc,
         )
         metadata_patched = False
 
@@ -318,7 +342,8 @@ async def _apply_resolved_work(
         except Exception as exc:
             logger.warning(
                 "_apply_resolved_work (%s): L1-L4 rewrite failed: %r",
-                doc_id, exc,
+                doc_id,
+                exc,
             )
 
     return {
@@ -359,9 +384,7 @@ def _doc_metadata_fields_from_work(
         "openalex_id": _extract_openalex_id(work.get("id")),
         "venue": source.get("display_name"),
         "source_url": primary_location.get("landing_page_url"),
-        "authors_display": _build_authors_display(
-            work.get("authorships") or []
-        ),
+        "authors_display": _build_authors_display(work.get("authorships") or []),
         "language": work.get("language"),
     }
 

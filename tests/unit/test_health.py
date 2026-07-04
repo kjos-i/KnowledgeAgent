@@ -9,6 +9,7 @@ raising), so the assertions confirm that contract — a Neo4j raise
 becomes `ok=False` with the exception repr in `detail`, not an
 uncaught exception bubbling out of `system_status()`.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -25,7 +26,6 @@ from knowledge_agent.health import (
     system_status,
 )
 
-
 # ---- ComponentStatus / StatusReport dataclasses ----
 
 
@@ -37,18 +37,22 @@ def test_component_status_is_frozen():
 
 
 def test_status_report_all_ok_true_when_all_components_ok():
-    report = StatusReport(components=(
-        ComponentStatus("a", True, ""),
-        ComponentStatus("b", True, ""),
-    ))
+    report = StatusReport(
+        components=(
+            ComponentStatus("a", True, ""),
+            ComponentStatus("b", True, ""),
+        )
+    )
     assert report.all_ok is True
 
 
 def test_status_report_all_ok_false_when_any_component_fail():
-    report = StatusReport(components=(
-        ComponentStatus("a", True, ""),
-        ComponentStatus("b", False, "err"),
-    ))
+    report = StatusReport(
+        components=(
+            ComponentStatus("a", True, ""),
+            ComponentStatus("b", False, "err"),
+        )
+    )
     assert report.all_ok is False
 
 
@@ -65,7 +69,8 @@ async def test_check_neo4j_returns_ok_when_round_trip_succeeds():
     fake_client = MagicMock()
     fake_client.read_query = AsyncMock(return_value=[{"ok": 1}])
     with patch(
-        "knowledge_agent.kg.client.get_kg_client", return_value=fake_client,
+        "knowledge_agent.kg.client.get_kg_client",
+        return_value=fake_client,
     ):
         result = await _check_neo4j()
     assert result.name == "neo4j"
@@ -78,7 +83,8 @@ async def test_check_neo4j_returns_fail_when_unexpected_result():
     fake_client = MagicMock()
     fake_client.read_query = AsyncMock(return_value=[{"ok": 999}])
     with patch(
-        "knowledge_agent.kg.client.get_kg_client", return_value=fake_client,
+        "knowledge_agent.kg.client.get_kg_client",
+        return_value=fake_client,
     ):
         result = await _check_neo4j()
     assert result.ok is False
@@ -93,7 +99,8 @@ async def test_check_neo4j_catches_driver_exception_returns_fail():
         side_effect=RuntimeError("connection refused"),
     )
     with patch(
-        "knowledge_agent.kg.client.get_kg_client", return_value=fake_client,
+        "knowledge_agent.kg.client.get_kg_client",
+        return_value=fake_client,
     ):
         result = await _check_neo4j()
     assert result.ok is False
@@ -145,7 +152,10 @@ def test_provider_key_local_provider_returns_ok():
 def test_provider_key_set_returns_ok():
     settings = MagicMock(anthropic_api_key="sk-ant-fake")
     status = _check_provider_key(
-        "llm", "anthropic", "anthropic_api_key", settings,
+        "llm",
+        "anthropic",
+        "anthropic_api_key",
+        settings,
     )
     assert status.ok is True
     assert "set" in status.detail
@@ -155,7 +165,10 @@ def test_provider_key_missing_returns_fail_with_env_var_name():
     """The detail message names the env var to set so the user can fix it."""
     settings = MagicMock(anthropic_api_key=None)
     status = _check_provider_key(
-        "llm", "anthropic", "anthropic_api_key", settings,
+        "llm",
+        "anthropic",
+        "anthropic_api_key",
+        settings,
     )
     assert status.ok is False
     assert "ANTHROPIC_API_KEY" in status.detail
@@ -191,7 +204,10 @@ async def test_system_status_returns_four_components_in_display_order():
         report = await system_status()
 
     assert [c.name for c in report.components] == [
-        "neo4j", "lancedb", "llm_key", "embed_key",
+        "neo4j",
+        "lancedb",
+        "llm_key",
+        "embed_key",
     ]
     assert report.all_ok is True
 
@@ -239,7 +255,7 @@ async def test_system_status_local_provider_skips_key_check():
     fake_settings = MagicMock(
         anthropic_api_key=None,
         voyage_api_key="vy",
-        llm_provider="ollama",        # <-- local
+        llm_provider="ollama",  # <-- local
         embedding_provider="voyage",
     )
     with (
@@ -261,10 +277,12 @@ async def test_system_status_local_provider_skips_key_check():
 
 
 def test_render_report_text_one_line_per_component():
-    report = StatusReport(components=(
-        ComponentStatus("neo4j", True, "ok"),
-        ComponentStatus("lancedb", False, "fail"),
-    ))
+    report = StatusReport(
+        components=(
+            ComponentStatus("neo4j", True, "ok"),
+            ComponentStatus("lancedb", False, "fail"),
+        )
+    )
     text = render_report_text(report)
     lines = text.split("\n")
     assert len(lines) == 2

@@ -5,6 +5,7 @@ empty-state) directly — no Flet render, no DB, no event loop. The async
 count fetch (`_reload_counts`) is guarded off without a running loop, so
 these never touch LanceDB/Neo4j.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -67,9 +68,14 @@ def test_populate_extractor_not_configured(fake_app):
 def test_populate_ingest_settings(fake_app):
     tab = _tab(fake_app)
     cfg = SimpleNamespace(
-        chunker_strategy="hybrid", chunk_max_tokens=512, merge_peers=True,
-        enable_pdf_ocr=False, enable_image_ocr=True,
-        extract_figures=True, images_scale=2.0, min_figure_bytes=2048,
+        chunker_strategy="hybrid",
+        chunk_max_tokens=512,
+        merge_peers=True,
+        enable_pdf_ocr=False,
+        enable_image_ocr=True,
+        extract_figures=True,
+        images_scale=2.0,
+        min_figure_bytes=2048,
     )
     tab._populate_ingest_settings(cfg)
     assert "hybrid" in tab.info_chunking.value
@@ -99,9 +105,7 @@ def test_populate_models(fake_app, monkeypatch):
         embedding_dims=384,
         llm_provider="anthropic",
     )
-    monkeypatch.setattr(
-        "knowledge_agent.config.get_settings", lambda: fake_settings
-    )
+    monkeypatch.setattr("knowledge_agent.config.get_settings", lambda: fake_settings)
     tab = _tab(fake_app)
     tab._populate_models()
     assert "huggingface" in tab.info_embedder.value
@@ -128,8 +132,12 @@ def test_info_empty_state_blanks_new_controls(fake_app):
     tab = _tab(fake_app)
     tab._info_empty_state()
     for ctrl in (
-        tab.info_breakdown, tab.info_chunking, tab.info_ocr,
-        tab.info_figures, tab.info_embedder, tab.info_llm,
+        tab.info_breakdown,
+        tab.info_chunking,
+        tab.info_ocr,
+        tab.info_figures,
+        tab.info_embedder,
+        tab.info_llm,
     ):
         assert ctrl.value == "—"
     assert tab.info_counts.value == "docs: — · chunks: — · mentions: —"

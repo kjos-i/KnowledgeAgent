@@ -306,14 +306,10 @@ async def count_ontology_terms(client, ontology_name: str) -> int:
     """
     entry = ONTOLOGY_REGISTRY.get(ontology_name)
     if entry is None:
-        raise ValueError(
-            f"count_ontology_terms: unknown ontology {ontology_name!r}"
-        )
+        raise ValueError(f"count_ontology_terms: unknown ontology {ontology_name!r}")
     term_label = entry["term_label"]
     async with client.driver.session() as session:
-        result = await session.run(
-            f"MATCH (n:{term_label}) RETURN count(n) AS n"
-        )
+        result = await session.run(f"MATCH (n:{term_label}) RETURN count(n) AS n")
         return int((await result.single())["n"])
 
 
@@ -329,19 +325,17 @@ async def count_canonical_links(client, ontology_name: str) -> int:
     """
     entry = ONTOLOGY_REGISTRY.get(ontology_name)
     if entry is None:
-        raise ValueError(
-            f"count_canonical_links: unknown ontology {ontology_name!r}"
-        )
+        raise ValueError(f"count_canonical_links: unknown ontology {ontology_name!r}")
     term_label = entry["term_label"]
     async with client.driver.session() as session:
         result = await session.run(
-            f"MATCH ()-[r:{CANONICAL_TO_REL}]->(:{term_label}) "
-            f"RETURN count(r) AS n"
+            f"MATCH ()-[r:{CANONICAL_TO_REL}]->(:{term_label}) RETURN count(r) AS n"
         )
         return int((await result.single())["n"])
 
 
-async def ensure_ontology_imported(client,
+async def ensure_ontology_imported(
+    client,
     ontology_name: str,
     *,
     xrefs_mode: str = "none",
@@ -397,7 +391,8 @@ async def ensure_ontology_imported(client,
 # ---------------------------------------------------------------------------
 
 
-async def link_entities(client,
+async def link_entities(
+    client,
     ontology_name: str,
     matching_strategy: Literal["exact", "fuzzy"],
     *,
@@ -424,8 +419,7 @@ async def link_entities(client,
     """
     if ontology_name not in ONTOLOGY_REGISTRY:
         raise ValueError(
-            f"Unknown ontology name {ontology_name!r}. "
-            f"Known: {sorted(ONTOLOGY_REGISTRY)}."
+            f"Unknown ontology name {ontology_name!r}. Known: {sorted(ONTOLOGY_REGISTRY)}."
         )
     entry = ONTOLOGY_REGISTRY[ontology_name]
     term_label = entry["term_label"]
@@ -449,9 +443,7 @@ async def link_entities(client,
 
     edges: list[dict[str, Any]] = []
     for entity in entities:
-        matches = _match_entity_key(
-            entity["key"], index, matching_strategy
-        )
+        matches = _match_entity_key(entity["key"], index, matching_strategy)
         for term_id, confidence in matches:
             edges.append(
                 {
@@ -466,14 +458,17 @@ async def link_entities(client,
     if not edges:
         logger.info(
             "L7 linking (%s): %d entities scanned, 0 matched",
-            ontology_name, len(entities),
+            ontology_name,
+            len(entities),
         )
         return 0
 
     written = await _write_canonical_links(client, edges, term_label)
     logger.info(
         "L7 linking (%s): wrote %d :CANONICAL_TO edges across %d entities",
-        ontology_name, written, len(entities),
+        ontology_name,
+        written,
+        len(entities),
     )
     return written
 
@@ -524,7 +519,8 @@ async def _build_term_index(client, term_label: str) -> dict[str, list[str]]:
     return index
 
 
-async def _fetch_entities_to_link(client, term_label: str, doc_id: str | None
+async def _fetch_entities_to_link(
+    client, term_label: str, doc_id: str | None
 ) -> list[dict[str, str]]:
     """Return [{key, entity_type}, ...] for entities the pass should
     try to link.
@@ -637,8 +633,7 @@ def _fuzzy_variants(key: str) -> list[tuple[str, float]]:
 # ---------------------------------------------------------------------------
 
 
-async def _write_canonical_links(client, rows: list[dict[str, Any]], term_label: str
-) -> int:
+async def _write_canonical_links(client, rows: list[dict[str, Any]], term_label: str) -> int:
     """Batch-write :CANONICAL_TO edges via UNWIND + MERGE.
 
     Each row carries the entity key + type (composite identity), the

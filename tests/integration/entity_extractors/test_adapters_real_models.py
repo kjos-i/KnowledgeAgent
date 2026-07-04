@@ -68,8 +68,16 @@ def test_gliner_biomed_extracts_real_entities_with_default_labels() -> None:
     assert len(mentions) > 0
 
     types = {m.entity_type.upper() for m in mentions}
-    biomedical = {"DISEASE", "CHEMICAL", "GENE", "PROTEIN",
-                  "SPECIES", "CELL_LINE", "CELL_TYPE", "ANATOMY"}
+    biomedical = {
+        "DISEASE",
+        "CHEMICAL",
+        "GENE",
+        "PROTEIN",
+        "SPECIES",
+        "CELL_LINE",
+        "CELL_TYPE",
+        "ANATOMY",
+    }
     # At least one biomedical label was extracted.
     assert types & biomedical
 

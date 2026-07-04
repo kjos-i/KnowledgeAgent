@@ -27,7 +27,6 @@ from knowledge_agent.kg.client import Neo4jClient
 from knowledge_agent.kg.schema import TRIPLE_PREDICATE_RELS
 from knowledge_agent.kg.triples_writes import ExtractedTriple
 
-
 # ---- Test harness ----
 
 
@@ -213,9 +212,7 @@ async def test_write_triples_only_invalid_predicates_is_noop():
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     bad = _t(predicate="BOGUS_VERB")
-    result = await triples_writes.write_triples(
-        client, DOC_ID, [("c0", [bad])]
-    )
+    result = await triples_writes.write_triples(client, DOC_ID, [("c0", [bad])])
     assert result is None
     assert driver.sessions == []
 
@@ -383,9 +380,7 @@ async def test_client_delete_triples_by_doc_id_delegates_to_module():
 
 async def test_client_get_entities_by_chunk_delegates_to_module():
     driver = RecordingDriver(
-        data_returns=[
-            [{"chunk_id": "c0", "key": "brca1", "entity_type": "GENE"}]
-        ]
+        data_returns=[[{"chunk_id": "c0", "key": "brca1", "entity_type": "GENE"}]]
     )
     client = _client_with_driver(driver)
     result = await client.get_entities_by_chunk(DOC_ID)

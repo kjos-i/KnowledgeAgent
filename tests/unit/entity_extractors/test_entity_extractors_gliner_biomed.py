@@ -6,11 +6,10 @@ acknowledgement that this checkpoint has no .safetensors (pickle
 format only — flagged in provenance).
 """
 
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
 from knowledge_agent.entity_extractors import gliner_biomed
 from knowledge_agent.entity_extractors.base import Mention
-
 
 # ---- module constants ----
 
@@ -78,10 +77,8 @@ async def test_extract_maps_each_prediction_to_mention_with_score_and_offset():
     """Every dict GLiNER returns becomes a Mention with offset +
     confidence populated from GLiNER's start / score fields."""
     predictions = [
-        {"text": "type 2 diabetes", "label": "DISEASE",
-         "start": 0, "end": 15, "score": 0.94},
-        {"text": "metformin", "label": "CHEMICAL",
-         "start": 25, "end": 34, "score": 0.89},
+        {"text": "type 2 diabetes", "label": "DISEASE", "start": 0, "end": 15, "score": 0.94},
+        {"text": "metformin", "label": "CHEMICAL", "start": 25, "end": 34, "score": 0.89},
     ]
     fake_model = _fake_model_returning(predictions)
     with patch(
@@ -92,12 +89,16 @@ async def test_extract_maps_each_prediction_to_mention_with_score_and_offset():
 
     assert result == [
         Mention(
-            raw_text="type 2 diabetes", entity_type="DISEASE",
-            offset=0, confidence=0.94,
+            raw_text="type 2 diabetes",
+            entity_type="DISEASE",
+            offset=0,
+            confidence=0.94,
         ),
         Mention(
-            raw_text="metformin", entity_type="CHEMICAL",
-            offset=25, confidence=0.89,
+            raw_text="metformin",
+            entity_type="CHEMICAL",
+            offset=25,
+            confidence=0.89,
         ),
     ]
 
@@ -147,8 +148,7 @@ async def test_extract_preserves_original_spelling_in_raw_text():
     """raw_text preserves verbatim span — lowercasing happens in
     entity_writes at the :Entity MERGE step."""
     predictions = [
-        {"text": "TP53", "label": "GENE",
-         "start": 0, "end": 4, "score": 0.95},
+        {"text": "TP53", "label": "GENE", "start": 0, "end": 4, "score": 0.95},
     ]
     fake_model = _fake_model_returning(predictions)
     with patch(

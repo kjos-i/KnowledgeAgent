@@ -31,9 +31,7 @@ DOC_GAMMA = "integ-doc-l9-gamma"
 pytestmark = pytest.mark.integration
 
 
-def _seed_doc(
-    client: Any, doc_id: str, entities: list[tuple[str, str]]
-) -> str:
+def _seed_doc(client: Any, doc_id: str, entities: list[tuple[str, str]]) -> str:
     """Write a synthetic :Document + one :Chunk + :MENTIONS edges.
     Returns chunk_id."""
     chunk_id = make_chunk_id(doc_id, 0)
@@ -45,7 +43,8 @@ def _seed_doc(
             "SET c.doc_id = $doc_id, c.chunk_index = 0, "
             "c.section = 'Synthetic', c.page = 1, c.content_type = 'text' "
             "MERGE (c)-[:PART_OF]->(d)",
-            doc_id=doc_id, chunk_id=chunk_id,
+            doc_id=doc_id,
+            chunk_id=chunk_id,
         )
         for key, etype in entities:
             session.run(
@@ -53,7 +52,9 @@ def _seed_doc(
                 "WITH e MATCH (c:Chunk {chunk_id: $chunk_id}) "
                 "MERGE (c)-[m:MENTIONS]->(e) "
                 "ON CREATE SET m.offset = 0",
-                key=key, type=etype, chunk_id=chunk_id,
+                key=key,
+                type=etype,
+                chunk_id=chunk_id,
             )
     return chunk_id
 
@@ -84,7 +85,8 @@ async def test_recompute_writes_related_to_edge_when_threshold_met(
             "MATCH (a:Document {doc_id: $a})-[r:RELATED_TO]-"
             "(b:Document {doc_id: $b}) "
             "RETURN r.shared_count AS n, r.shared_entities AS keys",
-            a=DOC_ALPHA, b=DOC_BETA,
+            a=DOC_ALPHA,
+            b=DOC_BETA,
         ).single()
     assert row is not None
     assert row["n"] == 3
@@ -116,8 +118,7 @@ async def test_recompute_wipes_previous_edges_incident_to_doc(
 
     with kg_client.driver.session() as session:
         n_edges = session.run(
-            "MATCH (:Document {doc_id: $a})-[r:RELATED_TO]-(:Document) "
-            "RETURN count(r) AS n",
+            "MATCH (:Document {doc_id: $a})-[r:RELATED_TO]-(:Document) RETURN count(r) AS n",
             a=DOC_ALPHA,
         ).single()["n"]
     assert n_edges == 1
@@ -137,11 +138,13 @@ async def test_recompute_handles_multi_doc_neighbourhood(
     assert n == 2
 
     with kg_client.driver.session() as session:
-        neighbours = list(session.run(
-            "MATCH (a:Document {doc_id: $a})-[:RELATED_TO]-(other:Document) "
-            "RETURN other.doc_id AS doc_id ORDER BY other.doc_id",
-            a=DOC_ALPHA,
-        ))
+        neighbours = list(
+            session.run(
+                "MATCH (a:Document {doc_id: $a})-[:RELATED_TO]-(other:Document) "
+                "RETURN other.doc_id AS doc_id ORDER BY other.doc_id",
+                a=DOC_ALPHA,
+            )
+        )
     assert {r["doc_id"] for r in neighbours} == {DOC_BETA, DOC_GAMMA}
 
 

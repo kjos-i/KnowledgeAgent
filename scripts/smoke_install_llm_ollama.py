@@ -28,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _install_smoke_lib import (  # noqa: E402
+from _install_smoke_lib import (
     bail_if_not_confirmed,
     confirm,
     confirm_no_default,
@@ -37,9 +37,9 @@ from _install_smoke_lib import (  # noqa: E402
     print_result,
 )
 
-from knowledge_agent import llm_factory  # noqa: E402
-from knowledge_agent.config import get_settings  # noqa: E402
-from knowledge_agent.llm_lifecycle import (  # noqa: E402
+from knowledge_agent import llm_factory
+from knowledge_agent.config import get_settings
+from knowledge_agent.llm_lifecycle import (
     OLLAMA_MODELS,
     _ollama_daemon_is_reachable,
     install_llm_provider_execute,
@@ -49,7 +49,6 @@ from knowledge_agent.llm_lifecycle import (  # noqa: E402
     uninstall_llm_provider_execute,
     uninstall_llm_provider_plan,
 )
-
 
 PROVIDER = "ollama"
 
@@ -71,9 +70,7 @@ async def main() -> None:
     print_plan(f"install_llm_provider_plan({PROVIDER!r})", plan)
 
     if plan.already_installed:
-        print(
-            "\nAdapter already installed — skipping install step."
-        )
+        print("\nAdapter already installed — skipping install step.")
     else:
         bail_if_not_confirmed("Proceed with pip install?")
         result = await install_llm_provider_execute(plan)
@@ -107,12 +104,10 @@ async def main() -> None:
         if chosen_model in OLLAMA_MODELS:
             pull_plan = await pull_ollama_model_plan(chosen_model)
             print_plan(
-                f"pull_ollama_model_plan({chosen_model!r})", pull_plan,
+                f"pull_ollama_model_plan({chosen_model!r})",
+                pull_plan,
             )
-            if confirm(
-                f"Run `ollama pull {chosen_model}` now? "
-                "(skip if already pulled)"
-            ):
+            if confirm(f"Run `ollama pull {chosen_model}` now? (skip if already pulled)"):
                 pull_result = await pull_ollama_model_execute(pull_plan)
                 print_result("pull_ollama_model_execute", pull_result)
 

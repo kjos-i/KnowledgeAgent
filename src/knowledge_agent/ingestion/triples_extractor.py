@@ -44,11 +44,10 @@ Defensive policies:
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from knowledge_agent.llm_factory import get_llm as _get_llm
-from knowledge_agent.llm_factory import with_retry as _with_retry
 from knowledge_agent.kg.schema import TRIPLE_PREDICATE_RELS
 from knowledge_agent.kg.triples_writes import ExtractedTriple
-
+from knowledge_agent.llm_factory import get_llm as _get_llm
+from knowledge_agent.llm_factory import with_retry as _with_retry
 
 # ---------------------------------------------------------------------------
 # Structured-output schema. Pydantic models are LLM-facing only; the public
@@ -74,10 +73,7 @@ class _LLMTriple(BaseModel):
         )
     )
     predicate: str = Field(
-        description=(
-            "Relation type. MUST be one of the allowed predicates "
-            "(SCREAMING_SNAKE_CASE)."
-        )
+        description=("Relation type. MUST be one of the allowed predicates (SCREAMING_SNAKE_CASE).")
     )
     object_key: str = Field(
         description=(
@@ -172,8 +168,7 @@ def _build_system_prompt(entity_vocab: list[tuple[str, str]]) -> str:
         rendered = "  (none)"
     else:
         rendered = "\n".join(
-            f"  - {key} (type: {entity_type})"
-            for key, entity_type in entity_vocab
+            f"  - {key} (type: {entity_type})" for key, entity_type in entity_vocab
         )
     return _SYSTEM_PROMPT_TEMPLATE.format(
         entity_vocab=rendered,
@@ -215,9 +210,7 @@ def _filter_and_convert_triples(
     if not isinstance(result, _LLMTriples):
         return []
 
-    vocab_lookup: dict[str, str] = {
-        key: entity_type for key, entity_type in entity_vocab
-    }
+    vocab_lookup: dict[str, str] = {key: entity_type for key, entity_type in entity_vocab}
     allowed_predicates: set[str] = set(TRIPLE_PREDICATE_RELS)
 
     out: list[ExtractedTriple] = []

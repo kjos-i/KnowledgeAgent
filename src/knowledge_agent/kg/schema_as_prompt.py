@@ -77,32 +77,32 @@ from knowledge_agent.kg.schema import (
     GO_TERM_LABEL,
     HPO_IS_A_REL,
     HPO_TERM_LABEL,
+    MENTIONS_REL,
+    MESH_BROADER_REL,
+    MESH_TERM_LABEL,
     MONDO_IS_A_REL,
     MONDO_TERM_LABEL,
     NCBITAXON_IS_A_REL,
     NCBITAXON_TERM_LABEL,
     OBI_IS_A_REL,
     OBI_TERM_LABEL,
-    PO_IS_A_REL,
-    PO_TERM_LABEL,
-    PR_IS_A_REL,
-    PR_TERM_LABEL,
-    SO_IS_A_REL,
-    SO_TERM_LABEL,
-    UBERON_IS_A_REL,
-    UBERON_TERM_LABEL,
-    MENTIONS_REL,
-    MESH_BROADER_REL,
-    MESH_TERM_LABEL,
     ONTOLOGY_TERM_LABEL,
     ONTOLOGY_XREF_RELS,
     PAPER_LABEL,
     PART_OF_REL,
+    PO_IS_A_REL,
+    PO_TERM_LABEL,
+    PR_IS_A_REL,
+    PR_TERM_LABEL,
     PUBLISHED_IN_REL,
     RELATED_BY_XREF_REL,
     RELATED_TO_REL,
+    SO_IS_A_REL,
+    SO_TERM_LABEL,
     TOPIC_LABEL,
     TRIPLE_PREDICATE_RELS,
+    UBERON_IS_A_REL,
+    UBERON_TERM_LABEL,
     VENUE_LABEL,
 )
 
@@ -197,15 +197,10 @@ def _openalex_active(config: CorpusConfig) -> bool:
     """True when the L1-L4 OpenAlex entities are reachable for this corpus:
     the layer is on AND the corpus allows the `Paper` sub-label (the only
     sub-label that triggers OpenAlex writes today)."""
-    return (
-        config.layers.openalex_papers
-        and PAPER_LABEL in config.allowed_types
-    )
+    return config.layers.openalex_papers and PAPER_LABEL in config.allowed_types
 
 
-def _allowed_in(
-    config: CorpusConfig, candidates: tuple[str, ...]
-) -> list[str]:
+def _allowed_in(config: CorpusConfig, candidates: tuple[str, ...]) -> list[str]:
     """Return the candidates that appear in `config.allowed_types`,
     preserving the canonical order from schema.py rather than the user's
     write order."""
@@ -225,19 +220,13 @@ def _document_block(config: CorpusConfig) -> str:
     ]
     if sub_labels:
         rendered = ", ".join(f":{s}" for s in sub_labels)
-        lines.append(
-            f"  Co-applied subtype labels for this corpus: {rendered}."
-        )
-        lines.append(
-            f"  Use a subtype to scope queries (e.g. `MATCH (d:{sub_labels[0]})`)."
-        )
+        lines.append(f"  Co-applied subtype labels for this corpus: {rendered}.")
+        lines.append(f"  Use a subtype to scope queries (e.g. `MATCH (d:{sub_labels[0]})`).")
     lines.append("  Properties:")
     lines.append(
         "    doc_id       (str)  : SHA-256 of file bytes. Present on every CORPUS document."
     )
-    lines.append(
-        "                          Universal join key with the LanceDB store."
-    )
+    lines.append("                          Universal join key with the LanceDB store.")
     if _openalex_active(config):
         lines.append(
             '    openalex_id  (str)  : Bare OpenAlex work ID (e.g. "W1234567890"). Present'
@@ -252,9 +241,7 @@ def _document_block(config: CorpusConfig) -> str:
         lines.append(
             "    in_corpus    (bool) : true = ingested document. false = shadow (cited but"
         )
-        lines.append(
-            "                          not ingested). Filter on this to exclude shadows."
-        )
+        lines.append("                          not ingested). Filter on this to exclude shadows.")
     return "\n".join(lines)
 
 
@@ -270,12 +257,8 @@ def _artifact_block(config: CorpusConfig) -> str:
     ]
     if sub_labels:
         rendered = ", ".join(f":{s}" for s in sub_labels)
-        lines.append(
-            f"  Co-applied subtype labels for this corpus: {rendered}."
-        )
-        lines.append(
-            f"  Use a subtype to scope queries (e.g. `MATCH (a:{sub_labels[0]})`)."
-        )
+        lines.append(f"  Co-applied subtype labels for this corpus: {rendered}.")
+        lines.append(f"  Use a subtype to scope queries (e.g. `MATCH (a:{sub_labels[0]})`).")
     lines.append("  Properties:")
     lines.append(
         "    doc_id       (str)  : SHA-256 of file bytes. Universal join key with LanceDB."
@@ -357,13 +340,10 @@ def _entity_block(config: CorpusConfig) -> str:
     SCREAMING_SNAKE_CASE); the block flags that explicitly."""
     # config.entities is guaranteed non-None when layers.entities=true
     # (model validator), so this helper is only called in that case.
-    assert config.entities is not None  # noqa: S101
+    assert config.entities is not None
     types = config.entities.entity_types
     if types:
-        types_clause = (
-            "Configured entity_type values for this corpus: "
-            f"{', '.join(types)}."
-        )
+        types_clause = f"Configured entity_type values for this corpus: {', '.join(types)}."
     else:
         types_clause = (
             "entity_type values are open-vocabulary (LLM-chosen "
@@ -418,8 +398,7 @@ _ONTOLOGY_BLOCK_SPECS: dict[str, dict[str, str]] = {
         "sub_label": GO_TERM_LABEL,
         "hierarchy_rel": GO_IS_A_REL,
         "description": (
-            "Gene Ontology - biological processes, molecular functions, "
-            "and cellular components."
+            "Gene Ontology - biological processes, molecular functions, and cellular components."
         ),
         "id_example": "GO:0008150",
     },
@@ -510,8 +489,7 @@ _ONTOLOGY_BLOCK_SPECS: dict[str, dict[str, str]] = {
         "sub_label": FOODON_TERM_LABEL,
         "hierarchy_rel": FOODON_IS_A_REL,
         "description": (
-            "Food Ontology - foods, food products, dietary components, "
-            "and processing methods."
+            "Food Ontology - foods, food products, dietary components, and processing methods."
         ),
         "id_example": "FOODON:03301720",
     },
@@ -619,9 +597,7 @@ _CANONICAL_TO_BLOCK = f"""\
 # label (not a property on a generic :RELATION edge). One block describes
 # the 15 edge types together since they share the same node pattern and
 # property schema; per-edge differences are only in the relation name.
-_TRIPLES_PREDICATE_LIST_RENDERED = "\n      ".join(
-    f":{p}" for p in TRIPLE_PREDICATE_RELS
-)
+_TRIPLES_PREDICATE_LIST_RENDERED = "\n      ".join(f":{p}" for p in TRIPLE_PREDICATE_RELS)
 _TRIPLES_BLOCK = f"""\
 - (:{ENTITY_LABEL})-[<predicate>]->(:{ENTITY_LABEL})
     Typed entity-to-entity relation, extracted by an LLM from chunk text
@@ -663,9 +639,7 @@ _RELATED_TO_BLOCK = f"""\
 # nodes). 18 predicates total — one per shipped ontology — rendered
 # inline from the canonical `ONTOLOGY_XREF_RELS` tuple so the prompt
 # stays in sync as new ontologies ship.
-_XREF_PREDICATE_LIST_RENDERED = "\n      ".join(
-    f":{p}" for p in ONTOLOGY_XREF_RELS
-)
+_XREF_PREDICATE_LIST_RENDERED = "\n      ".join(f":{p}" for p in ONTOLOGY_XREF_RELS)
 _XREFS_BLOCK = f"""\
 - (:{ONTOLOGY_TERM_LABEL})-[<predicate>]->(:{ONTOLOGY_TERM_LABEL})
     Cross-ontology xref edge (L7). Source ontology declares its concept
@@ -712,19 +686,13 @@ def _identifier_conventions(config: CorpusConfig) -> str:
     LLM doesn't see advice about properties it can't use."""
     lines = ["Identifier conventions:"]
     if config.layers.chunks:
-        lines.append(
-            "- Use `chunk_id` for chunk-level joins with LanceDB; use `doc_id` for"
-        )
+        lines.append("- Use `chunk_id` for chunk-level joins with LanceDB; use `doc_id` for")
         lines.append("  document-level joins.")
     else:
         lines.append("- Use `doc_id` for document-level joins with LanceDB.")
     if _openalex_active(config):
-        lines.append(
-            "- Prefer `openalex_id` for traversing cite/author/venue/topic graphs."
-        )
+        lines.append("- Prefer `openalex_id` for traversing cite/author/venue/topic graphs.")
         lines.append("- `doi` is optional; use it only when the user asks by DOI.")
-        lines.append(
-            "- Use `in_corpus = true` to exclude shadow citations when the user wants"
-        )
+        lines.append("- Use `in_corpus = true` to exclude shadow citations when the user wants")
         lines.append("  only documents we've ingested.")
     return "\n".join(lines)

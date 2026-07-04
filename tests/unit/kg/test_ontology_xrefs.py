@@ -45,7 +45,7 @@ class _StubSession:
             return self.canned_results[idx]
         return _StubResult()
 
-    async def __aenter__(self) -> "_StubSession":
+    async def __aenter__(self) -> _StubSession:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -56,9 +56,7 @@ class _StubSession:
 class _StubDriver:
     sessions: list[_StubSession] = field(default_factory=list)
     raise_on_run: Exception | None = None
-    canned_results_per_session: list[list[_StubResult]] = field(
-        default_factory=list
-    )
+    canned_results_per_session: list[list[_StubResult]] = field(default_factory=list)
 
     def session(self) -> _StubSession:
         idx = len(self.sessions)
@@ -68,7 +66,8 @@ class _StubDriver:
             else []
         )
         sess = _StubSession(
-            raise_on_run=self.raise_on_run, canned_results=canned,
+            raise_on_run=self.raise_on_run,
+            canned_results=canned,
         )
         self.sessions.append(sess)
         return sess
@@ -94,7 +93,7 @@ async def test_backfill_returns_per_ontology_dict_for_all_18():
     result = await ontology_xrefs.backfill_resolved_xrefs(client)
     assert result is not None
     assert set(result.keys()) == set(ONTOLOGY_SUB_LABELS)
-    for label, counts in result.items():
+    for _label, counts in result.items():
         assert "n_edges_attempted" in counts
         assert "n_sources_cleaned" in counts
 
@@ -153,10 +152,12 @@ async def test_backfill_aggregates_counts_per_ontology():
 
     result = await ontology_xrefs.backfill_resolved_xrefs(client)
     assert result["MeSHTerm"] == {
-        "n_edges_attempted": 5, "n_sources_cleaned": 3,
+        "n_edges_attempted": 5,
+        "n_sources_cleaned": 3,
     }
     assert result["GOTerm"] == {
-        "n_edges_attempted": 7, "n_sources_cleaned": 4,
+        "n_edges_attempted": 7,
+        "n_sources_cleaned": 4,
     }
 
 
@@ -171,24 +172,24 @@ async def test_backfill_per_ontology_failure_records_zeros_keeps_going():
     completes."""
     from knowledge_agent.kg.schema import ONTOLOGY_SUB_LABELS
 
-    client = _StubClient(
-        driver=_StubDriver(raise_on_run=RuntimeError("constraint violation"))
-    )
+    client = _StubClient(driver=_StubDriver(raise_on_run=RuntimeError("constraint violation")))
     result = await ontology_xrefs.backfill_resolved_xrefs(client)
     # NOT None — the outer session opened cleanly; only the per-query
     # MATCHes raised, caught by the helpers' try/except.
     assert result is not None
     # All 18 ontologies present, all with zero counts.
     assert set(result.keys()) == set(ONTOLOGY_SUB_LABELS)
-    for label, counts in result.items():
+    for _label, counts in result.items():
         assert counts == {
-            "n_edges_attempted": 0, "n_sources_cleaned": 0,
+            "n_edges_attempted": 0,
+            "n_sources_cleaned": 0,
         }
 
 
 async def test_backfill_propagates_on_session_failure():
     """Outer session exception (e.g. driver gone) propagates; the
     orchestrator boundary catches and records the failure."""
+
     @dataclass
     class _BrokenDriver:
         def session(self) -> Any:
@@ -209,7 +210,7 @@ async def test_clear_xref_edges_deletes_edges_and_clears_dangling_property():
     client.driver.canned_results_per_session = [
         [
             _StubResult(rows=[{"n": 12}]),  # edges deleted
-            _StubResult(rows=[{"n": 7}]),   # props cleared
+            _StubResult(rows=[{"n": 7}]),  # props cleared
         ],
     ]
     n = await ontology_xrefs.clear_xref_edges_for_ontology(client, "MeSHTerm")
@@ -247,9 +248,7 @@ async def test_clear_xref_edges_rejects_unknown_term_label():
 
 async def test_clear_xref_edges_propagates_cypher_exception():
     """Cypher exception propagates; orchestrator boundary catches."""
-    client = _StubClient(
-        driver=_StubDriver(raise_on_run=RuntimeError("boom"))
-    )
+    client = _StubClient(driver=_StubDriver(raise_on_run=RuntimeError("boom")))
     with pytest.raises(RuntimeError, match="boom"):
         await ontology_xrefs.clear_xref_edges_for_ontology(client, "MeSHTerm")
 
@@ -276,9 +275,7 @@ async def test_count_dangling_xrefs_unknown_ontology_raises():
 
 
 async def test_count_dangling_xrefs_propagates_cypher_exception():
-    client = _StubClient(
-        driver=_StubDriver(raise_on_run=RuntimeError("boom"))
-    )
+    client = _StubClient(driver=_StubDriver(raise_on_run=RuntimeError("boom")))
     with pytest.raises(RuntimeError, match="boom"):
         await ontology_xrefs.count_dangling_xrefs(client, "MeSHTerm")
 
@@ -320,16 +317,12 @@ async def test_count_xref_edges_unknown_ontology_raises():
 
 
 async def test_count_xref_edges_propagates_cypher_exception():
-    client = _StubClient(
-        driver=_StubDriver(raise_on_run=RuntimeError("boom"))
-    )
+    client = _StubClient(driver=_StubDriver(raise_on_run=RuntimeError("boom")))
     with pytest.raises(RuntimeError, match="boom"):
         await ontology_xrefs.count_xref_edges(client, "MeSHTerm")
 
 
 async def test_count_xref_edges_global_propagates_cypher_exception():
-    client = _StubClient(
-        driver=_StubDriver(raise_on_run=RuntimeError("boom"))
-    )
+    client = _StubClient(driver=_StubDriver(raise_on_run=RuntimeError("boom")))
     with pytest.raises(RuntimeError, match="boom"):
         await ontology_xrefs.count_xref_edges(client, None)

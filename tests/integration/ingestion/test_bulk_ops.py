@@ -53,8 +53,7 @@ Skipped by default; opt in via `pytest -m integration`.
 from __future__ import annotations
 
 import shutil
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -109,6 +108,9 @@ from knowledge_agent.kg.schema import (
     ONTOLOGY_TERM_LABEL,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 pytestmark = pytest.mark.integration
 
 
@@ -130,9 +132,7 @@ def _minimal_corpus_config() -> CorpusConfig:
 
 
 @pytest.fixture
-def clean_both_stores(
-    kg_client: Any, lance_client: Any, ensure_constraints: None
-) -> None:
+def clean_both_stores(kg_client: Any, lance_client: Any, ensure_constraints: None) -> None:
     """Same pattern as test_pipeline.py: wipe both stores before each
     bulk_ops test so multi-doc plans start from empty state."""
     import asyncio
@@ -565,7 +565,8 @@ async def test_bulk_backfill_ontology_links_entities_to_pre_seeded_mesh_terms(
             session.run(
                 f"MERGE (t:{ONTOLOGY_TERM_LABEL}:{MESH_TERM_LABEL} "
                 f"{{id: $id}}) SET t.label = $label",
-                id=term_id, label=label,
+                id=term_id,
+                label=label,
             )
 
     mesh_cfg = _mesh_corpus_config()
@@ -742,7 +743,8 @@ async def test_recompute_cross_doc_xrefs_writes_edges_with_synthetic_setup(
                 "MERGE (c)-[:MENTIONS]->(e2) "
                 "MERGE (t2:OntologyTerm:MeSHTerm {id: 'MESH:D003920'}) "
                 "MERGE (e2)-[:CANONICAL_TO]->(t2)",
-                doc_id=doc_id, chunk_id=chunk_id,
+                doc_id=doc_id,
+                chunk_id=chunk_id,
             )
 
     # Build a corpus config with both xrefs="use" + cross_doc_xrefs=True.
@@ -798,11 +800,7 @@ async def test_clear_xref_edges_drops_target_ontology_edges(
 
     # MONDO_XREF gone; MESH_XREF survives.
     with kg_client.driver.session() as session:
-        n_mondo = session.run(
-            "MATCH ()-[r:MONDO_XREF]->() RETURN count(r) AS n"
-        ).single()["n"]
-        n_mesh = session.run(
-            "MATCH ()-[r:MESH_XREF]->() RETURN count(r) AS n"
-        ).single()["n"]
+        n_mondo = session.run("MATCH ()-[r:MONDO_XREF]->() RETURN count(r) AS n").single()["n"]
+        n_mesh = session.run("MATCH ()-[r:MESH_XREF]->() RETURN count(r) AS n").single()["n"]
     assert n_mondo == 0
     assert n_mesh == 1

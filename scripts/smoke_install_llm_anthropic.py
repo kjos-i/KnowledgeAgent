@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _install_smoke_lib import (  # noqa: E402
+from _install_smoke_lib import (
     bail_if_not_confirmed,
     confirm_no_default,
     header,
@@ -29,15 +29,14 @@ from _install_smoke_lib import (  # noqa: E402
     print_result,
 )
 
-from knowledge_agent import llm_factory  # noqa: E402
-from knowledge_agent.config import get_settings  # noqa: E402
-from knowledge_agent.llm_lifecycle import (  # noqa: E402
+from knowledge_agent import llm_factory
+from knowledge_agent.config import get_settings
+from knowledge_agent.llm_lifecycle import (
     install_llm_provider_execute,
     install_llm_provider_plan,
     uninstall_llm_provider_execute,
     uninstall_llm_provider_plan,
 )
-
 
 PROVIDER = "anthropic"
 SMOKE_MODEL = "claude-haiku-4-5-20251001"  # cheapest tier
@@ -45,19 +44,14 @@ SMOKE_MODEL = "claude-haiku-4-5-20251001"  # cheapest tier
 
 async def main() -> None:
     if not get_settings().anthropic_api_key:
-        print(
-            "ANTHROPIC_API_KEY is not set in .env. Add it before "
-            "running this smoke."
-        )
+        print("ANTHROPIC_API_KEY is not set in .env. Add it before running this smoke.")
         sys.exit(1)
 
     plan = await install_llm_provider_plan(PROVIDER)
     print_plan(f"install_llm_provider_plan({PROVIDER!r})", plan)
 
     if plan.already_installed:
-        print(
-            "\nAdapter already installed — skipping install step."
-        )
+        print("\nAdapter already installed — skipping install step.")
     else:
         bail_if_not_confirmed("Proceed with pip install?")
         result = await install_llm_provider_execute(plan)

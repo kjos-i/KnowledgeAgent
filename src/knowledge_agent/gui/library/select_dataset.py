@@ -30,9 +30,11 @@ Remove: unregisters the `CorpusEntry` + deletes its keyring entry.
 Does NOT delete the actual Neo4j DBMS / LanceDB folder / corpus.toml
 — those are external artefacts the user manages themselves.
 """
+
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 from collections import Counter
@@ -84,11 +86,24 @@ _LAYER_BADGES: tuple[tuple[str, str], ...] = (
 # Same ontology keys as CorpusConfigEditor's `_ONTOLOGY_DISPLAY` —
 # kept local to avoid a cross-import between sibling files.
 _ONTOLOGY_KEYS: tuple[tuple[str, str], ...] = (
-    ("mesh", "MeSH"), ("go", "GO"), ("hpo", "HPO"), ("uberon", "UBERON"),
-    ("mondo", "MONDO"), ("chebi", "ChEBI"), ("eco", "ECO"), ("so", "SO"),
-    ("pr", "PR"), ("cl", "CL"), ("po", "PO"), ("foodon", "FOODON"),
-    ("envo", "ENVO"), ("ncbitaxon", "NCBITaxon"), ("obi", "OBI"),
-    ("efo", "EFO"), ("dron", "DRON"), ("fibo", "FIBO"),
+    ("mesh", "MeSH"),
+    ("go", "GO"),
+    ("hpo", "HPO"),
+    ("uberon", "UBERON"),
+    ("mondo", "MONDO"),
+    ("chebi", "ChEBI"),
+    ("eco", "ECO"),
+    ("so", "SO"),
+    ("pr", "PR"),
+    ("cl", "CL"),
+    ("po", "PO"),
+    ("foodon", "FOODON"),
+    ("envo", "ENVO"),
+    ("ncbitaxon", "NCBITaxon"),
+    ("obi", "OBI"),
+    ("efo", "EFO"),
+    ("dron", "DRON"),
+    ("fibo", "FIBO"),
 )
 
 
@@ -138,7 +153,9 @@ class SelectDatasetTab:
         self.picker_container = ft.Container(
             content=ft.Text(
                 "(building picker…)",
-                size=12, color=ft.Colors.GREY_500, italic=True,
+                size=12,
+                color=ft.Colors.GREY_500,
+                italic=True,
             ),
         )
 
@@ -157,7 +174,9 @@ class SelectDatasetTab:
 
         # ---- info card controls ----
         self.info_name = ft.Text(
-            "", size=15, weight=ft.FontWeight.BOLD,
+            "",
+            size=15,
+            weight=ft.FontWeight.BOLD,
         )
         self.info_uri = ft.Text("", size=12, color=ft.Colors.GREY_300)
         self.info_user = ft.Text("", size=12, color=ft.Colors.GREY_300)
@@ -165,14 +184,19 @@ class SelectDatasetTab:
         self.info_toml = ft.Text("", size=12, color=ft.Colors.GREY_300)
         self.info_counts = ft.Text(
             "docs: — · chunks: — · mentions: —",
-            size=12, color=ft.Colors.GREY_400,
+            size=12,
+            color=ft.Colors.GREY_400,
         )
         self.info_layers = ft.Row(spacing=6, wrap=True, controls=[])
         self.info_ontologies = ft.Text(
-            "", size=12, color=ft.Colors.GREY_300,
+            "",
+            size=12,
+            color=ft.Colors.GREY_300,
         )
         self.info_extractor = ft.Text(
-            "", size=12, color=ft.Colors.GREY_300,
+            "",
+            size=12,
+            color=ft.Colors.GREY_300,
         )
         self.info_xrefs = ft.Text("", size=12, color=ft.Colors.GREY_300)
         self.info_breakdown = ft.Text("", size=12, color=ft.Colors.GREY_400)
@@ -203,7 +227,8 @@ class SelectDatasetTab:
                         controls=[
                             ft.Text(
                                 "Layers",
-                                size=12, color=ft.Colors.GREY_500,
+                                size=12,
+                                color=ft.Colors.GREY_500,
                                 width=110,
                             ),
                             self.info_layers,
@@ -245,7 +270,8 @@ class SelectDatasetTab:
                 controls=[
                     ft.Text(
                         "Switch active corpus:",
-                        size=12, color=ft.Colors.GREY_400,
+                        size=12,
+                        color=ft.Colors.GREY_400,
                     ),
                     self.picker_container,
                     ft.Row(
@@ -303,24 +329,19 @@ class SelectDatasetTab:
         if not corpora:
             self.picker_radio = None
             self.picker_container.content = ft.Text(
-                "No corpora registered yet — open Create New to "
-                "register your first corpus.",
-                size=12, color=ft.Colors.AMBER_300, italic=True,
+                "No corpora registered yet — open Create New to register your first corpus.",
+                size=12,
+                color=ft.Colors.AMBER_300,
+                italic=True,
             )
             self._sync_button_disable_state(has_corpora=False)
             return
-        active_name = (
-            self.app.gui_config.active_corpus_name
-            or corpora[0].name
-        )
+        active_name = self.app.gui_config.active_corpus_name or corpora[0].name
         self.picker_radio = ft.RadioGroup(
             value=active_name,
             on_change=self.on_active_changed,
             content=ft.Column(
-                controls=[
-                    ft.Radio(value=c.name, label=self._radio_label(c))
-                    for c in corpora
-                ],
+                controls=[ft.Radio(value=c.name, label=self._radio_label(c)) for c in corpora],
                 spacing=4,
             ),
         )
@@ -375,11 +396,20 @@ class SelectDatasetTab:
     def _info_empty_state(self) -> None:
         """When there's no active corpus, blank out all the fields."""
         for text in (
-            self.info_name, self.info_uri, self.info_user,
-            self.info_lancedb, self.info_toml,
-            self.info_ontologies, self.info_extractor, self.info_xrefs,
-            self.info_breakdown, self.info_chunking, self.info_ocr,
-            self.info_figures, self.info_embedder, self.info_llm,
+            self.info_name,
+            self.info_uri,
+            self.info_user,
+            self.info_lancedb,
+            self.info_toml,
+            self.info_ontologies,
+            self.info_extractor,
+            self.info_xrefs,
+            self.info_breakdown,
+            self.info_chunking,
+            self.info_ocr,
+            self.info_figures,
+            self.info_embedder,
+            self.info_llm,
         ):
             if text is not None:
                 text.value = "—"
@@ -396,12 +426,15 @@ class SelectDatasetTab:
         except FileNotFoundError:
             logger.info(
                 "corpus.toml not found for %r at %s",
-                entry.name, entry.corpus_config_path,
+                entry.name,
+                entry.corpus_config_path,
             )
             return None
         except Exception as exc:
             logger.warning(
-                "load_corpus_config failed for %r: %r", entry.name, exc,
+                "load_corpus_config failed for %r: %r",
+                entry.name,
+                exc,
             )
             return None
 
@@ -410,10 +443,7 @@ class SelectDatasetTab:
             return
         badges: list[ft.Control] = []
         for field, label in _LAYER_BADGES:
-            on = (
-                cfg is not None
-                and bool(getattr(cfg.layers, field, False))
-            )
+            on = cfg is not None and bool(getattr(cfg.layers, field, False))
             badges.append(_badge(label, on=on))
         self.info_layers.controls = badges
 
@@ -428,9 +458,7 @@ class SelectDatasetTab:
             for key, display in _ONTOLOGY_KEYS
             if bool(getattr(cfg.layers, f"ontology_{key}", False))
         ]
-        self.info_ontologies.value = (
-            ", ".join(active) if active else "none enabled"
-        )
+        self.info_ontologies.value = ", ".join(active) if active else "none enabled"
 
     def _populate_extractor(self, cfg: CorpusConfig | None) -> None:
         if self.info_extractor is None:
@@ -497,19 +525,17 @@ class SelectDatasetTab:
         only the provider is summarised — role models live in Settings."""
         try:
             from knowledge_agent.config import get_settings
+
             s = get_settings()
         except Exception as exc:
-            logger.info(
-                "SelectDataset: get_settings failed (%r); models —", exc
-            )
+            logger.info("SelectDataset: get_settings failed (%r); models —", exc)
             for t in (self.info_embedder, self.info_llm):
                 if t is not None:
                     t.value = "—"
             return
         if self.info_embedder is not None:
             self.info_embedder.value = (
-                f"{s.embedding_provider} · {s.embedding_model} · "
-                f"{s.embedding_dims}-dim"
+                f"{s.embedding_provider} · {s.embedding_model} · {s.embedding_dims}-dim"
             )
         if self.info_llm is not None:
             self.info_llm.value = str(s.llm_provider)
@@ -547,24 +573,17 @@ class SelectDatasetTab:
         if rows is not None:
             docs_str = str(len(rows))
             chunks_str = str(sum(int(r.get("n_chunks") or 0) for r in rows))
-            counts = Counter(
-                (r.get("metadata_status") or "unknown") for r in rows
-            )
-            breakdown = (
-                " · ".join(f"{k}: {v}" for k, v in sorted(counts.items()))
-                or "—"
-            )
+            counts = Counter((r.get("metadata_status") or "unknown") for r in rows)
+            breakdown = " · ".join(f"{k}: {v}" for k, v in sorted(counts.items())) or "—"
         mentions_str = "—"
         try:
             from knowledge_agent.kg.client import get_kg_client
+
             mentions_str = str(await get_kg_client().count_mentions())
         except Exception as exc:
-            logger.info(
-                "SelectDataset: count_mentions failed (%r); showing —", exc
-            )
+            logger.info("SelectDataset: count_mentions failed (%r); showing —", exc)
         self.info_counts.value = (
-            f"docs: {docs_str} · chunks: {chunks_str} · "
-            f"mentions: {mentions_str}"
+            f"docs: {docs_str} · chunks: {chunks_str} · mentions: {mentions_str}"
         )
         if self.info_breakdown is not None:
             self.info_breakdown.value = breakdown
@@ -743,10 +762,8 @@ class SelectDatasetTab:
             save_config(self.app.gui_config)
         except ConfigError as exc:
             if old_password:
-                try:
+                with contextlib.suppress(ConfigError):
                     set_corpus_password(new_name, "")
-                except ConfigError:
-                    pass
             self.status.value = f"could not save rename: {exc}"
             self.app.page.update()
             return
@@ -756,14 +773,13 @@ class SelectDatasetTab:
             except ConfigError as exc:
                 logger.warning(
                     "could not delete old keyring entry for %r: %r",
-                    old_name, exc,
+                    old_name,
+                    exc,
                 )
         self._sync_picker()
         self._populate_info_card()
         self.status.value = f"renamed {old_name!r} → {new_name!r}"
-        self.app.chat_panel.append_system(
-            f"renamed corpus {old_name!r} → {new_name!r}"
-        )
+        self.app.chat_panel.append_system(f"renamed corpus {old_name!r} → {new_name!r}")
         self.app.page.update()
 
     # ----- Remove ---------------------------------------------------------
@@ -799,9 +815,7 @@ class SelectDatasetTab:
     def _remove_corpus(self, name: str) -> None:
         if self.status is None:
             return
-        updated = [
-            c for c in self.app.gui_config.corpora if c.name != name
-        ]
+        updated = [c for c in self.app.gui_config.corpora if c.name != name]
         self.app.gui_config.corpora = updated
         if self.app.gui_config.active_corpus_name == name:
             new_active = updated[0] if updated else None
@@ -812,9 +826,7 @@ class SelectDatasetTab:
                 self.app.gui_config.neo4j_uri = new_active.neo4j_uri
                 self.app.gui_config.neo4j_user = new_active.neo4j_user
                 self.app.gui_config.lancedb_path = new_active.lancedb_path
-                self.app.gui_config.corpus_config_path = (
-                    new_active.corpus_config_path
-                )
+                self.app.gui_config.corpus_config_path = new_active.corpus_config_path
         try:
             save_config(self.app.gui_config)
         except ConfigError as exc:
@@ -825,7 +837,9 @@ class SelectDatasetTab:
             set_corpus_password(name, "")
         except ConfigError as exc:
             logger.warning(
-                "could not delete keyring entry for %r: %r", name, exc,
+                "could not delete keyring entry for %r: %r",
+                name,
+                exc,
             )
         new_active_name = self.app.gui_config.active_corpus_name
         if new_active_name is not None:
@@ -842,13 +856,12 @@ class SelectDatasetTab:
         self._sync_picker()
         self._populate_info_card()
         self.status.value = f"removed {name!r} from the corpus list"
-        self.app.chat_panel.append_system(
-            f"unregistered corpus {name!r} (external files kept)"
-        )
+        self.app.chat_panel.append_system(f"unregistered corpus {name!r} (external files kept)")
         self.app.page.update()
 
 
 # ----- module-level helpers ---------------------------------------------
+
 
 def _kv_row(label: str, value_control: ft.Control) -> ft.Row:
     """A `label: value` row where the label is fixed-width so keys align."""
@@ -866,15 +879,11 @@ def _badge(label: str, *, on: bool) -> ft.Control:
     return ft.Container(
         padding=ft.Padding.symmetric(vertical=2, horizontal=6),
         border_radius=10,
-        bgcolor=(
-            ft.Colors.GREEN_900 if on else ft.Colors.GREY_800
-        ),
+        bgcolor=(ft.Colors.GREEN_900 if on else ft.Colors.GREY_800),
         content=ft.Text(
             label,
             size=11,
-            color=(
-                ft.Colors.GREEN_200 if on else ft.Colors.GREY_500
-            ),
+            color=(ft.Colors.GREEN_200 if on else ft.Colors.GREY_500),
         ),
     )
 

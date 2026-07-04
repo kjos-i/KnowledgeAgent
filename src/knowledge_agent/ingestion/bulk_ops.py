@@ -23,7 +23,6 @@ Layer 2 (`pipeline.py`). That keeps the dependency chain
 imports.
 """
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +41,7 @@ from knowledge_agent.kg import (
 )
 from knowledge_agent.kg.client import get_kg_client
 from knowledge_agent.kg.corpus_config import CorpusConfig
+from knowledge_agent.kg.ontology_linking import ONTOLOGY_REGISTRY
 from knowledge_agent.kg.reconcile import (
     reconcile_cross_doc_to_config,
     reconcile_cross_doc_xrefs_to_config,
@@ -49,7 +49,6 @@ from knowledge_agent.kg.reconcile import (
     reconcile_ontologies_to_config,
     reconcile_triples_to_config,
 )
-from knowledge_agent.kg.ontology_linking import ONTOLOGY_REGISTRY
 from knowledge_agent.kg.schema import ONTOLOGY_SUB_LABELS
 from knowledge_agent.search.client import get_search_client
 
@@ -163,9 +162,7 @@ async def delete_doc_plan(doc_id: str) -> DeleteDocPlan:
         # render. Execute path will surface the real error if there is one.
         chunk_rows = []
     if not chunk_rows:
-        return DeleteDocPlan(
-            doc_id=doc_id, title=None, n_chunks=0, source_path=None
-        )
+        return DeleteDocPlan(doc_id=doc_id, title=None, n_chunks=0, source_path=None)
 
     first = chunk_rows[0]
     return DeleteDocPlan(
@@ -227,7 +224,8 @@ class BulkResolveOpenAlexResult:
 
 
 async def bulk_resolve_openalex_plan(
-    *, skip_manual: bool = True,
+    *,
+    skip_manual: bool = True,
 ) -> BulkResolveOpenAlexPlan:
     """List all indexed docs; split into targets vs manual-skipped.
 
@@ -287,7 +285,9 @@ async def bulk_resolve_openalex_execute(
                 n_no_work += 1
         except Exception as exc:
             logger.warning(
-                "bulk_resolve_openalex_execute: %s failed: %r", doc_id, exc,
+                "bulk_resolve_openalex_execute: %s failed: %r",
+                doc_id,
+                exc,
             )
             failures.append((doc_id, repr(exc)))
             n_failed += 1
@@ -316,10 +316,7 @@ class BulkReEmbedPlan:
 
     @property
     def summary(self) -> str:
-        return (
-            f"Re-embed {self.n_targets} docs "
-            f"(~{self.total_chunks} chunks total)."
-        )
+        return f"Re-embed {self.n_targets} docs (~{self.total_chunks} chunks total)."
 
 
 @dataclass(frozen=True)
@@ -338,12 +335,14 @@ async def bulk_re_embed_plan() -> BulkReEmbedPlan:
     target_ids = tuple(d["doc_id"] for d in indexed)
     total_chunks = sum(d.get("n_chunks", 0) for d in indexed)
     return BulkReEmbedPlan(
-        target_doc_ids=target_ids, total_chunks=total_chunks,
+        target_doc_ids=target_ids,
+        total_chunks=total_chunks,
     )
 
 
 async def bulk_re_embed_execute(
-    plan: BulkReEmbedPlan, config: CorpusConfig,
+    plan: BulkReEmbedPlan,
+    config: CorpusConfig,
 ) -> BulkReEmbedResult:
     """Iterate `plan.target_doc_ids`; call `pipeline.re_embed`.
 
@@ -369,7 +368,9 @@ async def bulk_re_embed_execute(
                 failures.append((doc_id, "embed_ok or lancedb_ok was False"))
         except Exception as exc:
             logger.warning(
-                "bulk_re_embed_execute: %s failed: %r", doc_id, exc,
+                "bulk_re_embed_execute: %s failed: %r",
+                doc_id,
+                exc,
             )
             failures.append((doc_id, repr(exc)))
             n_failed += 1
@@ -432,7 +433,8 @@ async def bulk_backfill_chunks_plan() -> BulkBackfillPlan:
 
 
 async def bulk_backfill_chunks_execute(
-    plan: BulkBackfillPlan, config: CorpusConfig,
+    plan: BulkBackfillPlan,
+    config: CorpusConfig,
 ) -> BulkBackfillResult:
     """Iterate targets; call `await pipeline.backfill_chunks(doc_id, config)`.
 
@@ -455,7 +457,9 @@ async def bulk_backfill_chunks_execute(
                 failures.append((doc_id, "chunks_ok was False"))
         except Exception as exc:
             logger.warning(
-                "bulk_backfill_chunks_execute: %s failed: %r", doc_id, exc,
+                "bulk_backfill_chunks_execute: %s failed: %r",
+                doc_id,
+                exc,
             )
             failures.append((doc_id, repr(exc)))
             n_failed += 1
@@ -473,7 +477,8 @@ async def bulk_backfill_entities_plan() -> BulkBackfillPlan:
 
 
 async def bulk_backfill_entities_execute(
-    plan: BulkBackfillPlan, config: CorpusConfig,
+    plan: BulkBackfillPlan,
+    config: CorpusConfig,
 ) -> BulkBackfillResult:
     """Iterate targets; call `await pipeline.backfill_entities(doc_id, config)`.
 
@@ -498,7 +503,8 @@ async def bulk_backfill_entities_execute(
         except Exception as exc:
             logger.warning(
                 "bulk_backfill_entities_execute: %s failed: %r",
-                doc_id, exc,
+                doc_id,
+                exc,
             )
             failures.append((doc_id, repr(exc)))
             n_failed += 1
@@ -516,7 +522,8 @@ async def bulk_backfill_ontology_plan() -> BulkBackfillPlan:
 
 
 async def bulk_backfill_ontology_execute(
-    plan: BulkBackfillPlan, config: CorpusConfig,
+    plan: BulkBackfillPlan,
+    config: CorpusConfig,
 ) -> BulkBackfillResult:
     """Iterate targets; call `await pipeline.backfill_ontology(doc_id, config)`.
 
@@ -542,20 +549,17 @@ async def bulk_backfill_ontology_execute(
                 # No ontologies enabled - this is a no-op success.
                 n_succeeded += 1
                 continue
-            any_imported = any(
-                v.get("import_ok") for v in result.values()
-            )
+            any_imported = any(v.get("import_ok") for v in result.values())
             if any_imported:
                 n_succeeded += 1
             else:
                 n_failed += 1
-                failures.append(
-                    (doc_id, "no enabled ontology successfully imported")
-                )
+                failures.append((doc_id, "no enabled ontology successfully imported"))
         except Exception as exc:
             logger.warning(
                 "bulk_backfill_ontology_execute: %s failed: %r",
-                doc_id, exc,
+                doc_id,
+                exc,
             )
             failures.append((doc_id, repr(exc)))
             n_failed += 1
@@ -573,7 +577,8 @@ async def bulk_backfill_triples_plan() -> BulkBackfillPlan:
 
 
 async def bulk_backfill_triples_execute(
-    plan: BulkBackfillPlan, config: CorpusConfig,
+    plan: BulkBackfillPlan,
+    config: CorpusConfig,
 ) -> BulkBackfillResult:
     """Iterate targets; call `await pipeline.backfill_triples(doc_id, config)`.
 
@@ -604,7 +609,8 @@ async def bulk_backfill_triples_execute(
         except Exception as exc:
             logger.warning(
                 "bulk_backfill_triples_execute: %s failed: %r",
-                doc_id, exc,
+                doc_id,
+                exc,
             )
             failures.append((doc_id, repr(exc)))
             n_failed += 1
@@ -622,7 +628,8 @@ async def bulk_backfill_cross_doc_plan() -> BulkBackfillPlan:
 
 
 async def bulk_backfill_cross_doc_execute(
-    plan: BulkBackfillPlan, config: CorpusConfig,
+    plan: BulkBackfillPlan,
+    config: CorpusConfig,
 ) -> BulkBackfillResult:
     """Iterate targets; call `await pipeline.backfill_cross_doc(doc_id, config)`.
 
@@ -651,7 +658,8 @@ async def bulk_backfill_cross_doc_execute(
         except Exception as exc:
             logger.warning(
                 "bulk_backfill_cross_doc_execute: %s failed: %r",
-                doc_id, exc,
+                doc_id,
+                exc,
             )
             failures.append((doc_id, repr(exc)))
             n_failed += 1
@@ -729,9 +737,7 @@ class IngestFolderPlan:
 
     @property
     def n_manual(self) -> int:
-        return sum(
-            1 for i in self.items if i.metadata_status == "manual"
-        )
+        return sum(1 for i in self.items if i.metadata_status == "manual")
 
     @property
     def total_bytes(self) -> int:
@@ -742,14 +748,9 @@ class IngestFolderPlan:
         size_mb = self.total_bytes / (1024 * 1024)
         parts = [f"Ingest {self.n_files} files ({size_mb:.1f} MB)"]
         if self.n_overwrites:
-            parts.append(
-                f"will overwrite {self.n_overwrites} already in DB"
-            )
+            parts.append(f"will overwrite {self.n_overwrites} already in DB")
         if self.n_manual:
-            parts.append(
-                f"{self.n_manual} have manual metadata that will be "
-                f"replaced"
-            )
+            parts.append(f"{self.n_manual} have manual metadata that will be replaced")
         return ". ".join(parts) + "."
 
 
@@ -768,7 +769,9 @@ class IngestFolderResult:
 
 
 async def ingest_folder_plan(
-    folder: Path, main_label: str, sub_label: str | None = None,
+    folder: Path,
+    main_label: str,
+    sub_label: str | None = None,
 ) -> IngestFolderPlan:
     """Recursively scan `folder` for supported files; hash each + check DB.
 
@@ -807,13 +810,15 @@ async def ingest_folder_plan(
             exists_in_db = False
             metadata_status = None
 
-        items.append(IngestFolderItem(
-            path=path,
-            doc_id=doc_id,
-            size_bytes=size_bytes,
-            exists_in_db=exists_in_db,
-            metadata_status=metadata_status,
-        ))
+        items.append(
+            IngestFolderItem(
+                path=path,
+                doc_id=doc_id,
+                size_bytes=size_bytes,
+                exists_in_db=exists_in_db,
+                metadata_status=metadata_status,
+            )
+        )
 
     return IngestFolderPlan(
         folder=folder,
@@ -878,7 +883,9 @@ class AddResult:
 
 
 async def add_plan(
-    folder: Path, main_label: str, sub_label: str | None = None,
+    folder: Path,
+    main_label: str,
+    sub_label: str | None = None,
 ) -> AddPlan:
     """Walk `folder`; classify each supported file as NEW or skipped.
 
@@ -906,13 +913,15 @@ async def add_plan(
         if existing:
             n_skipped += 1
             continue
-        new_items.append(IngestFolderItem(
-            path=path,
-            doc_id=doc_id,
-            size_bytes=size_bytes,
-            exists_in_db=False,
-            metadata_status=None,
-        ))
+        new_items.append(
+            IngestFolderItem(
+                path=path,
+                doc_id=doc_id,
+                size_bytes=size_bytes,
+                exists_in_db=False,
+                metadata_status=None,
+            )
+        )
 
     return AddPlan(
         folder=folder,
@@ -941,13 +950,18 @@ async def add_execute(
     for item in plan.new_items:
         try:
             await pipeline.ingest_document(
-                item.path, config, plan.main_label, plan.sub_label,
+                item.path,
+                config,
+                plan.main_label,
+                plan.sub_label,
                 preserve_existing_labels=preserve_existing_labels,
             )
             n_succeeded += 1
         except Exception as exc:
             logger.warning(
-                "add_execute: %s failed: %r", item.path.name, exc,
+                "add_execute: %s failed: %r",
+                item.path.name,
+                exc,
             )
             failures.append((item.path.name, repr(exc)))
             n_failed += 1
@@ -1024,8 +1038,7 @@ class SyncPlan:
         confirmation dialog (the "explicit per-file confirmation" rule
         from the bulk_ops design memory)."""
         return tuple(
-            o.title or o.stored_path or f"doc {o.doc_id[:12]}"
-            for o in self.buckets.orphan
+            o.title or o.stored_path or f"doc {o.doc_id[:12]}" for o in self.buckets.orphan
         )
 
 
@@ -1049,7 +1062,9 @@ class SyncResult:
 
 
 async def sync_plan(
-    folder: Path, main_label: str, sub_label: str | None = None,
+    folder: Path,
+    main_label: str,
+    sub_label: str | None = None,
 ) -> SyncPlan:
     """Build a Sync plan: walk + hash disk, list indexed docs, classify.
 
@@ -1065,10 +1080,7 @@ async def sync_plan(
     except ValueError as exc:
         raise ValueError(f"sync_plan: {exc}") from exc
 
-    disk_files = [
-        DiskFile(path=p, doc_id=did)
-        for p, did, _ in _walk_and_hash(folder)
-    ]
+    disk_files = [DiskFile(path=p, doc_id=did) for p, did, _ in _walk_and_hash(folder)]
 
     search_client = get_search_client()
     # LanceDB read errors propagate (typed-errors contract).
@@ -1133,13 +1145,18 @@ async def sync_execute(
     for disk in plan.buckets.new:
         try:
             await pipeline.ingest_document(
-                disk.path, config, plan.main_label, plan.sub_label,
+                disk.path,
+                config,
+                plan.main_label,
+                plan.sub_label,
                 preserve_existing_labels=preserve_existing_labels,
             )
             n_new_ingested += 1
         except Exception as exc:
             logger.warning(
-                "sync_execute: NEW %s failed: %r", disk.path.name, exc,
+                "sync_execute: NEW %s failed: %r",
+                disk.path.name,
+                exc,
             )
             failures.append((f"NEW {disk.path.name}", repr(exc)))
             n_new_failed += 1
@@ -1148,16 +1165,17 @@ async def sync_execute(
     for disk, old in plan.buckets.moved:
         try:
             await search_client.update_doc_metadata(
-                old.doc_id, {"source_path": disk.path.as_posix()},
+                old.doc_id,
+                {"source_path": disk.path.as_posix()},
             )
             n_moved += 1
         except Exception as exc:
             logger.warning(
-                "sync_execute: MOVED %s failed: %r", disk.path.name, exc,
+                "sync_execute: MOVED %s failed: %r",
+                disk.path.name,
+                exc,
             )
-            failures.append(
-                (f"MOVED {disk.path.name}", repr(exc))
-            )
+            failures.append((f"MOVED {disk.path.name}", repr(exc)))
 
     # EDITED: delete the old doc_id, ingest the new content.
     # The new content produces a fresh content-hash doc_id, so
@@ -1165,15 +1183,14 @@ async def sync_execute(
     # read the old labels here + carry them into the fresh ingest.
     # `kg_client` obtained lazily so plans with no EDITED items or
     # preserve=False don't touch the KG driver.
-    kg_client_for_edited = get_kg_client() if (
-        preserve_existing_labels and plan.buckets.edited
-    ) else None
+    kg_client_for_edited = (
+        get_kg_client() if (preserve_existing_labels and plan.buckets.edited) else None
+    )
     for disk, old in plan.buckets.edited:
         try:
             if kg_client_for_edited is not None:
-                old_main, old_sub = (
-                    await kg_client_for_edited
-                    .get_focal_labels_by_doc_id(old.doc_id)
+                old_main, old_sub = await kg_client_for_edited.get_focal_labels_by_doc_id(
+                    old.doc_id
                 )
                 use_main = old_main or plan.main_label
                 use_sub = old_sub if old_main else plan.sub_label
@@ -1182,13 +1199,18 @@ async def sync_execute(
                 use_sub = plan.sub_label
             await pipeline.delete_doc(old.doc_id)
             await pipeline.ingest_document(
-                disk.path, config, use_main, use_sub,
+                disk.path,
+                config,
+                use_main,
+                use_sub,
                 preserve_existing_labels=False,
             )
             n_edited_succeeded += 1
         except Exception as exc:
             logger.warning(
-                "sync_execute: EDITED %s failed: %r", disk.path.name, exc,
+                "sync_execute: EDITED %s failed: %r",
+                disk.path.name,
+                exc,
             )
             failures.append((f"EDITED {disk.path.name}", repr(exc)))
             n_edited_failed += 1
@@ -1241,14 +1263,18 @@ async def ingest_folder_execute(
     for item in plan.items:
         try:
             await pipeline.ingest_document(
-                item.path, config, plan.main_label, plan.sub_label,
+                item.path,
+                config,
+                plan.main_label,
+                plan.sub_label,
                 preserve_existing_labels=preserve_existing_labels,
             )
             n_succeeded += 1
         except Exception as exc:
             logger.warning(
                 "ingest_folder_execute: %s failed: %r",
-                item.path.name, exc,
+                item.path.name,
+                exc,
             )
             failures.append((item.path.name, repr(exc)))
             n_failed += 1
@@ -1299,8 +1325,8 @@ class BackfillXrefsPlan:
     def summary(self) -> str:
         if self.xrefs_mode == "none":
             return (
-                "L7 xrefs layer is \"none\" — backfill is a no-op. "
-                "Set xrefs to \"collect_only\" or \"use\" first; "
+                'L7 xrefs layer is "none" — backfill is a no-op. '
+                'Set xrefs to "collect_only" or "use" first; '
                 "imports will then start storing the data this op "
                 "would resolve."
             )
@@ -1356,12 +1382,14 @@ async def backfill_xrefs_plan(config: CorpusConfig) -> BackfillXrefsPlan:
     for term_label in ONTOLOGY_SUB_LABELS:
         try:
             total_dangling += await ontology_xrefs.count_dangling_xrefs(
-                kg_client, term_label,
+                kg_client,
+                term_label,
             )
         except Exception as exc:
             logger.warning(
                 "backfill_xrefs_plan: count_dangling_xrefs(%s) failed: %r",
-                term_label, exc,
+                term_label,
+                exc,
             )
 
     will_recompute_l10 = bool(config.layers.cross_doc_xrefs)
@@ -1387,7 +1415,8 @@ async def backfill_xrefs_plan(config: CorpusConfig) -> BackfillXrefsPlan:
 
 
 async def backfill_xrefs_execute(
-    plan: BackfillXrefsPlan, config: CorpusConfig,
+    plan: BackfillXrefsPlan,
+    config: CorpusConfig,
 ) -> BackfillXrefsResult:
     """Perform the backfill promised by `plan`.
 
@@ -1416,7 +1445,8 @@ async def backfill_xrefs_execute(
         per_ontology = await ontology_xrefs.backfill_resolved_xrefs(kg_client)
     except Exception as exc:
         logger.warning(
-            "backfill_xrefs_execute: backfill_resolved_xrefs failed: %r", exc,
+            "backfill_xrefs_execute: backfill_resolved_xrefs failed: %r",
+            exc,
         )
         per_ontology = None
 
@@ -1424,12 +1454,13 @@ async def backfill_xrefs_execute(
     if plan.will_recompute_l10:
         try:
             n_l10 = await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(
-                kg_client, plan.l10_threshold,
+                kg_client,
+                plan.l10_threshold,
             )
         except Exception as exc:
             logger.warning(
-                "backfill_xrefs_execute: recompute_cross_doc_xrefs_global "
-                "failed: %r", exc,
+                "backfill_xrefs_execute: recompute_cross_doc_xrefs_global failed: %r",
+                exc,
             )
             n_l10 = None
 
@@ -1513,16 +1544,13 @@ async def recompute_cross_doc_xrefs_plan(
         # Reuse the same diagnostic the install plan uses.
         with kg_client.driver.session() as session:
             try:
-                result = session.run(
-                    "MATCH ()-[r:RELATED_BY_XREF]-() "
-                    "RETURN count(r) AS n"
-                )
+                result = session.run("MATCH ()-[r:RELATED_BY_XREF]-() RETURN count(r) AS n")
                 row = result.single()
                 n_edges = int(row["n"]) if row else 0
             except Exception as exc:
                 logger.warning(
-                    "recompute_cross_doc_xrefs_plan: edge count failed: "
-                    "%r", exc,
+                    "recompute_cross_doc_xrefs_plan: edge count failed: %r",
+                    exc,
                 )
                 n_edges = 0
         threshold = (
@@ -1555,7 +1583,8 @@ async def recompute_cross_doc_xrefs_execute(
     if not plan.enabled:
         if config is not None:
             await reconcile_cross_doc_xrefs_to_config(
-                get_kg_client(), config,
+                get_kg_client(),
+                config,
             )
         return RecomputeCrossDocXrefsResult(
             layer_skipped=True,
@@ -1564,11 +1593,13 @@ async def recompute_cross_doc_xrefs_execute(
     kg_client = get_kg_client()
     try:
         n = await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(
-            kg_client, plan.threshold,
+            kg_client,
+            plan.threshold,
         )
     except Exception as exc:
         logger.warning(
-            "recompute_cross_doc_xrefs_execute: failed: %r", exc,
+            "recompute_cross_doc_xrefs_execute: failed: %r",
+            exc,
         )
         n = None
     return RecomputeCrossDocXrefsResult(
@@ -1657,17 +1688,20 @@ async def clear_xref_edges_plan(ontology_name: str) -> ClearXrefEdgesPlan:
     except Exception as exc:
         logger.warning(
             "clear_xref_edges_plan: count_xref_edges(%s) failed: %r",
-            term_label, exc,
+            term_label,
+            exc,
         )
         n_edges = 0
     try:
         n_dangling = await ontology_xrefs.count_dangling_xrefs(
-            kg_client, term_label,
+            kg_client,
+            term_label,
         )
     except Exception as exc:
         logger.warning(
             "clear_xref_edges_plan: count_dangling_xrefs(%s) failed: %r",
-            term_label, exc,
+            term_label,
+            exc,
         )
         n_dangling = 0
     return ClearXrefEdgesPlan(
@@ -1685,12 +1719,14 @@ async def clear_xref_edges_execute(
     kg_client = get_kg_client()
     try:
         n = await ontology_xrefs.clear_xref_edges_for_ontology(
-            kg_client, plan.term_label,
+            kg_client,
+            plan.term_label,
         )
     except Exception as exc:
         logger.warning(
             "clear_xref_edges_execute (%s): failed: %r",
-            plan.term_label, exc,
+            plan.term_label,
+            exc,
         )
         n = None
     return ClearXrefEdgesResult(

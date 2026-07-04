@@ -10,15 +10,19 @@ Mirrors `research_articles_agent/gui/artifacts.py` so saved files
 from both apps have a consistent layout (title block, separator,
 body, source list).
 """
+
 from __future__ import annotations
 
 import re
 from datetime import datetime
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
-from knowledge_agent.models import AgentAnswer, ChunkSource
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from knowledge_agent.models import AgentAnswer, ChunkSource
 
 
 class SaveError(Exception):
@@ -45,10 +49,7 @@ def render_answer_markdown(answer: AgentAnswer, query: str) -> str:
     lines.append("")
     lines.append("---")
     lines.append("")
-    lines.append(
-        f"## Sources ({len(answer.chunk_sources)} chunk, "
-        f"{len(answer.kg_sources)} KG)"
-    )
+    lines.append(f"## Sources ({len(answer.chunk_sources)} chunk, {len(answer.kg_sources)} KG)")
     lines.append("")
     if not answer.chunk_sources and not answer.kg_sources:
         lines.append("_(none)_")
@@ -70,11 +71,7 @@ def render_answer_markdown(answer: AgentAnswer, query: str) -> str:
                 lines.append("")
                 # For figure chunks the quote IS the caption / OCR text
                 # — label it as such so the reader knows what it is.
-                label = (
-                    "caption / OCR"
-                    if c.content_type == "figure"
-                    else "quote"
-                )
+                label = "caption / OCR" if c.content_type == "figure" else "quote"
                 lines.append(f"> _{label}:_ {c.quote}")
             lines.append("")
 
@@ -110,13 +107,8 @@ def _format_chunk_source_line(index: int, c: ChunkSource) -> str:
     """
     if c.content_type == "figure":
         if c.page is not None:
-            return (
-                f"**[{index}]** Figure at page {c.page} of "
-                f"`{c.doc_id}` · chunk: `{c.chunk_id}`"
-            )
-        return (
-            f"**[{index}]** Image: `{c.doc_id}` · chunk: `{c.chunk_id}`"
-        )
+            return f"**[{index}]** Figure at page {c.page} of `{c.doc_id}` · chunk: `{c.chunk_id}`"
+        return f"**[{index}]** Image: `{c.doc_id}` · chunk: `{c.chunk_id}`"
     return f"**[{index}]** doc: `{c.doc_id}` · chunk: `{c.chunk_id}`"
 
 
@@ -135,9 +127,7 @@ def _slugify(text: str, max_length: int = 50) -> str:
     return slug or "answer"
 
 
-def save_answer(
-    answer: AgentAnswer, query: str, results_dir: Path
-) -> tuple[Path, Path]:
+def save_answer(answer: AgentAnswer, query: str, results_dir: Path) -> tuple[Path, Path]:
     """Save the answer as Markdown + JSON in `results_dir`.
 
     Returns both paths (`.md` and `.json`). Filenames use a
@@ -153,19 +143,19 @@ def save_answer(
     try:
         results_dir.mkdir(parents=True, exist_ok=True)
         md_path.write_text(
-            render_answer_markdown(answer, query), encoding="utf-8",
+            render_answer_markdown(answer, query),
+            encoding="utf-8",
         )
         json_path.write_text(
-            answer.model_dump_json(indent=2), encoding="utf-8",
+            answer.model_dump_json(indent=2),
+            encoding="utf-8",
         )
     except OSError as exc:
         raise SaveError(f"could not write to {results_dir}: {exc}") from exc
     return md_path, json_path
 
 
-def render_chat_markdown(
-    messages: list[BaseMessage], timestamp: str
-) -> str:
+def render_chat_markdown(messages: list[BaseMessage], timestamp: str) -> str:
     """Render a conversation as a Markdown transcript.
 
     Roles: HumanMessage → "you", AIMessage → "assistant", anything
@@ -190,9 +180,7 @@ def render_chat_markdown(
     return "\n".join(lines)
 
 
-def save_chat(
-    messages: list[BaseMessage], query: str | None, results_dir: Path
-) -> Path:
+def save_chat(messages: list[BaseMessage], query: str | None, results_dir: Path) -> Path:
     """Save the conversation as a Markdown transcript in `results_dir`.
 
     `query` is used for the filename slug only — when None (the
@@ -205,7 +193,8 @@ def save_chat(
     try:
         results_dir.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            render_chat_markdown(messages, timestamp), encoding="utf-8",
+            render_chat_markdown(messages, timestamp),
+            encoding="utf-8",
         )
     except OSError as exc:
         raise SaveError(f"could not write to {results_dir}: {exc}") from exc

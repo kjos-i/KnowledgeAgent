@@ -20,7 +20,6 @@ import pytest
 
 from knowledge_agent.kg.ontology_provenance import OntologyProvenance
 
-
 # ---------------------------------------------------------------------------
 # Class shape
 # ---------------------------------------------------------------------------
@@ -67,10 +66,18 @@ def test_heavy_warning_can_be_set() -> None:
 
 def test_is_frozen_dataclass() -> None:
     p = OntologyProvenance(
-        ontology_name="x", full_name="X", publisher="A", license="B",
-        source_url="u", download_url="d", file_format="OBO",
-        download_size_mb=1, estimated_terms=1, domain_tags=(),
-        covers_labels=(), description="...",
+        ontology_name="x",
+        full_name="X",
+        publisher="A",
+        license="B",
+        source_url="u",
+        download_url="d",
+        file_format="OBO",
+        download_size_mb=1,
+        estimated_terms=1,
+        domain_tags=(),
+        covers_labels=(),
+        description="...",
     )
     with pytest.raises(Exception):  # FrozenInstanceError
         p.ontology_name = "y"  # type: ignore[misc]
@@ -89,6 +96,7 @@ def test_ontology_lifecycle_re_export_is_same_class() -> None:
     from knowledge_agent.kg.ontology_lifecycle import (
         OntologyProvenance as Reexport,
     )
+
     assert Reexport is OntologyProvenance
 
 

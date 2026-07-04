@@ -39,7 +39,6 @@ from typing import Any
 
 from knowledge_agent.kg.ontology_helpers import OntologyTerm, ensure_cached
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -66,10 +65,7 @@ def _validate_xrefs_mode(value: str) -> None:
     smoke scripts). Raises `ValueError` on an unrecognised value.
     """
     if value not in ("none", "collect_only", "use"):
-        raise ValueError(
-            f"xrefs_mode must be 'none', 'collect_only', or 'use'; "
-            f"got {value!r}."
-        )
+        raise ValueError(f"xrefs_mode must be 'none', 'collect_only', or 'use'; got {value!r}.")
 
 
 async def is_ontology_imported(client, *, term_label: str, ontology_name: str) -> bool:
@@ -84,14 +80,16 @@ async def is_ontology_imported(client, *, term_label: str, ontology_name: str) -
     per-ontology so one bad lookup doesn't kill the walk.
     """
     async with client.driver.session() as session:
-        result = await session.run(
-            f"MATCH (t:{term_label}) RETURN count(t) > 0 AS present"
-        )
+        result = await session.run(f"MATCH (t:{term_label}) RETURN count(t) > 0 AS present")
         row = await result.single()
         return bool(row and row["present"])
 
 
-async def delete_ontology_terms(client, *, term_label: str, ontology_name: str,
+async def delete_ontology_terms(
+    client,
+    *,
+    term_label: str,
+    ontology_name: str,
 ) -> None:
     """DETACH DELETE every node carrying `term_label` plus its edges.
 
@@ -101,15 +99,16 @@ async def delete_ontology_terms(client, *, term_label: str, ontology_name: str,
     Cypher failures propagate to the caller (typed-errors contract).
     """
     async with client.driver.session() as session:
-        await session.run(
-            f"MATCH (t:{term_label}) DETACH DELETE t"
-        )
+        await session.run(f"MATCH (t:{term_label}) DETACH DELETE t")
     logger.info(
-        "%s: deleted all :%s nodes + edges", ontology_name, term_label,
+        "%s: deleted all :%s nodes + edges",
+        ontology_name,
+        term_label,
     )
 
 
-async def write_ontology_terms(client,
+async def write_ontology_terms(
+    client,
     terms: list[OntologyTerm],
     *,
     term_label: str,
@@ -169,22 +168,14 @@ async def write_ontology_terms(client,
         }
         for t in terms
     ]
-    hierarchy_rows = [
-        {"child": t.id, "parent": p}
-        for t in terms
-        for p in t.parents
-    ]
+    hierarchy_rows = [{"child": t.id, "parent": p} for t in terms for p in t.parents]
     # Only build xref payload when the layer actually wants it. Empty
     # `t.xrefs` is the common case; filtering keeps storage minimal
     # (no empty `dangling_xrefs = []` properties on terms that have
     # nothing to declare).
     xref_rows: list[dict[str, Any]] = []
     if xrefs_mode != "none":
-        xref_rows = [
-            {"source_id": t.id, "xrefs": list(t.xrefs)}
-            for t in terms
-            if t.xrefs
-        ]
+        xref_rows = [{"source_id": t.id, "xrefs": list(t.xrefs)} for t in terms if t.xrefs]
     xref_rel = _xref_rel_from_term_label(term_label)
     n_resolved_edges = 0
 
@@ -239,19 +230,25 @@ async def write_ontology_terms(client,
 
     logger.info(
         "%s: wrote %d :%s nodes + %d :%s edges",
-        ontology_name, len(node_rows), term_label,
-        len(hierarchy_rows), hierarchy_rel,
+        ontology_name,
+        len(node_rows),
+        term_label,
+        len(hierarchy_rows),
+        hierarchy_rel,
     )
     if xref_rows:
         logger.info(
-            "%s: stored dangling_xrefs on %d terms (mode=%s); "
-            "resolved %d :%s edges",
-            ontology_name, len(xref_rows), xrefs_mode,
-            n_resolved_edges, xref_rel,
+            "%s: stored dangling_xrefs on %d terms (mode=%s); resolved %d :%s edges",
+            ontology_name,
+            len(xref_rows),
+            xrefs_mode,
+            n_resolved_edges,
+            xref_rel,
         )
 
 
-async def import_ontology_data(client,
+async def import_ontology_data(
+    client,
     *,
     ontology_name: str,
     url: str,
@@ -296,7 +293,9 @@ async def import_ontology_data(client,
     """
     _validate_xrefs_mode(xrefs_mode)
     if not force and await is_ontology_imported(
-        client, term_label=term_label, ontology_name=ontology_name,
+        client,
+        term_label=term_label,
+        ontology_name=ontology_name,
     ):
         logger.info(
             "%s: already imported; use force=True to re-import",
@@ -310,7 +309,9 @@ async def import_ontology_data(client,
             ontology_name,
         )
         await delete_ontology_terms(
-            client, term_label=term_label, ontology_name=ontology_name,
+            client,
+            term_label=term_label,
+            ontology_name=ontology_name,
         )
 
     logger.info("%s: downloading %s", ontology_name, url)
@@ -323,12 +324,11 @@ async def import_ontology_data(client,
     terms = read_and_extract(path)
 
     if not terms:
-        raise RuntimeError(
-            f"{ontology_name}: extracted 0 terms - unexpected, aborting write"
-        )
+        raise RuntimeError(f"{ontology_name}: extracted 0 terms - unexpected, aborting write")
 
     await write_ontology_terms(
-        client, terms,
+        client,
+        terms,
         term_label=term_label,
         hierarchy_rel=hierarchy_rel,
         ontology_name=ontology_name,

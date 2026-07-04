@@ -6,6 +6,7 @@ schema is what the GUI expects, (b) the cache works, (c) the system
 prompt mentions both retrieval stores so the router routes correctly
 for KG-only questions.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch

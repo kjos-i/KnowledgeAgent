@@ -34,8 +34,6 @@ _HTTP_PATCH = "knowledge_agent._http_client.request"
 from knowledge_agent.llm_lifecycle import (
     LLM_PROVIDER_REGISTRY,
     OLLAMA_MODELS,
-    InstallLLMProviderPlan,
-    InstallLLMProviderResult,
     PullOllamaModelPlan,
     UninstallLLMProviderPlan,
     _ollama_daemon_is_reachable,
@@ -47,7 +45,6 @@ from knowledge_agent.llm_lifecycle import (
     uninstall_llm_provider_plan,
 )
 
-
 _PIP_PATCH = "knowledge_agent.llm_lifecycle._run_pip"
 _OLLAMA_PATCH = "knowledge_agent.llm_lifecycle._run_ollama"
 _WHICH_PATCH = "knowledge_agent.llm_lifecycle.shutil.which"
@@ -57,9 +54,7 @@ _WHICH_PATCH = "knowledge_agent.llm_lifecycle.shutil.which"
 
 
 def test_registry_has_four_providers():
-    assert set(LLM_PROVIDER_REGISTRY) == {
-        "anthropic", "openai", "google", "ollama"
-    }
+    assert set(LLM_PROVIDER_REGISTRY) == {"anthropic", "openai", "google", "ollama"}
 
 
 def test_no_provider_is_bundled_after_2026_06_29_refactor():
@@ -99,8 +94,12 @@ def test_each_provider_has_six_default_model_entries():
     triples_extractor) keeps the lifecycle switch step able to
     rewrite all six Settings fields in one go."""
     expected_sites = {
-        "mode_classifier", "query_builder", "cypher_builder",
-        "synthesizer", "entity_extractor", "triples_extractor",
+        "mode_classifier",
+        "query_builder",
+        "cypher_builder",
+        "synthesizer",
+        "entity_extractor",
+        "triples_extractor",
     }
     for name, entry in LLM_PROVIDER_REGISTRY.items():
         assert set(entry["default_models"]) == expected_sites, name
@@ -160,9 +159,7 @@ async def test_plan_ollama_when_daemon_missing_surfaces_install_url():
         # Force HTTP fallback to fail too.
         patch(
             "knowledge_agent.llm_lifecycle.get_settings",
-            return_value=MagicMock(
-                ollama_base_url="http://localhost:11434"
-            ),
+            return_value=MagicMock(ollama_base_url="http://localhost:11434"),
         ),
         patch(
             _HTTP_PATCH,
@@ -208,7 +205,9 @@ async def test_execute_runs_pip_when_not_installed():
     ):
         plan = await install_llm_provider_plan("openai")
     with patch(
-        _PIP_PATCH, new_callable=AsyncMock, return_value=(True, "install ok"),
+        _PIP_PATCH,
+        new_callable=AsyncMock,
+        return_value=(True, "install ok"),
     ) as pip:
         result = await install_llm_provider_execute(plan)
     pip.assert_called_once()
@@ -274,7 +273,9 @@ async def test_uninstall_runs_pip_when_inactive_and_installed():
         result = await uninstall_llm_provider_execute(plan)
     pip.assert_called_once()
     assert pip.call_args.args[0] == [
-        "uninstall", "-y", "langchain-google-genai",
+        "uninstall",
+        "-y",
+        "langchain-google-genai",
     ]
     assert result.uninstall_ok is True
 
@@ -294,9 +295,7 @@ async def test_daemon_reachable_via_http_when_binary_not_on_path():
         patch(_WHICH_PATCH, return_value=None),
         patch(
             "knowledge_agent.llm_lifecycle.get_settings",
-            return_value=MagicMock(
-                ollama_base_url="http://localhost:11434"
-            ),
+            return_value=MagicMock(ollama_base_url="http://localhost:11434"),
         ),
         patch(
             _HTTP_PATCH,
@@ -312,9 +311,7 @@ async def test_daemon_not_reachable_when_neither_works():
         patch(_WHICH_PATCH, return_value=None),
         patch(
             "knowledge_agent.llm_lifecycle.get_settings",
-            return_value=MagicMock(
-                ollama_base_url="http://localhost:11434"
-            ),
+            return_value=MagicMock(ollama_base_url="http://localhost:11434"),
         ),
         patch(
             _HTTP_PATCH,
@@ -343,9 +340,7 @@ async def test_pull_plan_summary_when_daemon_not_reachable():
         patch(_WHICH_PATCH, return_value=None),
         patch(
             "knowledge_agent.llm_lifecycle.get_settings",
-            return_value=MagicMock(
-                ollama_base_url="http://localhost:11434"
-            ),
+            return_value=MagicMock(ollama_base_url="http://localhost:11434"),
         ),
         patch(
             _HTTP_PATCH,
@@ -379,7 +374,9 @@ async def test_pull_execute_runs_ollama_pull_when_daemon_reachable():
         daemon_reachable=True,
     )
     with patch(
-        _OLLAMA_PATCH, new_callable=AsyncMock, return_value=(True, "pulled"),
+        _OLLAMA_PATCH,
+        new_callable=AsyncMock,
+        return_value=(True, "pulled"),
     ) as run:
         result = await pull_ollama_model_execute(plan)
     run.assert_called_once_with(["pull", "qwen2.5:7b"])

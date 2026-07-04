@@ -15,11 +15,10 @@ The fake model exposes `predict_entities(text, labels, threshold)`
 returning a hand-rolled list of dicts matching GLiNER's real shape.
 """
 
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
 from knowledge_agent.entity_extractors import gliner
 from knowledge_agent.entity_extractors.base import Mention
-
 
 # ---- module constants ----
 
@@ -90,10 +89,8 @@ async def test_extract_maps_each_prediction_to_mention():
     """Every dict GLiNER returns becomes a Mention with offset +
     confidence populated from GLiNER's start / score fields."""
     predictions = [
-        {"text": "Albert Einstein", "label": "PERSON",
-         "start": 0, "end": 15, "score": 0.95},
-        {"text": "Princeton", "label": "ORGANIZATION",
-         "start": 30, "end": 39, "score": 0.88},
+        {"text": "Albert Einstein", "label": "PERSON", "start": 0, "end": 15, "score": 0.95},
+        {"text": "Princeton", "label": "ORGANIZATION", "start": 30, "end": 39, "score": 0.88},
     ]
     fake_model = _fake_model_returning(predictions)
     with patch(
@@ -104,12 +101,16 @@ async def test_extract_maps_each_prediction_to_mention():
 
     assert result == [
         Mention(
-            raw_text="Albert Einstein", entity_type="PERSON",
-            offset=0, confidence=0.95,
+            raw_text="Albert Einstein",
+            entity_type="PERSON",
+            offset=0,
+            confidence=0.95,
         ),
         Mention(
-            raw_text="Princeton", entity_type="ORGANIZATION",
-            offset=30, confidence=0.88,
+            raw_text="Princeton",
+            entity_type="ORGANIZATION",
+            offset=30,
+            confidence=0.88,
         ),
     ]
 
@@ -118,8 +119,7 @@ async def test_extract_preserves_offset_from_start_field():
     """Mention.offset comes from GLiNER's `start` (char position in
     chunk text), NOT a different field."""
     predictions = [
-        {"text": "Berlin", "label": "LOCATION",
-         "start": 42, "end": 48, "score": 0.91},
+        {"text": "Berlin", "label": "LOCATION", "start": 42, "end": 48, "score": 0.91},
     ]
     fake_model = _fake_model_returning(predictions)
     with patch(
@@ -135,8 +135,7 @@ async def test_extract_preserves_confidence_from_score_field():
     """GLiNER exposes per-mention scores — surface them on Mention.
     Unlike SciSpaCy + LLM which both leave confidence=None."""
     predictions = [
-        {"text": "Marie Curie", "label": "PERSON",
-         "start": 0, "end": 11, "score": 0.73},
+        {"text": "Marie Curie", "label": "PERSON", "start": 0, "end": 11, "score": 0.73},
     ]
     fake_model = _fake_model_returning(predictions)
     with patch(
@@ -163,7 +162,7 @@ async def test_extract_passes_non_empty_entity_types_verbatim():
         await gliner.extract("text", ["GENE", "PROTEIN", "DISEASE"])
 
     # Confirm the model was called with the labels we passed.
-    args, kwargs = fake_model.predict_entities.call_args
+    args, _kwargs = fake_model.predict_entities.call_args
     # GLiNER signature: predict_entities(text, labels, threshold=...)
     assert args[1] == ["GENE", "PROTEIN", "DISEASE"]
 
@@ -179,7 +178,7 @@ async def test_extract_uses_default_labels_when_entity_types_empty():
     ):
         await gliner.extract("text", [])
 
-    args, kwargs = fake_model.predict_entities.call_args
+    args, _kwargs = fake_model.predict_entities.call_args
     assert args[1] == list(gliner.DEFAULT_LABELS)
 
 
@@ -193,7 +192,7 @@ async def test_extract_passes_threshold_to_model():
     ):
         await gliner.extract("text", ["PERSON"])
 
-    args, kwargs = fake_model.predict_entities.call_args
+    _args, kwargs = fake_model.predict_entities.call_args
     assert kwargs.get("threshold") == gliner._SCORE_THRESHOLD
 
 
@@ -207,7 +206,7 @@ async def test_extract_forwards_text_unchanged_to_model():
     ):
         await gliner.extract("Mixed-case Text  with  weird whitespace.", ["X"])
 
-    args, kwargs = fake_model.predict_entities.call_args
+    args, _kwargs = fake_model.predict_entities.call_args
     assert args[0] == "Mixed-case Text  with  weird whitespace."
 
 
@@ -219,8 +218,7 @@ async def test_extract_preserves_original_spelling_in_raw_text():
     lowercase or normalise. Lowercasing happens in entity_writes when
     computing the :Entity node's key for the MERGE."""
     predictions = [
-        {"text": "CRISPR-Cas9", "label": "TECHNOLOGY",
-         "start": 0, "end": 11, "score": 0.85},
+        {"text": "CRISPR-Cas9", "label": "TECHNOLOGY", "start": 0, "end": 11, "score": 0.85},
     ]
     fake_model = _fake_model_returning(predictions)
     with patch(

@@ -40,9 +40,11 @@ imports are local to the handlers (heavy-import-off-the-startup rule).
 
 Deliberately deferred: Neo4j per-doc layer badges.
 """
+
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -77,8 +79,7 @@ _STATUS_COLORS: dict[str, str] = {
 #   - `sub_label` (type): would need a Neo4j label sync.
 _EDIT_FIELD_SPEC: tuple[tuple[str, str, str], ...] = (
     ("title", "Title", ""),
-    ("authors_display", "Authors (semicolon-separated)",
-     "e.g. Jane Doe; John Smith"),
+    ("authors_display", "Authors (semicolon-separated)", "e.g. Jane Doe; John Smith"),
     ("year", "Year", "e.g. 2020"),
     ("venue", "Venue", ""),
     ("doi", "DOI", "e.g. 10.1126/science.aaz5357"),
@@ -89,7 +90,12 @@ _EDIT_FIELD_SPEC: tuple[tuple[str, str, str], ...] = (
 # String columns written on every Save (full "set" semantics — a
 # blanked field clears to ""). `year` is handled separately (int32).
 _EDIT_STRING_KEYS: tuple[str, ...] = (
-    "title", "authors_display", "venue", "doi", "source_url", "language",
+    "title",
+    "authors_display",
+    "venue",
+    "doi",
+    "source_url",
+    "language",
 )
 
 
@@ -184,17 +190,13 @@ class DocumentsView:
         if active is None:
             self._loaded_rows = []
             self._loaded_for = None
-            self.doc_list.controls = [
-                empty_state("No corpus selected.")
-            ]
+            self.doc_list.controls = [empty_state("No corpus selected.")]
             self.coverage_text.value = ""
             self.app.page.update()
             return
         if not force and self._loaded_for == active:
             return
-        self.doc_list.controls = [
-            ft.Text("Loading …", italic=True, color=ft.Colors.GREY_500)
-        ]
+        self.doc_list.controls = [ft.Text("Loading …", italic=True, color=ft.Colors.GREY_500)]
         self.coverage_text.value = ""
         self.app.page.update()
         try:
@@ -253,9 +255,7 @@ class DocumentsView:
     def _matches_filter(row: dict[str, Any], needle: str) -> bool:
         if not needle:
             return True
-        hay = (
-            (row.get("title") or "") + " " + (row.get("source_path") or "")
-        ).lower()
+        hay = ((row.get("title") or "") + " " + (row.get("source_path") or "")).lower()
         return needle in hay
 
     def _render_rows(self) -> None:
@@ -274,36 +274,27 @@ class DocumentsView:
             self.coverage_text.value = ""
             return
         needle = (self.search_field.value or "").strip().lower()
-        filtered = [
-            r for r in self._loaded_rows if self._matches_filter(r, needle)
-        ]
+        filtered = [r for r in self._loaded_rows if self._matches_filter(r, needle)]
         total = len(self._loaded_rows)
         if needle:
             self.coverage_text.value = f"{len(filtered)} of {total} documents"
         else:
-            self.coverage_text.value = (
-                f"{total} document{'s' if total != 1 else ''}"
-            )
+            self.coverage_text.value = f"{total} document{'s' if total != 1 else ''}"
         if not filtered:
             self.doc_list.controls = [
                 ft.Text(
                     f"No documents match '{needle}'.",
-                    italic=True, color=ft.Colors.GREY_500,
+                    italic=True,
+                    color=ft.Colors.GREY_500,
                 )
             ]
             return
-        self.doc_list.controls = [
-            self._render_doc_card(r) for r in filtered
-        ]
+        self.doc_list.controls = [self._render_doc_card(r) for r in filtered]
 
     def _render_doc_card(self, row: dict[str, Any]) -> ft.Control:
         status = (row.get("metadata_status") or "").strip() or "unknown"
         color = _STATUS_COLORS.get(status, ft.Colors.GREY_500)
-        title = (
-            row.get("title")
-            or _basename(row.get("source_path"))
-            or "(no title)"
-        )
+        title = row.get("title") or _basename(row.get("source_path")) or "(no title)"
         doc_type = row.get("sub_label") or row.get("main_label") or "—"
         date = _fmt_date(row.get("ingested_at"))
         n_chunks = row.get("n_chunks") or 0
@@ -315,9 +306,7 @@ class DocumentsView:
             meta_parts.append(date)
         chunk_str = f"{n_chunks} chunk{'s' if n_chunks != 1 else ''}"
         if n_figures:
-            chunk_str += (
-                f" · {n_figures} figure{'s' if n_figures != 1 else ''}"
-            )
+            chunk_str += f" · {n_figures} figure{'s' if n_figures != 1 else ''}"
         meta_parts.append(chunk_str)
         meta_line = "  ·  ".join(meta_parts)
 
@@ -337,7 +326,7 @@ class DocumentsView:
         reingest_button = ft.Button(
             content="Re-ingest",
             tooltip="Re-run the full pipeline on this document with the "
-                    "corpus's current settings (needs the source file)",
+            "corpus's current settings (needs the source file)",
             height=28,
             on_click=lambda e, s=snap: self._on_reingest_clicked(s),
         )
@@ -358,8 +347,10 @@ class DocumentsView:
                         controls=[
                             status_chip,
                             ft.Text(
-                                title, size=13,
-                                weight=ft.FontWeight.BOLD, expand=True,
+                                title,
+                                size=13,
+                                weight=ft.FontWeight.BOLD,
+                                expand=True,
                             ),
                             edit_button,
                             reingest_button,
@@ -370,8 +361,10 @@ class DocumentsView:
                     ),
                     ft.Text(meta_line, size=12, color=ft.Colors.GREY_300),
                     ft.Text(
-                        source_path, size=11,
-                        color=ft.Colors.GREY_500, selectable=True,
+                        source_path,
+                        size=11,
+                        color=ft.Colors.GREY_500,
+                        selectable=True,
                     ),
                 ],
             ),
@@ -396,11 +389,7 @@ class DocumentsView:
             "fields": fields,
             "lookup_checkbox": lookup_checkbox,
         }
-        heading = (
-            _basename(row.get("source_path"))
-            or (row.get("title") or "")
-            or f"{doc_id[:12]}…"
-        )
+        heading = _basename(row.get("source_path")) or (row.get("title") or "") or f"{doc_id[:12]}…"
 
         def _close(_ev: ft.Event) -> None:
             self.app.page.pop_dialog()
@@ -416,7 +405,9 @@ class DocumentsView:
             modal=True,
             title=ft.Text(f"Edit metadata — {heading}"),
             content=ft.Column(
-                spacing=8, tight=True, width=480,
+                spacing=8,
+                tight=True,
+                width=480,
                 scroll=ft.ScrollMode.AUTO,
                 controls=[
                     *fields.values(),
@@ -427,7 +418,9 @@ class DocumentsView:
                         "enriches the other fields afterward (status → "
                         "'enriched'). Chunk text + embeddings are never "
                         "touched.",
-                        size=10, italic=True, color=ft.Colors.GREY_500,
+                        size=10,
+                        italic=True,
+                        color=ft.Colors.GREY_500,
                     ),
                 ],
             ),
@@ -463,25 +456,28 @@ class DocumentsView:
             patch[key] = (fields[key].value or "").strip()
         year_raw = (fields["year"].value or "").strip()
         if year_raw:
-            try:
+            # leave `year` unchanged on unparseable input
+            with contextlib.suppress(ValueError):
                 patch["year"] = int(year_raw)
-            except ValueError:
-                pass  # leave `year` unchanged on unparseable input
         patch["metadata_status"] = "manual"
         return patch
 
     def _schedule_save(
-        self, doc_id: str, patch: dict[str, Any], *,
+        self,
+        doc_id: str,
+        patch: dict[str, Any],
+        *,
         lookup_doi: str | None = None,
     ) -> None:
         if not self._loop_running():
             return
-        self._spawn(
-            self._save_metadata(doc_id, patch, lookup_doi=lookup_doi)
-        )
+        self._spawn(self._save_metadata(doc_id, patch, lookup_doi=lookup_doi))
 
     async def _save_metadata(
-        self, doc_id: str, patch: dict[str, Any], *,
+        self,
+        doc_id: str,
+        patch: dict[str, Any],
+        *,
         lookup_doi: str | None = None,
     ) -> None:
         if not doc_id or not patch:
@@ -491,7 +487,8 @@ class DocumentsView:
         except Exception as exc:
             logger.warning(
                 "DocumentsView: update_doc_metadata(%s) failed: %r",
-                doc_id, exc,
+                doc_id,
+                exc,
             )
             return
         # RAA parity: with the box checked + a DOI, enrich from OpenAlex
@@ -501,12 +498,14 @@ class DocumentsView:
             from knowledge_agent.ingestion.metadata_resolution import (
                 lookup_known_doi,
             )
+
             try:
                 await lookup_known_doi(doc_id, lookup_doi)
             except Exception as exc:
                 logger.warning(
                     "DocumentsView: lookup_known_doi(%s) failed: %r",
-                    doc_id, exc,
+                    doc_id,
+                    exc,
                 )
         await self.reload(force=True)
 
@@ -533,9 +532,7 @@ class DocumentsView:
             or "document"
         )
         if not source_path:
-            self._set_op_status(
-                f"No source path recorded for '{name}' — can't re-ingest."
-            )
+            self._set_op_status(f"No source path recorded for '{name}' — can't re-ingest.")
             return
         if not Path(source_path).is_file():
             self._set_op_status(f"Source file not found: {source_path}")
@@ -556,7 +553,8 @@ class DocumentsView:
                 f"Re-run the full pipeline on '{name}' with the corpus's "
                 f"current settings (layers, extractors, ontologies)? This "
                 f"replaces the existing version.\n\nSource: {source_path}",
-                size=12, selectable=True,
+                size=12,
+                selectable=True,
             ),
             actions=[
                 ft.TextButton("Cancel", on_click=_cancel),
@@ -587,14 +585,17 @@ class DocumentsView:
             # preserve_existing_labels: keep the doc's stored type on a
             # re-ingest of the same file (its labels don't change).
             await pipeline.ingest_document(
-                Path(source_path), config,
+                Path(source_path),
+                config,
                 row.get("main_label") or "Document",
                 row.get("sub_label"),
                 preserve_existing_labels=True,
             )
         except Exception as exc:
             logger.warning(
-                "DocumentsView: re-ingest(%s) failed: %r", source_path, exc,
+                "DocumentsView: re-ingest(%s) failed: %r",
+                source_path,
+                exc,
             )
             self._op_busy = False
             self._set_op_status(f"Re-ingest of '{name}' failed: {exc}")
@@ -614,11 +615,14 @@ class DocumentsView:
         if not doc_id:
             return
         from knowledge_agent.ingestion.bulk_ops import delete_doc_plan
+
         try:
             plan = await delete_doc_plan(doc_id)
         except Exception as exc:
             logger.warning(
-                "DocumentsView: delete_doc_plan(%s) failed: %r", doc_id, exc,
+                "DocumentsView: delete_doc_plan(%s) failed: %r",
+                doc_id,
+                exc,
             )
             return
 
@@ -643,12 +647,14 @@ class DocumentsView:
 
     async def _do_delete(self, plan: Any) -> None:
         from knowledge_agent.ingestion.bulk_ops import delete_doc_execute
+
         try:
             result = await delete_doc_execute(plan)
         except Exception as exc:
             logger.warning(
                 "DocumentsView: delete_doc_execute(%s) failed: %r",
-                getattr(plan, "doc_id", "?"), exc,
+                getattr(plan, "doc_id", "?"),
+                exc,
             )
             return
         if not result.ok:

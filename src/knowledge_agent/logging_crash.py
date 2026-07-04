@@ -48,6 +48,7 @@ both limits are needed.
 
 from __future__ import annotations
 
+import contextlib
 import faulthandler
 import importlib.metadata
 import json
@@ -57,13 +58,14 @@ import platform
 import sys
 import threading
 import traceback
-from collections.abc import Callable
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
-from knowledge_agent.logging_ring_buffer import RingBufferHandler
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
+    from knowledge_agent.logging_ring_buffer import RingBufferHandler
 
 # ---------------------------------------------------------------------------
 # Format constants shared with `logging_setup` (kept in sync — the
@@ -72,10 +74,7 @@ from knowledge_agent.logging_ring_buffer import RingBufferHandler
 # ---------------------------------------------------------------------------
 
 
-LOG_FORMAT = (
-    "%(asctime)s.%(msecs)03d %(levelname)-7s [%(threadName)s] "
-    "%(name)s: %(message)s"
-)
+LOG_FORMAT = "%(asctime)s.%(msecs)03d %(levelname)-7s [%(threadName)s] %(name)s: %(message)s"
 LOG_DATEFMT = "%Y-%m-%dT%H:%M:%S"
 
 
@@ -110,9 +109,7 @@ the security boundary."""
 # ---------------------------------------------------------------------------
 
 
-def cleanup_old_crashes(
-    crash_dir: Path, retention_days: int, max_files: int
-) -> None:
+def cleanup_old_crashes(crash_dir: Path, retention_days: int, max_files: int) -> None:
     """Delete crash files older than `retention_days` AND keep only
     the newest `max_files`. Either limit alone is insufficient — a
     crash loop fills the folder faster than age-cleanup catches up.
@@ -122,7 +119,7 @@ def cleanup_old_crashes(
     """
     if not crash_dir.is_dir():
         return
-    now = datetime.now(timezone.utc).timestamp()
+    now = datetime.now(UTC).timestamp()
     cutoff = now - retention_days * 86400
     crash_files = sorted(
         (p for p in crash_dir.glob("crash_*.log") if p.is_file()),
@@ -130,10 +127,8 @@ def cleanup_old_crashes(
         reverse=True,
     )
     for path in crash_files[max_files:]:
-        try:
+        with contextlib.suppress(OSError):
             path.unlink()
-        except OSError:
-            pass
     for path in crash_files[:max_files]:
         try:
             if path.stat().st_mtime < cutoff:
@@ -159,9 +154,7 @@ def capture_system_info() -> dict[str, Any]:
     except importlib.metadata.PackageNotFoundError:
         app_version = "dev"
 
-    env_subset = {
-        k: os.environ[k] for k in ALLOWLISTED_ENV_KEYS if k in os.environ
-    }
+    env_subset = {k: os.environ[k] for k in ALLOWLISTED_ENV_KEYS if k in os.environ}
 
     packages: list[str] = []
     try:
@@ -182,9 +175,7 @@ def capture_system_info() -> dict[str, Any]:
                 "cuda_available": bool(torch_mod.cuda.is_available()),
                 "cuda_device_count": int(torch_mod.cuda.device_count()),
                 "cuda_device_name": (
-                    torch_mod.cuda.get_device_name(0)
-                    if torch_mod.cuda.is_available()
-                    else None
+                    torch_mod.cuda.get_device_name(0) if torch_mod.cuda.is_available() else None
                 ),
             }
         except Exception:
@@ -217,23 +208,19 @@ def write_crash_file(
     """
     try:
         crash_dir.mkdir(parents=True, exist_ok=True)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stamp = now.strftime("%Y-%m-%dT%H-%M-%SZ")
         path = crash_dir / f"crash_{stamp}.log"
 
         sysinfo = capture_system_info()
-        tb_lines = "".join(
-            traceback.format_exception(exc_type, exc_value, exc_traceback)
-        )
+        tb_lines = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
 
         ring_lines: list[str] = []
         if ring is not None:
             plain_formatter = logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT)
             for rec in ring.get_snapshot():
-                try:
+                with contextlib.suppress(Exception):
                     ring_lines.append(plain_formatter.format(rec))
-                except Exception:
-                    pass
 
         with path.open("w", encoding="utf-8") as fh:
             fh.write("=== Crash report ===\n")
@@ -268,9 +255,7 @@ def write_crash_file(
 # ---------------------------------------------------------------------------
 
 
-def make_sys_excepthook(
-    crash_dir: Path, ring: RingBufferHandler | None
-) -> Callable[..., None]:
+def make_sys_excepthook(crash_dir: Path, ring: RingBufferHandler | None) -> Callable[..., None]:
     """Return a `sys.excepthook` that writes a crash file then chains
     to the original Python hook so the interpreter still prints the
     traceback to stderr (visible in dev; harmless when packaged)."""
@@ -294,9 +279,7 @@ def make_sys_excepthook(
             source="sys.excepthook",
         )
         if path is not None:
-            logging.getLogger(__name__).critical(
-                "Crash report written to %s", path
-            )
+            logging.getLogger(__name__).critical("Crash report written to %s", path)
         original(exc_type, exc_value, exc_traceback)
 
     return hook
@@ -321,9 +304,7 @@ def make_threading_excepthook(
             source="threading.excepthook",
         )
         if path is not None:
-            logging.getLogger(__name__).critical(
-                "Crash report written to %s", path
-            )
+            logging.getLogger(__name__).critical("Crash report written to %s", path)
 
     return hook
 

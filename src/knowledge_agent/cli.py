@@ -30,6 +30,7 @@ Exit codes:
         check failed)
   - 2 — usage error (handled by argparse)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -65,7 +66,9 @@ async def _cmd_ingest(args: argparse.Namespace) -> int:
 
     config = load_corpus_config(config_path)
     plan = await bulk_ops.ingest_folder_plan(
-        folder, main_label=args.main_label, sub_label=args.sub_label,
+        folder,
+        main_label=args.main_label,
+        sub_label=args.sub_label,
     )
     print(plan.summary)
 
@@ -176,19 +179,24 @@ def _build_parser() -> argparse.ArgumentParser:
     p_ingest = subparsers.add_parser("ingest", help="Ingest a folder of documents.")
     p_ingest.add_argument("folder", help="Path to the folder to ingest.")
     p_ingest.add_argument(
-        "--config", default=_DEFAULT_CONFIG,
+        "--config",
+        default=_DEFAULT_CONFIG,
         help="Path to corpus.toml (default: ./corpus.toml).",
     )
     p_ingest.add_argument(
-        "--main-label", default="Document",
+        "--main-label",
+        default="Document",
         help="Main KG label for each ingested file (default: Document).",
     )
     p_ingest.add_argument(
-        "--sub-label", default=None,
+        "--sub-label",
+        default=None,
         help="Optional KG sub-label (e.g. Paper, Note).",
     )
     p_ingest.add_argument(
-        "-y", "--yes", action="store_true",
+        "-y",
+        "--yes",
+        action="store_true",
         help="Skip the confirmation prompt; ingest immediately.",
     )
     p_ingest.set_defaults(func=_cmd_ingest)
@@ -196,25 +204,33 @@ def _build_parser() -> argparse.ArgumentParser:
     p_query = subparsers.add_parser("query", help="Run one agent query end-to-end.")
     p_query.add_argument("query", help="Natural-language question.")
     p_query.add_argument(
-        "--config", default=_DEFAULT_CONFIG,
+        "--config",
+        default=_DEFAULT_CONFIG,
         help="Path to corpus.toml (default: ./corpus.toml).",
     )
     p_query.add_argument(
-        "--mode", default="auto",
+        "--mode",
+        default="auto",
         choices=(
-            "auto", "lancedb_only", "neo4j_only",
-            "lancedb_then_neo4j", "neo4j_then_lancedb", "parallel_fused",
+            "auto",
+            "lancedb_only",
+            "neo4j_only",
+            "lancedb_then_neo4j",
+            "neo4j_then_lancedb",
+            "parallel_fused",
         ),
         help="Force a specific retrieval mode (default: auto = classifier picks).",
     )
     p_query.add_argument(
-        "--json", action="store_true",
+        "--json",
+        action="store_true",
         help="Print the full AgentAnswer as JSON instead of just the answer text.",
     )
     p_query.set_defaults(func=_cmd_query)
 
     p_health = subparsers.add_parser(
-        "health", help="Liveness probe: Neo4j + LanceDB + active provider keys.",
+        "health",
+        help="Liveness probe: Neo4j + LanceDB + active provider keys.",
     )
     p_health.set_defaults(func=_cmd_health)
 

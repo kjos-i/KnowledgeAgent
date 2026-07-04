@@ -7,7 +7,7 @@ path. These unit tests pin the plan/execute split + the dispatch via
 `ONTOLOGY_REGISTRY` with everything mocked.
 """
 
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -33,20 +33,23 @@ from knowledge_agent.kg.ontology_lifecycle import (
     link_ontology_plan,
 )
 
-
 # ---- ImportOntologyPlan summary ----
 
 
 def test_import_plan_summary_when_already_imported():
     plan = ImportOntologyPlan(
-        ontology_name="mesh", already_imported=True, download_size_mb=115,
+        ontology_name="mesh",
+        already_imported=True,
+        download_size_mb=115,
     )
     assert "already imported" in plan.summary.lower()
 
 
 def test_import_plan_summary_when_not_imported_mentions_size():
     plan = ImportOntologyPlan(
-        ontology_name="mesh", already_imported=False, download_size_mb=115,
+        ontology_name="mesh",
+        already_imported=False,
+        download_size_mb=115,
     )
     assert "115 MB" in plan.summary
     assert "Import mesh" in plan.summary
@@ -73,10 +76,8 @@ async def test_import_ontology_plan_marks_already_imported_when_kg_has_it():
         },
     }
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
-              return_value=kg_mock),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client", return_value=kg_mock),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         plan = await import_ontology_plan("mesh")
 
@@ -96,10 +97,8 @@ async def test_import_ontology_plan_marks_not_imported_when_kg_has_none():
         },
     }
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
-              return_value=kg_mock),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client", return_value=kg_mock),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         plan = await import_ontology_plan("go")
 
@@ -112,16 +111,15 @@ async def test_import_ontology_plan_marks_not_imported_when_kg_has_none():
 async def test_import_ontology_execute_no_op_when_already_imported():
     """already_imported=True -> did_import False, import_ok True (idempotent)."""
     plan = ImportOntologyPlan(
-        ontology_name="mesh", already_imported=True, download_size_mb=115,
+        ontology_name="mesh",
+        already_imported=True,
+        download_size_mb=115,
     )
     import_fn = AsyncMock(return_value=True)
-    fake_registry = {
-        "mesh": {"import_fn": import_fn, "download_size_mb": 115}
-    }
+    fake_registry = {"mesh": {"import_fn": import_fn, "download_size_mb": 115}}
     with (
         patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client"),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         result = await import_ontology_execute(plan)
 
@@ -132,15 +130,15 @@ async def test_import_ontology_execute_no_op_when_already_imported():
 
 async def test_import_ontology_execute_runs_import_fn_when_not_imported():
     plan = ImportOntologyPlan(
-        ontology_name="mesh", already_imported=False, download_size_mb=115,
+        ontology_name="mesh",
+        already_imported=False,
+        download_size_mb=115,
     )
     import_fn = AsyncMock(return_value=True)
     fake_registry = {"mesh": {"import_fn": import_fn, "download_size_mb": 115}}
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
-              return_value=MagicMock()),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client", return_value=MagicMock()),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         result = await import_ontology_execute(plan)
 
@@ -154,7 +152,9 @@ async def test_import_ontology_execute_propagates_failure_from_import_fn():
     execute boundary catches and reports `import_ok=False` plus a
     typed `import_error` carrying the message + exception class."""
     plan = ImportOntologyPlan(
-        ontology_name="mesh", already_imported=False, download_size_mb=115,
+        ontology_name="mesh",
+        already_imported=False,
+        download_size_mb=115,
     )
 
     def _failing_import(client, **kw):
@@ -167,10 +167,8 @@ async def test_import_ontology_execute_propagates_failure_from_import_fn():
         },
     }
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
-              return_value=MagicMock()),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client", return_value=MagicMock()),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         result = await import_ontology_execute(plan)
 
@@ -183,13 +181,16 @@ async def test_import_ontology_execute_propagates_failure_from_import_fn():
 
 async def test_import_ontology_execute_returns_result_dataclass():
     plan = ImportOntologyPlan(
-        ontology_name="mesh", already_imported=True, download_size_mb=115,
+        ontology_name="mesh",
+        already_imported=True,
+        download_size_mb=115,
     )
     with (
         patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client"),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              {"mesh": {"import_fn": AsyncMock(return_value=True),
-                        "download_size_mb": 115}}),
+        patch(
+            "knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
+            {"mesh": {"import_fn": AsyncMock(return_value=True), "download_size_mb": 115}},
+        ),
     ):
         result = await import_ontology_execute(plan)
     assert isinstance(result, ImportOntologyResult)
@@ -249,12 +250,14 @@ async def test_link_ontology_plan_raises_on_bad_matching_strategy():
             "is_imported_fn": AsyncMock(return_value=True),
         },
     }
-    with patch(
-        "knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-        fake_registry,
+    with (
+        patch(
+            "knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
+            fake_registry,
+        ),
+        pytest.raises(ValueError),
     ):
-        with pytest.raises(ValueError):
-            await link_ontology_plan("mesh", matching_strategy="nope")
+        await link_ontology_plan("mesh", matching_strategy="nope")
 
 
 async def test_link_ontology_plan_marks_is_imported_true_when_terms_present():
@@ -265,10 +268,8 @@ async def test_link_ontology_plan_marks_is_imported_true_when_terms_present():
         },
     }
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
-              return_value=kg_mock),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client", return_value=kg_mock),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         plan = await link_ontology_plan("mesh")
 
@@ -283,10 +284,8 @@ async def test_link_ontology_plan_marks_is_imported_false_when_no_terms():
         },
     }
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
-              return_value=kg_mock),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client", return_value=kg_mock),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         plan = await link_ontology_plan("mesh")
 
@@ -296,13 +295,13 @@ async def test_link_ontology_plan_marks_is_imported_false_when_no_terms():
 async def test_link_ontology_plan_defaults_to_global_scope_and_exact_matching():
     kg_mock = MagicMock()
     fake_registry = {
-        "mesh": {"is_imported_fn": AsyncMock(return_value=True),},
+        "mesh": {
+            "is_imported_fn": AsyncMock(return_value=True),
+        },
     }
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
-              return_value=kg_mock),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client", return_value=kg_mock),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         plan = await link_ontology_plan("mesh")
 
@@ -313,16 +312,18 @@ async def test_link_ontology_plan_defaults_to_global_scope_and_exact_matching():
 async def test_link_ontology_plan_accepts_doc_id_scope_and_fuzzy_matching():
     kg_mock = MagicMock()
     fake_registry = {
-        "go": {"is_imported_fn": AsyncMock(return_value=True),},
+        "go": {
+            "is_imported_fn": AsyncMock(return_value=True),
+        },
     }
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
-              return_value=kg_mock),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client", return_value=kg_mock),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         plan = await link_ontology_plan(
-            "go", matching_strategy="fuzzy", scope="doc-xyz",
+            "go",
+            matching_strategy="fuzzy",
+            scope="doc-xyz",
         )
 
     assert plan.scope == "doc-xyz"
@@ -368,7 +369,9 @@ async def test_link_ontology_execute_passes_none_doc_id_for_global_scope():
         result = await link_ontology_execute(plan)
 
     kg_mock.link_entities_to_ontology.assert_called_once_with(
-        "mesh", "exact", doc_id=None,
+        "mesh",
+        "exact",
+        doc_id=None,
     )
     assert result.n_links_written == 42
     assert result.link_ok is True
@@ -390,7 +393,9 @@ async def test_link_ontology_execute_passes_doc_id_when_scope_is_doc_id():
         result = await link_ontology_execute(plan)
 
     kg_mock.link_entities_to_ontology.assert_called_once_with(
-        "go", "fuzzy", doc_id="abc123",
+        "go",
+        "fuzzy",
+        doc_id="abc123",
     )
     assert result.n_links_written == 7
     assert result.scope == "abc123"
@@ -460,16 +465,20 @@ async def test_link_ontology_execute_catches_linking_pass_failure():
 
 def test_delete_plan_summary_when_not_imported_is_noop_message():
     plan = DeleteOntologyPlan(
-        ontology_name="mesh", is_imported=False,
-        n_terms=0, n_canonical_links=0,
+        ontology_name="mesh",
+        is_imported=False,
+        n_terms=0,
+        n_canonical_links=0,
     )
     assert "not imported" in plan.summary.lower()
 
 
 def test_delete_plan_summary_mentions_terms_and_links():
     plan = DeleteOntologyPlan(
-        ontology_name="mesh", is_imported=True,
-        n_terms=30142, n_canonical_links=18,
+        ontology_name="mesh",
+        is_imported=True,
+        n_terms=30142,
+        n_canonical_links=18,
     )
     s = plan.summary
     assert "30142" in s
@@ -495,10 +504,8 @@ async def test_delete_ontology_plan_skips_counts_when_not_imported():
         },
     }
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
-              return_value=kg_mock),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client", return_value=kg_mock),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         plan = await delete_ontology_plan("mesh")
 
@@ -520,10 +527,8 @@ async def test_delete_ontology_plan_populates_counts_when_imported():
         },
     }
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
-              return_value=kg_mock),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client", return_value=kg_mock),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         plan = await delete_ontology_plan("mesh")
 
@@ -544,13 +549,11 @@ async def test_delete_ontology_plan_propagates_count_failure():
         },
     }
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
-              return_value=kg_mock),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client", return_value=kg_mock),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
+        pytest.raises(RuntimeError, match="cypher boom"),
     ):
-        with pytest.raises(RuntimeError, match="cypher boom"):
-            await delete_ontology_plan("mesh")
+        await delete_ontology_plan("mesh")
 
 
 # ---- delete_ontology_execute ----
@@ -558,15 +561,16 @@ async def test_delete_ontology_plan_propagates_count_failure():
 
 async def test_delete_ontology_execute_no_op_when_not_imported():
     plan = DeleteOntologyPlan(
-        ontology_name="mesh", is_imported=False,
-        n_terms=0, n_canonical_links=0,
+        ontology_name="mesh",
+        is_imported=False,
+        n_terms=0,
+        n_canonical_links=0,
     )
     delete_fn = AsyncMock(return_value=True)
     fake_registry = {"mesh": {"delete_fn": delete_fn}}
     with (
         patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client"),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         result = await delete_ontology_execute(plan)
 
@@ -577,16 +581,16 @@ async def test_delete_ontology_execute_no_op_when_not_imported():
 
 async def test_delete_ontology_execute_runs_delete_fn_when_imported():
     plan = DeleteOntologyPlan(
-        ontology_name="mesh", is_imported=True,
-        n_terms=100, n_canonical_links=5,
+        ontology_name="mesh",
+        is_imported=True,
+        n_terms=100,
+        n_canonical_links=5,
     )
     delete_fn = AsyncMock(return_value=True)
     fake_registry = {"mesh": {"delete_fn": delete_fn}}
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
-              return_value=MagicMock()),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client", return_value=MagicMock()),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         result = await delete_ontology_execute(plan)
 
@@ -600,8 +604,10 @@ async def test_delete_ontology_execute_propagates_failure():
     boundary catches and reports `delete_ok=False` plus a typed
     `delete_error` carrying the message + exception class."""
     plan = DeleteOntologyPlan(
-        ontology_name="mesh", is_imported=True,
-        n_terms=100, n_canonical_links=5,
+        ontology_name="mesh",
+        is_imported=True,
+        n_terms=100,
+        n_canonical_links=5,
     )
 
     def _failing_delete(client):
@@ -609,10 +615,8 @@ async def test_delete_ontology_execute_propagates_failure():
 
     fake_registry = {"mesh": {"delete_fn": _failing_delete}}
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
-              return_value=MagicMock()),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client", return_value=MagicMock()),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         result = await delete_ontology_execute(plan)
 
@@ -625,13 +629,21 @@ async def test_delete_ontology_execute_propagates_failure():
 
 async def test_delete_ontology_execute_returns_result_dataclass():
     plan = DeleteOntologyPlan(
-        ontology_name="mesh", is_imported=False,
-        n_terms=0, n_canonical_links=0,
+        ontology_name="mesh",
+        is_imported=False,
+        n_terms=0,
+        n_canonical_links=0,
     )
     with (
         patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client"),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              {"mesh": {"delete_fn": AsyncMock(return_value=True),}}),
+        patch(
+            "knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
+            {
+                "mesh": {
+                    "delete_fn": AsyncMock(return_value=True),
+                }
+            },
+        ),
     ):
         result = await delete_ontology_execute(plan)
     assert isinstance(result, DeleteOntologyResult)
@@ -695,10 +707,8 @@ async def test_import_ontology_plan_threads_xrefs_mode_into_dataclass():
         },
     }
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
-              return_value=kg_mock),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client", return_value=kg_mock),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         plan = await import_ontology_plan("mesh", xrefs_mode="use")
     assert plan.xrefs_mode == "use"
@@ -726,10 +736,8 @@ async def test_import_ontology_execute_passes_xrefs_mode_to_import_fn():
         },
     }
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
-              return_value=MagicMock()),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client", return_value=MagicMock()),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         result = await import_ontology_execute(plan)
     assert result.import_ok is True
@@ -797,6 +805,7 @@ def test_install_xrefs_plan_summary_none_describes_disable():
 async def test_install_xrefs_plan_factory_aggregates_counts_across_18():
     """`install_xrefs_plan` walks all 18 sub-labels via the diagnostics
     in `kg.ontology_xrefs` and aggregates counts."""
+
     # Stub the count primitives to return predictable per-label counts.
     def fake_dangling(client, term_label):
         return {"MeSHTerm": 4, "GOTerm": 3}.get(term_label, 0)
@@ -819,21 +828,19 @@ async def test_install_xrefs_plan_factory_aggregates_counts_across_18():
     # Registry must map for every term_label so the factory's
     # is_imported probe always finds an entry.
     from knowledge_agent.kg.schema import ONTOLOGY_SUB_LABELS
+
     fake_registry = {
-        f"key_{lbl}": {**fake_registry_entry, "term_label": lbl}
-        for lbl in ONTOLOGY_SUB_LABELS
+        f"key_{lbl}": {**fake_registry_entry, "term_label": lbl} for lbl in ONTOLOGY_SUB_LABELS
     }
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.count_dangling_xrefs",
-              side_effect=fake_dangling),
-        patch("knowledge_agent.kg.ontology_lifecycle.count_xref_edges",
-              side_effect=fake_edges),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch(
+            "knowledge_agent.kg.ontology_lifecycle.count_dangling_xrefs", side_effect=fake_dangling
+        ),
+        patch("knowledge_agent.kg.ontology_lifecycle.count_xref_edges", side_effect=fake_edges),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
         # Rebuild the cached label->registry-key map after the patch.
         patch(
-            "knowledge_agent.kg.ontology_lifecycle."
-            "_TERM_LABEL_TO_REGISTRY_KEY",
+            "knowledge_agent.kg.ontology_lifecycle._TERM_LABEL_TO_REGISTRY_KEY",
             {lbl: f"key_{lbl}" for lbl in ONTOLOGY_SUB_LABELS},
         ),
     ):
@@ -853,6 +860,7 @@ async def test_install_xrefs_plan_factory_fail_soft_on_dangling_count_none():
     """When `count_dangling_xrefs` returns None for a label, the
     factory skips that label and keeps going (the plan is still
     built from the data we did get)."""
+
     def fake_dangling(client, term_label):
         # First call returns None (simulating Cypher error), then 0.
         if term_label == "MeSHTerm":
@@ -863,10 +871,10 @@ async def test_install_xrefs_plan_factory_fail_soft_on_dangling_count_none():
         return 0
 
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.count_dangling_xrefs",
-              side_effect=fake_dangling),
-        patch("knowledge_agent.kg.ontology_lifecycle.count_xref_edges",
-              side_effect=fake_edges),
+        patch(
+            "knowledge_agent.kg.ontology_lifecycle.count_dangling_xrefs", side_effect=fake_dangling
+        ),
+        patch("knowledge_agent.kg.ontology_lifecycle.count_xref_edges", side_effect=fake_edges),
     ):
         plan = await install_xrefs_plan(MagicMock(), "collect_only")
     assert isinstance(plan, InstallXrefsPlan)
@@ -929,19 +937,24 @@ async def test_install_cross_doc_xrefs_plan_factory_reads_live_counts():
     class FakeSession:
         def __init__(self):
             self.calls = []
-            self._iter = iter([
-                {"n": 73},   # count of focal nodes
-                {"n": 19},   # count of L10 edges
-            ])
+            self._iter = iter(
+                [
+                    {"n": 73},  # count of focal nodes
+                    {"n": 19},  # count of L10 edges
+                ]
+            )
 
         async def run(self, query, **params):
             self.calls.append(query)
             row = next(self._iter)
+
             class _R:
                 def __init__(self, r):
                     self._r = r
+
                 async def single(self):
                     return self._r
+
             return _R(row)
 
         async def __aenter__(self):
@@ -974,6 +987,7 @@ async def test_install_cross_doc_xrefs_plan_factory_reads_live_counts():
 async def test_install_cross_doc_xrefs_plan_factory_fail_soft_on_count_error():
     """If both count primitives raise, the plan still builds with
     n_docs=0 and n_existing_l10_edges=0 (graceful degradation)."""
+
     class FakeDriver:
         def session(self):
             raise RuntimeError("driver down")
@@ -1081,20 +1095,22 @@ def test_import_plan_rich_summary_when_provenance_present():
     """Provenance set -> summary picks up publisher / license /
     source / domain / covers_labels / description, replacing the
     legacy bare line."""
-    p = OntologyProvenance(**_provenance_kwargs(
-        ontology_name="mondo",
-        full_name="Mondo Disease Ontology",
-        publisher="Mondo Initiative + Monarch Initiative",
-        license="CC0 1.0",
-        source_url="https://mondo.monarchinitiative.org/",
-        download_url="https://example/mondo.obo",
-        file_format="OBO",
-        download_size_mb=30,
-        estimated_terms=24000,
-        domain_tags=("medicine",),
-        covers_labels=("DISEASE",),
-        description="Integrated disease ontology across DOID, OMIM, Orphanet, etc.",
-    ))
+    p = OntologyProvenance(
+        **_provenance_kwargs(
+            ontology_name="mondo",
+            full_name="Mondo Disease Ontology",
+            publisher="Mondo Initiative + Monarch Initiative",
+            license="CC0 1.0",
+            source_url="https://mondo.monarchinitiative.org/",
+            download_url="https://example/mondo.obo",
+            file_format="OBO",
+            download_size_mb=30,
+            estimated_terms=24000,
+            domain_tags=("medicine",),
+            covers_labels=("DISEASE",),
+            description="Integrated disease ontology across DOID, OMIM, Orphanet, etc.",
+        )
+    )
     plan = ImportOntologyPlan(
         ontology_name="mondo",
         already_imported=False,
@@ -1107,18 +1123,20 @@ def test_import_plan_rich_summary_when_provenance_present():
     assert "CC0 1.0" in s
     assert "https://mondo.monarchinitiative.org/" in s
     assert "OBO" in s
-    assert "24,000" in s   # formatted with commas
+    assert "24,000" in s  # formatted with commas
     assert "medicine" in s
     assert "DISEASE" in s
     assert "Integrated disease ontology" in s
 
 
 def test_import_plan_rich_summary_includes_heavy_warning_when_present():
-    p = OntologyProvenance(**_provenance_kwargs(
-        ontology_name="ncbitaxon",
-        full_name="NCBI Taxonomy",
-        heavy_warning="~2.74M classes / ~440 MB / several GB RAM at import",
-    ))
+    p = OntologyProvenance(
+        **_provenance_kwargs(
+            ontology_name="ncbitaxon",
+            full_name="NCBI Taxonomy",
+            heavy_warning="~2.74M classes / ~440 MB / several GB RAM at import",
+        )
+    )
     plan = ImportOntologyPlan(
         ontology_name="ncbitaxon",
         already_imported=False,
@@ -1183,10 +1201,8 @@ async def test_import_ontology_plan_factory_reads_provenance_from_registry():
         },
     }
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
-              return_value=kg_mock),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client", return_value=kg_mock),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         plan = await import_ontology_plan("mesh")
     assert plan.provenance is p
@@ -1208,10 +1224,8 @@ async def test_import_ontology_plan_factory_handles_registry_without_provenance(
         },
     }
     with (
-        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client",
-              return_value=kg_mock),
-        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY",
-              fake_registry),
+        patch("knowledge_agent.kg.ontology_lifecycle.get_kg_client", return_value=kg_mock),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
     ):
         plan = await import_ontology_plan("go")
     assert plan.provenance is None
@@ -1226,6 +1240,7 @@ def test_mesh_pilot_provenance_constant_exposed_via_module():
     """The MeSH module exports a `_MESH_PROVENANCE` constant with
     real values that match the registry."""
     from knowledge_agent.kg import ontology_mesh_writes
+
     p = ontology_mesh_writes._MESH_PROVENANCE
     assert isinstance(p, OntologyProvenance)
     assert p.ontology_name == "mesh"
@@ -1242,6 +1257,7 @@ def test_mesh_pilot_registry_entry_carries_provenance():
     from knowledge_agent.kg.ontology_linking import (
         ONTOLOGY_REGISTRY,
     )
+
     entry = ONTOLOGY_REGISTRY["mesh"]
     assert entry.get("provenance") is ontology_mesh_writes._MESH_PROVENANCE
 
@@ -1253,11 +1269,11 @@ def test_every_shipped_ontology_has_registry_provenance():
     from knowledge_agent.kg.ontology_linking import (
         ONTOLOGY_REGISTRY,
     )
+
     for name, entry in ONTOLOGY_REGISTRY.items():
         provenance = entry.get("provenance")
         assert isinstance(provenance, OntologyProvenance), (
-            f"{name}: registry entry is missing provenance "
-            "(expected OntologyProvenance instance)."
+            f"{name}: registry entry is missing provenance (expected OntologyProvenance instance)."
         )
         # The provenance's own name field matches the registry key.
         assert provenance.ontology_name == name, (
@@ -1272,6 +1288,7 @@ def test_every_shipped_ontology_provenance_has_required_fields():
     from knowledge_agent.kg.ontology_linking import (
         ONTOLOGY_REGISTRY,
     )
+
     for name, entry in ONTOLOGY_REGISTRY.items():
         p = entry["provenance"]
         assert p.full_name, f"{name}: full_name empty"
@@ -1284,12 +1301,8 @@ def test_every_shipped_ontology_provenance_has_required_fields():
             f"{name}: download_url not URL-shaped: {p.download_url!r}"
         )
         assert p.file_format, f"{name}: file_format empty"
-        assert p.download_size_mb > 0, (
-            f"{name}: download_size_mb must be > 0"
-        )
-        assert p.estimated_terms > 0, (
-            f"{name}: estimated_terms must be > 0"
-        )
+        assert p.download_size_mb > 0, f"{name}: download_size_mb must be > 0"
+        assert p.estimated_terms > 0, f"{name}: estimated_terms must be > 0"
         assert p.domain_tags, f"{name}: domain_tags must be non-empty"
         assert p.description, f"{name}: description empty"
 
@@ -1300,6 +1313,7 @@ def test_ncbitaxon_and_dron_have_heavy_warnings():
     from knowledge_agent.kg.ontology_linking import (
         ONTOLOGY_REGISTRY,
     )
+
     assert ONTOLOGY_REGISTRY["ncbitaxon"]["provenance"].heavy_warning
     assert ONTOLOGY_REGISTRY["dron"]["provenance"].heavy_warning
 
@@ -1308,11 +1322,16 @@ def test_go_domain_tags_dropped_pharmacology():
     """GO covers biology / chemistry / proteins; pharmacology was
     dropped in step 2 since drug pharmacology belongs to DRON/ChEBI."""
     from knowledge_agent.kg import ontology_go_writes
+
     assert ontology_go_writes.DOMAIN_TAGS == (
-        "biology", "chemistry", "proteins",
+        "biology",
+        "chemistry",
+        "proteins",
     )
     assert ontology_go_writes._GO_PROVENANCE.domain_tags == (
-        "biology", "chemistry", "proteins",
+        "biology",
+        "chemistry",
+        "proteins",
     )
 
 
@@ -1327,9 +1346,11 @@ async def test_mesh_pilot_factory_produces_rich_summary():
     from knowledge_agent.kg.ontology_linking import (
         ONTOLOGY_REGISTRY,
     )
+
     # Preserve original, swap in a stub, restore after.
     async def _not_imported(_c):
         return False
+
     original_entry = dict(ONTOLOGY_REGISTRY["mesh"])
     ONTOLOGY_REGISTRY["mesh"]["is_imported_fn"] = _not_imported
     try:
@@ -1408,7 +1429,11 @@ def test_get_canonicalization_candidates_hunflair2_5_label_set():
     entry (possibly empty)."""
     candidates = get_canonicalization_candidates("hunflair2")
     assert set(candidates) == {
-        "DISEASE", "CHEMICAL", "GENE", "SPECIES", "CELL_LINE",
+        "DISEASE",
+        "CHEMICAL",
+        "GENE",
+        "SPECIES",
+        "CELL_LINE",
     }
 
 
@@ -1481,6 +1506,7 @@ async def test_import_plan_rich_summary_surfaces_extractor_candidates():
     """When the plan carries extractor_candidates, the summary
     appends a 'Pairs well with extractors:' block."""
     from knowledge_agent.kg.ontology_linking import ONTOLOGY_REGISTRY
+
     with (
         patch(
             "knowledge_agent.kg.ontology_lifecycle.get_kg_client",
@@ -1488,7 +1514,9 @@ async def test_import_plan_rich_summary_surfaces_extractor_candidates():
         ),
         patch.dict(
             ONTOLOGY_REGISTRY["mesh"],
-            {"is_imported_fn": AsyncMock(return_value=False),},
+            {
+                "is_imported_fn": AsyncMock(return_value=False),
+            },
         ),
     ):
         plan = await import_ontology_plan("mesh")
@@ -1503,6 +1531,7 @@ async def test_import_plan_rich_summary_handles_empty_extractor_candidates():
     summary surfaces the explanatory 'no extractor-pairable surface'
     note instead of dangling the Pairs-well-with block."""
     from knowledge_agent.kg.ontology_linking import ONTOLOGY_REGISTRY
+
     with (
         patch(
             "knowledge_agent.kg.ontology_lifecycle.get_kg_client",
@@ -1510,7 +1539,9 @@ async def test_import_plan_rich_summary_handles_empty_extractor_candidates():
         ),
         patch.dict(
             ONTOLOGY_REGISTRY["eco"],
-            {"is_imported_fn": AsyncMock(return_value=False),},
+            {
+                "is_imported_fn": AsyncMock(return_value=False),
+            },
         ),
     ):
         plan = await import_ontology_plan("eco")
@@ -1523,11 +1554,13 @@ def test_import_plan_summary_no_extractor_pairs_when_covers_set_but_no_match():
     """Hypothetical: covers_labels declared but no shipped extractor
     emits matching labels. Summary says so explicitly (don't dangle
     'Pairs well with' on an empty block)."""
-    p = OntologyProvenance(**_provenance_kwargs(
-        ontology_name="hypothetical",
-        full_name="Hypothetical",
-        covers_labels=("UNICORN_LABEL",),  # no extractor emits this
-    ))
+    p = OntologyProvenance(
+        **_provenance_kwargs(
+            ontology_name="hypothetical",
+            full_name="Hypothetical",
+            covers_labels=("UNICORN_LABEL",),  # no extractor emits this
+        )
+    )
     plan = ImportOntologyPlan(
         ontology_name="hypothetical",
         already_imported=False,
@@ -1548,6 +1581,7 @@ def test_install_extractor_plan_surfaces_canonicalisation_targets():
     from knowledge_agent.entity_extractors.extractor_lifecycle import (
         install_extractor_plan,
     )
+
     plan = install_extractor_plan("gliner_biomed")
     s = plan.summary
     assert "Canonicalisation targets" in s
@@ -1562,6 +1596,7 @@ def test_install_extractor_plan_marks_unmatched_label_explicitly():
     from knowledge_agent.entity_extractors.extractor_lifecycle import (
         install_extractor_plan,
     )
+
     plan = install_extractor_plan("gliner")
     s = plan.summary
     assert "PERSON" in s
@@ -1574,6 +1609,7 @@ def test_install_extractor_plan_llm_says_open_vocab_lexically():
     from knowledge_agent.entity_extractors.extractor_lifecycle import (
         install_extractor_plan,
     )
+
     plan = install_extractor_plan("llm")
     s = plan.summary
     assert "any ontology lexically" in s.lower() or "open vocabulary" in s.lower()
@@ -1586,6 +1622,7 @@ async def test_import_ontology_plan_threads_extractor_candidates():
     """Factory pre-computes extractor candidates and stores them on
     the plan."""
     from knowledge_agent.kg.ontology_linking import ONTOLOGY_REGISTRY
+
     with (
         patch(
             "knowledge_agent.kg.ontology_lifecycle.get_kg_client",
@@ -1593,7 +1630,9 @@ async def test_import_ontology_plan_threads_extractor_candidates():
         ),
         patch.dict(
             ONTOLOGY_REGISTRY["mondo"],
-            {"is_imported_fn": AsyncMock(return_value=False),},
+            {
+                "is_imported_fn": AsyncMock(return_value=False),
+            },
         ),
     ):
         plan = await import_ontology_plan("mondo")
@@ -1608,6 +1647,7 @@ def test_install_extractor_plan_threads_canonicalization_candidates():
     from knowledge_agent.entity_extractors.extractor_lifecycle import (
         install_extractor_plan,
     )
+
     plan = install_extractor_plan("gliner_biomed")
     assert plan.canonicalization_candidates is not None
     by_label = dict(plan.canonicalization_candidates)
@@ -1620,5 +1660,6 @@ def test_install_extractor_plan_llm_canonicalization_candidates_is_none():
     from knowledge_agent.entity_extractors.extractor_lifecycle import (
         install_extractor_plan,
     )
+
     plan = install_extractor_plan("llm")
     assert plan.canonicalization_candidates is None

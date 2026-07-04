@@ -94,6 +94,7 @@ require restart; the GUI surfaces a notice when settings change.
 from __future__ import annotations
 
 import atexit
+import contextlib
 import gzip
 import logging
 import logging.config
@@ -102,10 +103,9 @@ import os
 import queue
 import re
 import sys
-from collections.abc import Callable
 from logging import LogRecord
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import platformdirs
 import tomlkit
@@ -131,31 +131,33 @@ from knowledge_agent.logging_ring_buffer import (
     RingBufferHandler,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 __all__ = [
-    # Public API
-    "init_logging",
-    "LoggingSettings",
-    "RingBufferHandler",
-    "RedactingFormatter",
+    "ALLOWLISTED_ENV_KEYS",
     # Constants other modules read
     "APP_NAME",
-    "LOG_FILE_NAME",
     "CRASH_SUBDIR",
-    "FAULT_LOG_NAME",
-    "RING_BUFFER_SIZE",
-    "ALLOWLISTED_ENV_KEYS",
-    "LIBRARY_NOISE_CLAMP",
-    "LOG_FORMAT",
-    "LOG_DATEFMT",
+    "ENV_LOG_CONSOLE",
     "ENV_LOG_DIR",
     "ENV_LOG_LEVEL",
-    "ENV_LOG_CONSOLE",
     "ENV_PACKAGED",
+    "FAULT_LOG_NAME",
+    "LIBRARY_NOISE_CLAMP",
+    "LOG_DATEFMT",
+    "LOG_FILE_NAME",
+    "LOG_FORMAT",
+    "RING_BUFFER_SIZE",
+    "LoggingSettings",
+    "RedactingFormatter",
+    "RingBufferHandler",
     # Re-exports from logging_crash (test imports still work)
     "capture_system_info",
     "cleanup_old_crashes",
     "enable_faulthandler",
+    # Public API
+    "init_logging",
     "install_crash_handlers",
     "make_asyncio_exception_handler",
     "make_sys_excepthook",
@@ -178,10 +180,7 @@ SETTINGS_FILE_NAME = "settings.toml"
 ROTATING_MAX_BYTES = 20 * 1024 * 1024  # 20 MB
 ROTATING_BACKUP_COUNT = 10  # ~30-50 MB on disk with gzip
 
-LOG_FORMAT = (
-    "%(asctime)s.%(msecs)03d %(levelname)-7s [%(threadName)s] "
-    "%(name)s: %(message)s"
-)
+LOG_FORMAT = "%(asctime)s.%(msecs)03d %(levelname)-7s [%(threadName)s] %(name)s: %(message)s"
 LOG_DATEFMT = "%Y-%m-%dT%H:%M:%S"
 
 ENV_LOG_DIR = "KAGENT_LOG_DIR"
@@ -309,8 +308,7 @@ class LoggingSettings(BaseModel):
         toml_values: dict[str, Any] = {}
         if settings_path is None:
             settings_path = (
-                Path(platformdirs.user_data_dir(APP_NAME, appauthor=False))
-                / SETTINGS_FILE_NAME
+                Path(platformdirs.user_data_dir(APP_NAME, appauthor=False)) / SETTINGS_FILE_NAME
             )
         if settings_path.is_file():
             try:
@@ -384,9 +382,7 @@ def _detect_packaged() -> bool:
     if sys.stdout is None or sys.stderr is None:
         return True
     exe_stem = Path(sys.executable).stem.lower()
-    if exe_stem and not exe_stem.startswith("python") and not exe_stem.startswith("py"):
-        return True
-    return False
+    return bool(exe_stem and not exe_stem.startswith("python") and not exe_stem.startswith("py"))
 
 
 # ---------------------------------------------------------------------------
@@ -401,9 +397,7 @@ def _resolve_log_dir(settings: LoggingSettings) -> Path:
     """
     if settings.log_dir is not None:
         return Path(settings.log_dir).expanduser().resolve()
-    return Path(
-        platformdirs.user_log_dir(APP_NAME, appauthor=False)
-    ).expanduser().resolve()
+    return Path(platformdirs.user_log_dir(APP_NAME, appauthor=False)).expanduser().resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -427,10 +421,8 @@ def _gzip_rotator(source: str, dest: str) -> None:
         os.remove(source)
     except OSError:
         # If gzip fails, fall back to plain move so we don't lose data.
-        try:
+        with contextlib.suppress(OSError):
             os.replace(source, dest.removesuffix(".gz"))
-        except OSError:
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -498,8 +490,7 @@ def _build_log_config(
         }
 
     loggers: dict[str, dict[str, Any]] = {
-        name: {"level": level}
-        for name, level in LIBRARY_NOISE_CLAMP.items()
+        name: {"level": level} for name, level in LIBRARY_NOISE_CLAMP.items()
     }
 
     return {
@@ -587,11 +578,7 @@ def init_logging(
         settings = LoggingSettings.load(settings_path)
 
     is_packaged = _detect_packaged()
-    console_enabled = (
-        settings.console
-        if settings.console is not None
-        else not is_packaged
-    )
+    console_enabled = settings.console if settings.console is not None else not is_packaged
 
     log_dir = _resolve_log_dir(settings)
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -607,10 +594,8 @@ def init_logging(
     # don't accumulate threads. dictConfig itself is safe to re-call
     # with `disable_existing_loggers: False`.
     if _LISTENER is not None:
-        try:
+        with contextlib.suppress(Exception):
             _LISTENER.stop()
-        except Exception:
-            pass
         _LISTENER = None
     # Reset the queue so stale records from a prior init don't replay.
     _LOG_QUEUE = queue.Queue(-1)
@@ -631,8 +616,7 @@ def init_logging(
         file_h.rotator = _gzip_rotator
 
     real_handlers: list[logging.Handler] = [
-        h for h in (file_h, console_h, ring_h, archive_h)
-        if isinstance(h, logging.Handler)
+        h for h in (file_h, console_h, ring_h, archive_h) if isinstance(h, logging.Handler)
     ]
 
     _LISTENER = logging.handlers.QueueListener(
@@ -671,8 +655,6 @@ def _shutdown_listener() -> None:
     queued records are flushed before the process dies."""
     global _LISTENER
     if _LISTENER is not None:
-        try:
+        with contextlib.suppress(Exception):
             _LISTENER.stop()
-        except Exception:
-            pass
         _LISTENER = None

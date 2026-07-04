@@ -23,14 +23,11 @@ from knowledge_agent.kg.cypher_safety import (
     wrap_with_limit,
 )
 
-
 # ---- is_cypher_read_only ----
 
 
 def test_read_only_query_passes():
-    assert is_cypher_read_only(
-        "MATCH (d:Document) RETURN d.doc_id LIMIT 10"
-    )
+    assert is_cypher_read_only("MATCH (d:Document) RETURN d.doc_id LIMIT 10")
 
 
 def test_empty_string_passes():
@@ -41,17 +38,13 @@ def test_each_forbidden_keyword_rejects():
     """Every keyword in FORBIDDEN_KEYWORDS rejects Cypher containing it."""
     for kw in FORBIDDEN_KEYWORDS:
         cypher = f"MATCH (n) {kw} n.x = 1 RETURN n"
-        assert not is_cypher_read_only(cypher), (
-            f"Forbidden keyword {kw!r} should reject the cypher"
-        )
+        assert not is_cypher_read_only(cypher), f"Forbidden keyword {kw!r} should reject the cypher"
 
 
 def test_keyword_rejection_is_case_insensitive():
     for variant in ("CREATE", "create", "Create", "CrEaTe"):
         cypher = f"{variant} (n:X) RETURN n"
-        assert not is_cypher_read_only(cypher), (
-            f"Case variant {variant!r} should reject"
-        )
+        assert not is_cypher_read_only(cypher), f"Case variant {variant!r} should reject"
 
 
 def test_property_named_after_keyword_does_not_reject():
@@ -115,9 +108,9 @@ def _case_permutations(word: str) -> st.SearchStrategy[str]:
     pin that the validator's case-insensitivity holds for arbitrary
     case mixings of every forbidden keyword.
     """
-    return st.tuples(
-        *[st.sampled_from([c.lower(), c.upper()]) for c in word]
-    ).map(lambda parts: "".join(parts))
+    return st.tuples(*[st.sampled_from([c.lower(), c.upper()]) for c in word]).map(
+        lambda parts: "".join(parts)
+    )
 
 
 @given(safe=_SAFE_TEXT)
@@ -132,9 +125,7 @@ def test_safe_text_always_passes_validator(safe: str) -> None:
     prefix=_SAFE_TEXT,
     suffix=_SAFE_TEXT,
 )
-def test_text_with_forbidden_keyword_always_rejects(
-    keyword: str, prefix: str, suffix: str
-) -> None:
+def test_text_with_forbidden_keyword_always_rejects(keyword: str, prefix: str, suffix: str) -> None:
     """Any text that embeds a forbidden keyword at a word boundary
     (between safe-alphabet characters that include whitespace + line
     breaks) must be rejected — regardless of where in the string the
@@ -148,15 +139,10 @@ def test_text_with_forbidden_keyword_always_rejects(
     prefix=_SAFE_TEXT,
     suffix=_SAFE_TEXT,
 )
-def test_case_variants_of_forbidden_keyword_reject(
-    keyword: str, prefix: str, suffix: str
-) -> None:
+def test_case_variants_of_forbidden_keyword_reject(keyword: str, prefix: str, suffix: str) -> None:
     """For each case permutation of a forbidden keyword (e.g. cReAtE),
     the validator still rejects — locks case-insensitive detection."""
-    permuted = "".join(
-        c.upper() if (i % 2 == 0) else c.lower()
-        for i, c in enumerate(keyword)
-    )
+    permuted = "".join(c.upper() if (i % 2 == 0) else c.lower() for i, c in enumerate(keyword))
     cypher = f"{prefix} {permuted} {suffix}"
     assert not is_cypher_read_only(cypher)
 
@@ -165,9 +151,7 @@ def test_case_variants_of_forbidden_keyword_reject(
     inner=st.text(alphabet=_SAFE_CHARS, min_size=1, max_size=200),
     limit=st.integers(min_value=1, max_value=10_000),
 )
-def test_wrap_with_limit_preserves_inner_and_caps_outer(
-    inner: str, limit: int
-) -> None:
+def test_wrap_with_limit_preserves_inner_and_caps_outer(inner: str, limit: int) -> None:
     """For any safe inner Cypher + any positive limit, the wrapped
     output contains the inner string verbatim AND ends with the
     LIMIT N clause carrying the requested N."""

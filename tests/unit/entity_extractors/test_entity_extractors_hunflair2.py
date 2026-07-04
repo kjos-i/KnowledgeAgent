@@ -21,7 +21,6 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
 from knowledge_agent.entity_extractors import hunflair2
-from knowledge_agent.entity_extractors.base import Mention
 
 
 @dataclass
@@ -82,7 +81,7 @@ class _FakeSentence:
         self.text = text
         self._spans: list[_FakeSpan] = []
 
-    def get_spans(self, layer: str):  # noqa: ARG002
+    def get_spans(self, layer: str):
         return list(self._spans)
 
 
@@ -112,12 +111,15 @@ async def _run_extract(spans: list[_FakeSpan], entity_types: list[str] | None = 
     in every test.
     """
     fake_model = _fake_model_emitting(spans)
-    with patch(
-        "knowledge_agent.entity_extractors.hunflair2._get_model",
-        return_value=fake_model,
-    ), patch(
-        "knowledge_agent.entity_extractors.hunflair2._build_sentence",
-        side_effect=lambda text: _FakeSentence(text),
+    with (
+        patch(
+            "knowledge_agent.entity_extractors.hunflair2._get_model",
+            return_value=fake_model,
+        ),
+        patch(
+            "knowledge_agent.entity_extractors.hunflair2._build_sentence",
+            side_effect=lambda text: _FakeSentence(text),
+        ),
     ):
         return await hunflair2.extract(
             "input text",
@@ -134,16 +136,11 @@ async def test_extract_normalises_flair_title_case_to_uppercase_snake():
     """Disease → DISEASE; CellLine → CELL_LINE etc. so :Entity nodes
     have consistent label casing across all adapters."""
     spans = [
-        _FakeSpan(text="diabetes", tag="Disease",
-                  start_position=10, score=0.92),
-        _FakeSpan(text="HeLa", tag="CellLine",
-                  start_position=30, score=0.88),
-        _FakeSpan(text="aspirin", tag="Chemical",
-                  start_position=50, score=0.95),
-        _FakeSpan(text="TP53", tag="Gene",
-                  start_position=70, score=0.91),
-        _FakeSpan(text="E. coli", tag="Species",
-                  start_position=90, score=0.85),
+        _FakeSpan(text="diabetes", tag="Disease", start_position=10, score=0.92),
+        _FakeSpan(text="HeLa", tag="CellLine", start_position=30, score=0.88),
+        _FakeSpan(text="aspirin", tag="Chemical", start_position=50, score=0.95),
+        _FakeSpan(text="TP53", tag="Gene", start_position=70, score=0.91),
+        _FakeSpan(text="E. coli", tag="Species", start_position=90, score=0.85),
     ]
     result = await _run_extract(spans)
     labels = [m.entity_type for m in result]
@@ -154,8 +151,7 @@ async def test_extract_preserves_offset_from_start_position():
     """Mention.offset comes from Flair's `start_position` (char
     position in chunk text)."""
     spans = [
-        _FakeSpan(text="diabetes", tag="Disease",
-                  start_position=42, score=0.92),
+        _FakeSpan(text="diabetes", tag="Disease", start_position=42, score=0.92),
     ]
     result = await _run_extract(spans)
     assert result[0].offset == 42
@@ -164,8 +160,7 @@ async def test_extract_preserves_offset_from_start_position():
 async def test_extract_preserves_confidence_from_score():
     """Flair exposes per-span scores — surface on Mention.confidence."""
     spans = [
-        _FakeSpan(text="diabetes", tag="Disease",
-                  start_position=0, score=0.73),
+        _FakeSpan(text="diabetes", tag="Disease", start_position=0, score=0.73),
     ]
     result = await _run_extract(spans)
     assert result[0].confidence == 0.73
@@ -176,10 +171,8 @@ async def test_extract_skips_unknown_flair_tags():
     the adapter skips rather than emit unmapped. Catches Flair
     upstream changes — bump the dict when this triggers in practice."""
     spans = [
-        _FakeSpan(text="diabetes", tag="Disease",
-                  start_position=0, score=0.92),
-        _FakeSpan(text="future_label", tag="NotAKnownTag",
-                  start_position=20, score=0.85),
+        _FakeSpan(text="diabetes", tag="Disease", start_position=0, score=0.92),
+        _FakeSpan(text="future_label", tag="NotAKnownTag", start_position=20, score=0.85),
     ]
     result = await _run_extract(spans)
     assert len(result) == 1
@@ -190,8 +183,7 @@ async def test_extract_preserves_original_spelling_in_raw_text():
     """raw_text preserves verbatim span — lowercasing happens at
     :Entity MERGE in entity_writes."""
     spans = [
-        _FakeSpan(text="Fragile X Syndrome", tag="Disease",
-                  start_position=0, score=0.95),
+        _FakeSpan(text="Fragile X Syndrome", tag="Disease", start_position=0, score=0.95),
     ]
     result = await _run_extract(spans)
     assert result[0].raw_text == "Fragile X Syndrome"
@@ -203,10 +195,8 @@ async def test_extract_preserves_original_spelling_in_raw_text():
 async def test_extract_ignores_entity_types_arg_empty():
     """entity_types=[] → returns everything HunFlair2 emits (full set)."""
     spans = [
-        _FakeSpan(text="diabetes", tag="Disease",
-                  start_position=0, score=0.92),
-        _FakeSpan(text="aspirin", tag="Chemical",
-                  start_position=20, score=0.95),
+        _FakeSpan(text="diabetes", tag="Disease", start_position=0, score=0.92),
+        _FakeSpan(text="aspirin", tag="Chemical", start_position=20, score=0.95),
     ]
     result = await _run_extract(spans, entity_types=[])
     assert len(result) == 2
@@ -218,10 +208,8 @@ async def test_extract_ignores_entity_types_arg_non_empty():
     every emission, including non-DISEASE ones. Pinned UX: user has
     no narrowing surface."""
     spans = [
-        _FakeSpan(text="diabetes", tag="Disease",
-                  start_position=0, score=0.92),
-        _FakeSpan(text="aspirin", tag="Chemical",
-                  start_position=20, score=0.95),
+        _FakeSpan(text="diabetes", tag="Disease", start_position=0, score=0.92),
+        _FakeSpan(text="aspirin", tag="Chemical", start_position=20, score=0.95),
     ]
     # User tried to narrow to DISEASE only — adapter should IGNORE
     # and return everything anyway.
@@ -233,8 +221,7 @@ async def test_extract_ignores_entity_types_arg_non_empty():
 async def test_extract_ignores_entity_types_arg_garbage():
     """Even nonsense entity_types — silently ignored, no error."""
     spans = [
-        _FakeSpan(text="diabetes", tag="Disease",
-                  start_position=0, score=0.92),
+        _FakeSpan(text="diabetes", tag="Disease", start_position=0, score=0.92),
     ]
     # Garbage in - no raise.
     result = await _run_extract(spans, entity_types=["NONSENSE_TYPE", "asdf"])

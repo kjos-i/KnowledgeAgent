@@ -32,7 +32,6 @@ from knowledge_agent.models import (
     SearchQueryRewrite,
 )
 
-
 # ---------------------------------------------------------------------------
 # SearchQueryRewrite
 # ---------------------------------------------------------------------------
@@ -151,9 +150,7 @@ def test_retrieved_chunk_missing_required_raises() -> None:
 
 
 def test_retrieved_chunk_roundtrip() -> None:
-    original = RetrievedChunk(
-        chunk_id="d#0", doc_id="d", text="text", score=0.5, year=2023
-    )
+    original = RetrievedChunk(chunk_id="d#0", doc_id="d", text="text", score=0.5, year=2023)
     restored = RetrievedChunk.model_validate(original.model_dump())
     assert restored == original
 

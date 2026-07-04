@@ -31,8 +31,8 @@ Notes on test isolation:
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
@@ -45,6 +45,8 @@ from knowledge_agent.config import (
     load_test_env,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 # ---------------------------------------------------------------------------
 # Shared minimal-required kwargs.
@@ -143,8 +145,10 @@ def test_settings_api_keys_are_optional_post_bundled_removal(
     Settings construction itself doesn't enforce."""
     # Clear all key env vars so .env-fallback can't fill them in.
     for var in (
-        "ANTHROPIC_API_KEY", "VOYAGE_API_KEY",
-        "OPENAI_API_KEY", "GOOGLE_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "VOYAGE_API_KEY",
+        "OPENAI_API_KEY",
+        "GOOGLE_API_KEY",
     ):
         monkeypatch.delenv(var, raising=False)
     kwargs = _minimal_required()
@@ -226,9 +230,7 @@ def test_validate_retrieval_windows_num_candidates_smaller_than_window_fails() -
 def test_validate_retrieval_windows_at_boundary_succeeds() -> None:
     """top_k == rrf_window == num_candidates is valid (equality OK)."""
     s = Settings(  # type: ignore[arg-type]
-        **_minimal_required(
-            top_k=20, rrf_rank_window_size=20, num_candidates=20
-        )
+        **_minimal_required(top_k=20, rrf_rank_window_size=20, num_candidates=20)
     )
     assert s.top_k == s.rrf_rank_window_size == s.num_candidates == 20
 

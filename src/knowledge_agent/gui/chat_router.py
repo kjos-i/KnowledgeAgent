@@ -11,6 +11,7 @@ one-shot per command; eval harness drives the graph directly).
 Mirrors `research_articles_agent/gui/chat_router.py` so the two apps'
 chat UX feels the same.
 """
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -20,7 +21,6 @@ from pydantic import BaseModel, Field
 
 from knowledge_agent.config import get_settings
 from knowledge_agent.llm_factory import get_llm
-
 
 CHAT_SYSTEM_PROMPT = """\
 You are a research literature assistant. The user asks questions that
@@ -57,13 +57,9 @@ CHAT_ROUTER_TIMEOUT_SECONDS = 30
 class ChatTurnOutput(BaseModel):
     """Structured output of the chat router (its contract, not graph data)."""
 
-    response: str = Field(
-        description="What to say to the user this turn."
-    )
+    response: str = Field(description="What to say to the user this turn.")
     ready_to_retrieve: bool = Field(
-        description=(
-            "True when this turn should run a retrieval over the corpus."
-        )
+        description=("True when this turn should run a retrieval over the corpus.")
     )
 
 

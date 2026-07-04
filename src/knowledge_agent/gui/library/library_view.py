@@ -11,6 +11,7 @@ Sub-tabs:
 No draggable splitter — each tab owns its internal layout with fixed
 proportions. Splitters live in Search only.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -50,17 +51,24 @@ class LibraryView:
         sub_bodies = ft.TabBarView(
             controls=[
                 ft.Container(
-                    content=self.select_tab.build(), padding=8, expand=True,
+                    content=self.select_tab.build(),
+                    padding=8,
+                    expand=True,
                 ),
                 ft.Container(
-                    content=self.ingest_tab.build(), padding=8, expand=True,
+                    content=self.ingest_tab.build(),
+                    padding=8,
+                    expand=True,
                 ),
                 ft.Container(
-                    content=self.create_tab.build(), padding=8, expand=True,
+                    content=self.create_tab.build(),
+                    padding=8,
+                    expand=True,
                 ),
                 ft.Container(
                     content=self.installs_tab.build(),
-                    padding=8, expand=True,
+                    padding=8,
+                    expand=True,
                 ),
             ],
             expand=True,
@@ -69,7 +77,9 @@ class LibraryView:
             length=len(SUB_TAB_LABELS),
             selected_index=0,
             content=ft.Column(
-                controls=[sub_bar, sub_bodies], expand=True, spacing=0,
+                controls=[sub_bar, sub_bodies],
+                expand=True,
+                spacing=0,
             ),
             expand=True,
         )
