@@ -128,7 +128,8 @@ def test_switch_to_info_renders_stub_message(fake_app: MagicMock):
     panel.switch_mode(MODE_INFO)
     content = panel.view_container.content
     body = content.controls[1]
-    assert "info" in body.content.value.lower()
+    # Info panel is a placeholder until it's filled last (the how-to guide).
+    assert "coming soon" in body.content.value.lower()
 
 
 def test_button_row_contains_all_five_buttons_with_view_result_label(

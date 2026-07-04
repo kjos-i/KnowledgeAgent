@@ -38,6 +38,9 @@ class LibraryView:
         self.ingest_tab = IngestTab(app)
         self.create_tab = CreateNewDatasetTab(app)
         self.installs_tab = InstallsTab(app)
+        # Cross-tab: after a successful ingest / bulk-op in the Ingest
+        # sub-tab, refresh the Select sub-tab's card counts + Documents.
+        self.ingest_tab.on_ingest_complete = self.select_tab.refresh_after_ingest
 
     def build(self) -> ft.Control:
         sub_bar = ft.TabBar(

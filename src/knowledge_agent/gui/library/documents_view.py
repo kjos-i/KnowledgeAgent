@@ -10,10 +10,11 @@ Each document renders as a card:
   - title (or filename fallback) + type + ingested date + chunk count
     (+ figure count for multimodal docs)
   - source path
-  - per-row actions: **Edit** (rich metadata modal) + **Delete**
-    (remove from corpus). Single-doc resolve lives in the Edit modal's
-    "Look up DOI online" checkbox; corpus-wide "Resolve all" (with
-    "Skip manually edited") lives in the Ingest tab's bulk-ops.
+  - per-row actions: **Edit** (rich metadata modal), **Re-ingest**
+    (re-run the full pipeline on the source file with current settings),
+    **Delete** (remove from corpus). Single-doc resolve lives in the
+    Edit modal's "Look up DOI online" checkbox; corpus-wide "Resolve all"
+    (with "Skip manually edited") lives in the Ingest tab's bulk-ops.
 
 Edit modal (RAA parity) exposes every editable doc-level column:
 Title / Authors / Year / Venue / DOI / Source URL / Language, plus a
@@ -33,17 +34,17 @@ Data source: LanceDB via `list_indexed_docs()` — every chunk row
 carries the denormalised doc metadata, so one projection scan yields
 the whole list + chunk counts. Edits patch the doc-level LanceDB
 columns via `update_doc_metadata` (chunk text + embeddings untouched);
-Delete goes through `bulk_ops.delete_doc_*` (LanceDB + Neo4j); Resolve
-through `metadata_resolution.resolve_openalex`. Those backend imports
-are local to the handlers (heavy-import-off-the-startup-path rule).
+Delete goes through `bulk_ops.delete_doc_*` (LanceDB + Neo4j); Re-ingest
+re-runs `pipeline.ingest_document` on the source file. Those backend
+imports are local to the handlers (heavy-import-off-the-startup rule).
 
-Deliberately deferred: Re-ingest (the ingest-execution path is itself
-unbuilt) and Neo4j per-doc layer badges.
+Deliberately deferred: Neo4j per-doc layer badges.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import flet as ft
@@ -103,6 +104,8 @@ class DocumentsView:
         # Strong refs to in-flight background tasks so they aren't GC'd
         # mid-run (they self-discard on completion).
         self._bg_tasks: set[asyncio.Task] = set()
+        # Guards against a second per-doc op (re-ingest) starting mid-run.
+        self._op_busy = False
         self._create_controls()
 
     def _spawn(self, coro) -> None:
@@ -136,6 +139,8 @@ class DocumentsView:
             on_click=self._on_refresh_clicked,
         )
         self.coverage_text = ft.Text("", size=11, color=ft.Colors.GREY_400)
+        # Transient status for per-doc ops (re-ingest).
+        self.op_status = ft.Text("", size=11, color=ft.Colors.GREY_400)
         # Plain Column — the parent (select_dataset right pane) already
         # scrolls, so nesting a scroll here would fight it.
         self.doc_list = ft.Column(spacing=6)
@@ -155,6 +160,7 @@ class DocumentsView:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 self.coverage_text,
+                self.op_status,
                 ft.Divider(),
                 self.doc_list,
             ],
@@ -328,6 +334,13 @@ class DocumentsView:
             height=28,
             on_click=lambda e, s=snap: self._open_edit_dialog(s),
         )
+        reingest_button = ft.Button(
+            content="Re-ingest",
+            tooltip="Re-run the full pipeline on this document with the "
+                    "corpus's current settings (needs the source file)",
+            height=28,
+            on_click=lambda e, s=snap: self._on_reingest_clicked(s),
+        )
         delete_button = ft.Button(
             content="Delete",
             tooltip="Remove this document from the corpus (both stores)",
@@ -349,6 +362,7 @@ class DocumentsView:
                                 weight=ft.FontWeight.BOLD, expand=True,
                             ),
                             edit_button,
+                            reingest_button,
                             delete_button,
                         ],
                         spacing=8,
@@ -495,6 +509,99 @@ class DocumentsView:
                     doc_id, exc,
                 )
         await self.reload(force=True)
+
+    # ----- re-ingest -----------------------------------------------------
+
+    def _set_op_status(self, msg: str) -> None:
+        self.op_status.value = msg
+        self.app.page.update()
+
+    def _on_reingest_clicked(self, row: dict[str, Any]) -> None:
+        if self._op_busy:
+            self._set_op_status("A re-ingest is already running…")
+            return
+        self._open_reingest_confirm(row)
+
+    def _open_reingest_confirm(self, row: dict[str, Any]) -> None:
+        """Validate the source file exists, then confirm before re-running
+        the full pipeline on this one document."""
+        source_path = (row.get("source_path") or "").strip()
+        name = (
+            row.get("title")
+            or _basename(source_path)
+            or (row.get("doc_id") or "")[:12]
+            or "document"
+        )
+        if not source_path:
+            self._set_op_status(
+                f"No source path recorded for '{name}' — can't re-ingest."
+            )
+            return
+        if not Path(source_path).is_file():
+            self._set_op_status(f"Source file not found: {source_path}")
+            return
+
+        def _cancel(_ev: ft.Event) -> None:
+            self.app.page.pop_dialog()
+
+        def _confirm(_ev: ft.Event) -> None:
+            self.app.page.pop_dialog()
+            if self._loop_running():
+                self._spawn(self._do_reingest(dict(row)))
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Re-ingest document"),
+            content=ft.Text(
+                f"Re-run the full pipeline on '{name}' with the corpus's "
+                f"current settings (layers, extractors, ontologies)? This "
+                f"replaces the existing version.\n\nSource: {source_path}",
+                size=12, selectable=True,
+            ),
+            actions=[
+                ft.TextButton("Cancel", on_click=_cancel),
+                ft.Button(content="Re-ingest", on_click=_confirm),
+            ],
+        )
+        self.app.page.show_dialog(dialog)
+        self.app.page.update()
+
+    async def _do_reingest(self, row: dict[str, Any]) -> None:
+        from knowledge_agent.ingestion import pipeline
+        from knowledge_agent.kg.corpus_config import load_corpus_config
+
+        source_path = (row.get("source_path") or "").strip()
+        name = row.get("title") or _basename(source_path) or "document"
+        cfg_path = self.app.gui_config.corpus_config_path
+        if cfg_path is None:
+            self._set_op_status("No active corpus.")
+            return
+        try:
+            config = load_corpus_config(cfg_path)
+        except Exception as exc:
+            self._set_op_status(f"Could not load corpus.toml: {exc}")
+            return
+        self._op_busy = True
+        self._set_op_status(f"Re-ingesting '{name}'…")
+        try:
+            # preserve_existing_labels: keep the doc's stored type on a
+            # re-ingest of the same file (its labels don't change).
+            await pipeline.ingest_document(
+                Path(source_path), config,
+                row.get("main_label") or "Document",
+                row.get("sub_label"),
+                preserve_existing_labels=True,
+            )
+        except Exception as exc:
+            logger.warning(
+                "DocumentsView: re-ingest(%s) failed: %r", source_path, exc,
+            )
+            self._op_busy = False
+            self._set_op_status(f"Re-ingest of '{name}' failed: {exc}")
+            return
+        self._op_busy = False
+        await self.reload(force=True)
+        self._set_op_status(f"Re-ingested '{name}'.")
 
     # ----- delete --------------------------------------------------------
 

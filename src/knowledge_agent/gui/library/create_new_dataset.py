@@ -2,26 +2,29 @@
 
 Storage-only form:
 
-  Corpus name, Neo4j URI / user / password, Corpus folder (single
-  folder where all the corpus's artefacts live — LanceDB data,
-  corpus.toml, future backups). Auto-suggested to
-  `<user_data_dir>/knowledge-agent/corpora/<name>` when the name
-  changes.
+  Corpus name, Neo4j URI / user / password, Location (the parent
+  folder to save the corpus into — Browse-only, no auto-fill). A
+  subfolder named after the corpus is created inside the location
+  and holds all the corpus's artefacts.
 
-The GUI derives the two internal paths from the folder:
+The GUI derives the corpus home and its internal paths from the
+location + name:
 
-  * LanceDB path      = `<corpus folder>/lancedb`
-  * corpus.toml path  = `<corpus folder>/corpus.toml`
+  * Corpus folder     = `<location>/<name>`
+  * LanceDB path      = `<location>/<name>/lancedb`
+  * corpus.toml path  = `<location>/<name>/corpus.toml`
+  * figures dir       = `<location>/<name>/figures`
 
 Users don't need to think about file structure — they pick a
-location, we manage what goes where inside it.
+location, we create the named corpus folder and manage what goes
+where inside it.
 
 On [Create corpus]:
 
   1. Validate the form (see `_validate` below).
   2. Ping the Neo4j URI with a 5 s timeout.
-  3. Write a fresh corpus.toml at `<folder>/corpus.toml` with seed
-     defaults.
+  3. Write a fresh corpus.toml at `<location>/<name>/corpus.toml`
+     with seed defaults.
   4. Save the Neo4j password to the OS keyring under
      `f"neo4j-{name}"`.
   5. Append a `CorpusEntry` to `GuiConfig.corpora`; set
@@ -39,7 +42,6 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 import tomlkit
-from platformdirs import user_data_dir
 
 from knowledge_agent.config import reset_after_key_change
 from knowledge_agent.gui._styles import (
@@ -48,7 +50,6 @@ from knowledge_agent.gui._styles import (
     centered_label,
 )
 from knowledge_agent.gui.config_store import (
-    APP_ID,
     ConfigError,
     CorpusEntry,
     apply_connection_to_env,
@@ -78,16 +79,6 @@ _LEFT_FLEX = 60
 _RIGHT_FLEX = 40
 
 
-def _default_corpora_root() -> Path:
-    """Where auto-suggested corpus folders live under platform conv.
-
-    Windows: %APPDATA%\\knowledge-agent\\corpora
-    macOS: ~/Library/Application Support/knowledge-agent/corpora
-    Linux: ~/.local/share/knowledge-agent/corpora
-    """
-    return Path(user_data_dir(APP_ID, appauthor=False)) / "corpora"
-
-
 class CreateNewDatasetTab:
     """Storage-only form for registering a new corpus."""
 
@@ -101,10 +92,6 @@ class CreateNewDatasetTab:
         self.folder_field: ft.TextField | None = None
         self.browse_button: ft.Button | None = None
         self.create_button: ft.Button | None = None
-        # Has the user typed in the folder field? If not, we
-        # auto-suggest from the name; once they've edited manually,
-        # we stop overwriting it.
-        self._folder_touched = False
         self._create_controls()
 
     # ----- control construction --------------------------------------------
@@ -118,7 +105,6 @@ class CreateNewDatasetTab:
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
-            on_change=self._on_name_change,
         )
         self.uri_field = ft.TextField(
             label="Neo4j URI",
@@ -143,17 +129,15 @@ class CreateNewDatasetTab:
             bgcolor=PANEL_BG,
         )
         self.folder_field = ft.TextField(
-            label="Corpus folder",
+            label="Location",
             hint_text=(
-                "Where this corpus's LanceDB data + corpus.toml + "
-                "future backups will live. Auto-suggested from name; "
-                "edit or Browse to pick a different location."
+                "Browse to where this corpus should be saved. A subfolder "
+                "named after the corpus is created inside it."
             ),
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
             expand=True,
-            on_change=self._on_folder_change,
         )
         self.browse_button = ft.Button(
             content=centered_label("Browse"),
@@ -213,13 +197,15 @@ class CreateNewDatasetTab:
                         size=13, weight=ft.FontWeight.BOLD,
                     ),
                     ft.Text(
-                        "Inside the corpus folder you pick:",
+                        "At the location you pick:",
                         size=12, color=ft.Colors.GREY_400,
                     ),
                     ft.Text(
-                        "  <corpus folder>/\n"
-                        "    ├── lancedb/       (vector store)\n"
-                        "    └── corpus.toml    (config file)",
+                        "  <location>/\n"
+                        "    └── <corpus name>/\n"
+                        "          ├── lancedb/       (vector store)\n"
+                        "          ├── corpus.toml    (config file)\n"
+                        "          └── figures/       (multimodal figures)",
                         size=11,
                         font_family="Consolas",
                         color=ft.Colors.GREY_300,
@@ -257,23 +243,7 @@ class CreateNewDatasetTab:
             controls=[view_header("Create New Dataset"), body],
         )
 
-    # ----- Path auto-suggest handlers --------------------------------------
-
-    def _on_name_change(self, e: ft.Event) -> None:
-        """When the name changes, auto-suggest the corpus folder IF the
-        user hasn't manually edited the folder yet.
-        """
-        if self.name_field is None or self.folder_field is None:
-            return
-        name = (self.name_field.value or "").strip()
-        if not name:
-            return
-        if not self._folder_touched:
-            self.folder_field.value = str(_default_corpora_root() / name)
-            self.app.page.update()
-
-    def _on_folder_change(self, e: ft.Event) -> None:
-        self._folder_touched = True
+    # ----- Browse ----------------------------------------------------------
 
     async def _on_browse_clicked(self, e: ft.Event) -> None:
         """Open the OS folder picker; drop the choice into the folder field."""
@@ -282,10 +252,8 @@ class CreateNewDatasetTab:
         # Start the picker at the current field value ONLY if the path
         # actually exists on disk. Windows' folder picker fails with
         # `0x80070002 (file not found)` when the initial path doesn't
-        # exist yet — which is the common case for our auto-suggested
-        # paths (they're where the corpus WILL live, not where it is).
-        # Walk up parents until we hit one that exists; pass None if
-        # nothing along the chain is present.
+        # exist yet. Walk up parents until we hit one that exists; pass
+        # None if nothing along the chain is present.
         raw = (self.folder_field.value or "").strip()
         initial: str | None = None
         if raw:
@@ -308,7 +276,6 @@ class CreateNewDatasetTab:
         if not chosen:
             return
         self.folder_field.value = chosen
-        self._folder_touched = True
         self.app.page.update()
 
     # ----- validation ------------------------------------------------------
@@ -316,12 +283,13 @@ class CreateNewDatasetTab:
     def _validate(self) -> tuple[bool, str]:
         """Run pre-create sync checks. Returns (ok, error_message).
 
-        Derives the two internal paths from the corpus folder:
-          lancedb_path = <folder>/lancedb
-          corpus.toml  = <folder>/corpus.toml
-        Checks the folder itself doesn't already contain a corpus.toml
-        (would clobber an existing corpus) and its lancedb subfolder
-        is either nonexistent or empty.
+        Derives the corpus home + internal paths from location + name:
+          corpus_folder = <location>/<name>
+          lancedb_path  = <location>/<name>/lancedb
+          corpus.toml   = <location>/<name>/corpus.toml
+        Checks the derived corpus folder doesn't already contain a
+        corpus.toml (would clobber an existing corpus) and its lancedb
+        subfolder is either nonexistent or empty.
         """
         if (
             self.name_field is None
@@ -350,20 +318,20 @@ class CreateNewDatasetTab:
         if not folder_raw:
             return False, "corpus folder is required"
 
-        folder = Path(folder_raw)
-        toml_path = folder / "corpus.toml"
-        lancedb_path = folder / "lancedb"
+        corpus_folder = Path(folder_raw) / name
+        toml_path = corpus_folder / "corpus.toml"
+        lancedb_path = corpus_folder / "lancedb"
         if toml_path.exists():
             return (
                 False,
-                f"folder {folder} already contains a corpus.toml — "
-                f"pick an empty / new folder (auto-import isn't wired yet)",
+                f"a corpus already exists at {corpus_folder} "
+                f"(corpus.toml present) — pick a different name or location",
             )
         if lancedb_path.exists() and any(lancedb_path.iterdir()):
             return (
                 False,
-                f"folder {folder}/lancedb exists and is non-empty — "
-                f"pick an empty / new folder",
+                f"{lancedb_path} exists and is non-empty — "
+                f"pick a different name or location",
             )
         return True, ""
 
@@ -420,9 +388,11 @@ class CreateNewDatasetTab:
         uri = self.uri_field.value.strip()
         user = self.user_field.value.strip()
         password = self.password_field.value
-        folder = Path(self.folder_field.value.strip())
-        lancedb_path = folder / "lancedb"
-        toml_path = folder / "corpus.toml"
+        # The corpus lives in a `<location>/<name>/` subfolder — the user
+        # picks the location, the GUI names + structures the folder.
+        corpus_folder = Path(self.folder_field.value.strip()) / name
+        lancedb_path = corpus_folder / "lancedb"
+        toml_path = corpus_folder / "corpus.toml"
 
         try:
             ping_err = await self._ping_neo4j(uri, user, password)
@@ -522,7 +492,6 @@ class CreateNewDatasetTab:
         ):
             if field is not None:
                 field.value = ""
-        self._folder_touched = False
 
 
 # =============================================================================

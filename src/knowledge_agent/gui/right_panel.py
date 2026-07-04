@@ -13,10 +13,9 @@ Per-mode views are rebuilt on switch (lazy + keeps the controls owned
 by the active view's lifecycle). The highlight on the current mode
 button tracks `current_mode`.
 
-Settings + Info are stubs in slice 1 (empty-state). Slice 2 fills
-the Settings view; Info ships as static help text. Library and
-Evaluation are top-level tabs, NOT right-panel modes — they need
-the full window.
+Settings is the full SettingsView. Info is still a placeholder
+(static how-to help text, filled last). Library and Evaluation are
+top-level tabs, NOT right-panel modes — they need the full window.
 """
 from __future__ import annotations
 
@@ -148,8 +147,8 @@ class RightPanel:
             return view_with_header(
                 "Information",
                 empty_state(
-                    "Info view lands in slice 2 with the static help "
-                    "text describing every setting + workflow."
+                    "Help / how-to guide — coming soon. This panel will "
+                    "describe every setting and the main workflows."
                 ),
             )
         return LatestView(

@@ -108,3 +108,24 @@ def test_skip_manual_checkbox_relocated_here_default_on(fake_app):
     Documents table), default on."""
     tab = IngestTab(fake_app)
     assert tab.skip_manual_checkbox.value is True
+
+
+# ---- cross-tab refresh callback ----
+
+
+def test_on_ingest_complete_defaults_none(fake_app):
+    tab = IngestTab(fake_app)
+    assert tab.on_ingest_complete is None
+
+
+def test_notify_ingest_complete_calls_callback(fake_app):
+    tab = IngestTab(fake_app)
+    called = []
+    tab.on_ingest_complete = lambda: called.append(True)
+    tab._notify_ingest_complete()
+    assert called == [True]
+
+
+def test_notify_ingest_complete_noop_when_unset(fake_app):
+    tab = IngestTab(fake_app)
+    tab._notify_ingest_complete()  # must not raise when no callback set

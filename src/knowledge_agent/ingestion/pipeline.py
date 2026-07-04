@@ -997,7 +997,10 @@ async def ingest_document(
     # named subfolders like `chunks.lance/` for its own state).
     figures_dir: Path | None = None
     if config.extract_figures:
-        figures_dir = settings.lancedb_path / "figures" / doc_id
+        # Figures live BESIDE lancedb at `<corpus>/figures/<doc_id>/`
+        # (lancedb_path.parent = the corpus folder), not inside the
+        # LanceDB dir — figures are our artefact, not LanceDB internals.
+        figures_dir = settings.lancedb_path.parent / "figures" / doc_id
     chunks = await asyncio.to_thread(
         parse_document, path, config, figures_dir=figures_dir,
     )

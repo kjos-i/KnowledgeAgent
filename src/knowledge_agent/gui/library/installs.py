@@ -179,7 +179,7 @@ class InstallsTab:
         self.extractor_download_buttons: dict[str, ft.Button] = {}
         self.extractor_delete_buttons: dict[str, ft.Button] = {}
 
-        # Parser row widgets (stub install path today).
+        # Parser row widgets (Install / Uninstall pip extras).
         self.parser_status_texts: dict[str, ft.Text] = {}
         self.parser_install_buttons: dict[str, ft.Button] = {}
         self.parser_uninstall_buttons: dict[str, ft.Button] = {}
@@ -262,7 +262,8 @@ class InstallsTab:
                 on_click=lambda e, n=name: self._on_extractor_delete(n),
             )
 
-        # Parser: 2 buttons (Install / Uninstall), stubbed for now.
+        # Parser: 2 buttons (Install / Uninstall) — pip extras via
+        # install_parser_extra_* (wired below).
         for name in _PARSER_ORDER:
             self.parser_status_texts[name] = ft.Text(
                 "(checking…)", size=11, color=ft.Colors.GREY_500, italic=True,

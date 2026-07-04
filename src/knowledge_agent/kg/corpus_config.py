@@ -1005,19 +1005,17 @@ def corpus_folder(corpus_toml_path: Path) -> Path:
 
 
 def corpus_figures_dir(corpus_toml_path: Path, doc_id: str) -> Path:
-    """Return the per-doc figures directory inside the LanceDB folder.
+    """Return the per-doc figures directory beside the LanceDB folder.
 
-    Path is `<corpus folder>/lancedb/figures/<doc_id>/`. Figures live
-    INSIDE the LanceDB dir (option 1 locked 2026-07-03) so a corpus
-    folder stays self-contained: everything the corpus owns sits
-    inside `<corpus folder>/lancedb/`. LanceDB uses named subfolders
-    (`chunks.lance/`) for its own tables, so `figures/` alongside
-    them doesn't collide.
+    Path is `<corpus folder>/figures/<doc_id>/` — a sibling of
+    `<corpus folder>/lancedb/`. Figures are the app's own artefact, not
+    LanceDB internals, so they live beside the vector store rather than
+    inside its directory (revised 2026-07-04, was inside lancedb).
 
     Created idempotently on call so callers can start writing PNGs
     immediately. Used by the parser when `config.extract_figures=True`;
     each picture is saved as `<returned dir>/<i>.png`.
     """
-    d = corpus_folder(corpus_toml_path) / "lancedb" / "figures" / doc_id
+    d = corpus_folder(corpus_toml_path) / "figures" / doc_id
     d.mkdir(parents=True, exist_ok=True)
     return d

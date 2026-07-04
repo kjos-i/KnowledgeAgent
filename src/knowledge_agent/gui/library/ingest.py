@@ -31,6 +31,7 @@ hint pointing at Create New.
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -48,7 +49,12 @@ from knowledge_agent.gui.library.corpus_config_editor import (
 from knowledge_agent.gui.views._frame import view_header
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from knowledge_agent.gui.app import GuiApp
+
+
+logger = logging.getLogger(__name__)
 
 
 class IngestTab:
@@ -79,6 +85,9 @@ class IngestTab:
         # Bulk-ops: Skip-manually-edited toggle for bulk_resolve_openalex
         # (relocated here from the Documents table).
         self.skip_manual_checkbox: ft.Checkbox | None = None
+        # Set by LibraryView — called after a successful ingest / bulk-op
+        # so the Select sub-tab refreshes its counts + Documents list.
+        self.on_ingest_complete: Callable[[], None] | None = None
 
         self._create_controls()
 
@@ -656,9 +665,9 @@ class IngestTab:
             return
         self._set_busy(
             False,
-            f"{op_name} done: {self._fmt_bulk_result(result)}. "
-            f"Refresh Select to see changes.",
+            f"{op_name} done: {self._fmt_bulk_result(result)}.",
         )
+        self._notify_ingest_complete()
 
     @staticmethod
     def _fmt_bulk_result(result: object) -> str:
@@ -714,6 +723,16 @@ class IngestTab:
         if msg is not None and self.status is not None:
             self.status.value = msg
         self.app.page.update()
+
+    def _notify_ingest_complete(self) -> None:
+        """Best-effort cross-tab refresh after a successful ingest / op
+        (LibraryView wires this to the Select sub-tab's reload)."""
+        if self.on_ingest_complete is None:
+            return
+        try:
+            self.on_ingest_complete()
+        except Exception as exc:
+            logger.warning("on_ingest_complete callback failed: %r", exc)
 
     # ---- pickers ----
 
@@ -908,6 +927,7 @@ class IngestTab:
             self._set_busy(False, f"{action} failed: {exc}")
             return
         self._set_busy(False, msg)
+        self._notify_ingest_complete()
 
     async def _execute_single_file(
         self, path: Path, config: object, main: str,
@@ -923,7 +943,8 @@ class IngestTab:
         except Exception as exc:
             self._set_busy(False, f"Ingest failed: {exc}")
             return
-        self._set_busy(False, f"Ingested '{path.name}'. Refresh Select to see it.")
+        self._set_busy(False, f"Ingested '{path.name}'.")
+        self._notify_ingest_complete()
 
     @staticmethod
     def _fmt_ingest_result(action: str, result: object) -> str:
@@ -934,7 +955,7 @@ class IngestTab:
         if result.failures:
             name, err = result.failures[0]
             msg += f"  First failure: {name} — {err}"
-        return msg + "  Refresh Select to see changes."
+        return msg
 
     @staticmethod
     def _fmt_sync_result(result: object) -> str:
@@ -942,8 +963,7 @@ class IngestTab:
             f"Sync done: {result.n_new_ingested} new, "
             f"{result.n_edited_succeeded} re-ingested, "
             f"{result.n_orphans_deleted} removed, "
-            f"{result.n_new_failed + result.n_edited_failed} failed. "
-            f"Refresh Select to see changes."
+            f"{result.n_new_failed + result.n_edited_failed} failed."
         )
 
     def _show_invalid_config_dialog(self, action: str, message: str) -> None:

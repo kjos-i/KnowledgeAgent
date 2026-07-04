@@ -111,15 +111,31 @@ def test_render_doc_card_returns_container(fake_app):
     assert isinstance(card, ft.Container)
 
 
-def test_render_doc_card_has_edit_and_delete_buttons(fake_app):
-    """Each card exposes Edit + Delete. Per-card Resolve was removed —
-    single-doc resolve now lives in the Edit modal's 'Look up DOI
-    online' checkbox."""
+def test_render_doc_card_has_three_action_buttons(fake_app):
+    """Each card exposes Edit + Re-ingest + Delete (per-card Resolve was
+    removed — single-doc resolve lives in the Edit modal's 'Look up DOI
+    online' checkbox)."""
     dv = _view(fake_app)
     card = dv._render_doc_card(_rows()[0])
     action_row = card.content.controls[0]
     buttons = [c for c in action_row.controls if isinstance(c, ft.Button)]
-    assert len(buttons) == 2
+    assert len(buttons) == 3
+
+
+def test_reingest_no_source_path_sets_status(fake_app):
+    dv = _view(fake_app)
+    dv._open_reingest_confirm(
+        {"doc_id": "d1", "title": "T", "source_path": ""}
+    )
+    assert "source path" in dv.op_status.value.lower()
+
+
+def test_reingest_missing_file_sets_status(fake_app):
+    dv = _view(fake_app)
+    dv._open_reingest_confirm(
+        {"doc_id": "d1", "title": "T", "source_path": "/no/such/file_xyz.pdf"}
+    )
+    assert "not found" in dv.op_status.value.lower()
 
 
 def test_no_resolve_all_controls_in_table(fake_app):

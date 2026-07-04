@@ -140,3 +140,9 @@ def test_schedule_counts_noop_without_loop(fake_app):
     tab = _tab(fake_app)
     tab._schedule_counts()
     assert tab._bg_tasks == set()
+
+
+def test_refresh_after_ingest_is_callable(fake_app):
+    """Cross-tab hook the Ingest sub-tab calls after a successful op."""
+    tab = _tab(fake_app)
+    assert callable(tab.refresh_after_ingest)

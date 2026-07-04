@@ -649,6 +649,14 @@ class SelectDatasetTab:
             self.status.value = "refreshed"
         self.app.page.update()
 
+    def refresh_after_ingest(self) -> None:
+        """Reload the corpus card (counts) + Documents list after an
+        ingest / bulk-op in the Ingest sub-tab. Wired cross-tab by
+        LibraryView so the user needn't hit Refresh manually."""
+        self._populate_info_card()
+        self.documents._schedule_reload(force=True)
+        self.app.page.update()
+
     # ----- Rename ---------------------------------------------------------
 
     def on_rename_clicked(self, e: ft.Event) -> None:
