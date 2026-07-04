@@ -37,3 +37,18 @@ repos:
       - id: check-toml
       - id: check-added-large-files
         args: ["--maxkb=1024"]
+      # Reject an accidentally-committed private key (SSH / PEM). Free,
+      # no baseline — a belt-and-suspenders next to detect-secrets below.
+      - id: detect-private-key
+
+  # Secret scanning — block commits that add API keys / tokens / passwords /
+  # .env-style secrets. New findings in staged files are matched against
+  # `.secrets.baseline` (known / allowlisted); anything new fails the commit.
+  # False positives: add `# pragma: allowlist secret` on the line, OR
+  # `detect-secrets audit .secrets.baseline` to mark + record them, OR
+  # `git commit --no-verify` to bypass all hooks for one commit.
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
