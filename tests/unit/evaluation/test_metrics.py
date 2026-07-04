@@ -106,3 +106,32 @@ def test_chunk_source_grounding():
     assert M.chunk_source_grounding(["c1", "cX"], ["c1", "c2"]) == 0.5
     # cited nothing → nothing to ground → 1.0
     assert M.chunk_source_grounding([], ["c1"]) == 1.0
+
+
+# ---- KG metrics (Phase 2) ----
+
+
+def test_kg_entity_metrics():
+    hits = [{"name": "ESCRT-III", "type": "complex"}, {"name": "Vps4"}]
+    got = M.compute_kg_entity_metrics(hits, ["ESCRT-III", "CHMP4B"])
+    assert got["kg_hit_at_k"] == 1.0
+    assert got["kg_entity_recall"] == 0.5  # found ESCRT-III, not CHMP4B
+    # no gold entities → None
+    assert set(M.compute_kg_entity_metrics(hits, []).values()) == {None}
+
+
+def test_kg_source_grounding():
+    assert M.kg_source_grounding([0, 1], 3) == 1.0
+    assert M.kg_source_grounding([0, 5], 3) == 0.5  # index 5 out of range → ungrounded
+    assert M.kg_source_grounding([], 3) == 1.0
+
+
+def test_cypher_validity():
+    assert M.cypher_validity(True, None) == 1.0
+    assert M.cypher_validity(False, None) == 0.0  # write cypher (read-only rail failed)
+    assert M.cypher_validity(True, "Neo4jError") == 0.0  # executed with error
+
+
+def test_mode_routing_correct():
+    assert M.mode_routing_correct("neo4j_only", "neo4j_only") == 1.0
+    assert M.mode_routing_correct("lancedb_only", "neo4j_only") == 0.0

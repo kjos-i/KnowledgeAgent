@@ -29,7 +29,9 @@ DEFAULT_DATASET_PATH: Path = _PKG_DIR / "datasets" / "escrt_bootstrap.json"
 # arrives in Phase 2 and "judge" (DeepEval) in Phase 3. A metric with no
 # `toggle_group` in the registry is always-on regardless of this set.
 ALL_TOGGLE_GROUPS: frozenset[str] = frozenset({"source", "chunk", "kg", "judge"})
-DEFAULT_ENABLED_GROUPS: frozenset[str] = frozenset({"source", "chunk"})
+# "kg" is on by default — its metrics are None (skipped) for cases whose leg
+# didn't run (e.g. lancedb_only), so it costs nothing on non-KG corpora.
+DEFAULT_ENABLED_GROUPS: frozenset[str] = frozenset({"source", "chunk", "kg"})
 
 
 @dataclass(frozen=True, slots=True)

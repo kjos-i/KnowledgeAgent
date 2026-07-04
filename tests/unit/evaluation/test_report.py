@@ -61,7 +61,7 @@ def test_build_report_structure(monkeypatch):
     assert rep["prompts_snapshot"]["model_config"]["llm_provider"] == "anthropic"
     assert rep["prompts_snapshot"]["prompts"]["synthesizer_system"] == "P"
     assert rep["summary"]["pass_rate"] == 0.5
-    assert set(rep["enabled_groups"]) == {"source", "chunk"}
+    assert set(rep["enabled_groups"]) == {"source", "chunk", "kg"}
     assert len(rep["results"]) == 2
 
 

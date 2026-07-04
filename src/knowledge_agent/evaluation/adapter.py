@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 
+from knowledge_agent.kg.cypher_safety import is_cypher_read_only
+
 if TYPE_CHECKING:
     from knowledge_agent.evaluation.models import EvalCase
     from knowledge_agent.kg.corpus_config import CorpusConfig
@@ -50,6 +52,8 @@ class CaseRun:
     kg_hits: list[dict[str, Any]] = field(default_factory=list)
     cited_kg_indices: list[int] = field(default_factory=list)
     cypher_query: str | None = None
+    cypher_read_only: bool | None = None
+    kg_retrieval_error: str | None = None
     routed_mode: str | None = None
     search_query: str | None = None
     # ---- usage / timing ----
@@ -92,6 +96,8 @@ def build_case_run(
 
     chunks = final_state.get("retrieved_chunks", []) or []
     kg_hits = final_state.get("kg_hits", []) or []
+    cypher = final_state.get("cypher_query")
+    kg_err = final_state.get("kg_retrieval_error")
     inp, out, tot = _sum_tokens(cb)
 
     return CaseRun(
@@ -103,7 +109,9 @@ def build_case_run(
         cited_chunk_ids=[cs.chunk_id for cs in chunk_sources],
         kg_hits=[h.data for h in kg_hits],
         cited_kg_indices=[ks.hit_index for ks in kg_sources],
-        cypher_query=final_state.get("cypher_query"),
+        cypher_query=cypher,
+        cypher_read_only=is_cypher_read_only(cypher) if cypher else None,
+        kg_retrieval_error=str(kg_err) if kg_err else None,
         routed_mode=final_state.get("routed_mode"),
         search_query=final_state.get("search_query"),
         input_tokens=inp,

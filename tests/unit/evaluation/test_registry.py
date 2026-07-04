@@ -49,6 +49,14 @@ def test_toggle_groups_resolve():
         "chunk_recall_at_k",
         "chunk_ndcg_at_k",
     ]
+    assert R.keys_in_toggle_group("kg") == [
+        "cypher_validity",
+        "cypher_nonempty",
+        "kg_hit_at_k",
+        "kg_entity_recall",
+        "kg_source_grounding",
+        "mode_routing_correctness",
+    ]
 
 
 def test_always_on_excludes_pass_rate_and_toggled():

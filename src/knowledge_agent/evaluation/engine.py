@@ -35,6 +35,39 @@ def _round(key: str, value: float | int | None) -> float | int | None:
     return round(value, _DECIMALS.get(key, 3))
 
 
+_KG_KEYS = (
+    "cypher_validity",
+    "cypher_nonempty",
+    "kg_hit_at_k",
+    "kg_entity_recall",
+    "kg_source_grounding",
+    "mode_routing_correctness",
+)
+
+
+def _kg_metrics(case: EvalCase, run: CaseRun) -> dict[str, Any]:
+    """The 6 deterministic KG metrics. Each is None when not applicable:
+    the cypher metrics + KG-source grounding need a Cypher to have run; the
+    entity metrics need gold `expected_entities`; mode-routing needs an
+    auto-mode case with an `expected_mode`."""
+    values: dict[str, Any] = dict.fromkeys(_KG_KEYS, None)
+    values.update(M.compute_kg_entity_metrics(run.kg_hits, case.expected_entities))
+
+    if run.cypher_query and run.cypher_query.strip():
+        values["cypher_validity"] = M.cypher_validity(run.cypher_read_only, run.kg_retrieval_error)
+        values["cypher_nonempty"] = 1.0 if run.kg_hits else 0.0
+        values["kg_source_grounding"] = M.kg_source_grounding(
+            run.cited_kg_indices, len(run.kg_hits)
+        )
+
+    if case.expected_mode and case.retrieval.retrieval_mode == "auto":
+        values["mode_routing_correctness"] = M.mode_routing_correct(
+            run.routed_mode, case.expected_mode
+        )
+
+    return values
+
+
 def _compute_metrics(case: EvalCase, run: CaseRun, cfg: EvalConfig) -> dict[str, Any]:
     """Assemble the flat metric dict. Disabled groups → None columns (stored
     as NULL); families with no gold → None from the compute fns."""
@@ -49,6 +82,11 @@ def _compute_metrics(case: EvalCase, run: CaseRun, cfg: EvalConfig) -> dict[str,
         values.update(M.compute_chunk_metrics(run.retrieved_texts, case.expected_chunks))
     else:
         values.update(dict.fromkeys(keys_in_toggle_group("chunk"), None))
+
+    if "kg" in cfg.enabled_groups:
+        values.update(_kg_metrics(case, run))
+    else:
+        values.update(dict.fromkeys(keys_in_toggle_group("kg"), None))
 
     # Always-on families.
     values["required_keyword_hit_rate"] = M.required_keyword_hit_rate(

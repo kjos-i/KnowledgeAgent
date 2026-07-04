@@ -79,3 +79,65 @@ def test_evaluate_cases_runs_all_in_order(monkeypatch):
     _patch_run(monkeypatch, _run(answer="a"))
     results = asyncio.run(E.evaluate_cases(cases, None, EvalConfig(concurrency=2)))
     assert [r["id"] for r in results] == ["c0", "c1", "c2", "c3"]
+
+
+# ---- KG group (Phase 2) ----
+
+
+def test_kg_metrics_computed_for_neo4j_case(monkeypatch):
+    case = EvalCase(
+        id="k1",
+        question="q?",
+        retrieval={"retrieval_mode": "neo4j_only"},
+        expected_entities=["ESCRT-III"],
+    )
+    _patch_run(
+        monkeypatch,
+        _run(
+            answer="a",
+            cypher_query="MATCH (n) RETURN n",
+            cypher_read_only=True,
+            kg_hits=[{"name": "ESCRT-III"}],
+            cited_kg_indices=[0],
+        ),
+    )
+    result = asyncio.run(E.evaluate_case(case, None, EvalConfig()))
+    assert result["cypher_validity"] == 1.0
+    assert result["cypher_nonempty"] == 1.0
+    assert result["kg_hit_at_k"] == 1.0
+    assert result["kg_entity_recall"] == 1.0
+    assert result["kg_source_grounding"] == 1.0
+
+
+def test_kg_metrics_none_for_lancedb_case(monkeypatch):
+    case = EvalCase(id="k2", question="q?")  # lancedb_only, no cypher runs
+    _patch_run(monkeypatch, _run(answer="a"))
+    result = asyncio.run(E.evaluate_case(case, None, EvalConfig()))
+    assert result["cypher_validity"] is None
+    assert result["cypher_nonempty"] is None
+    assert result["kg_hit_at_k"] is None  # no gold entities either
+
+
+def test_mode_routing_metric_for_auto_case(monkeypatch):
+    case = EvalCase(
+        id="k3", question="q?", retrieval={"retrieval_mode": "auto"}, expected_mode="neo4j_only"
+    )
+    _patch_run(monkeypatch, _run(answer="a", routed_mode="neo4j_only"))
+    result = asyncio.run(E.evaluate_case(case, None, EvalConfig()))
+    assert result["mode_routing_correctness"] == 1.0
+
+
+def test_kg_group_disabled_yields_none(monkeypatch):
+    case = EvalCase(
+        id="k4",
+        question="q?",
+        retrieval={"retrieval_mode": "neo4j_only"},
+        expected_entities=["ESCRT-III"],
+    )
+    _patch_run(
+        monkeypatch, _run(cypher_query="MATCH (n) RETURN n", kg_hits=[{"name": "ESCRT-III"}])
+    )
+    cfg = EvalConfig(enabled_groups=frozenset({"source"}))  # kg OFF
+    result = asyncio.run(E.evaluate_case(case, None, cfg))
+    assert result["kg_hit_at_k"] is None
+    assert result["cypher_validity"] is None

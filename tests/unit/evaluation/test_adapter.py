@@ -93,3 +93,23 @@ def test_run_case_captures_graph_error():
     run = asyncio.run(A.run_case(case, corpus_config=None, graph=fake_graph))
     assert run.error is not None and "boom" in run.error
     assert run.answer == ""  # empty final_state → empty answer, no crash
+
+
+# ---- KG fields (Phase 2) ----
+
+
+def test_build_case_run_kg_fields():
+    run = A.build_case_run("Q?", _final_state(), _cb(), 0.1, None)
+    assert run.cypher_query == "MATCH (n) RETURN n"
+    assert run.cypher_read_only is True  # MATCH ... RETURN passes the read-only rail
+    assert run.cited_kg_indices == [0]
+    assert run.kg_retrieval_error is None
+
+
+def test_build_case_run_flags_write_cypher_and_kg_error():
+    state = _final_state()
+    state["cypher_query"] = "MATCH (n) DELETE n"
+    state["kg_retrieval_error"] = "Neo4jError: boom"
+    run = A.build_case_run("Q?", state, _cb(), 0.1, None)
+    assert run.cypher_read_only is False  # DELETE fails the read-only rail
+    assert run.kg_retrieval_error == "Neo4jError: boom"

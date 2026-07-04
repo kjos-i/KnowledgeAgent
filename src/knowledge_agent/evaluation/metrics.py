@@ -162,3 +162,51 @@ def chunk_source_grounding(
         return 1.0
     retrieved = set(retrieved_chunk_ids)
     return sum(1 for cid in cited_chunk_ids if cid in retrieved) / len(cited_chunk_ids)
+
+
+# ---------------------------------------------------------------------------
+# KG metrics (Phase 2). All deterministic — read cypher_query / kg_hits /
+# kg_sources straight out of the typed state. An entity is "found" when its
+# normalized string appears in the normalized text of any returned KG row.
+# ---------------------------------------------------------------------------
+
+_KG_ENTITY_KEYS = ("kg_hit_at_k", "kg_entity_recall")
+
+
+def _hit_contains_entity(hit: dict, entity_norm: str) -> bool:
+    blob = normalize_text(" ".join(str(v) for v in hit.values()))
+    return entity_norm in blob
+
+
+def compute_kg_entity_metrics(
+    kg_hits: Sequence[dict], expected_entities: Sequence[str]
+) -> dict[str, float | None]:
+    """`kg_hit_at_k` (any gold entity present in the rows) + `kg_entity_recall`
+    (fraction of gold entities present). Both None when the case has no gold
+    `expected_entities`."""
+    ents = [normalize_text(e) for e in expected_entities if e.strip()]
+    if not ents:
+        return dict.fromkeys(_KG_ENTITY_KEYS, None)
+    found = sum(1 for e in ents if any(_hit_contains_entity(h, e) for h in kg_hits))
+    return {"kg_hit_at_k": 1.0 if found else 0.0, "kg_entity_recall": found / len(ents)}
+
+
+def kg_source_grounding(cited_kg_indices: Sequence[int], n_kg_hits: int) -> float:
+    """Fraction of the answer's KG citations (hit_index) that point at a real
+    returned row — the graph twin of `chunk_source_grounding`. 1.0 when the
+    answer cited no KG rows."""
+    if not cited_kg_indices:
+        return 1.0
+    valid = sum(1 for i in cited_kg_indices if 0 <= i < n_kg_hits)
+    return valid / len(cited_kg_indices)
+
+
+def cypher_validity(cypher_read_only: bool | None, kg_retrieval_error: str | None) -> float:
+    """1.0 iff the Cypher passed the read-only rail AND executed without a
+    retrieval error (catches write attempts + malformed/failed Cypher)."""
+    return 1.0 if (cypher_read_only and not kg_retrieval_error) else 0.0
+
+
+def mode_routing_correct(routed_mode: str | None, expected_mode: str) -> float:
+    """1.0 iff the mode-classifier routed to the case's expected leg."""
+    return 1.0 if routed_mode == expected_mode else 0.0

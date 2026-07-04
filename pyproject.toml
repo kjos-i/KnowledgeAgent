@@ -55,6 +55,10 @@ ka = "knowledge_agent.cli:main"
 # mode-switching display panel on the right. See gui/app.py docstring.
 # `python -m knowledge_agent.gui` ALSO works via `gui/__main__.py`.
 ka-gui = "knowledge_agent.gui.app:main"
+# Evaluation harness runner (2026-07-05). Convenience alias for
+# `python -m knowledge_agent.evaluation.runner` — the harness code lives
+# self-contained in `evaluation/`; this just points at its `main`.
+ka-eval = "knowledge_agent.evaluation.runner:main"
 
 [project.optional-dependencies]
 dev = [
