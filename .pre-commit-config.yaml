@@ -20,7 +20,7 @@ repos:
     hooks:
       # Lint — same checks as `ruff check .`. The rules + ignores live in
       # `[tool.ruff.lint]` in pyproject.toml so there's one source of truth.
-      - id: ruff
+      - id: ruff-check
         args: ["--fix"]
       # Format — same formatter as `ruff format .`. Rules live in
       # `[tool.ruff.format]` in pyproject.toml.
