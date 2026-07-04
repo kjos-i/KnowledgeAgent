@@ -8,7 +8,8 @@ has no router entry.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from knowledge_agent.gui.config_store import GuiConfig
 from knowledge_agent.gui.settings.llm_tab import LLM_AVAILABLE_MODELS, LlmTab
@@ -43,3 +44,58 @@ def test_provider_switch_resets_router_model_gui_side():
     assert tab.app.gui_config.chat_router_model == LLM_AVAILABLE_MODELS["openai"][0]
     # And the visible dropdown value tracks it.
     assert tab.node_model_fields["chat_router"].value == LLM_AVAILABLE_MODELS["openai"][0]
+
+
+# ---- install / uninstall wiring ----
+
+
+def _plan(**kw) -> MagicMock:
+    plan = MagicMock(**kw)
+    plan.summary = kw.get("summary", "SUMMARY")
+    return plan
+
+
+def test_uninstall_active_provider_short_circuits_no_dialog():
+    """The active provider can't be uninstalled — the handler surfaces the
+    plan summary as a status and shows NO confirm dialog."""
+    tab = _tab()
+    plan = _plan(bundled=False, is_active=True, installed=True, summary="X is ACTIVE")
+    with patch(
+        "knowledge_agent.gui.settings.llm_tab.uninstall_llm_provider_plan", return_value=plan
+    ):
+        tab.on_uninstall_clicked("anthropic")
+    assert tab.status.value == "X is ACTIVE"
+    tab.app.page.show_dialog.assert_not_called()
+
+
+def test_uninstall_installed_inactive_shows_confirm_dialog():
+    tab = _tab()
+    plan = _plan(bundled=False, is_active=False, installed=True, display_name="OpenAI")
+    with patch(
+        "knowledge_agent.gui.settings.llm_tab.uninstall_llm_provider_plan", return_value=plan
+    ):
+        tab.on_uninstall_clicked("openai")
+    tab.app.page.show_dialog.assert_called_once()
+
+
+def test_prompt_install_already_installed_short_circuits_no_dialog():
+    tab = _tab()
+    plan = _plan(bundled=False, already_installed=True, summary="already installed")
+    with patch(
+        "knowledge_agent.gui.settings.llm_tab.install_llm_provider_plan",
+        AsyncMock(return_value=plan),
+    ):
+        asyncio.run(tab._prompt_install("anthropic"))
+    assert tab.status.value == "already installed"
+    tab.app.page.show_dialog.assert_not_called()
+
+
+def test_prompt_install_installable_shows_confirm_dialog():
+    tab = _tab()
+    plan = _plan(bundled=False, already_installed=False, display_name="OpenAI")
+    with patch(
+        "knowledge_agent.gui.settings.llm_tab.install_llm_provider_plan",
+        AsyncMock(return_value=plan),
+    ):
+        asyncio.run(tab._prompt_install("openai"))
+    tab.app.page.show_dialog.assert_called_once()
