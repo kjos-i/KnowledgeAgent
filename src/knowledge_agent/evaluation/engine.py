@@ -116,7 +116,33 @@ def _status(case: EvalCase, values: dict[str, Any], run: CaseRun, cfg: EvalConfi
         retrieval_ok = values.get("hit_at_k") == 1.0
     keywords_ok = (values.get("required_keyword_hit_rate") or 0.0) >= cfg.required_keyword_threshold
     keywords_ok = keywords_ok and (values.get("disallowed_keyword_hits") or 0) == 0
-    return "PASS" if retrieval_ok and keywords_ok else "REVIEW"
+    judge_ok = True
+    if "judge" in cfg.enabled_groups:
+        # Gate on the two core generation-quality judges when present.
+        present = [values.get(k) for k in ("faithfulness", "answer_relevancy")]
+        present = [s for s in present if s is not None]
+        judge_ok = bool(present) and all(s >= cfg.judge_threshold for s in present)
+    return "PASS" if retrieval_ok and keywords_ok and judge_ok else "REVIEW"
+
+
+async def _judge_metrics(case: EvalCase, run: CaseRun, cfg: EvalConfig) -> dict[str, Any]:
+    """Run the DeepEval judge panel (async) → the 7 judge scores + their
+    mean + judge token usage, rounded to registry precision."""
+    from knowledge_agent.evaluation import judge as J
+
+    data = J.build_judge_input(run, case)
+    models = J.resolve_judge_models(cfg.judge_models)
+    scores, in_tok, out_tok = await J.run_judge_panel(data, models, cfg.judge_threshold)
+
+    values: dict[str, Any] = {k: _round(k, scores.get(k)) for k in J.JUDGE_METRIC_KEYS}
+    present = [scores[k] for k in J.JUDGE_METRIC_KEYS if scores.get(k) is not None]
+    values["avg_judge_score"] = _round("avg_judge_score", M.safe_mean(present)) if present else None
+    values["judge_input_tokens"] = in_tok
+    values["judge_output_tokens"] = out_tok
+    values["judge_total_tokens"] = (
+        in_tok + out_tok if in_tok is not None and out_tok is not None else None
+    )
+    return values
 
 
 async def evaluate_case(
@@ -126,6 +152,10 @@ async def evaluate_case(
     structural fields)."""
     run = await run_case(case, corpus_config)
     values = _compute_metrics(case, run, cfg)
+    if "judge" in cfg.enabled_groups:
+        values.update(await _judge_metrics(case, run, cfg))
+    else:
+        values.update(dict.fromkeys(keys_in_toggle_group("judge"), None))
     return {
         "id": case.id,
         "category": case.category,

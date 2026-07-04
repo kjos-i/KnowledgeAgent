@@ -141,3 +141,35 @@ def test_kg_group_disabled_yields_none(monkeypatch):
     result = asyncio.run(E.evaluate_case(case, None, cfg))
     assert result["kg_hit_at_k"] is None
     assert result["cypher_validity"] is None
+
+
+# ---- judge track (Phase 3) — judge module stubbed, no deepeval ----
+
+
+def test_judge_track_wired(monkeypatch):
+    from knowledge_agent.evaluation import judge as J
+
+    async def fake_panel(data, models, threshold):
+        return {k: 0.9 for k in J.JUDGE_METRIC_KEYS}, 200, 80
+
+    monkeypatch.setattr(J, "run_judge_panel", fake_panel)
+    monkeypatch.setattr(J, "resolve_judge_models", lambda m: ["x"])
+    monkeypatch.setattr(J, "build_judge_input", lambda run, case: {})
+    case = EvalCase(id="j1", question="q?", expected_answer_points=["fact"])
+    _patch_run(monkeypatch, _run(answer="a"))
+    cfg = EvalConfig(enabled_groups=frozenset({"judge"}))
+    result = asyncio.run(E.evaluate_case(case, None, cfg))
+    assert result["faithfulness"] == 0.9
+    assert result["avg_judge_score"] == 0.9
+    assert result["judge_total_tokens"] == 280
+    assert result["status"] == "PASS"  # faithfulness + answer_relevancy >= threshold
+
+
+def test_judge_group_disabled_yields_none(monkeypatch):
+    case = EvalCase(id="j2", question="q?")
+    _patch_run(monkeypatch, _run(answer="a"))
+    cfg = EvalConfig(enabled_groups=frozenset({"source"}))  # judge OFF
+    result = asyncio.run(E.evaluate_case(case, None, cfg))
+    assert result["faithfulness"] is None
+    assert result["avg_judge_score"] is None
+    assert result["judge_total_tokens"] is None

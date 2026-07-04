@@ -68,6 +68,12 @@ dev = [
     "pre-commit>=4,<5",
     "hypothesis>=6.100,<7",
 ]
+# Evaluation harness LLM-judge track (Phase 3). DeepEval supplies the
+# faithfulness / relevancy / correctness metrics. Only needed to run the
+# "judge" group — the deterministic metrics work without it.
+eval = [
+    "deepeval>=1.0",
+]
 # L6 entity extractor backends. Only install what your corpus uses.
 # The `llm` adapter has no extra deps (langchain-anthropic is a base
 # requirement); each NER adapter brings its own model + framework.

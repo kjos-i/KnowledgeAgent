@@ -56,20 +56,17 @@ class EvalConfig:
     metadata_match_threshold: float = 0.8
     required_keyword_threshold: float = 0.5
 
-    # ---- judge (Phase 3; unused while "judge" is off) --------------------
-    # OPEN DECISION (deferred to the Phase-3 judge build): who picks the
-    # judge model(s) — user-set, fixed, or derived from the user's
-    # configured providers — and the panel composition. The value below is
-    # a PLACEHOLDER, not a decision. Note: best practice keeps the judge
-    # DIFFERENT from the agent-under-test's model (self-preference bias),
-    # so "reuse the search LLM" is not the default.
-    judge_model: str = "claude-haiku-4-5-20251001"
-    """PLACEHOLDER single judge model (see open decision above). Used when
-    `judge_panel_models` is empty."""
-    judge_panel_models: tuple[str, ...] = ()
-    """Optional diverse-model judge panel (mean/majority). Empty = single
-    `judge_model`. Configurable size is the agreed mitigation for judge
-    noise/bias; membership is the open Phase-3 decision."""
+    # ---- judge (Phase 3; used only when "judge" is enabled) --------------
+    judge_models: tuple[str, ...] = ()
+    """The LLM-judge PANEL — a user-set list of model IDs, one per judge
+    (any models, same or different; the count is the panel size). Runs on
+    the user's configured LLM provider, same choose-your-provider pattern
+    as the search LLM (no hardcoded default model). Empty → a single
+    default judge resolved from the active provider (see
+    `judge.resolve_judge_models`). The GUI Evaluation tab (Phase 4)
+    populates this list. Best practice keeps a judge model DIFFERENT from
+    the agent's synthesizer (self-preference bias); a multi-model panel is
+    the stronger mitigation."""
 
     # ---- run control -----------------------------------------------------
     concurrency: int = 4
