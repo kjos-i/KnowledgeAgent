@@ -38,6 +38,13 @@ crashes/
 # Test documents for manual ingestion smoke tests (PDFs, JATS XML, etc.)
 test_documents/
 
+# Benchmark eval corpora — ignored wholesale for now (each holds a
+# regenerable lancedb/ + figures/ plus possibly large/licensed docs).
+# When ready to SHIP a benchmark, replace this blanket rule with
+# selective ones: keep corpus.toml + documents/ + gold.json, ignore
+# only benchmarks/*/lancedb/ and benchmarks/*/figures/.
+benchmarks/
+
 # IDE
 .vscode/
 .idea/
