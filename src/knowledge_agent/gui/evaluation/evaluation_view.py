@@ -84,6 +84,7 @@ class EvaluationView:
         for now this records the run + switches to the Run Summary sub-tab.
         """
         self.selected_run_id = run_id
+        self.run_summary_tab.refresh()
         if self._tabs is not None:
             self._tabs.selected_index = 1  # Run Summary
             self.app.page.update()
