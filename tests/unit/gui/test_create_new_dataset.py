@@ -1,11 +1,16 @@
 """Tests for Create New Dataset — corpus path derivation + validation.
 
-The B2 rework made the folder field a bare **Location**: the corpus lives
-in a `<location>/<name>/` subfolder whose `lancedb/`, `corpus.toml`, and
-`figures/` sit side by side. These tests pin that derivation (no
-double-nesting, no auto-fill) and the pre-create guards. The IO
-boundaries (Neo4j ping, keyring, disk config, env bridge) are mocked;
-only the path logic + guards run for real.
+The folder field pairs with a mode radio (`_corpus_folder`):
+
+  * create (default) → the corpus lives in a `<location>/<name>/`
+    subfolder whose `lancedb/`, `corpus.toml`, `figures/` sit side by side.
+  * adopt            → the picked folder *is* the corpus home; artefacts
+    land directly in it (adopts an existing folder in place).
+
+These tests pin both derivations (no double-nesting, no auto-fill), the
+pre-create guards (which also make adopt-mode safe), and the cosmetic
+relabel on mode change. The IO boundaries (Neo4j ping, keyring, disk
+config, env bridge) are mocked; only the path logic + guards run for real.
 """
 
 from __future__ import annotations
@@ -156,3 +161,80 @@ def test_on_create_validation_failure_short_circuits(tmp_path: Path):
         asyncio.run(tab.on_create_clicked(MagicMock()))
     ping.assert_not_called()
     assert tab.status.value.startswith("cannot create")
+
+
+# ---- folder mode: create (subfolder) vs adopt (folder itself) ----------
+
+
+def test_create_mode_derives_named_subfolder(tmp_path: Path):
+    """Default mode makes a `<location>/<name>` subfolder."""
+    tab = _tab()  # radio defaults to create
+    assert tab._folder_mode() == "create"
+    assert tab._corpus_folder(str(tmp_path), "c1") == tmp_path / "c1"
+
+
+def test_adopt_mode_uses_selected_folder_directly(tmp_path: Path):
+    """Adopt mode treats the picked folder as the corpus home — no subfolder."""
+    tab = _tab()
+    tab.location_mode_radio.value = "adopt"
+    assert tab._folder_mode() == "adopt"
+    assert tab._corpus_folder(str(tmp_path), "c1") == tmp_path
+    # A fresh empty folder is valid to adopt.
+    _fill(tab, name="c1", folder=str(tmp_path))
+    ok, msg = tab._validate()
+    assert ok and msg == ""
+
+
+def test_adopt_mode_rejects_folder_that_is_already_a_corpus(tmp_path: Path):
+    """The corpus.toml guard makes adopt safe: refuse an existing corpus."""
+    (tmp_path / "corpus.toml").write_text("x", encoding="utf-8")
+    tab = _tab()
+    tab.location_mode_radio.value = "adopt"
+    _fill(tab, name="c1", folder=str(tmp_path))
+    ok, msg = tab._validate()
+    assert not ok and "already exists" in msg
+
+
+def test_adopt_mode_registers_folder_as_corpus_home(tmp_path: Path, monkeypatch):
+    """on_create in adopt mode writes corpus.toml + registers the picked
+    folder itself — lancedb/corpus.toml sit directly inside it, not in a
+    `<name>` subfolder."""
+    tab = _tab()
+    tab.location_mode_radio.value = "adopt"
+    tab.app.chat_panel = MagicMock()
+    tab.app.library_tab = MagicMock()
+    _fill(tab, name="mycorpus", folder=str(tmp_path))
+    monkeypatch.setenv("NEO4J_PASSWORD", "")
+
+    with (
+        patch.object(tab, "_ping_neo4j", AsyncMock(return_value=None)),
+        patch(f"{_MOD}._write_corpus_toml") as write_toml,
+        patch(f"{_MOD}.set_corpus_password"),
+        patch(f"{_MOD}.save_config"),
+        patch(f"{_MOD}.apply_connection_to_env"),
+        patch(f"{_MOD}.reset_after_key_change"),
+    ):
+        asyncio.run(tab.on_create_clicked(MagicMock()))
+
+    # corpus.toml written directly in the picked folder — not tmp/mycorpus.
+    write_toml.assert_called_once()
+    assert write_toml.call_args.args[0] == tmp_path / "corpus.toml"
+    entry = tab.app.gui_config.corpora[-1]
+    assert entry.lancedb_path == tmp_path / "lancedb"
+    assert entry.corpus_config_path == tmp_path / "corpus.toml"
+
+
+def test_mode_change_relabels_folder_field_and_structure_tree():
+    """Toggling the radio swaps the folder label/hint + the right-pane tree."""
+    tab = _tab()
+    # Flip to adopt.
+    tab.location_mode_radio.value = "adopt"
+    tab._on_location_mode_change(MagicMock())
+    assert tab.folder_field.label == "Corpus folder"
+    assert "BE this corpus" in tab.folder_field.hint_text
+    assert "<selected folder>" in tab._structure_tree.value
+    # Flip back to create.
+    tab.location_mode_radio.value = "create"
+    tab._on_location_mode_change(MagicMock())
+    assert tab.folder_field.label == "Location"
+    assert "<corpus name>" in tab._structure_tree.value

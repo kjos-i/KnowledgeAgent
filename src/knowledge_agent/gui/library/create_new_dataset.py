@@ -2,28 +2,33 @@
 
 Storage-only form:
 
-  Corpus name, Neo4j URI / user / password, Location (the parent
-  folder to save the corpus into — Browse-only, no auto-fill). A
-  subfolder named after the corpus is created inside the location
-  and holds all the corpus's artefacts.
+  Corpus name, Neo4j URI / user / password, a folder field, and a
+  radio that chooses how that folder is used:
 
-The GUI derives the corpus home and its internal paths from the
-location + name:
+  * "Create a new folder named after the corpus" (default) — the
+    folder field is a *parent* location; a `<name>` subfolder is made
+    inside it and holds all the corpus's artefacts.
+  * "Use the selected folder as the corpus home" — the folder field
+    *is* the corpus home; artefacts land directly in it (adopts a
+    folder you've already made, e.g. one that already holds a
+    `documents/` subfolder).
 
-  * Corpus folder     = `<location>/<name>`
-  * LanceDB path      = `<location>/<name>/lancedb`
-  * corpus.toml path  = `<location>/<name>/corpus.toml`
-  * figures dir       = `<location>/<name>/figures`
+The GUI derives the corpus home from the folder field + the radio
+(see `_corpus_folder`), then the internal paths from that home:
 
-Users don't need to think about file structure — they pick a
-location, we create the named corpus folder and manage what goes
-where inside it.
+  * Corpus folder     = `<folder>/<name>` (create) | `<folder>` (adopt)
+  * LanceDB path      = `<corpus folder>/lancedb`
+  * corpus.toml path  = `<corpus folder>/corpus.toml`
+  * figures dir       = `<corpus folder>/figures`
+
+Users don't need to think about file structure — they pick a folder
+plus a mode, and we manage what goes where inside the corpus home.
 
 On [Create corpus]:
 
   1. Validate the form (see `_validate` below).
   2. Ping the Neo4j URI with a 5 s timeout.
-  3. Write a fresh corpus.toml at `<location>/<name>/corpus.toml`
+  3. Write a fresh corpus.toml at `<corpus folder>/corpus.toml`
      with seed defaults.
   4. Save the Neo4j password to the OS keyring under
      `f"neo4j-{name}"`.
@@ -81,6 +86,46 @@ _LEFT_FLEX = 60
 _RIGHT_FLEX = 40
 
 
+# Folder-mode radio values + the copy that swaps when the mode flips.
+# 'create' (default) treats the folder field as a parent and makes a
+# `<name>` subfolder inside it; 'adopt' treats the folder field as the
+# corpus home itself. The actual path branch lives in `_corpus_folder`;
+# everything below is cosmetic (field label/hint + the right-pane tree).
+_MODE_CREATE = "create"
+_MODE_ADOPT = "adopt"
+
+_FOLDER_LABEL = {_MODE_CREATE: "Location", _MODE_ADOPT: "Corpus folder"}
+_FOLDER_HINT = {
+    _MODE_CREATE: (
+        "Browse to where this corpus should be saved. A subfolder "
+        "named after the corpus is created inside it."
+    ),
+    _MODE_ADOPT: (
+        "Browse to the folder that will BE this corpus. Its lancedb/, "
+        "corpus.toml, and figures/ are written directly inside it."
+    ),
+}
+_STRUCTURE_CAPTION = {
+    _MODE_CREATE: "At the location you pick:",
+    _MODE_ADOPT: "In the folder you select:",
+}
+_STRUCTURE_TREE = {
+    _MODE_CREATE: (
+        "  <location>/\n"
+        "    └── <corpus name>/\n"
+        "          ├── lancedb/       (vector store)\n"
+        "          ├── corpus.toml    (config file)\n"
+        "          └── figures/       (multimodal figures)"
+    ),
+    _MODE_ADOPT: (
+        "  <selected folder>/\n"
+        "    ├── lancedb/       (vector store)\n"
+        "    ├── corpus.toml    (config file)\n"
+        "    └── figures/       (multimodal figures)"
+    ),
+}
+
+
 class CreateNewDatasetTab:
     """Storage-only form for registering a new corpus."""
 
@@ -92,8 +137,13 @@ class CreateNewDatasetTab:
         self.user_field: ft.TextField | None = None
         self.password_field: ft.TextField | None = None
         self.folder_field: ft.TextField | None = None
+        self.location_mode_radio: ft.RadioGroup | None = None
         self.browse_button: ft.Button | None = None
         self.create_button: ft.Button | None = None
+        # Right-pane "what gets created" text — kept as refs so the
+        # folder-mode radio can rewrite them in place.
+        self._structure_caption: ft.Text | None = None
+        self._structure_tree: ft.Text | None = None
         self._create_controls()
 
     # ----- control construction --------------------------------------------
@@ -131,15 +181,44 @@ class CreateNewDatasetTab:
             bgcolor=PANEL_BG,
         )
         self.folder_field = ft.TextField(
-            label="Location",
-            hint_text=(
-                "Browse to where this corpus should be saved. A subfolder "
-                "named after the corpus is created inside it."
-            ),
+            label=_FOLDER_LABEL[_MODE_CREATE],
+            hint_text=_FOLDER_HINT[_MODE_CREATE],
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
             expand=True,
+        )
+        # Folder-mode radio — defaults to 'create' (make a named
+        # subfolder), matching the folder field's default label + hint.
+        self.location_mode_radio = ft.RadioGroup(
+            value=_MODE_CREATE,
+            on_change=self._on_location_mode_change,
+            content=ft.Column(
+                spacing=0,
+                controls=[
+                    ft.Radio(
+                        value=_MODE_CREATE,
+                        label="Create a new folder named after the corpus",
+                    ),
+                    ft.Radio(
+                        value=_MODE_ADOPT,
+                        label="Use the selected folder as the corpus home",
+                    ),
+                ],
+            ),
+        )
+        # Right-pane structure hint — starts in create-mode wording;
+        # `_on_location_mode_change` swaps it to adopt-mode when toggled.
+        self._structure_caption = ft.Text(
+            _STRUCTURE_CAPTION[_MODE_CREATE],
+            size=12,
+            color=ft.Colors.GREY_400,
+        )
+        self._structure_tree = ft.Text(
+            _STRUCTURE_TREE[_MODE_CREATE],
+            size=11,
+            font_family="Consolas",
+            color=ft.Colors.GREY_300,
         )
         self.browse_button = ft.Button(
             content=centered_label("Browse"),
@@ -173,6 +252,12 @@ class CreateNewDatasetTab:
                     self.uri_field,
                     self.user_field,
                     self.password_field,
+                    ft.Text(
+                        "Where to put the corpus:",
+                        size=12,
+                        color=ft.Colors.GREY_400,
+                    ),
+                    self.location_mode_radio,
                     ft.Row(
                         controls=[self.folder_field, self.browse_button],
                         spacing=8,
@@ -201,21 +286,8 @@ class CreateNewDatasetTab:
                         size=13,
                         weight=ft.FontWeight.BOLD,
                     ),
-                    ft.Text(
-                        "At the location you pick:",
-                        size=12,
-                        color=ft.Colors.GREY_400,
-                    ),
-                    ft.Text(
-                        "  <location>/\n"
-                        "    └── <corpus name>/\n"
-                        "          ├── lancedb/       (vector store)\n"
-                        "          ├── corpus.toml    (config file)\n"
-                        "          └── figures/       (multimodal figures)",
-                        size=11,
-                        font_family="Consolas",
-                        color=ft.Colors.GREY_300,
-                    ),
+                    self._structure_caption,
+                    self._structure_tree,
                     ft.Text(
                         "The Neo4j DBMS lives outside — Neo4j Desktop "
                         "manages its data directory itself. Only the "
@@ -287,18 +359,64 @@ class CreateNewDatasetTab:
         self.folder_field.value = chosen
         self.app.page.update()
 
+    # ----- folder mode -----------------------------------------------------
+
+    def _folder_mode(self) -> str:
+        """Current folder mode from the radio: ``create`` | ``adopt``.
+
+        Falls back to ``create`` when the radio isn't built yet, so the
+        path derivation stays safe if called before/without a UI.
+        """
+        if self.location_mode_radio is None:
+            return _MODE_CREATE
+        return self.location_mode_radio.value or _MODE_CREATE
+
+    def _corpus_folder(self, folder_raw: str, name: str) -> Path:
+        """Derive the corpus home from the folder field + the mode radio.
+
+        The single place the folder mode changes anything:
+
+          * ``create`` (default) → ``<folder_raw>/<name>`` — a subfolder
+            named after the corpus is made inside the picked parent.
+          * ``adopt`` → ``<folder_raw>`` — the picked folder *is* the
+            corpus home (adopts an existing folder in place).
+
+        LanceDB / corpus.toml / figures all derive from the returned
+        path, so nothing else needs to know which mode is active.
+        """
+        base = Path(folder_raw)
+        return base if self._folder_mode() == _MODE_ADOPT else base / name
+
+    def _on_location_mode_change(self, _e: ft.Event) -> None:
+        """Re-label the folder field + right-pane tree for the chosen mode.
+
+        Purely cosmetic — the real path branch lives in `_corpus_folder`.
+        """
+        mode = self._folder_mode()
+        if self.folder_field is not None:
+            self.folder_field.label = _FOLDER_LABEL[mode]
+            self.folder_field.hint_text = _FOLDER_HINT[mode]
+        if self._structure_caption is not None:
+            self._structure_caption.value = _STRUCTURE_CAPTION[mode]
+        if self._structure_tree is not None:
+            self._structure_tree.value = _STRUCTURE_TREE[mode]
+        self.app.page.update()
+
     # ----- validation ------------------------------------------------------
 
     def _validate(self) -> tuple[bool, str]:
         """Run pre-create sync checks. Returns (ok, error_message).
 
-        Derives the corpus home + internal paths from location + name:
-          corpus_folder = <location>/<name>
-          lancedb_path  = <location>/<name>/lancedb
-          corpus.toml   = <location>/<name>/corpus.toml
+        Derives the corpus home via `_corpus_folder` (create → a
+        `<location>/<name>` subfolder; adopt → the picked folder itself)
+        then its internal paths:
+          lancedb_path = <corpus folder>/lancedb
+          corpus.toml  = <corpus folder>/corpus.toml
         Checks the derived corpus folder doesn't already contain a
         corpus.toml (would clobber an existing corpus) and its lancedb
-        subfolder is either nonexistent or empty.
+        subfolder is either nonexistent or empty. These guards are what
+        make adopt-mode safe: they refuse a folder that's already a
+        corpus while happily adopting one that merely holds documents/.
         """
         if (
             self.name_field is None
@@ -327,19 +445,19 @@ class CreateNewDatasetTab:
         if not folder_raw:
             return False, "corpus folder is required"
 
-        corpus_folder = Path(folder_raw) / name
+        corpus_folder = self._corpus_folder(folder_raw, name)
         toml_path = corpus_folder / "corpus.toml"
         lancedb_path = corpus_folder / "lancedb"
         if toml_path.exists():
             return (
                 False,
                 f"a corpus already exists at {corpus_folder} "
-                f"(corpus.toml present) — pick a different name or location",
+                f"(corpus.toml present) — pick a different name or folder",
             )
         if lancedb_path.exists() and any(lancedb_path.iterdir()):
             return (
                 False,
-                f"{lancedb_path} exists and is non-empty — pick a different name or location",
+                f"{lancedb_path} exists and is non-empty — pick a different name or folder",
             )
         return True, ""
 
@@ -398,9 +516,10 @@ class CreateNewDatasetTab:
         uri = self.uri_field.value.strip()
         user = self.user_field.value.strip()
         password = self.password_field.value
-        # The corpus lives in a `<location>/<name>/` subfolder — the user
-        # picks the location, the GUI names + structures the folder.
-        corpus_folder = Path(self.folder_field.value.strip()) / name
+        # Corpus home = the folder field resolved through the mode radio
+        # (create → a `<name>` subfolder; adopt → the folder itself). All
+        # internal paths hang off that single derived home.
+        corpus_folder = self._corpus_folder(self.folder_field.value.strip(), name)
         lancedb_path = corpus_folder / "lancedb"
         toml_path = corpus_folder / "corpus.toml"
 
