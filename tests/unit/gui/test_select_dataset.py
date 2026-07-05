@@ -9,11 +9,15 @@ these never touch LanceDB/Neo4j.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
+from knowledge_agent.gui.config_store import CorpusEntry
 from knowledge_agent.gui.library.select_dataset import (
     SelectDatasetTab,
     _onoff,
 )
+
+_MOD = "knowledge_agent.gui.library.select_dataset"
 
 
 def _tab(fake_app) -> SelectDatasetTab:
@@ -154,3 +158,56 @@ def test_refresh_after_ingest_is_callable(fake_app):
     """Cross-tab hook the Ingest sub-tab calls after a successful op."""
     tab = _tab(fake_app)
     assert callable(tab.refresh_after_ingest)
+
+
+# ---- Relocate (repoint a moved corpus) ----
+
+
+def _corpus(name: str, folder) -> CorpusEntry:
+    return CorpusEntry(
+        name=name,
+        neo4j_uri="neo4j://h:7687",
+        lancedb_path=folder / "lancedb",
+        corpus_config_path=folder / "corpus.toml",
+    )
+
+
+def test_relocate_corpus_rewrites_paths(fake_app, tmp_path):
+    new = tmp_path / "moved"
+    new.mkdir()
+    (new / "corpus.toml").write_text("x", encoding="utf-8")
+    tab = _tab(fake_app)
+    fake_app.gui_config.corpora = [_corpus("c1", tmp_path / "old")]
+    fake_app.gui_config.active_corpus_name = "c1"
+
+    with (
+        patch(f"{_MOD}.save_config"),
+        patch(f"{_MOD}.apply_connection_to_env"),
+        patch(f"{_MOD}.reset_after_key_change"),
+        patch.object(tab, "_sync_picker"),
+        patch.object(tab, "_populate_info_card"),
+    ):
+        tab._relocate_corpus("c1", new)
+
+    entry = fake_app.gui_config.corpora[0]
+    assert entry.corpus_config_path == new / "corpus.toml"
+    assert entry.lancedb_path == new / "lancedb"
+    # active corpus → top-level mirror updated too
+    assert fake_app.gui_config.corpus_config_path == new / "corpus.toml"
+    assert "relocated" in tab.status.value
+
+
+def test_relocate_corpus_rejects_folder_without_corpus_toml(fake_app, tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()  # no corpus.toml here
+    tab = _tab(fake_app)
+    fake_app.gui_config.corpora = [_corpus("c1", tmp_path / "old")]
+    fake_app.gui_config.active_corpus_name = "c1"
+
+    with patch(f"{_MOD}.save_config") as save:
+        tab._relocate_corpus("c1", empty)
+
+    save.assert_not_called()
+    # entry untouched
+    assert fake_app.gui_config.corpora[0].corpus_config_path == tmp_path / "old" / "corpus.toml"
+    assert "corpus.toml" in tab.status.value

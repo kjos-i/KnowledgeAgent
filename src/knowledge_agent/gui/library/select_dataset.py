@@ -2,7 +2,8 @@
 
 Internal 2-column layout (fixed proportions, no dragger):
 
-  Left column  (~320 px): dataset picker + Rename / Remove / Refresh.
+  Left column  (~320 px): dataset picker + Rename / Relocate / Remove /
+                          Refresh.
   Right column (expand):  info card (name, URIs, paths, counts,
                           active ontologies + extractor + layer flags)
                           on top; Documents table below.
@@ -26,6 +27,10 @@ Rename: updates `CorpusEntry.name`; migrates keyring entry from
 `neo4j-{old}` → `neo4j-{new}`; refreshes info card if the renamed
 corpus is active.
 
+Relocate: repoints a MOVED corpus — rewrites `CorpusEntry.lancedb_path`
++ `corpus_config_path` to a folder you pick (must contain `corpus.toml`).
+No re-ingest; the data moved with the folder.
+
 Remove: unregisters the `CorpusEntry` + deletes its keyring entry.
 Does NOT delete the actual Neo4j DBMS / LanceDB folder / corpus.toml
 — those are external artefacts the user manages themselves.
@@ -38,6 +43,7 @@ import contextlib
 import logging
 import os
 from collections import Counter
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import flet as ft
@@ -116,6 +122,7 @@ class SelectDatasetTab:
         self.picker_container: ft.Container | None = None
         self.picker_radio: ft.RadioGroup | None = None
         self.rename_button: ft.Button | None = None
+        self.relocate_button: ft.Button | None = None
         self.remove_button: ft.Button | None = None
         self.refresh_button: ft.Button | None = None
 
@@ -162,6 +169,10 @@ class SelectDatasetTab:
         self.rename_button = ft.Button(
             content=centered_label("Rename"),
             on_click=self.on_rename_clicked,
+        )
+        self.relocate_button = ft.Button(
+            content=centered_label("Relocate"),
+            on_click=self.on_relocate_clicked,
         )
         self.remove_button = ft.Button(
             content=centered_label("Remove"),
@@ -277,10 +288,12 @@ class SelectDatasetTab:
                     ft.Row(
                         controls=[
                             self.rename_button,
+                            self.relocate_button,
                             self.remove_button,
                             self.refresh_button,
                         ],
                         spacing=8,
+                        wrap=True,
                     ),
                     self.status,
                     ft.Divider(),
@@ -354,6 +367,8 @@ class SelectDatasetTab:
     def _sync_button_disable_state(self, has_corpora: bool) -> None:
         if self.rename_button is not None:
             self.rename_button.disabled = not has_corpora
+        if self.relocate_button is not None:
+            self.relocate_button.disabled = not has_corpora
         if self.remove_button is not None:
             self.remove_button.disabled = not has_corpora
 
@@ -780,6 +795,89 @@ class SelectDatasetTab:
         self._populate_info_card()
         self.status.value = f"renamed {old_name!r} → {new_name!r}"
         self.app.chat_panel.append_system(f"renamed corpus {old_name!r} → {new_name!r}")
+        self.app.page.update()
+
+    # ----- Relocate -------------------------------------------------------
+
+    async def on_relocate_clicked(self, e: ft.Event) -> None:
+        """Repoint the active corpus at a folder it was MOVED to.
+
+        Opens the OS folder picker; the chosen folder becomes the corpus
+        home (its `corpus.toml` + `lancedb/` are read from there). No
+        re-ingest — the data moved with the folder, so only the two stored
+        paths change."""
+        active_name = self.app.gui_config.active_corpus_name
+        if active_name is None:
+            return
+        entry = self._find_corpus(active_name)
+        if entry is None:
+            return
+        current = entry.corpus_config_path.parent
+        initial = str(current) if current.is_dir() else None
+        try:
+            chosen = await self.app.file_picker.get_directory_path(
+                dialog_title=f"Pick the new folder for corpus {active_name!r}",
+                initial_directory=initial,
+            )
+        except Exception as exc:
+            logger.warning("folder picker failed: %r", exc)
+            if self.status is not None:
+                self.status.value = f"folder picker error: {exc}"
+                self.app.page.update()
+            return
+        if not chosen:
+            return
+        self._relocate_corpus(active_name, Path(chosen))
+
+    def _relocate_corpus(self, name: str, new_folder: Path) -> None:
+        """Rewrite the corpus's `lancedb_path` + `corpus_config_path` to
+        `new_folder` (its home after a move). Requires a `corpus.toml` there
+        — the corpus identity marker; `lancedb/` may be absent (never
+        ingested). Re-bridges to env when the relocated corpus is active."""
+        if self.status is None:
+            return
+        toml_path = new_folder / "corpus.toml"
+        if not toml_path.is_file():
+            self.status.value = (
+                f"no corpus.toml in {new_folder} — pick the folder that IS the corpus"
+            )
+            self.app.page.update()
+            return
+        lancedb_path = new_folder / "lancedb"
+        updated: list[CorpusEntry] = []
+        for c in self.app.gui_config.corpora:
+            if c.name == name:
+                updated.append(
+                    c.model_copy(
+                        update={
+                            "lancedb_path": lancedb_path,
+                            "corpus_config_path": toml_path,
+                        }
+                    )
+                )
+            else:
+                updated.append(c)
+        self.app.gui_config.corpora = updated
+        is_active = self.app.gui_config.active_corpus_name == name
+        if is_active:
+            self.app.gui_config.lancedb_path = lancedb_path
+            self.app.gui_config.corpus_config_path = toml_path
+        try:
+            save_config(self.app.gui_config)
+        except ConfigError as exc:
+            self.status.value = f"could not save relocation: {exc}"
+            self.app.page.update()
+            return
+        if is_active:
+            apply_connection_to_env(self.app.gui_config)
+            try:
+                reset_after_key_change()
+            except Exception as exc:
+                logger.warning("reset_after_key_change failed: %r", exc)
+        self._sync_picker()
+        self._populate_info_card()
+        self.status.value = f"relocated {name!r} → {new_folder}"
+        self.app.chat_panel.append_system(f"relocated corpus {name!r} → {new_folder}")
         self.app.page.update()
 
     # ----- Remove ---------------------------------------------------------
