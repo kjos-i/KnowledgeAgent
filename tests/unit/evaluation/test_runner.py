@@ -40,12 +40,13 @@ def test_end_to_end_with_stubbed_graph(tmp_path, monkeypatch):
         RP, "capture_provenance", lambda: {"git_commit": None, "model_config": {}, "prompts": {}}
     )
 
-    # dataset defaults to the shipped escrt_bootstrap.json (3 cases).
+    # dataset defaults to the shipped escrt_bootstrap.json (9 cases, one per
+    # pathway).
     cfg = load_eval_config(output_dir=tmp_path / "out")
     report = asyncio.run(RN.run(cfg))
 
     # ---- report shape ----
-    assert report["summary"]["case_count"] == 3
+    assert report["summary"]["case_count"] == 9
     assert report["summary"]["avg_chunk_hit_at_k"] == 1.0  # every answer chunk matched
     assert report["summary"]["avg_agent_total_tokens"] == 140
 
@@ -61,4 +62,4 @@ def test_end_to_end_with_stubbed_graph(tmp_path, monkeypatch):
         n_runs = conn.execute("SELECT COUNT(*) FROM eval_runs").fetchone()[0]
         n_cases = conn.execute("SELECT COUNT(*) FROM eval_cases").fetchone()[0]
     assert n_runs == 1
-    assert n_cases == 3
+    assert n_cases == 9

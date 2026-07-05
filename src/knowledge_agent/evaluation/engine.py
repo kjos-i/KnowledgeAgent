@@ -108,12 +108,20 @@ def _compute_metrics(case: EvalCase, run: CaseRun, cfg: EvalConfig) -> dict[str,
 
 def _status(case: EvalCase, values: dict[str, Any], run: CaseRun, cfg: EvalConfig) -> str:
     """PASS / REVIEW verdict. Any error forces REVIEW. Retrieval gate applies
-    only when the source group ran AND the case has gold sources."""
+    only when the source group ran AND the case has gold sources.
+
+    A `direct_retrieval` case returns chunks with no synthesized answer, so
+    the answer-based gates (keywords, judge) don't apply — it's scored on
+    retrieval alone."""
     if run.error:
         return "REVIEW"
     retrieval_ok = True
     if "source" in cfg.enabled_groups and case.expected_sources:
         retrieval_ok = values.get("hit_at_k") == 1.0
+
+    if case.retrieval.direct_retrieval:
+        return "PASS" if retrieval_ok else "REVIEW"
+
     keywords_ok = (values.get("required_keyword_hit_rate") or 0.0) >= cfg.required_keyword_threshold
     keywords_ok = keywords_ok and (values.get("disallowed_keyword_hits") or 0) == 0
     judge_ok = True
@@ -152,7 +160,9 @@ async def evaluate_case(
     structural fields)."""
     run = await run_case(case, corpus_config)
     values = _compute_metrics(case, run, cfg)
-    if "judge" in cfg.enabled_groups:
+    # direct_retrieval returns chunks with no synthesized answer, so the LLM
+    # judge has nothing to score — skip it (and don't spend judge tokens).
+    if "judge" in cfg.enabled_groups and not case.retrieval.direct_retrieval:
         values.update(await _judge_metrics(case, run, cfg))
     else:
         values.update(dict.fromkeys(keys_in_toggle_group("judge"), None))

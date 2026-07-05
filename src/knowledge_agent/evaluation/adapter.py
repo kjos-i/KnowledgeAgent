@@ -15,9 +15,11 @@ drops from run-level means downstream.
 
 `retrieved_chunks` come back IN the final state, so — unlike the
 reference harness — there's no separate retriever call, and thus no
-retrieval-vs-LLM latency split (only total wall-clock). `lancedb_search_mode`
-is a Settings-level knob, not a graph-state field, so it is NOT injected
-per case here (a P1 limitation; the EvalCase field is reserved).
+retrieval-vs-LLM latency split (only total wall-clock). Every per-case
+pathway knob the graph reads from state — retrieval_mode,
+lancedb_search_mode, top_k, skip_query_builder, direct_retrieval,
+user_cypher — is injected below, so a gold case fully specifies its own
+retrieval pathway (no dependence on ambient Settings).
 """
 
 from __future__ import annotations
@@ -131,8 +133,9 @@ async def run_case(
     """Invoke the KA graph for one case and normalize the typed result.
 
     Injects the state-supported per-case overrides (query, retrieval_mode,
-    top_k, corpus_config) + a usage callback. A graph error is captured as
-    a string on the returned `CaseRun` (empty answer / empty retrieval) so
+    lancedb_search_mode, top_k, skip_query_builder, direct_retrieval,
+    user_cypher, corpus_config) + a usage callback. A graph error is captured
+    as a string on the returned `CaseRun` (empty answer / empty retrieval) so
     one bad case can't sink the whole run. `graph` is injectable for tests;
     None lazy-imports the real compiled graph.
     """
@@ -145,7 +148,11 @@ async def run_case(
     invoke_state: dict[str, Any] = {
         "query": case.question,
         "retrieval_mode": case.retrieval.retrieval_mode,
+        "lancedb_search_mode": case.retrieval.lancedb_search_mode,
         "top_k": case.retrieval.top_k,
+        "skip_query_builder": case.retrieval.skip_query_builder,
+        "direct_retrieval": case.retrieval.direct_retrieval,
+        "user_cypher": case.user_cypher,
         "corpus_config": corpus_config,
     }
 

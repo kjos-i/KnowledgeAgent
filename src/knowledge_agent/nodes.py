@@ -455,11 +455,16 @@ async def lancedb_retriever_node(state: AgentState) -> dict[str, Any]:
                 len(kg_hits),
             )
 
+    # Within-LanceDB search mode: per-invocation override wins; None lets
+    # client.retrieve fall back to settings.lancedb_search_mode.
+    search_mode = state.get("lancedb_search_mode")
+
     client = get_search_client()
     try:
         hits = await client.retrieve(
             query=query,
             top_k=top_k,
+            mode=search_mode,
             use_mmr=use_mmr,
             filters=filters,
         )

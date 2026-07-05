@@ -12,10 +12,10 @@
     ],
     "retrieval": { "retrieval_mode": "lancedb_only", "lancedb_search_mode": "hybrid", "top_k": 5 },
     "category": "Mechanism",
-    "notes": "PLACEHOLDER bootstrap over test_corpus/. expected_sources (doc_ids) TBD by curator."
+    "notes": "PLACEHOLDER. Pathway: lancedb_only + query_builder + synthesizer (the default full text path). expected_sources (doc_ids) TBD by curator."
   },
   {
-    "id": "escrt_membrane_scission",
+    "id": "escrt_membrane_scission_fts",
     "question": "How do ESCRT complexes drive membrane scission?",
     "expected_sources": [],
     "expected_chunks": ["scission", "membrane"],
@@ -25,12 +25,12 @@
       "ESCRT machinery is recruited to the membrane neck and narrows it.",
       "Scission occurs from within the neck (reverse-topology)."
     ],
-    "retrieval": { "retrieval_mode": "lancedb_only", "lancedb_search_mode": "hybrid", "top_k": 5 },
+    "retrieval": { "retrieval_mode": "lancedb_only", "lancedb_search_mode": "fts", "top_k": 5 },
     "category": "Mechanism",
-    "notes": "PLACEHOLDER bootstrap. expected_sources TBD."
+    "notes": "PLACEHOLDER. Pathway: lancedb_only under FTS (lexical) search mode — demonstrates per-case lancedb_search_mode. expected_sources TBD."
   },
   {
-    "id": "escrt_cellular_roles",
+    "id": "escrt_cellular_roles_vector",
     "question": "What cellular processes are ESCRT proteins involved in?",
     "expected_sources": [],
     "expected_chunks": ["ESCRT"],
@@ -40,8 +40,104 @@
       "Multivesicular body biogenesis and receptor sorting.",
       "Cytokinetic abscission, viral budding, and membrane repair."
     ],
-    "retrieval": { "retrieval_mode": "lancedb_only", "lancedb_search_mode": "hybrid", "top_k": 5 },
+    "retrieval": { "retrieval_mode": "lancedb_only", "lancedb_search_mode": "vector", "top_k": 5 },
     "category": "Overview",
-    "notes": "PLACEHOLDER bootstrap. expected_sources TBD."
+    "notes": "PLACEHOLDER. Pathway: lancedb_only under vector (semantic) search mode. expected_sources TBD."
+  },
+  {
+    "id": "escrt_raw_query_no_rewrite",
+    "question": "ESCRT-III filament structure",
+    "expected_sources": [],
+    "expected_chunks": ["ESCRT-III", "filament"],
+    "required_keywords": ["ESCRT-III"],
+    "disallowed_keywords": [],
+    "expected_answer_points": [
+      "ESCRT-III subunits assemble into helical filaments and spirals."
+    ],
+    "retrieval": {
+      "retrieval_mode": "lancedb_only",
+      "lancedb_search_mode": "hybrid",
+      "top_k": 5,
+      "skip_query_builder": true
+    },
+    "category": "Mechanism",
+    "notes": "PLACEHOLDER. Pathway: skip_query_builder=true — the raw keyword query runs verbatim (no LLM rewrite). expected_sources TBD."
+  },
+  {
+    "id": "escrt_retrieval_only",
+    "question": "ESCRT membrane remodeling",
+    "expected_sources": [],
+    "expected_chunks": ["ESCRT", "membrane"],
+    "required_keywords": [],
+    "disallowed_keywords": [],
+    "expected_answer_points": [],
+    "retrieval": {
+      "retrieval_mode": "lancedb_only",
+      "lancedb_search_mode": "hybrid",
+      "top_k": 5,
+      "direct_retrieval": true
+    },
+    "category": "Retrieval-only",
+    "notes": "PLACEHOLDER. Pathway: direct_retrieval=true — returns chunks as sources, NO synthesized answer. Scored on retrieval only (no judge / answer-keyword gates). Set expected_sources/expected_chunks for scoring; leave expected_answer_points/required_keywords empty."
+  },
+  {
+    "id": "escrt_kg_generated_cypher",
+    "question": "Which proteins interact with CHMP4B?",
+    "expected_sources": [],
+    "expected_chunks": [],
+    "required_keywords": [],
+    "disallowed_keywords": [],
+    "expected_answer_points": [
+      "CHMP4B is a core ESCRT-III subunit that polymerizes on membranes."
+    ],
+    "expected_entities": ["CHMP4B"],
+    "retrieval": { "retrieval_mode": "neo4j_only", "top_k": 5 },
+    "category": "KG",
+    "notes": "PLACEHOLDER. Pathway: neo4j_only with LLM-generated Cypher + synthesizer. Requires a populated KG for the corpus (else kg_hits empty). expected_entities TBD by curator."
+  },
+  {
+    "id": "escrt_kg_direct_cypher",
+    "question": "List entities mentioning ESCRT.",
+    "expected_sources": [],
+    "expected_chunks": [],
+    "required_keywords": [],
+    "disallowed_keywords": [],
+    "expected_answer_points": [],
+    "expected_entities": ["ESCRT"],
+    "user_cypher": "MATCH (e:Entity) WHERE e.key CONTAINS 'escrt' RETURN e.key, e.entity_type LIMIT 10",
+    "retrieval": { "retrieval_mode": "neo4j_only", "top_k": 5 },
+    "category": "KG",
+    "notes": "PLACEHOLDER. Pathway: user_cypher — raw read-only Cypher runs verbatim, bypassing cypher_builder. The :Entity {key, entity_type} schema is FIXED across KA corpora (key = lowercased entity text); only requires the corpus KG to be populated (L6 entity extraction run). For real questions, change the search term + expected_entities. Read-only rails still enforced at execution."
+  },
+  {
+    "id": "escrt_fused_text_and_kg",
+    "question": "How is ESCRT-III recruited and what does it do at the membrane?",
+    "expected_sources": [],
+    "expected_chunks": ["ESCRT-III"],
+    "required_keywords": ["ESCRT-III"],
+    "disallowed_keywords": [],
+    "expected_answer_points": [
+      "ESCRT-III is recruited by upstream ESCRT components and adaptor proteins.",
+      "It polymerizes to constrict and sever the membrane neck."
+    ],
+    "expected_entities": ["ESCRT-III"],
+    "retrieval": { "retrieval_mode": "parallel_fused", "lancedb_search_mode": "hybrid", "top_k": 5 },
+    "category": "Mechanism",
+    "notes": "PLACEHOLDER. Pathway: parallel_fused — LanceDB + Neo4j legs run in parallel and the synthesizer fuses both. expected_sources/expected_entities TBD."
+  },
+  {
+    "id": "escrt_auto_routes_to_text",
+    "question": "Summarize what ESCRT proteins are.",
+    "expected_sources": [],
+    "expected_chunks": ["ESCRT"],
+    "required_keywords": ["ESCRT"],
+    "disallowed_keywords": [],
+    "expected_answer_points": [
+      "ESCRT (Endosomal Sorting Complex Required for Transport) proteins mediate membrane remodeling and scission."
+    ],
+    "expected_mode": "lancedb_only",
+    "retrieval": { "retrieval_mode": "auto", "lancedb_search_mode": "hybrid", "top_k": 5 },
+    "category": "Overview",
+    "notes": "PLACEHOLDER. Pathway: auto — the mode_classifier routes; expected_mode asserts it should pick lancedb_only for this descriptive question. TBD by curator."
   }
 ]

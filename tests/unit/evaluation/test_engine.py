@@ -173,3 +173,38 @@ def test_judge_group_disabled_yields_none(monkeypatch):
     assert result["faithfulness"] is None
     assert result["avg_judge_score"] is None
     assert result["judge_total_tokens"] is None
+
+
+# ---- direct_retrieval pathway (empty answer, scored on retrieval) ----
+
+
+def test_direct_retrieval_scored_on_retrieval_only(monkeypatch):
+    """Empty answer + retrieval hit → PASS. Judge is skipped even when the
+    group is enabled (no prose to score, no judge tokens spent)."""
+    case = EvalCase(
+        id="dr1",
+        question="escrt membrane",
+        expected_sources=["d1"],
+        retrieval={"retrieval_mode": "lancedb_only", "direct_retrieval": True},
+    )
+    _patch_run(monkeypatch, _run(answer="", retrieved_doc_ids=["d1", "d2"]))
+    cfg = EvalConfig(enabled_groups=frozenset({"source", "judge"}))  # judge ON but must be skipped
+    result = asyncio.run(E.evaluate_case(case, None, cfg))
+    assert result["hit_at_k"] == 1.0
+    assert result["status"] == "PASS"  # empty answer is expected here
+    assert result["faithfulness"] is None  # judge not run
+    assert result["avg_judge_score"] is None
+    assert result["judge_total_tokens"] is None
+
+
+def test_direct_retrieval_review_on_retrieval_miss(monkeypatch):
+    case = EvalCase(
+        id="dr2",
+        question="q?",
+        expected_sources=["d1"],
+        retrieval={"retrieval_mode": "lancedb_only", "direct_retrieval": True},
+    )
+    _patch_run(monkeypatch, _run(answer="", retrieved_doc_ids=["dX"]))
+    result = asyncio.run(E.evaluate_case(case, None, EvalConfig()))
+    assert result["hit_at_k"] == 0.0
+    assert result["status"] == "REVIEW"

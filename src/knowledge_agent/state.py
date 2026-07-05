@@ -61,6 +61,14 @@ class AgentState(TypedDict, total=False):
     """Per-invocation top-k override for the retriever. When None, the
     retriever node uses its own default."""
 
+    lancedb_search_mode: str | None
+    """Per-invocation within-LanceDB search mode override (hybrid / fts /
+    vector). When None, the retriever node falls back to
+    `settings.lancedb_search_mode`. Distinct from `retrieval_mode`, which
+    picks the agent-level topology (which store(s) run); this picks how the
+    LanceDB leg searches. Allowed values match the Literal on
+    `config.Settings.lancedb_search_mode`."""
+
     skip_query_builder: bool | None
     """Per-invocation override for the query-rewrite LLM step. None falls
     back to `settings.skip_query_builder`. When True, the user's raw

@@ -19,6 +19,40 @@ def test_minimal_case_defaults():
     assert c.expected_mode is None
 
 
+def test_pathway_knob_defaults():
+    c = EvalCase(id="x", question="what?")
+    assert c.retrieval.skip_query_builder is False
+    assert c.retrieval.direct_retrieval is False
+    assert c.user_cypher is None
+
+
+def test_pathway_knobs_load(tmp_path):
+    data = [
+        {
+            "id": "raw",
+            "question": "escrt filament",
+            "retrieval": {"retrieval_mode": "lancedb_only", "skip_query_builder": True},
+        },
+        {
+            "id": "direct",
+            "question": "escrt",
+            "retrieval": {"retrieval_mode": "lancedb_only", "direct_retrieval": True},
+        },
+        {
+            "id": "cyph",
+            "question": "list escrt",
+            "user_cypher": "MATCH (n) RETURN n LIMIT 5",
+            "retrieval": {"retrieval_mode": "neo4j_only"},
+        },
+    ]
+    p = tmp_path / "cases.json"
+    p.write_text(json.dumps(data), encoding="utf-8")
+    cases = load_cases(p)
+    assert cases[0].retrieval.skip_query_builder is True
+    assert cases[1].retrieval.direct_retrieval is True
+    assert cases[2].user_cypher == "MATCH (n) RETURN n LIMIT 5"
+
+
 def test_case_rejects_blank_id():
     with pytest.raises(ValidationError):
         EvalCase(id="", question="q?")

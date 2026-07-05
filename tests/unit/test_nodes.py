@@ -590,6 +590,7 @@ def test_retriever_prefers_rewritten_search_query():
     mock_client.retrieve.assert_called_once_with(
         query="rewritten",
         top_k=5,
+        mode=None,
         use_mmr=False,
         filters=None,
     )
@@ -613,6 +614,7 @@ def test_retriever_falls_back_to_raw_query_when_no_search_query():
     mock_client.retrieve.assert_called_once_with(
         query="raw",
         top_k=5,
+        mode=None,
         use_mmr=False,
         filters=None,
     )
@@ -635,6 +637,26 @@ def test_retriever_honours_state_top_k_override():
     call_kwargs = mock_client.retrieve.call_args.kwargs
     assert call_kwargs["query"] == "rewritten"
     assert call_kwargs["top_k"] == 20
+
+
+def test_retriever_honours_state_lancedb_search_mode():
+    """Per-invocation lancedb_search_mode is passed to client.retrieve as
+    `mode` (None falls back to settings inside retrieve)."""
+    mock_client = MagicMock()
+    mock_client.retrieve = AsyncMock(return_value=[])
+    with (
+        patch(
+            "knowledge_agent.nodes.get_search_client",
+            return_value=mock_client,
+        ),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
+    ):
+        mock_settings.return_value.top_k = 5
+        mock_settings.return_value.default_retrieval_mode = "lancedb_only"
+        mock_settings.return_value.default_use_mmr = False
+        state = {"query": "raw", "search_query": "rewritten", "lancedb_search_mode": "fts"}
+        asyncio.run(lancedb_retriever_node(state))
+    assert mock_client.retrieve.call_args.kwargs["mode"] == "fts"
 
 
 def test_retriever_mode4_extracts_doc_ids_from_kg_hits_and_filters():

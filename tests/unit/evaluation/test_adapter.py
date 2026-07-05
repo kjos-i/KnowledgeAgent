@@ -87,6 +87,30 @@ def test_run_case_invokes_graph_with_state_overrides():
     assert run.answer.startswith("Norway")
 
 
+def test_run_case_injects_all_pathway_knobs():
+    case = EvalCase(
+        id="x",
+        question="q?",
+        user_cypher="MATCH (n) RETURN n LIMIT 5",
+        retrieval={
+            "retrieval_mode": "neo4j_only",
+            "lancedb_search_mode": "fts",
+            "top_k": 7,
+            "skip_query_builder": True,
+            "direct_retrieval": True,
+        },
+    )
+    fake_graph = SimpleNamespace(ainvoke=AsyncMock(return_value=_final_state()))
+    asyncio.run(A.run_case(case, corpus_config=None, graph=fake_graph))
+    state = fake_graph.ainvoke.call_args.args[0]
+    assert state["lancedb_search_mode"] == "fts"
+    assert state["skip_query_builder"] is True
+    assert state["direct_retrieval"] is True
+    assert state["user_cypher"] == "MATCH (n) RETURN n LIMIT 5"
+    assert state["top_k"] == 7
+    assert state["retrieval_mode"] == "neo4j_only"
+
+
 def test_run_case_captures_graph_error():
     case = EvalCase(id="x", question="q?")
     fake_graph = SimpleNamespace(ainvoke=AsyncMock(side_effect=RuntimeError("boom")))

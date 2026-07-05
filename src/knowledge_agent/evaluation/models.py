@@ -46,6 +46,22 @@ class RetrievalSettings(BaseModel):
         description="Within-LanceDB search mode (hybrid / fts / vector).",
     )
     top_k: int = Field(default=5, ge=1, le=50, description="Final result depth.")
+    skip_query_builder: bool = Field(
+        default=False,
+        description=(
+            "Bypass the query-rewrite LLM — run the raw question verbatim as "
+            "the search query. Maps to state['skip_query_builder']."
+        ),
+    )
+    direct_retrieval: bool = Field(
+        default=False,
+        description=(
+            "Bypass the synthesizer LLM — return retrieved chunks as sources "
+            "with no synthesized answer. Maps to state['direct_retrieval']. "
+            "A direct_retrieval case is scored on retrieval only (the judge "
+            "and answer-keyword gates don't apply — there's no prose)."
+        ),
+    )
 
 
 class EvalCase(BaseModel):
@@ -82,6 +98,17 @@ class EvalCase(BaseModel):
     expected_mode: RetrievalMode | None = Field(
         default=None,
         description="For auto-mode cases: the leg the mode-classifier should route to.",
+    )
+
+    # ---- direct-Cypher input (optional) ----
+    user_cypher: str | None = Field(
+        default=None,
+        description=(
+            "Raw read-only Cypher to run verbatim, bypassing the cypher_builder "
+            "LLM (Direct-Cypher pathway). Maps to state['user_cypher']; pair "
+            "with a retrieval_mode that runs the Neo4j leg (e.g. neo4j_only). "
+            "Read-only rails are still enforced at execution time."
+        ),
     )
 
     # ---- run config + metadata ----
