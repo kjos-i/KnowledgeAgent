@@ -295,7 +295,12 @@ class DocumentsView:
         status = (row.get("metadata_status") or "").strip() or "unknown"
         color = _STATUS_COLORS.get(status, ft.Colors.GREY_500)
         title = row.get("title") or _basename(row.get("source_path")) or "(no title)"
-        doc_type = row.get("sub_label") or row.get("main_label") or "—"
+        # Show "<main> <sub>" (e.g. "Document Paper") when a sub-label is set,
+        # else just the main label (e.g. "Document"). Surfaces the type — and
+        # specifically whether a doc is a Paper — on the card.
+        main_lbl = row.get("main_label") or "—"
+        sub_lbl = row.get("sub_label")
+        doc_type = f"{main_lbl} {sub_lbl}" if sub_lbl else main_lbl
         date = _fmt_date(row.get("ingested_at"))
         n_chunks = row.get("n_chunks") or 0
         n_figures = row.get("n_figures") or 0

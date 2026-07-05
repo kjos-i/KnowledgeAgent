@@ -143,6 +143,28 @@ def test_render_doc_card_has_three_action_buttons(fake_app):
     assert len(buttons) == 3
 
 
+def test_render_doc_card_shows_main_and_sub_label(fake_app):
+    """A sub-labelled doc shows '<main> <sub>' (e.g. 'Document Paper') as the
+    first item of the meta line, so a Paper is visible as one."""
+    dv = _view(fake_app)
+    card = dv._render_doc_card(
+        {"main_label": "Document", "sub_label": "Paper", "metadata_status": "enriched"}
+    )
+    meta_line = card.content.controls[1].value
+    assert meta_line.startswith("Document Paper")
+
+
+def test_render_doc_card_shows_main_label_only_without_sub_label(fake_app):
+    """No sub-label -> just the main label ('Document'), no trailing type."""
+    dv = _view(fake_app)
+    card = dv._render_doc_card(
+        {"main_label": "Document", "sub_label": None, "metadata_status": "baseline"}
+    )
+    meta_line = card.content.controls[1].value
+    assert meta_line.startswith("Document")
+    assert "Paper" not in meta_line
+
+
 def test_reingest_no_source_path_sets_status(fake_app):
     dv = _view(fake_app)
     dv._open_reingest_confirm({"doc_id": "d1", "title": "T", "source_path": ""})
