@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from knowledge_agent.evaluation.models import load_dataset
+from knowledge_agent.evaluation.models import EvalCase, load_dataset
 from knowledge_agent.gui.evaluation.dataset_tab import DatasetTab
 
 
@@ -143,3 +143,34 @@ def test_capture_from_search_no_result(fake_app):
     tab = _tab(fake_app)
     tab._on_capture_from_search(MagicMock())
     assert "No search result" in tab.status.value
+
+
+async def test_generate_llm_appends_candidates_and_saves(fake_app, tmp_path):
+    """Generate (LLM) drafts candidates via the backend, appends them
+    (origin=llm) to the dataset, and saves to the path."""
+    p = tmp_path / "gen.json"
+    tab = _tab(fake_app)
+    tab.dataset_dropdown.value = str(p)
+    tab.gen_count.value = "2"
+    fake_cases = [
+        EvalCase(id="gen-00-a", question="A?", origin="llm", expected_sources=["d1"]),
+        EvalCase(id="gen-01-b", question="B?", origin="llm", expected_sources=["d2"]),
+    ]
+    with patch(
+        "knowledge_agent.evaluation.generator.generate_from_corpus",
+        new_callable=AsyncMock,
+        return_value=fake_cases,
+    ):
+        await tab._on_generate_llm(MagicMock())
+
+    ds = load_dataset(p)
+    assert [c.id for c in ds.cases] == ["gen-00-a", "gen-01-b"]
+    assert all(c.origin == "llm" for c in ds.cases)
+    assert "generated 2" in tab.status.value
+
+
+async def test_generate_llm_requires_dataset_path(fake_app):
+    tab = _tab(fake_app)
+    tab.dataset_dropdown.value = None
+    await tab._on_generate_llm(MagicMock())
+    assert "path" in tab.status.value.lower()

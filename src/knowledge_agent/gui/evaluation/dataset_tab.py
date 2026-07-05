@@ -10,9 +10,12 @@ Dropdown options are derived from the model's own `Literal`s (via
 `typing.get_args`) so the choices can never drift from the schema. List-valued
 fields (expected_sources, keywords, …) are edited as one-item-per-line text.
 
+"Generate (LLM)" drafts candidate cases from the active corpus (one per
+doc) via the backend `generator` — flagged `origin=llm` for human review.
+
 Deliberately out of scope here (later slices): the doc-picker that resolves
-`expected_sources` to real ingested `doc_id`s, the Search-tab capture button,
-and the LLM case generator.
+`expected_sources` to real ingested `doc_id`s, and a Search-tab capture
+button.
 """
 
 from __future__ import annotations
@@ -47,6 +50,8 @@ class DatasetTab:
         self.case_list: ft.Column | None = None
         self.form: ft.Column | None = None
         self.status: ft.Text | None = None
+        self.gen_count: ft.TextField | None = None
+        self.gen_button: ft.Control | None = None
         # form field widgets (created in build)
         self.f: dict[str, ft.Control] = {}
         # state
@@ -93,6 +98,10 @@ class DatasetTab:
         new_button = ft.TextButton("New case", icon=ft.Icons.ADD, on_click=self._on_new)
         capture_button = ft.TextButton(
             "From last search", icon=ft.Icons.SEARCH, on_click=self._on_capture_from_search
+        )
+        self.gen_count = ft.TextField(label="count", value="5", width=80, dense=True)
+        self.gen_button = ft.TextButton(
+            "Generate (LLM)", icon=ft.Icons.AUTO_AWESOME, on_click=self._on_generate_llm
         )
         self.status = ft.Text("", size=11, color=ft.Colors.GREY_500)
 
@@ -184,6 +193,11 @@ class DatasetTab:
                     self.status_dropdown,
                     self.status,
                     ft.Row([new_button, capture_button], wrap=True),
+                    ft.Row(
+                        [self.gen_button, self.gen_count],
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
                     ft.Divider(height=1),
                     self.case_list,
                 ],
@@ -399,6 +413,68 @@ class DatasetTab:
         self._render_list()
         self._set_status(f"captured from search ({len(sources)} source(s)) — review + Save")
         self.app.page.update()
+
+    async def _on_generate_llm(self, _e: ft.Event) -> None:
+        """Draft `count` LLM candidate cases from the ACTIVE corpus and append
+        them (flagged `origin=llm`) to the loaded dataset for review.
+
+        `generator.generate_from_corpus` samples one passage per corpus doc
+        and drafts a question + answer points + keywords via the active
+        provider's model. The cases are saved to the dataset path; the user
+        then reviews / edits / deletes each in the form. Async — the LLM calls
+        run off the UI thread and the button disables while it works."""
+        from knowledge_agent.evaluation.generator import generate_from_corpus
+        from knowledge_agent.evaluation.models import EvalDataset, save_dataset
+
+        path = self._current_path()
+        if path is None:
+            self._set_status("Pick or type a dataset path first.")
+            return
+        try:
+            n = int((self.gen_count.value or "5").strip()) if self.gen_count else 5
+        except ValueError:
+            self._set_status("Count must be a whole number.")
+            return
+        if n <= 0:
+            self._set_status("Count must be at least 1.")
+            return
+
+        if self.gen_button is not None:
+            self.gen_button.disabled = True
+        self._set_status(f"generating {n} candidate case(s) from the active corpus…")
+        try:
+            cases = await generate_from_corpus(n)
+        except Exception as exc:  # broad: provider / corpus / LLM errors → status
+            if self.gen_button is not None:
+                self.gen_button.disabled = False
+            self._set_status(f"generation failed: {exc}")
+            return
+        if self.gen_button is not None:
+            self.gen_button.disabled = False
+
+        if not cases:
+            self._set_status("no candidates generated (empty corpus or all passages too short)")
+            return
+
+        if self._dataset is None:
+            self._dataset = EvalDataset()
+            if self.name_field is not None:
+                self.name_field.value = self._dataset.name
+            if self.status_dropdown is not None:
+                self.status_dropdown.value = self._dataset.status
+        self._dataset.cases.extend(cases)
+        try:
+            save_dataset(self._dataset, path)
+        except Exception as exc:  # broad: I/O failure → status
+            self._set_status(f"generated {len(cases)} but save failed: {exc}")
+            return
+        self._cases = self._dataset.cases
+        self._path = path
+        self._selected = None
+        self._render_list()
+        self._set_status(
+            f"generated {len(cases)} LLM candidate(s) — review each (origin=llm), keep/edit/delete"
+        )
 
     def _on_save_case(self, _e: ft.Event) -> None:
         from knowledge_agent.evaluation.models import EvalDataset, save_dataset
