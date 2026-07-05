@@ -303,6 +303,7 @@ class RunTab:
 
     def _build_config(self) -> EvalConfig:
         from knowledge_agent.evaluation.config import load_eval_config
+        from knowledge_agent.gui.evaluation._common import active_corpus_config_path
 
         groups = frozenset(g for g, cb in self.group_checks.items() if cb.value)
         judge_models = tuple(
@@ -313,9 +314,9 @@ class RunTab:
             "enabled_groups": groups,
             "judge_models": judge_models,
         }
-        corpus_path = getattr(self.app.gui_config, "corpus_config_path", None)
+        corpus_path = active_corpus_config_path(self.app)
         if corpus_path:
-            overrides["corpus_config_path"] = Path(corpus_path)
+            overrides["corpus_config_path"] = corpus_path
         raw_max = (self.max_cases_field.value or "").strip() if self.max_cases_field else ""
         if raw_max:
             overrides["max_cases"] = int(raw_max)

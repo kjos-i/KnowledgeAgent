@@ -5,17 +5,22 @@ run control — every other module reads an `EvalConfig` so there are no
 magic numbers scattered around (mirrors the reference's single-config
 policy).
 
-Outputs (the SQLite ledger + JSON/CSV reports) default to a git-ignored
-`eval_output/` under the current working directory: disposable trend
-data, never committed — the same principle as `test_corpus/`. Override
-any field via the constructor (tests pass `tmp_path`) or the `KA_EVAL_*`
-env vars honoured by `load_eval_config()`.
+Outputs (the SQLite ledger + JSON/CSV reports) land in a git-ignored
+`eval_output/` folder: beside the evaluated corpus (the folder holding
+its `corpus.toml` + `lancedb`) when `corpus_config_path` is set, else
+under the current working directory. Either way it's disposable trend
+data, never committed — the same principle as `test_corpus/`. Colocating
+with the corpus keeps a corpus self-contained: its eval history moves
+with the folder (survives a Library → Relocate) instead of orphaning.
+Override the derivation via the constructor (tests pass `tmp_path`),
+`--output-dir`, or the `KA_EVAL_OUTPUT_DIR` env var honoured by
+`load_eval_config()`.
 """
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 
 _PKG_DIR = Path(__file__).resolve().parent
@@ -83,12 +88,27 @@ class EvalConfig:
     """Truncate the queryset (dev runs). None = all."""
 
     # ---- outputs (git-ignored, disposable) -------------------------------
-    output_dir: Path = field(default_factory=lambda: Path.cwd() / "eval_output")
-    """Root for the ledger DB + timestamped JSON/CSV reports."""
+    output_dir: Path | None = None
+    """Root for the ledger DB + timestamped JSON/CSV reports. Left None (the
+    default) it is resolved in `__post_init__`: `<corpus folder>/eval_output`
+    when `corpus_config_path` is set — the corpus folder is its parent, the
+    same folder that holds `lancedb` — else `<cwd>/eval_output`. Pass an
+    explicit path (constructor / `--output-dir` / `KA_EVAL_OUTPUT_DIR`) to
+    override the derivation. Always a concrete `Path` after construction."""
+
+    def __post_init__(self) -> None:
+        # Resolve the disposable-output root once, from the corpus being
+        # evaluated — so its history sits beside its `lancedb` and travels
+        # with the folder (a Library → Relocate). Only when the caller didn't
+        # pin an explicit path; frozen dataclass → set via object.__setattr__.
+        if self.output_dir is None:
+            base = self.corpus_config_path.parent if self.corpus_config_path else Path.cwd()
+            object.__setattr__(self, "output_dir", base / "eval_output")
 
     @property
     def ledger_path(self) -> Path:
         """SQLite ledger path, derived from `output_dir` (single knob)."""
+        assert self.output_dir is not None  # always resolved in __post_init__
         return self.output_dir / "eval_ledger.db"
 
     def gate_thresholds(self) -> dict[str, float]:
@@ -103,7 +123,8 @@ class EvalConfig:
 
 def load_eval_config(**overrides: object) -> EvalConfig:
     """Build an `EvalConfig` from defaults + `KA_EVAL_*` env vars, with
-    explicit keyword `overrides` winning over both.
+    explicit keyword `overrides` winning over both. With no `output_dir` from
+    any source, it is derived from the corpus folder (see `EvalConfig`).
 
     Env vars honoured:
       - KA_EVAL_DATASET       → dataset_path
@@ -127,4 +148,7 @@ def load_eval_config(**overrides: object) -> EvalConfig:
     if v := os.environ.get("KA_EVAL_CONCURRENCY"):
         env["concurrency"] = int(v)
 
-    return replace(EvalConfig(), **{**env, **overrides})  # type: ignore[arg-type]
+    # Construct directly (not `replace(EvalConfig(), ...)`): a pre-built base
+    # would already have `output_dir` resolved to the CWD before the corpus is
+    # known, defeating the corpus-folder derivation in `__post_init__`.
+    return EvalConfig(**{**env, **overrides})  # type: ignore[arg-type]

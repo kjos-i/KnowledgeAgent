@@ -173,10 +173,9 @@ class TrendsTab:
     # ---- data / refresh ---------------------------------------------------
 
     def _ledger(self):
-        from knowledge_agent.evaluation.config import load_eval_config
-        from knowledge_agent.evaluation.ledger import EvalLedger
+        from knowledge_agent.gui.evaluation._common import active_eval_ledger
 
-        return EvalLedger(load_eval_config().ledger_path)
+        return active_eval_ledger(self.app)
 
     def refresh(self) -> None:
         if self.body is None or self.dataset_dropdown is None:
