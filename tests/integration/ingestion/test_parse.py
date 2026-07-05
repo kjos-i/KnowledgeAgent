@@ -21,14 +21,22 @@ from typing import TYPE_CHECKING
 import pytest
 
 from knowledge_agent.ingestion.parse import (
+    UnsupportedFormatError,
     parse_document,
     supported_extensions,
 )
+from knowledge_agent.kg.corpus_config import CorpusConfig
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 pytestmark = pytest.mark.integration
+
+# `parse_document` requires a CorpusConfig — only the docling strategy reads
+# its fields (OCR flags, chunker strategy, image scale); other parsers ignore
+# it. The default config (PDF OCR off, hybrid chunker) is what these
+# format-coverage tests want, so one shared instance covers every call below.
+_CONFIG = CorpusConfig()
 
 
 def test_supported_extensions_includes_pdf_docx_xml() -> None:
@@ -41,14 +49,14 @@ def test_supported_extensions_includes_pdf_docx_xml() -> None:
 
 def test_parse_pdf_returns_non_empty_chunks(sample_pdf: Path) -> None:
     """A real research PDF parses into > 0 chunks with non-empty text."""
-    chunks = parse_document(sample_pdf)
+    chunks = parse_document(sample_pdf, _CONFIG)
     assert len(chunks) > 0
     assert all(c.text for c in chunks)
 
 
 def test_parse_pdf_chunks_have_sequential_chunk_index(sample_pdf: Path) -> None:
     """chunk_index is 0-based + sequential across the output."""
-    chunks = parse_document(sample_pdf)
+    chunks = parse_document(sample_pdf, _CONFIG)
     indices = [c.chunk_index for c in chunks]
     assert indices == list(range(len(chunks)))
 
@@ -56,7 +64,7 @@ def test_parse_pdf_chunks_have_sequential_chunk_index(sample_pdf: Path) -> None:
 def test_parse_pdf_chunks_have_content_type_text(sample_pdf: Path) -> None:
     """A PDF parse produces docling-style text chunks. Tables / figures
     may use other content_type values; the majority must be text."""
-    chunks = parse_document(sample_pdf)
+    chunks = parse_document(sample_pdf, _CONFIG)
     text_count = sum(1 for c in chunks if c.content_type == "text")
     assert text_count >= len(chunks) // 2
 
@@ -68,7 +76,7 @@ def test_parse_pdf_chunks_carry_page_info_for_at_least_some_chunks(
     source layout supports it. Not every chunk has a page (cover/TOC
     chunks may have None), but a research PDF should have at least
     some pages annotated."""
-    chunks = parse_document(sample_pdf)
+    chunks = parse_document(sample_pdf, _CONFIG)
     with_page = [c for c in chunks if c.page is not None]
     assert len(with_page) > 0
     assert all(c.page >= 1 for c in with_page)
@@ -76,25 +84,25 @@ def test_parse_pdf_chunks_carry_page_info_for_at_least_some_chunks(
 
 def test_parse_jats_xml_returns_chunks(sample_jats_xml: Path) -> None:
     """JATS-XML scientific articles parse via docling too."""
-    chunks = parse_document(sample_jats_xml)
+    chunks = parse_document(sample_jats_xml, _CONFIG)
     assert len(chunks) > 0
     assert all(c.text for c in chunks)
 
 
 def test_parse_docx_returns_chunks(sample_docx: Path) -> None:
     """DOCX support: a Word abstract parses into chunks."""
-    chunks = parse_document(sample_docx)
+    chunks = parse_document(sample_docx, _CONFIG)
     assert len(chunks) > 0
     assert all(c.text for c in chunks)
 
 
 def test_parse_unsupported_extension_raises(tmp_path: Path) -> None:
-    """A file with an unknown extension raises rather than returning
-    an empty list — catches misuse early."""
+    """A file with an unknown extension raises `UnsupportedFormatError`
+    rather than returning an empty list — catches misuse early."""
     bogus = tmp_path / "bogus.xyz"
     bogus.write_text("hello")
-    with pytest.raises(Exception):
-        parse_document(bogus)
+    with pytest.raises(UnsupportedFormatError):
+        parse_document(bogus, _CONFIG)
 
 
 # ---------------------------------------------------------------------------
@@ -107,56 +115,56 @@ def test_parse_unsupported_extension_raises(tmp_path: Path) -> None:
 
 def test_parse_pptx_returns_chunks(sample_pptx: Path) -> None:
     """PowerPoint slides parse via docling's PPTX pipeline."""
-    chunks = parse_document(sample_pptx)
+    chunks = parse_document(sample_pptx, _CONFIG)
     assert len(chunks) > 0
     assert all(c.text for c in chunks)
 
 
 def test_parse_xlsx_returns_chunks(sample_xlsx: Path) -> None:
     """Excel workbooks parse via docling's XLSX pipeline."""
-    chunks = parse_document(sample_xlsx)
+    chunks = parse_document(sample_xlsx, _CONFIG)
     assert len(chunks) > 0
     assert all(c.text for c in chunks)
 
 
 def test_parse_html_returns_chunks(sample_html: Path) -> None:
     """HTML files parse via docling's HTML pipeline."""
-    chunks = parse_document(sample_html)
+    chunks = parse_document(sample_html, _CONFIG)
     assert len(chunks) > 0
     assert all(c.text for c in chunks)
 
 
 def test_parse_md_returns_chunks(sample_md: Path) -> None:
     """Markdown files parse via docling's MD pipeline."""
-    chunks = parse_document(sample_md)
+    chunks = parse_document(sample_md, _CONFIG)
     assert len(chunks) > 0
     assert all(c.text for c in chunks)
 
 
 def test_parse_tex_returns_chunks(sample_tex: Path) -> None:
     """LaTeX files parse via docling's LaTeX pipeline."""
-    chunks = parse_document(sample_tex)
+    chunks = parse_document(sample_tex, _CONFIG)
     assert len(chunks) > 0
     assert all(c.text for c in chunks)
 
 
 def test_parse_adoc_returns_chunks(sample_adoc: Path) -> None:
     """AsciiDoc files parse via docling's AsciiDoc pipeline."""
-    chunks = parse_document(sample_adoc)
+    chunks = parse_document(sample_adoc, _CONFIG)
     assert len(chunks) > 0
     assert all(c.text for c in chunks)
 
 
 def test_parse_csv_returns_chunks(sample_csv: Path) -> None:
     """CSV files parse via docling's CSV pipeline."""
-    chunks = parse_document(sample_csv)
+    chunks = parse_document(sample_csv, _CONFIG)
     assert len(chunks) > 0
     assert all(c.text for c in chunks)
 
 
 def test_parse_vtt_returns_chunks(sample_vtt: Path) -> None:
     """WebVTT subtitle files parse via docling's VTT pipeline."""
-    chunks = parse_document(sample_vtt)
+    chunks = parse_document(sample_vtt, _CONFIG)
     assert len(chunks) > 0
     assert all(c.text for c in chunks)
 
@@ -171,7 +179,7 @@ def test_parse_image_runs_ocr_pipeline_without_error(sample_image: Path) -> None
     not a regression. If the file happens to have text, chunks have
     non-empty `text` fields.
     """
-    chunks = parse_document(sample_image)
+    chunks = parse_document(sample_image, _CONFIG)
     # parse_document must always return a list, not None / exception.
     assert isinstance(chunks, list)
     # Any chunks present must carry non-empty text — empty-text chunks
@@ -206,7 +214,7 @@ def test_parse_audio_returns_chunks(sample_audio: Path) -> None:
     Marked `slow` because Whisper Turbo's first call loads ~1.5 GB of
     model weights — wall-clock measured in tens of seconds even on
     short clips."""
-    chunks = parse_document(sample_audio)
+    chunks = parse_document(sample_audio, _CONFIG)
     assert len(chunks) > 0
     assert all(c.text for c in chunks)
 
@@ -223,6 +231,6 @@ def test_parse_video_returns_chunks(sample_video: Path) -> None:
     Visual frames are NOT OCRed today — slides shown in a recording
     are invisible to the parser. Tracked in
     [[deferred-video-frame-extraction]]."""
-    chunks = parse_document(sample_video)
+    chunks = parse_document(sample_video, _CONFIG)
     assert len(chunks) > 0
     assert all(c.text for c in chunks)

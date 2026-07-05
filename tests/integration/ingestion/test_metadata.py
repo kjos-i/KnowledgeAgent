@@ -30,11 +30,17 @@ from knowledge_agent.ingestion.metadata import (
     resolve_metadata,
 )
 from knowledge_agent.ingestion.parse import parse_document
+from knowledge_agent.kg.corpus_config import CorpusConfig
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 pytestmark = pytest.mark.integration
+
+# `parse_document` requires a CorpusConfig (only the docling strategy reads
+# its fields; other parsers ignore it). The default suffices for these
+# DOI-extraction tests, which only care about the parsed chunk text.
+_CONFIG = CorpusConfig()
 
 # A stable, well-indexed DOI — the einstein 1905 relativity paper.
 # Used for the resolve_doi test so the assertion doesn't drift with
@@ -48,7 +54,7 @@ def test_extract_doi_candidates_finds_doi_in_real_pdf_chunks(
     """A real research PDF has a DOI in its first few chunks
     (typically on the title / abstract page). extract_doi_candidates
     finds it."""
-    chunks = parse_document(sample_pdf)
+    chunks = parse_document(sample_pdf, _CONFIG)
     candidates = extract_doi_candidates(chunks)
     assert len(candidates) > 0
     # All candidates lowercase, no trailing punctuation.
@@ -89,7 +95,7 @@ async def test_resolve_metadata_full_path_on_real_pdf(sample_pdf: Path) -> None:
     """End-to-end: parse the real PDF, extract DOI candidates, resolve
     the first that hits OpenAlex. Should return a work dict when the
     sample PDF carries a real DOI."""
-    chunks = parse_document(sample_pdf)
+    chunks = parse_document(sample_pdf, _CONFIG)
     work = await resolve_metadata(chunks)
     assert work is not None
     assert "id" in work

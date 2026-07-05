@@ -7,10 +7,10 @@ import ...` imports while the underlying strategies live in
 `parsers/<format>_parser.py`.
 
 The dispatcher (`parsers.parse_document`) routes by file extension to
-the right strategy module. Today the only registered strategy is
-`docling_parser`; future strategies (`json_parser`, `code_parser`)
-slot in by appending their module name to
-`parsers.PARSER_MODULES` - no change here.
+the right strategy module. Registered strategies are `docling_parser`
+(the bulk of formats), `json_parser` (json / jsonl / ndjson), and
+`code_parser` (source files); more slot in by appending their module
+name to `parsers.PARSER_MODULES` - no change here.
 
 Docling-specific symbols (`SUPPORTED_FORMATS`, `is_image_path`,
 `_extract_section`, `_extract_page`) are re-exported from

@@ -30,6 +30,7 @@ from knowledge_agent.ingestion.metadata import (
     resolve_doi,
 )
 from knowledge_agent.ingestion.parse import parse_document
+from knowledge_agent.kg.corpus_config import CorpusConfig
 
 TEST_DOCS = Path(__file__).resolve().parent.parent / "test_documents"
 
@@ -69,7 +70,7 @@ async def main() -> None:
 
     target = pdfs[0]
     print(f"Parsing: {target.name}")
-    chunks = parse_document(target)
+    chunks = parse_document(target, CorpusConfig())
     print(f"Total chunks: {len(chunks)}")
     print()
 
