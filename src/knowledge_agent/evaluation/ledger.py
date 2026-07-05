@@ -44,6 +44,7 @@ _RUNS_PREAMBLE: list[tuple[str, str]] = [
     ("run_id", "INTEGER PRIMARY KEY AUTOINCREMENT"),
     ("run_timestamp", "TEXT NOT NULL"),
     ("dataset_path", "TEXT"),
+    ("dataset_hash", "TEXT"),  # SHA-256 of the scored dataset's cases (provenance)
     ("git_commit", "TEXT"),
     ("prompts_snapshot", "TEXT"),  # JSON — run provenance
     ("case_count", "INTEGER"),
@@ -118,11 +119,18 @@ class EvalLedger:
         with closing(self._connect()) as conn:
             conn.execute(_create_sql("eval_runs", _run_columns()))
             conn.execute(_create_sql("eval_cases", _case_columns()))
-            # Registry growth (P2/P3 metrics) extends an existing DB.
-            for name, sqltype in run_sql_columns():
-                _try_add_column(conn, "eval_runs", name, sqltype)
-            for name, sqltype in case_sql_columns():
-                _try_add_column(conn, "eval_cases", name, sqltype)
+            # Add-only migration: registry growth (P2/P3 metrics) AND fixed
+            # column additions (e.g. dataset_hash) extend an existing DB. We
+            # walk the FULL column list (not just the registry) so a new
+            # preamble/trailing column also reaches an old DB; the
+            # AUTOINCREMENT PK is skipped (ALTER can't add it), and existing
+            # columns no-op via the swallowed 'duplicate column name'.
+            for name, sqltype in _run_columns():
+                if "AUTOINCREMENT" not in sqltype.upper():
+                    _try_add_column(conn, "eval_runs", name, sqltype)
+            for name, sqltype in _case_columns():
+                if "AUTOINCREMENT" not in sqltype.upper():
+                    _try_add_column(conn, "eval_cases", name, sqltype)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_cases_run_id ON eval_cases(run_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_ts ON eval_runs(run_timestamp)")
             conn.commit()
@@ -137,6 +145,7 @@ class EvalLedger:
         run_row: dict[str, Any] = {
             "run_timestamp": report.get("run_timestamp"),
             "dataset_path": report.get("dataset_path"),
+            "dataset_hash": report.get("dataset_hash"),
             "git_commit": report.get("git_commit"),
             "prompts_snapshot": _json_or_none(report.get("prompts_snapshot")),
             "case_count": summary.get("case_count"),

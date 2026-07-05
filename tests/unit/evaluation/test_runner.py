@@ -53,6 +53,8 @@ def test_end_to_end_with_stubbed_graph(tmp_path, monkeypatch):
 
     # ---- report shape ----
     assert report["summary"]["case_count"] == 9
+    # dataset hash computed from the cases + carried on the report
+    assert isinstance(report["dataset_hash"], str) and len(report["dataset_hash"]) == 64
     assert report["summary"]["avg_chunk_hit_at_k"] == 1.0  # every answer chunk matched
     assert report["summary"]["avg_agent_total_tokens"] == 140
 
@@ -67,8 +69,10 @@ def test_end_to_end_with_stubbed_graph(tmp_path, monkeypatch):
     with sqlite3.connect(ledger) as conn:
         n_runs = conn.execute("SELECT COUNT(*) FROM eval_runs").fetchone()[0]
         n_cases = conn.execute("SELECT COUNT(*) FROM eval_cases").fetchone()[0]
+        stored_hash = conn.execute("SELECT dataset_hash FROM eval_runs").fetchone()[0]
     assert n_runs == 1
     assert n_cases == 9
+    assert stored_hash == report["dataset_hash"]  # persisted to the ledger
 
 
 def test_overrides_from_args_maps_fields(tmp_path):

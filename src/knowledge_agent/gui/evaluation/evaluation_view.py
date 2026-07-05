@@ -1,4 +1,4 @@
-"""Evaluation top-tab coordinator — 5 sub-tabs, full window (Library model).
+"""Evaluation top-tab coordinator — 6 sub-tabs, full window (Library model).
 
 Sub-tabs (fixed order):
 
@@ -6,6 +6,10 @@ Sub-tabs (fixed order):
                    judge panel, max-cases) → `runner.run(cfg)` in-process
                    with a progress bar; on completion, refresh + select the
                    new run and hop to Run Summary.
+  Dataset        — browse/author the gold dataset: a scrollable case list +
+                   a full-field view of the selected case. Read-only in
+                   slice 1; editing / Add-Delete / capture-from-Search / LLM
+                   generation land in later slices.
   Run Summary    — KPI cards + per-case table for the selected run.
   Deep Analysis  — metric-balance / distribution / correlation for the run.
   Trends         — run-level metric trends over time (scoped per dataset).
@@ -25,6 +29,7 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
+from knowledge_agent.gui.evaluation.dataset_tab import DatasetTab
 from knowledge_agent.gui.evaluation.deep_analysis_tab import DeepAnalysisTab
 from knowledge_agent.gui.evaluation.metrics_guide_tab import MetricsGuideTab
 from knowledge_agent.gui.evaluation.run_summary_tab import RunSummaryTab
@@ -35,7 +40,7 @@ if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
 
 
-SUB_TAB_LABELS = ("Run", "Run Summary", "Deep Analysis", "Trends", "Metrics Guide")
+SUB_TAB_LABELS = ("Run", "Dataset", "Run Summary", "Deep Analysis", "Trends", "Metrics Guide")
 
 
 class EvaluationView:
@@ -49,6 +54,7 @@ class EvaluationView:
         self.selected_run_id: int | None = None
         self._tabs: ft.Tabs | None = None
         self.run_tab = RunTab(app, coordinator=self)
+        self.dataset_tab = DatasetTab(app, coordinator=self)
         self.run_summary_tab = RunSummaryTab(app, coordinator=self)
         self.deep_analysis_tab = DeepAnalysisTab(app, coordinator=self)
         self.trends_tab = TrendsTab(app, coordinator=self)
@@ -62,6 +68,7 @@ class EvaluationView:
         sub_bodies = ft.TabBarView(
             controls=[
                 ft.Container(content=self.run_tab.build(), padding=8, expand=True),
+                ft.Container(content=self.dataset_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.run_summary_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.deep_analysis_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.trends_tab.build(), padding=8, expand=True),
@@ -86,5 +93,5 @@ class EvaluationView:
         self.selected_run_id = run_id
         self.run_summary_tab.refresh()
         if self._tabs is not None:
-            self._tabs.selected_index = 1  # Run Summary
+            self._tabs.selected_index = SUB_TAB_LABELS.index("Run Summary")
             self.app.page.update()

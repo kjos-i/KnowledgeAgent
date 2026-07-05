@@ -63,6 +63,9 @@ def test_build_report_structure(monkeypatch):
     assert rep["summary"]["pass_rate"] == 0.5
     assert set(rep["enabled_groups"]) == {"source", "chunk", "kg"}
     assert len(rep["results"]) == 2
+    assert rep["dataset_hash"] is None  # not passed → None
+    rep2 = RP.build_report(EvalConfig(), _results(), "t", dataset_hash="h123")
+    assert rep2["dataset_hash"] == "h123"
 
 
 def test_write_report_creates_json_and_csv(tmp_path, monkeypatch):

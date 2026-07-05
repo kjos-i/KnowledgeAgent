@@ -7,7 +7,15 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from knowledge_agent.evaluation.models import EvalCase, load_cases
+from knowledge_agent.evaluation.models import (
+    EvalCase,
+    EvalDataset,
+    append_case,
+    compute_dataset_hash,
+    load_cases,
+    load_dataset,
+    save_dataset,
+)
 
 
 def test_minimal_case_defaults():
@@ -82,8 +90,67 @@ def test_load_cases_roundtrip(tmp_path):
     assert cases[1].expected_entities == ["ESCRT-III"]
 
 
-def test_load_cases_rejects_non_list(tmp_path):
+def test_load_dataset_accepts_both_shapes(tmp_path):
+    # New object shape: header + cases.
+    obj = tmp_path / "obj.json"
+    obj.write_text(
+        json.dumps({"status": "final", "name": "gold", "cases": [{"id": "a", "question": "q?"}]}),
+        encoding="utf-8",
+    )
+    ds = load_dataset(obj)
+    assert ds.status == "final" and ds.name == "gold"
+    assert [c.id for c in ds.cases] == ["a"]
+
+    # Legacy bare array → default header, same cases; load_cases stays
+    # backward-compatible for the engine/runner.
+    arr = tmp_path / "arr.json"
+    arr.write_text(json.dumps([{"id": "b", "question": "q?"}]), encoding="utf-8")
+    ds2 = load_dataset(arr)
+    assert ds2.status == "draft"  # default header
+    assert [c.id for c in load_cases(arr)] == ["b"]
+
+
+def test_load_rejects_json_scalar(tmp_path):
     p = tmp_path / "bad.json"
-    p.write_text(json.dumps({"id": "a"}), encoding="utf-8")
-    with pytest.raises(ValueError, match="must be a JSON array"):
+    p.write_text(json.dumps(42), encoding="utf-8")
+    with pytest.raises(ValueError, match="JSON array or object"):
         load_cases(p)
+
+
+def test_case_origin_default_and_values():
+    assert EvalCase(id="x", question="q?").origin == "manual"
+    assert EvalCase(id="x", question="q?", origin="llm").origin == "llm"
+    with pytest.raises(ValidationError):
+        EvalCase(id="x", question="q?", origin="bogus")
+
+
+def test_save_and_append_roundtrip(tmp_path):
+    p = tmp_path / "gold.json"
+    # Append to a non-existent file → creates a default dataset with one case.
+    ds = append_case(p, EvalCase(id="a", question="q1?", origin="search"))
+    assert [c.id for c in ds.cases] == ["a"]
+    # Persisted in OBJECT form (dict with "cases"), reloadable.
+    on_disk = json.loads(p.read_text(encoding="utf-8"))
+    assert isinstance(on_disk, dict) and "cases" in on_disk
+    assert load_dataset(p).cases[0].origin == "search"
+    # Append a second, then persist an edited header.
+    append_case(p, EvalCase(id="b", question="q2?"))
+    ds2 = load_dataset(p)
+    ds2.status = "final"
+    save_dataset(ds2, p)
+    assert load_dataset(p).status == "final"
+    assert [c.id for c in load_dataset(p).cases] == ["a", "b"]
+
+
+def test_dataset_hash_is_content_addressed():
+    a = EvalCase(id="a", question="q1?", required_keywords=["x"])
+    b = EvalCase(id="b", question="q2?")
+    h = compute_dataset_hash([a, b])
+    assert len(h) == 64
+    # order-independent (same set of cases → same hash)
+    assert compute_dataset_hash([b, a]) == h
+    # header-independent: hashing takes cases, so status/name never affect it
+    assert compute_dataset_hash(EvalDataset(status="final", cases=[a, b]).cases) == h
+    # content-sensitive: editing a case changes the hash
+    a2 = EvalCase(id="a", question="q1?", required_keywords=["y"])
+    assert compute_dataset_hash([a2, b]) != h

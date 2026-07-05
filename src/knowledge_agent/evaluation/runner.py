@@ -89,9 +89,12 @@ async def run(
     from knowledge_agent.evaluation import report as report_mod
     from knowledge_agent.evaluation.engine import evaluate_cases
     from knowledge_agent.evaluation.ledger import EvalLedger
-    from knowledge_agent.evaluation.models import load_cases
+    from knowledge_agent.evaluation.models import compute_dataset_hash, load_cases
 
     cases = load_cases(cfg.dataset_path)
+    # Hash the FULL dataset (before max_cases truncation / any filter) — the
+    # fingerprint is the dataset's identity, independent of how many ran.
+    dataset_hash = compute_dataset_hash(cases)
     if cfg.max_cases is not None:
         cases = cases[: cfg.max_cases]
     corpus_config = _load_corpus_config(cfg)
@@ -109,7 +112,7 @@ async def run(
         results = await evaluate_cases(cases, corpus_config, cfg, on_progress=on_progress)
 
     run_timestamp = datetime.now(UTC).isoformat(timespec="seconds")
-    report = report_mod.build_report(cfg, results, run_timestamp)
+    report = report_mod.build_report(cfg, results, run_timestamp, dataset_hash=dataset_hash)
     json_path, csv_path = report_mod.write_report(report, cfg.output_dir)
     run_id = EvalLedger(cfg.ledger_path).save_run(report)
 

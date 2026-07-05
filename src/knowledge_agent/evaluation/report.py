@@ -121,13 +121,23 @@ def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def build_report(
-    cfg: EvalConfig, results: list[dict[str, Any]], run_timestamp: str
+    cfg: EvalConfig,
+    results: list[dict[str, Any]],
+    run_timestamp: str,
+    *,
+    dataset_hash: str | None = None,
 ) -> dict[str, Any]:
-    """Assemble the full report dict (what the ledger + JSON consume)."""
+    """Assemble the full report dict (what the ledger + JSON consume).
+
+    `dataset_hash` (a SHA-256 of the scored dataset's cases) is recorded as
+    run provenance next to `git_commit` — so a trend view can tell when the
+    gold itself changed between runs.
+    """
     prov = capture_provenance()
     return {
         "run_timestamp": run_timestamp,
         "dataset_path": str(cfg.dataset_path),
+        "dataset_hash": dataset_hash,
         "git_commit": prov["git_commit"],
         "prompts_snapshot": {
             "model_config": prov["model_config"],

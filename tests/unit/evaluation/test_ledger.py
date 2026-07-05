@@ -20,6 +20,7 @@ def _report() -> dict:
     return {
         "run_timestamp": "2026-07-05T10:00:00",
         "dataset_path": "escrt_bootstrap.json",
+        "dataset_hash": "deadbeef" * 8,
         "git_commit": "abc123",
         "prompts_snapshot": {"synthesizer": "PROMPT"},
         "enabled_groups": ["source", "chunk"],
@@ -83,6 +84,7 @@ def test_save_run_roundtrip(tmp_path):
         conn.row_factory = sqlite3.Row
         run = conn.execute("SELECT * FROM eval_runs").fetchone()
         assert run["pass_count"] == 1
+        assert run["dataset_hash"] == "deadbeef" * 8
         assert run["git_commit"] == "abc123"
         assert json.loads(run["prompts_snapshot"])["synthesizer"] == "PROMPT"
         assert run["avg_hit_at_k"] == 0.5
