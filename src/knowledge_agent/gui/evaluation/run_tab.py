@@ -57,6 +57,7 @@ class RunTab:
         self.run_button: ft.Button | None = None
         self.progress: ft.ProgressBar | None = None
         self.status: ft.Text | None = None
+        self.output_line: ft.Text | None = None
 
     # ---- build ------------------------------------------------------------
 
@@ -65,6 +66,7 @@ class RunTab:
             DEFAULT_DATASET_PATH,
             DEFAULT_LANGSMITH_PROJECT,
         )
+        from knowledge_agent.gui.evaluation._common import active_output_dir
 
         datasets_dir = DEFAULT_DATASET_PATH.parent
         options = [
@@ -88,6 +90,16 @@ class RunTab:
             f"Active corpus: {active}" if active else "Active corpus: none — select one in Library",
             italic=not active,
             color=None if active else ft.Colors.ORANGE,
+        )
+        # Read-only: where this run's ledger + JSON/CSV reports will land —
+        # derived from the active corpus, exactly as `_build_config` resolves
+        # it. Selectable so the path can be copied; it is NOT an input (override
+        # only via --output-dir / KA_EVAL_OUTPUT_DIR).
+        self.output_line = ft.Text(
+            f"Results save to: {active_output_dir(self.app)}",
+            size=12,
+            color=ft.Colors.GREY_600,
+            selectable=True,
         )
 
         self.group_checks = {
@@ -149,6 +161,7 @@ class RunTab:
         form = ft.Column(
             controls=[
                 corpus_line,
+                self.output_line,
                 ft.Row([self.dataset_dropdown, browse_button], spacing=4),
                 ft.Text("Metric groups", weight=ft.FontWeight.BOLD),
                 ft.Row([self.group_checks[g] for g in _GROUP_DEFAULTS], wrap=True),

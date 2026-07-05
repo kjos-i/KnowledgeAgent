@@ -25,6 +25,15 @@ def test_run_tab_builds(fake_app: MagicMock):
     assert RunTab(fake_app, coordinator=MagicMock()).build() is not None
 
 
+def test_run_tab_shows_output_path(fake_app: MagicMock):
+    """Read-only 'Results save to:' line renders (selectable, not an input).
+    Building it must resolve the output dir without erroring."""
+    tab, _ = _run_tab(fake_app)
+    assert tab.output_line is not None
+    assert tab.output_line.value.startswith("Results save to:")
+    assert tab.output_line.selectable is True
+
+
 def test_judge_panel_hidden_until_judge_group_on(fake_app: MagicMock):
     tab, _ = _run_tab(fake_app)
     assert tab.judge_panel.visible is False  # judge off by default

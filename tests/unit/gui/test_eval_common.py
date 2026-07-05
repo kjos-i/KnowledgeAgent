@@ -11,6 +11,7 @@ from pathlib import Path
 from knowledge_agent.gui.evaluation._common import (
     active_corpus_config_path,
     active_eval_ledger,
+    active_output_dir,
 )
 
 
@@ -37,3 +38,18 @@ def test_active_eval_ledger_falls_back_to_cwd(fake_app, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     ledger = active_eval_ledger(fake_app)
     assert ledger.db_path == tmp_path / "eval_output" / "eval_ledger.db"
+
+
+def test_active_output_dir_uses_corpus_folder(fake_app, tmp_path):
+    """Output dir = <corpus folder>/eval_output, and resolving it for display
+    is READ-ONLY — unlike an EvalLedger, it must NOT create the folder."""
+    fake_app.gui_config.corpus_config_path = tmp_path / "corpus.toml"
+    out = active_output_dir(fake_app)
+    assert out == tmp_path / "eval_output"
+    assert not out.exists()  # no disk side effect from a read-only display
+
+
+def test_active_output_dir_falls_back_to_cwd(fake_app, tmp_path, monkeypatch):
+    fake_app.gui_config.corpus_config_path = None
+    monkeypatch.chdir(tmp_path)
+    assert active_output_dir(fake_app) == tmp_path / "eval_output"

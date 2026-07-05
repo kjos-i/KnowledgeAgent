@@ -39,3 +39,19 @@ def active_eval_ledger(app: GuiApp) -> EvalLedger:
     corpus = active_corpus_config_path(app)
     overrides = {"corpus_config_path": corpus} if corpus else {}
     return EvalLedger(load_eval_config(**overrides).ledger_path)
+
+
+def active_output_dir(app: GuiApp) -> Path:
+    """Where this run's results (ledger + JSON/CSV reports) will be written:
+    `<active corpus folder>/eval_output`, or `<cwd>/eval_output` when no corpus
+    is set. Resolves the SAME `EvalConfig.output_dir` the Run tab builds — but
+    WITHOUT constructing an `EvalLedger`, so reading it for a read-only display
+    never creates the folder on disk.
+    """
+    from knowledge_agent.evaluation.config import load_eval_config
+
+    corpus = active_corpus_config_path(app)
+    overrides = {"corpus_config_path": corpus} if corpus else {}
+    output_dir = load_eval_config(**overrides).output_dir
+    assert output_dir is not None  # always resolved in EvalConfig.__post_init__
+    return output_dir
