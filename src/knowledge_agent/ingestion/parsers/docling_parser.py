@@ -35,6 +35,20 @@ music-only audio) produces zero useful chunks. See
 multimodal-embedding extension that would close this gap; until that
 ships, treat video as "transcript-only".
 
+**XML: modern JATS only.** Docling parses the newer JATS `.xml` /
+`.nxml` articles (Z39.96 / JATS 1.x archiving + publishing). The OLDER
+"NLM Journal Publishing DTD v3.0" variant (used by some legacy PubMed
+Central / PLoS exports) is NOT recognised — docling raises
+`ConversionError: File format not allowed` (format None). It is handled
+like any other unsupported file: that one document is skipped / flagged
+failed while the rest of the batch ingests normally. Workaround: ingest
+the article's PDF instead (docling parses those), which supplies the
+body. The article DOI does NOT depend on this — it is read straight from
+the XML's `<article-id>` by `metadata.doi_from_jats`, independent of
+docling, so it still works on the old variant. A custom fallback parser
+for the old variant was considered and deliberately NOT built (the PDF
+covers the body); see the eval / benchmark notes.
+
 OCR + chunker behaviour is driven by `DoclingConfig` passed into
 `parse()` by the pipeline (values ultimately come from the corpus's
 `CorpusConfig`). PDFs default to OCR off (papers are born-digital);
