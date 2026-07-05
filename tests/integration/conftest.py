@@ -239,6 +239,26 @@ def doi_pdf() -> Path:
 
 
 @pytest.fixture(scope="session")
+def doi_xml() -> Path:
+    """A real JATS XML article (with a resolvable DOI) for the XML DOI /
+    metadata tests. Any `.xml` under `test_documents/doi_ref/`.
+
+    Same disposable subfolder as `doi_pdf` — one `doi_ref/` delete removes
+    every third-party licensed sample if a licence question ever arises.
+    Skips when absent; drop a real open-access JATS article there (e.g. a
+    PLoS `article/file?id=<doi>&type=manuscript` download) to activate the
+    XML DOI tests."""
+    ref_dir = TEST_DOCS / "doi_ref"
+    xmls = sorted(ref_dir.glob("*.xml")) if ref_dir.is_dir() else []
+    if not xmls:
+        pytest.skip(
+            f"no DOI-reference XML in {ref_dir} — drop a real JATS article "
+            f"there to run the XML DOI tests"
+        )
+    return xmls[0]
+
+
+@pytest.fixture(scope="session")
 def sample_jats_xml() -> Path:
     """First `.xml` file in `test_documents/` (assumed JATS-shaped).
 

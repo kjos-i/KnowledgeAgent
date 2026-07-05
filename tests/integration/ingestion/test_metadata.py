@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from knowledge_agent.ingestion.metadata import (
+    doi_from_jats,
     extract_doi_candidates,
     resolve_doi,
     resolve_metadata,
@@ -128,4 +129,33 @@ async def test_resolve_metadata_full_path_on_real_pdf(
     assert work is not None
     assert "id" in work
     # The work should have a title — a real OpenAlex record.
+    assert work.get("title")
+
+
+def test_doi_from_jats_reads_doi_from_real_jats_file(doi_xml: Path) -> None:
+    """`doi_from_jats` pulls the DOI straight from a REAL JATS article's
+    <article-id> — namespaces, DTD, full publisher structure and all. No
+    network; complements the synthetic-XML unit tests."""
+    doi = doi_from_jats(doi_xml)
+    assert doi is not None
+    assert doi.startswith("10.")
+
+
+async def test_structured_jats_doi_resolves_via_openalex_on_real_xml(
+    doi_xml: Path, _close_shared_http_client: None
+) -> None:
+    """A real JATS article -> `doi_from_jats` reads its <article-id> DOI ->
+    `resolve_metadata` resolves it via OpenAlex. The XML counterpart to the
+    PDF full-path test, proving structured-DOI enrichment on a real file.
+
+    Deliberately passes NO chunks and does NOT call `parse_document`: the
+    DOI lives in structured metadata (not the body text), so the feature
+    needs neither. This also sidesteps a separate docling limitation — it
+    rejects this file's older NLM Journal-Publishing-DTD v3.0 as an
+    unrecognised format (newer JATS Z39.96 parses fine). Chunk-level
+    ingestion of such XML is a distinct problem tracked outside this test.
+    """
+    work = await resolve_metadata([], source_path=doi_xml)
+    assert work is not None
+    assert "id" in work
     assert work.get("title")
