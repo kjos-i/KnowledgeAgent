@@ -2160,7 +2160,7 @@ def _make_mock_kg() -> MagicMock:
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(
@@ -2210,7 +2210,7 @@ async def test_ingest_document_skips_openalex_writes_when_layer_off(
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(
@@ -2258,7 +2258,7 @@ async def test_ingest_document_skips_chunk_writes_when_layer_off(
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(
@@ -2301,7 +2301,7 @@ async def test_ingest_document_runs_all_kg_writes_when_both_layers_on(
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(
@@ -2350,7 +2350,7 @@ async def test_ingest_document_skips_openalex_writes_when_layer_on_but_work_none
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(
@@ -2367,10 +2367,10 @@ async def test_ingest_document_skips_openalex_when_sub_label_is_not_paper(
     mock_parse,
     _mock_doc_id,
 ):
-    """Even with openalex_papers=True, a Note-typed file short-circuits
-    OpenAlex - no L1-L4 writes, and `resolve_metadata` was still called
-    (we don't currently short-circuit the API call itself, just the
-    KG writes derived from it)."""
+    """Even with openalex_papers=True, a Note-typed (non-Paper) file
+    short-circuits the whole metadata step: `resolve_metadata` is NOT
+    called (the Paper gate skips DOI extraction + the OpenAlex call), and
+    no L1-L4 KG writes happen."""
     mock_parse.return_value = [_chunk(0, "hello")]
     mock_resolve.return_value = _DUMMY_WORK
     mock_kg = _make_mock_kg()
@@ -2387,6 +2387,8 @@ async def test_ingest_document_skips_openalex_when_sub_label_is_not_paper(
     mock_kg.write_venue.assert_not_called()
     mock_kg.write_topics.assert_not_called()
     mock_kg.write_chunks.assert_called_once()
+    # The Paper gate short-circuits the OpenAlex call itself for a non-Paper.
+    mock_resolve.assert_not_called()
 
 
 async def test_ingest_document_rejects_invalid_main_label():
@@ -2435,7 +2437,7 @@ async def test_ingest_document_rejects_unsupported_extension(tmp_path: Path):
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(
@@ -2489,7 +2491,7 @@ async def test_ingest_document_preserve_uses_stored_labels_when_focal_exists(
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(
@@ -2544,7 +2546,7 @@ async def test_ingest_document_preserve_false_forces_passed_labels(
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(
@@ -2610,7 +2612,7 @@ def _config_with_entities(
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(
@@ -2678,7 +2680,7 @@ async def test_ingest_document_runs_l6_when_entities_layer_on(
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(
@@ -2725,7 +2727,7 @@ async def test_ingest_document_skips_l6_when_entities_layer_off(
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(
@@ -2772,7 +2774,7 @@ async def test_ingest_document_skips_l6_when_chunks_write_fails(
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(
@@ -2865,7 +2867,7 @@ def _config_with_ontology_mesh(matching: str = "exact") -> CorpusConfig:
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(
@@ -2908,7 +2910,7 @@ async def test_ingest_document_skips_l7_when_no_ontology_layer_enabled(
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(
@@ -2953,7 +2955,7 @@ async def test_ingest_document_l7_skipped_when_entities_failed(
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(
@@ -3007,7 +3009,7 @@ async def test_ingest_document_l7_first_import_runs_global_link(
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(
@@ -3053,7 +3055,7 @@ async def test_ingest_document_l7_subsequent_ingest_links_only_this_doc(
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(
@@ -3099,7 +3101,7 @@ async def test_ingest_document_l7_import_failure_skips_linking_returns_status(
 @patch("knowledge_agent.ingestion.pipeline.parse_document")
 @patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
 @patch(
-    "knowledge_agent.ingestion.pipeline.extract_doi_candidates",
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
     return_value=[],
 )
 @patch(

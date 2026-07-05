@@ -46,6 +46,7 @@ from knowledge_agent.ingestion.embed import embed_chunks
 from knowledge_agent.ingestion.ids import compute_doc_id, make_chunk_id
 from knowledge_agent.ingestion.metadata import (
     collect_doi_candidates,
+    is_doi_eligible,
     resolve_metadata,
 )
 from knowledge_agent.ingestion.metadata_resolution import (
@@ -83,7 +84,6 @@ from knowledge_agent.kg.reconcile import (
 )
 from knowledge_agent.kg.schema import (
     MAIN_LABELS,
-    PAPER_LABEL,
     SUB_LABEL_TO_MAIN,
 )
 from knowledge_agent.search.client import get_search_client
@@ -1003,17 +1003,21 @@ async def ingest_document(
         _kg_wipe(),
     )
 
-    # ---- 3. Metadata resolution (one HTTP call) ----
-    # For XML/JATS the DOI lives in structured metadata that docling drops
-    # from the chunk text, so pass the source path — resolve_metadata reads
-    # it straight from the file and prioritises it over the text regex.
-    work = await resolve_metadata(chunks, source_path=path)
-    if work is not None:
-        metadata_status = "enriched"
-    elif collect_doi_candidates(chunks, source_path=path):
-        metadata_status = "pending"
-    else:
-        metadata_status = "baseline"
+    # ---- 3. Metadata resolution (Paper-only; one HTTP call) ----
+    # DOI + OpenAlex enrichment applies ONLY to scholarly documents
+    # (`is_doi_eligible` → Paper). Non-Paper docs skip DOI extraction and the
+    # OpenAlex call entirely and stay at "baseline". For XML/JATS the DOI
+    # lives in structured metadata docling drops from the chunk text, so pass
+    # the source path — resolve_metadata reads it straight from the file and
+    # prioritises it over the text regex.
+    work = None
+    metadata_status = "baseline"
+    if is_doi_eligible(sub_label):
+        work = await resolve_metadata(chunks, source_path=path)
+        if work is not None:
+            metadata_status = "enriched"
+        elif collect_doi_candidates(chunks, source_path=path):
+            metadata_status = "pending"
 
     # ---- 4. Embed (one batched Voyage call, multimodal-aware) ----
     # `embed_chunks` inspects each chunk's `image_ref`: figure chunks
@@ -1086,7 +1090,7 @@ async def ingest_document(
     kg_venue_error: ErrorDetail | None = None
     kg_topics_ok: bool = False
     kg_topics_error: ErrorDetail | None = None
-    if sub_label == PAPER_LABEL and config.layers.openalex_papers and work is not None:
+    if is_doi_eligible(sub_label) and config.layers.openalex_papers and work is not None:
         results = await asyncio.gather(
             _try_kg_write(
                 kg_client.write_citations,

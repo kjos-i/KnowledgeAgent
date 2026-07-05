@@ -16,6 +16,7 @@ from knowledge_agent.ingestion.metadata import (
     collect_doi_candidates,
     doi_from_jats,
     extract_doi_candidates,
+    is_doi_eligible,
     resolve_doi,
     resolve_metadata,
 )
@@ -324,3 +325,28 @@ async def test_resolve_metadata_uses_structured_jats_doi_when_text_has_none(tmp_
     ) as mock_resolve:
         assert await resolve_metadata(chunks, source_path=p) == work
         mock_resolve.assert_called_once_with("10.1371/xonly")
+
+
+# ---- is_doi_eligible (Paper-only DOI/OpenAlex gate) ----
+
+
+def test_is_doi_eligible_true_for_paper():
+    from knowledge_agent.kg.schema import PAPER_LABEL
+
+    assert is_doi_eligible(PAPER_LABEL) is True
+
+
+def test_is_doi_eligible_false_for_generic_article_and_note():
+    # A generic Article (news/blog/magazine) and a Note carry no DOI.
+    assert is_doi_eligible("Article") is False
+    assert is_doi_eligible("Note") is False
+
+
+def test_is_doi_eligible_false_for_untyped_doc():
+    # A doc ingested with no sub_label is not DOI-eligible.
+    assert is_doi_eligible(None) is False
+
+
+def test_is_doi_eligible_false_for_artifact_types():
+    assert is_doi_eligible("Dataset") is False
+    assert is_doi_eligible("Code") is False

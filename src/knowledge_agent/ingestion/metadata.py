@@ -31,6 +31,7 @@ from typing import Any
 from knowledge_agent import _http_client
 from knowledge_agent.config import get_settings
 from knowledge_agent.ingestion.parse import ParsedChunk
+from knowledge_agent.kg.schema import PAPER_LABEL
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,25 @@ _DOI_RE = re.compile(r"\b(10\.\d{4,9}/[-._;()/:A-Z0-9]+)\b", re.IGNORECASE)
 _DOI_TRAILING_NOISE = ".,;)]>"
 
 OPENALEX_BASE_URL = "https://api.openalex.org"
+
+# Sub-labels whose documents carry a DOI and therefore get DOI extraction +
+# OpenAlex enrichment. Scholarly / professional works only — `Paper` today.
+# A generic `Article` (news / blog / magazine) has no DOI, so it's excluded.
+# Extend this set (e.g. add `Correspondence`) to broaden eligibility; it is
+# the single source the pipeline consults for BOTH the extraction gate and
+# the OpenAlex KG-enrichment writes.
+DOI_ELIGIBLE_SUB_LABELS: frozenset[str] = frozenset({PAPER_LABEL})
+
+
+def is_doi_eligible(sub_label: str | None) -> bool:
+    """True if a document of this sub-label should get DOI extraction +
+    OpenAlex enrichment.
+
+    Non-eligible types (`Note`, `Article`, media, …) and untyped docs
+    (`sub_label is None`) skip the whole metadata step. Single source for
+    the pipeline's DOI / OpenAlex gating.
+    """
+    return sub_label in DOI_ELIGIBLE_SUB_LABELS
 
 
 def extract_doi_candidates(chunks: list[ParsedChunk], max_chunks_to_search: int = 3) -> list[str]:
