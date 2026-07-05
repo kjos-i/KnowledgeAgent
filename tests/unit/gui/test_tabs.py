@@ -31,11 +31,13 @@ def test_library_tab_delegates_to_library_view(fake_app: MagicMock):
     assert ctl is not None
 
 
-def test_evaluation_tab_stub_mentions_eval_harness(fake_app: MagicMock):
+def test_evaluation_tab_delegates_to_evaluation_view(fake_app: MagicMock):
+    """EvaluationTab is a thin wrapper — `.build()` returns the
+    EvaluationView Tabs shell (5 sub-tabs). The shape is exercised in the
+    EvaluationView tests, not here."""
     tab = EvaluationTab(fake_app)
     ctl = tab.build()
-    body = ctl.controls[1]
-    assert "eval" in body.content.value.lower()
+    assert ctl is not None
 
 
 def test_search_tab_composes_chat_panel_and_right_panel_in_row(

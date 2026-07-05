@@ -1,24 +1,19 @@
-"""Evaluation tab — eval-harness UI.
+"""Evaluation top tab — dispatches to the full-window EvaluationView.
 
-Slice 1 stub. The eval harness (`evaluation/` folder, planned per
-[[evaluation-harness]]) lands as a backend module first; this tab
-wires it into the UI after that ships:
+The real layout (5 sub-tabs: Run / Run Summary / Deep Analysis / Trends /
+Metrics Guide) lives in `gui.evaluation.evaluation_view`. This module stays
+thin so the existing `GuiApp` wiring (which constructs `EvaluationTab`)
+doesn't change shape as the sub-tabs grow — same pattern as `LibraryTab`.
 
-  - Pick a dataset (eval-instance corpus, isolated from real data via
-    `.env.eval` per [[test-instance-setup]])
-  - Run a queryset → per-query results table (Hit@k, MRR, NDCG,
-    faithfulness, answer_relevancy)
-  - Aggregate metrics card
-  - Optional LangSmith trace toggle (env-var-gated, eval-only)
-
-Top-level tab because eval-result tables need the full window.
+Top-level (full-window) tab, not a right-panel mode: eval result tables +
+charts need the whole window.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from knowledge_agent.gui.views._frame import empty_state, view_with_header
+from knowledge_agent.gui.evaluation import EvaluationView
 
 if TYPE_CHECKING:
     import flet as ft
@@ -27,16 +22,11 @@ if TYPE_CHECKING:
 
 
 class EvaluationTab:
-    """Evaluation tab — stub until the eval harness ships."""
+    """Thin wrapper — delegates `build()` to `EvaluationView`."""
 
     def __init__(self, app: GuiApp) -> None:
         self.app = app
+        self.view = EvaluationView(app)
 
     def build(self) -> ft.Control:
-        return view_with_header(
-            "Evaluation",
-            empty_state(
-                "Evaluation lands after the eval harness ships — "
-                "queryset run, per-query metrics, aggregate dashboard."
-            ),
-        )
+        return self.view.build()
