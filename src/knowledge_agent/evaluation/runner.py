@@ -31,6 +31,8 @@ from knowledge_agent.evaluation.config import load_eval_config
 from knowledge_agent.evaluation.registry import metric_fmts, metric_labels, summary_avg_pairs
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from knowledge_agent.evaluation.config import EvalConfig
     from knowledge_agent.kg.corpus_config import CorpusConfig
 
@@ -59,13 +61,15 @@ def _load_corpus_config(cfg: EvalConfig) -> CorpusConfig | None:
     return load_corpus_config(cfg.corpus_config_path)
 
 
-async def run(cfg: EvalConfig) -> RunResult:
+async def run(cfg: EvalConfig, on_progress: Callable[[int, int], None] | None = None) -> RunResult:
     """Execute one evaluation run end-to-end; return a `RunResult`.
 
     Presentation-free: writes the JSON/CSV report + ledger row and returns
     the report + paths, but prints nothing (the CLI wrapper prints; the GUI
-    renders). Heavy deps (engine -> adapter -> langchain) import lazily so
-    merely importing this module stays cheap for `ka`'s other subcommands.
+    renders). `on_progress(done, total)` is passed through to `evaluate_cases`
+    so a caller can drive a progress bar / print line. Heavy deps (engine ->
+    adapter -> langchain) import lazily so merely importing this module stays
+    cheap for `ka`'s other subcommands.
     """
     from knowledge_agent.evaluation import report as report_mod
     from knowledge_agent.evaluation.engine import evaluate_cases
@@ -78,7 +82,7 @@ async def run(cfg: EvalConfig) -> RunResult:
     corpus_config = _load_corpus_config(cfg)
 
     logger.info("evaluating %d case(s), groups=%s", len(cases), sorted(cfg.enabled_groups))
-    results = await evaluate_cases(cases, corpus_config, cfg)
+    results = await evaluate_cases(cases, corpus_config, cfg, on_progress=on_progress)
 
     run_timestamp = datetime.now(UTC).isoformat(timespec="seconds")
     report = report_mod.build_report(cfg, results, run_timestamp)
@@ -105,6 +109,13 @@ def _print_summary(result: RunResult) -> None:
     print(f"report: {result.json_path}")
     print(f"csv:    {result.csv_path}")
     print(f"ledger: run_id={result.run_id}")
+
+
+def _cli_progress(done: int, total: int) -> None:
+    """In-place terminal progress line for `ka eval` (stderr, so it doesn't
+    pollute the stdout summary); newline once the last case lands."""
+    end = "\n" if done >= total else ""
+    print(f"\r  evaluating case {done}/{total} ...", end=end, file=sys.stderr, flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +255,7 @@ async def run_from_args(args: argparse.Namespace) -> int:
         return _show_history(cfg, args.export)
     if args.show is not None:
         return _show_run(cfg, args.show, args.export)
-    result = await run(cfg)
+    result = await run(cfg, on_progress=_cli_progress)
     _print_summary(result)
     return 0
 

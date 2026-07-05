@@ -81,6 +81,22 @@ def test_evaluate_cases_runs_all_in_order(monkeypatch):
     assert [r["id"] for r in results] == ["c0", "c1", "c2", "c3"]
 
 
+def test_evaluate_cases_reports_progress(monkeypatch):
+    """on_progress fires once per case as it completes: total constant, done
+    counts up 1..N (completion order, so we assert the set, not the order)."""
+    cases = [EvalCase(id=f"c{i}", question="q?") for i in range(4)]
+    _patch_run(monkeypatch, _run(answer="a"))
+    calls: list[tuple[int, int]] = []
+    asyncio.run(
+        E.evaluate_cases(
+            cases, None, EvalConfig(concurrency=2), on_progress=lambda d, t: calls.append((d, t))
+        )
+    )
+    assert len(calls) == 4
+    assert {total for _, total in calls} == {4}
+    assert sorted(done for done, _ in calls) == [1, 2, 3, 4]
+
+
 # ---- KG group (Phase 2) ----
 
 

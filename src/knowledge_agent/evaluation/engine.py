@@ -20,6 +20,8 @@ from knowledge_agent.evaluation.adapter import run_case
 from knowledge_agent.evaluation.registry import keys_in_toggle_group, metric_decimals
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from knowledge_agent.evaluation.adapter import CaseRun
     from knowledge_agent.evaluation.config import EvalConfig
     from knowledge_agent.evaluation.models import EvalCase
@@ -178,13 +180,31 @@ async def evaluate_case(
 
 
 async def evaluate_cases(
-    cases: list[EvalCase], corpus_config: CorpusConfig | None, cfg: EvalConfig
+    cases: list[EvalCase],
+    corpus_config: CorpusConfig | None,
+    cfg: EvalConfig,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> list[dict[str, Any]]:
-    """Evaluate every case under a concurrency semaphore, preserving order."""
+    """Evaluate every case under a concurrency semaphore, preserving order.
+
+    `on_progress(done, total)` — when given — fires once per case as it
+    COMPLETES (completion order, not submission order), so a GUI progress bar
+    or the CLI can report advancement. Same emit-in-backend / render-in-caller
+    split as the ledger readers; the harness never imports a UI. `done` is
+    captured before the callback so concurrent completions report distinct
+    counts.
+    """
     sem = asyncio.Semaphore(max(1, cfg.concurrency))
+    total = len(cases)
+    done = 0
 
     async def _one(case: EvalCase) -> dict[str, Any]:
+        nonlocal done
         async with sem:
-            return await evaluate_case(case, corpus_config, cfg)
+            result = await evaluate_case(case, corpus_config, cfg)
+        done += 1
+        if on_progress is not None:
+            on_progress(done, total)
+        return result
 
     return await asyncio.gather(*[_one(c) for c in cases])

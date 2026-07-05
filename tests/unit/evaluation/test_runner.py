@@ -102,7 +102,7 @@ def test_run_from_args_prints_summary_and_returns_zero(tmp_path, monkeypatch, ca
         run_id=7,
     )
 
-    async def fake_run(cfg):
+    async def fake_run(cfg, on_progress=None):
         return fake
 
     monkeypatch.setattr(RN, "run", fake_run)
@@ -173,7 +173,7 @@ def test_run_from_args_history_mode_does_not_run(tmp_path, monkeypatch, capsys):
     out_dir = tmp_path / "out"
     _seed_run(load_eval_config(output_dir=out_dir))
 
-    async def boom(cfg):
+    async def boom(cfg, on_progress=None):
         raise AssertionError("run() must not be called in --history mode")
 
     monkeypatch.setattr(RN, "run", boom)
