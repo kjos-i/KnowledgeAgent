@@ -13,7 +13,8 @@ Document nodes carry two labels: :Document (universal) and :Paper (subtype).
 Queries can target either - :Document matches any ingested doc, :Paper
 filters to scholarly papers specifically.
 
-Requires Neo4j running and NEO4J_PASSWORD set in the shared `.env` file.
+Requires the TEST Neo4j instance running and NEO4J_PASSWORD set in
+`.env.test` (loaded by `load_test_env()` below — never the real `.env`).
 
 Lifecycle:
   1. Idempotent: clear any leftover smoke nodes from previous runs.

@@ -22,3 +22,18 @@ Run e2e selectively:
     pytest tests/e2e/
     pytest -m e2e
 """
+
+from __future__ import annotations
+
+import pytest
+
+from knowledge_agent.config import load_test_env
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _e2e_env() -> None:
+    """Point the whole e2e session at the TEST instance (`.env.test`) BEFORE
+    any test triggers `get_settings()` — the same isolation guarantee the
+    integration tier relies on (password-isolated; see the root conftest's
+    SAFETY INVARIANT). Autouse so no e2e test can forget it."""
+    load_test_env()

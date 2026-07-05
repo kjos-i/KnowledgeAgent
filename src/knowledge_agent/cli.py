@@ -24,6 +24,42 @@ orchestrators rather than reimplementing logic, so the eval harness,
 cron jobs, and the GUI all hit the same code paths. No subcommand
 runs more than ~30 LOC of glue.
 
+Configuration — `.env` vs. flags (THE convention; kept here as the
+single source so it's easy to rediscover):
+
+  The split is by *stability + sensitivity* — environment vs. invocation.
+
+  - `.env` (→ backend `Settings` in `config.py`, `env_file=.env`) holds
+    the ENVIRONMENT the run executes in — things that rarely change
+    run-to-run and/or are secret:
+      * secrets — `NEO4J_PASSWORD`, provider keys (`ANTHROPIC/OPENAI/
+        GOOGLE/VOYAGE/LANGSMITH_API_KEY`);
+      * connections — `NEO4J_URI/USER`, `LANCEDB_PATH` (all
+        required-no-default: a forgotten value fails fast instead of
+        silently hitting the wrong instance);
+      * provider + model + tuning defaults — `LLM_PROVIDER`,
+        `EMBEDDING_PROVIDER`, per-node models/temps, retrieval knobs
+        (`TOP_K`, `DEFAULT_RETRIEVAL_MODE`, `LANCEDB_SEARCH_MODE`,
+        RRF/MMR, `KG_MAX_ROWS`), rate limits, `ONTOLOGY_DOWNLOADS_DIR`;
+      * optional eval defaults — `KA_EVAL_*`.
+    Secrets live here and NEVER as flags: a password in `argv` leaks into
+    shell history / `ps` / CI logs.
+
+  - argparse flags say WHAT this invocation does — the verb + its object
+    (`ingest <folder>`, `query "<q>"`, `eval --dataset`), per-run
+    overrides (`--mode`, `--max-cases`, `--trace`), and output routing
+    (`--json`, `--export`, `--output-dir`). These change every run.
+
+  Overlap zone (flag wins): a few knobs sit in env AND can be overridden
+  per-run by a flag — `--mode` over `DEFAULT_RETRIEVAL_MODE`; the eval
+  flags over their `KA_EVAL_*` twins (precedence in `load_eval_config`:
+  defaults < `KA_EVAL_*` env < explicit flags). The flag is the most
+  immediate signal, so it should win.
+
+  Clean split worth remembering: WHICH corpus is a per-run choice
+  (`--config corpus.toml`, a flag), but WHERE its DB lives + WHO you are
+  is `.env` — so you point at different corpora without touching secrets.
+
 Health is deliberately minimal here; sprint 0c lands
 `system_status() → StatusReport` (the rich diagnostic surface used by
 the GUI's Settings → Diagnostics panel) and this command will swap
