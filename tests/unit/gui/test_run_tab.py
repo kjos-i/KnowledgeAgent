@@ -86,3 +86,47 @@ def test_run_click_blocks_when_no_group_selected(fake_app: MagicMock):
     ):
         tab._on_run_clicked(MagicMock())
     spawn.assert_not_called()  # validation stops the run
+
+
+def test_trace_toggle_reveals_warning_and_project(fake_app: MagicMock):
+    """The data-safety warning + project field are hidden until the user
+    opts into tracing — so the warning surfaces exactly at opt-in."""
+    tab, _ = _run_tab(fake_app)
+    assert tab.trace_check.value is False  # off by default
+    assert tab.trace_warning.visible is False
+    assert tab.project_field.visible is False
+    tab.trace_check.value = True
+    tab._on_trace_toggle(MagicMock())
+    assert tab.trace_warning.visible is True
+    assert tab.project_field.visible is True
+
+
+def test_execute_run_passes_trace_and_project(fake_app: MagicMock):
+    tab, _ = _run_tab(fake_app)
+    tab.trace_check.value = True
+    tab.project_field.value = "proj-x"
+    fake_result = MagicMock(run_id=5, report={"summary": {"pass_count": 1, "case_count": 1}})
+    with patch(
+        "knowledge_agent.evaluation.runner.run",
+        new_callable=AsyncMock,
+        return_value=fake_result,
+    ) as run_mock:
+        asyncio.run(tab._execute_run())
+    kwargs = run_mock.await_args.kwargs
+    assert kwargs["trace"] is True
+    assert kwargs["langsmith_project"] == "proj-x"
+
+
+def test_run_click_blocks_when_trace_without_key(fake_app: MagicMock):
+    """Checking Trace with no LangSmith key stored stops the run with a
+    pointer to Settings → Keys — no silent no-op trace."""
+    tab, _ = _run_tab(fake_app)
+    tab.trace_check.value = True  # groups + dataset are valid by default
+    with (
+        patch.object(tab, "_loop_running", return_value=True),
+        patch("knowledge_agent.gui.evaluation.run_tab.get_api_key", return_value=None),
+        patch.object(tab, "_spawn") as spawn,
+    ):
+        tab._on_run_clicked(MagicMock())
+    spawn.assert_not_called()
+    assert "LangSmith API key" in tab.status.value

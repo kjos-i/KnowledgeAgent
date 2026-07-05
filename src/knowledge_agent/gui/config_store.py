@@ -52,7 +52,7 @@ APP_ID = "knowledge-agent"
 # `neo4j-{corpus_name}` and managed via the Library tab (Create New
 # Dataset writes it; corpus-switch handler reads it). See
 # `get_corpus_password` / `set_corpus_password` below.
-API_KEY_NAMES = ("anthropic", "openai", "google", "voyage")
+API_KEY_NAMES = ("anthropic", "openai", "google", "voyage", "langsmith")
 
 # Human-readable labels for the Settings form — decoupled from the
 # keyring identifier so labels can differ from keyring names.
@@ -61,6 +61,7 @@ SECRET_DISPLAY_LABELS = {
     "openai": "OpenAI API key",
     "google": "Google API key",
     "voyage": "Voyage API key",
+    "langsmith": "LangSmith API key",
 }
 
 # Keyring identifier -> env var the agent's config layer reads.
@@ -73,6 +74,11 @@ KEYRING_TO_ENV = {
     "openai": "OPENAI_API_KEY",
     "google": "GOOGLE_API_KEY",
     "voyage": "VOYAGE_API_KEY",
+    # Bridged like the rest so LangSmith's SDK can authenticate — but the key
+    # ALONE never traces anything: tracing only happens when a run opts in
+    # (GUI Run-tab checkbox / `ka eval --trace`), which enables the tracer
+    # for that run only. `LANGSMITH_TRACING` is never set in the GUI process.
+    "langsmith": "LANGSMITH_API_KEY",
 }
 
 

@@ -102,7 +102,7 @@ def test_run_from_args_prints_summary_and_returns_zero(tmp_path, monkeypatch, ca
         run_id=7,
     )
 
-    async def fake_run(cfg, on_progress=None):
+    async def fake_run(cfg, on_progress=None, *, trace=False, langsmith_project=None):
         return fake
 
     monkeypatch.setattr(RN, "run", fake_run)
@@ -115,6 +115,8 @@ def test_run_from_args_prints_summary_and_returns_zero(tmp_path, monkeypatch, ca
         history=False,
         show=None,
         export=None,
+        trace=False,
+        project=None,
     )
     code = asyncio.run(RN.run_from_args(args))
     assert code == 0
@@ -173,7 +175,7 @@ def test_run_from_args_history_mode_does_not_run(tmp_path, monkeypatch, capsys):
     out_dir = tmp_path / "out"
     _seed_run(load_eval_config(output_dir=out_dir))
 
-    async def boom(cfg, on_progress=None):
+    async def boom(cfg, on_progress=None, *, trace=False, langsmith_project=None):
         raise AssertionError("run() must not be called in --history mode")
 
     monkeypatch.setattr(RN, "run", boom)
@@ -186,6 +188,118 @@ def test_run_from_args_history_mode_does_not_run(tmp_path, monkeypatch, capsys):
         history=True,
         show=None,
         export=None,
+        trace=False,
+        project=None,
     )
     assert asyncio.run(RN.run_from_args(args)) == 0
     assert "pass_rate" in capsys.readouterr().out  # printed the history table
+
+
+def test_add_eval_args_registers_trace_and_project():
+    """The eval CLI surface exposes --trace (opt-in) + --project."""
+    p = argparse.ArgumentParser()
+    RN.add_eval_args(p)
+    on = p.parse_args(["--trace", "--project", "my-proj"])
+    assert on.trace is True
+    assert on.project == "my-proj"
+    # Off by default: no flag → no tracing.
+    off = p.parse_args([])
+    assert off.trace is False
+    assert off.project is None
+
+
+def test_run_from_args_trace_without_key_errors(tmp_path, monkeypatch, capsys):
+    """--trace with no LangSmith key in env fails fast (exit 1) and does not
+    run — so the user isn't told a run traced when it silently couldn't."""
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    monkeypatch.delenv("LANGCHAIN_API_KEY", raising=False)
+
+    async def must_not_run(cfg, on_progress=None, *, trace=False, langsmith_project=None):
+        raise AssertionError("run() must not be called without a trace key")
+
+    monkeypatch.setattr(RN, "run", must_not_run)
+    args = argparse.Namespace(
+        dataset=None,
+        corpus=None,
+        groups="source",
+        max_cases=None,
+        output_dir=tmp_path / "out",
+        history=False,
+        show=None,
+        export=None,
+        trace=True,
+        project=None,
+    )
+    assert asyncio.run(RN.run_from_args(args)) == 1
+    assert "LangSmith API key" in capsys.readouterr().err
+
+
+def test_run_from_args_trace_passes_project_through(tmp_path, monkeypatch):
+    """With a key present, --trace + --project reach run() as kwargs."""
+    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-test")
+    seen: dict = {}
+
+    async def fake_run(cfg, on_progress=None, *, trace=False, langsmith_project=None):
+        seen["trace"] = trace
+        seen["project"] = langsmith_project
+        return RN.RunResult(
+            report={
+                "summary": {"case_count": 1, "pass_count": 1, "pass_rate": 1.0},
+                "run_timestamp": "t",
+                "enabled_groups": ["source"],
+            },
+            json_path=tmp_path / "r.json",
+            csv_path=tmp_path / "r.csv",
+            run_id=1,
+        )
+
+    monkeypatch.setattr(RN, "run", fake_run)
+    args = argparse.Namespace(
+        dataset=None,
+        corpus=None,
+        groups="source",
+        max_cases=None,
+        output_dir=tmp_path / "out",
+        history=False,
+        show=None,
+        export=None,
+        trace=True,
+        project="proj-x",
+    )
+    assert asyncio.run(RN.run_from_args(args)) == 0
+    assert seen == {"trace": True, "project": "proj-x"}
+
+
+def test_run_wraps_evaluate_in_langsmith_when_trace(tmp_path, monkeypatch):
+    """run(trace=True) evaluates INSIDE tracing_v2_enabled, scoped to the run
+    (never the global env flag), with the chosen project name."""
+    import contextlib
+
+    entered: dict = {}
+
+    async def fake_run_case(case, corpus_config):
+        return CaseRun(
+            question=case.question,
+            answer="a",
+            retrieved_texts=["t"],
+            retrieved_doc_ids=["d"],
+            retrieved_chunk_ids=["c"],
+        )
+
+    @contextlib.contextmanager
+    def fake_tracing(project_name=None):
+        entered["project"] = project_name
+        yield None
+
+    monkeypatch.setattr(E, "run_case", fake_run_case)
+    monkeypatch.setattr(
+        RP, "capture_provenance", lambda: {"git_commit": None, "model_config": {}, "prompts": {}}
+    )
+    import langchain_core.tracers.context as lcc
+
+    monkeypatch.setattr(lcc, "tracing_v2_enabled", fake_tracing)
+
+    cfg = load_eval_config(output_dir=tmp_path / "out", max_cases=1)
+    result = asyncio.run(RN.run(cfg, trace=True, langsmith_project="custom-proj"))
+    assert result.run_id == 1
+    assert entered["project"] == "custom-proj"

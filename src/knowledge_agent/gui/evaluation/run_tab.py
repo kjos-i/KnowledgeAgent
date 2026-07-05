@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
+from knowledge_agent.gui.config_store import get_api_key
 from knowledge_agent.gui.settings.llm_tab import LLM_AVAILABLE_MODELS
 from knowledge_agent.gui.views._frame import view_header
 
@@ -50,6 +51,9 @@ class RunTab:
         self.judge_dropdowns: list[ft.Dropdown] = []
         self.add_judge_button: ft.TextButton | None = None
         self.max_cases_field: ft.TextField | None = None
+        self.trace_check: ft.Checkbox | None = None
+        self.project_field: ft.TextField | None = None
+        self.trace_warning: ft.Text | None = None
         self.run_button: ft.Button | None = None
         self.progress: ft.ProgressBar | None = None
         self.status: ft.Text | None = None
@@ -57,7 +61,10 @@ class RunTab:
     # ---- build ------------------------------------------------------------
 
     def build(self) -> ft.Control:
-        from knowledge_agent.evaluation.config import DEFAULT_DATASET_PATH
+        from knowledge_agent.evaluation.config import (
+            DEFAULT_DATASET_PATH,
+            DEFAULT_LANGSMITH_PROJECT,
+        )
 
         datasets_dir = DEFAULT_DATASET_PATH.parent
         options = [
@@ -108,6 +115,29 @@ class RunTab:
             keyboard_type=ft.KeyboardType.NUMBER,
         )
 
+        # Tracing — OFF by default. The data-safety warning + project field
+        # only appear once the box is checked (see `_on_trace_toggle`).
+        self.trace_check = ft.Checkbox(
+            label="Trace to LangSmith",
+            value=False,
+            on_change=self._on_trace_toggle,
+        )
+        self.trace_warning = ft.Text(
+            "⚠ Tracing uploads this run's data — your queries, the retrieved "
+            "chunk text, and the answers — to LangSmith's cloud. Enable ONLY "
+            "for a non-sensitive corpus (e.g. the test corpus); never for "
+            "private documents.",
+            size=12,
+            color=ft.Colors.ORANGE,
+            visible=False,
+        )
+        self.project_field = ft.TextField(
+            label="LangSmith project",
+            value=DEFAULT_LANGSMITH_PROJECT,
+            width=300,
+            visible=False,
+        )
+
         self.run_button = ft.Button(
             "Run evaluation",
             icon=ft.Icons.PLAY_ARROW,
@@ -131,6 +161,10 @@ class RunTab:
                 self.judge_panel,
                 self.add_judge_button,
                 self.max_cases_field,
+                ft.Text("Tracing (optional)", weight=ft.FontWeight.BOLD),
+                self.trace_check,
+                self.trace_warning,
+                self.project_field,
                 ft.Row(
                     [self.run_button, self.progress],
                     spacing=12,
@@ -189,6 +223,18 @@ class RunTab:
             self.judge_panel.controls.remove(row)
         self.app.page.update()
 
+    # ---- tracing ----------------------------------------------------------
+
+    def _on_trace_toggle(self, _e: ft.Event) -> None:
+        """Reveal the data-safety warning + project field only when tracing
+        is enabled — so the warning is impossible to miss at opt-in time."""
+        on = bool(self.trace_check and self.trace_check.value)
+        if self.trace_warning is not None:
+            self.trace_warning.visible = on
+        if self.project_field is not None:
+            self.project_field.visible = on
+        self.app.page.update()
+
     # ---- run --------------------------------------------------------------
 
     def _on_browse_clicked(self, _e: ft.Event) -> None:
@@ -218,6 +264,9 @@ class RunTab:
         if not (self.dataset_dropdown and self.dataset_dropdown.value):
             self._set_status("Select a dataset.")
             return
+        if self.trace_check and self.trace_check.value and not get_api_key("langsmith"):
+            self._set_status("Set a LangSmith API key in Settings → Keys to trace.")
+            return
         self._spawn(self._execute_run())
 
     async def _execute_run(self) -> None:
@@ -231,8 +280,15 @@ class RunTab:
         self._set_busy(True, "starting…")
         if self.progress is not None:
             self.progress.value = 0.0
+        trace = bool(self.trace_check and self.trace_check.value)
+        project = (self.project_field.value or "").strip() if self.project_field else ""
         try:
-            result = await runner.run(cfg, on_progress=self._on_progress)
+            result = await runner.run(
+                cfg,
+                on_progress=self._on_progress,
+                trace=trace,
+                langsmith_project=project or None,
+            )
         except Exception as exc:  # broad: one failed run must not crash the GUI
             logger.exception("eval run failed")
             self._set_busy(False, f"run failed: {exc}")

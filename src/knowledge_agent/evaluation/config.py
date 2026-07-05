@@ -33,6 +33,14 @@ ALL_TOGGLE_GROUPS: frozenset[str] = frozenset({"source", "chunk", "kg", "judge"}
 # didn't run (e.g. lancedb_only), so it costs nothing on non-KG corpora.
 DEFAULT_ENABLED_GROUPS: frozenset[str] = frozenset({"source", "chunk", "kg"})
 
+# LangSmith tracing default project — the bucket traced runs land in (inside
+# whatever workspace the API key belongs to). Tracing is OPT-IN per run
+# (`runner.run(trace=...)`, `ka eval --trace`, the GUI Run-tab checkbox); it
+# is never enabled by config alone. The API key is NOT here — it lives in the
+# environment (`LANGSMITH_API_KEY`: from `.env` for the CLI, from the OS
+# keyring for the GUI), so nothing is ever uploaded unless a run opts in.
+DEFAULT_LANGSMITH_PROJECT = "knowledge-agent-eval"
+
 
 @dataclass(frozen=True, slots=True)
 class EvalConfig:

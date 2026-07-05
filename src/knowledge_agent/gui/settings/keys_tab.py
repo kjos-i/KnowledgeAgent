@@ -1,7 +1,8 @@
 """Settings → Keys sub-tab — provider API keys.
 
-Four keyring-backed fields: Anthropic, OpenAI, Google, Voyage API
-keys. The user fills only the ones the active providers actually
+Five keyring-backed fields: Anthropic, OpenAI, Google, Voyage provider
+keys plus an optional LangSmith key used only for tracing evaluation
+runs (Evaluation → Run). The user fills only the ones they actually
 need; no provider is privileged.
 
 Neo4j password does NOT live here — it's per-corpus (stored under
@@ -108,7 +109,10 @@ class KeysTab:
                     "plain text. Fill only what the providers you use "
                     "need. Leave blank to keep the existing value. "
                     "Neo4j passwords are per-corpus — set them via "
-                    "Library → Create New Dataset.",
+                    "Library → Create New Dataset. LangSmith is "
+                    "optional — only for tracing evaluation runs "
+                    "(Evaluation → Run); leave it blank if you don't "
+                    "trace.",
                     size=11,
                     color=ft.Colors.GREY_500,
                 ),

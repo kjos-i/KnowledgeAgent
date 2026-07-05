@@ -21,13 +21,14 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from knowledge_agent.evaluation.config import load_eval_config
+from knowledge_agent.evaluation.config import DEFAULT_LANGSMITH_PROJECT, load_eval_config
 from knowledge_agent.evaluation.registry import metric_fmts, metric_labels, summary_avg_pairs
 
 if TYPE_CHECKING:
@@ -61,7 +62,13 @@ def _load_corpus_config(cfg: EvalConfig) -> CorpusConfig | None:
     return load_corpus_config(cfg.corpus_config_path)
 
 
-async def run(cfg: EvalConfig, on_progress: Callable[[int, int], None] | None = None) -> RunResult:
+async def run(
+    cfg: EvalConfig,
+    on_progress: Callable[[int, int], None] | None = None,
+    *,
+    trace: bool = False,
+    langsmith_project: str | None = None,
+) -> RunResult:
     """Execute one evaluation run end-to-end; return a `RunResult`.
 
     Presentation-free: writes the JSON/CSV report + ledger row and returns
@@ -70,6 +77,14 @@ async def run(cfg: EvalConfig, on_progress: Callable[[int, int], None] | None = 
     so a caller can drive a progress bar / print line. Heavy deps (engine ->
     adapter -> langchain) import lazily so merely importing this module stays
     cheap for `ka`'s other subcommands.
+
+    `trace=True` sends this run's graph steps (queries, retrieved chunks,
+    answers) to LangSmith for step-by-step debugging. It is scoped to THIS
+    run via a context manager — never the global `LANGSMITH_TRACING` env flag
+    — so nothing is ever uploaded unless a caller explicitly opts in per run.
+    Auth uses `LANGSMITH_API_KEY` already in the environment (the GUI bridges
+    it from the OS keyring; the CLI from `.env`); `langsmith_project` names the
+    bucket traces land in (default `DEFAULT_LANGSMITH_PROJECT`).
     """
     from knowledge_agent.evaluation import report as report_mod
     from knowledge_agent.evaluation.engine import evaluate_cases
@@ -82,7 +97,16 @@ async def run(cfg: EvalConfig, on_progress: Callable[[int, int], None] | None = 
     corpus_config = _load_corpus_config(cfg)
 
     logger.info("evaluating %d case(s), groups=%s", len(cases), sorted(cfg.enabled_groups))
-    results = await evaluate_cases(cases, corpus_config, cfg, on_progress=on_progress)
+    if trace:
+        # Lazy import keeps langchain's tracer off the default (untraced) path.
+        from langchain_core.tracers.context import tracing_v2_enabled
+
+        project = (langsmith_project or "").strip() or DEFAULT_LANGSMITH_PROJECT
+        logger.info("LangSmith tracing ON (project=%s)", project)
+        with tracing_v2_enabled(project_name=project):
+            results = await evaluate_cases(cases, corpus_config, cfg, on_progress=on_progress)
+    else:
+        results = await evaluate_cases(cases, corpus_config, cfg, on_progress=on_progress)
 
     run_timestamp = datetime.now(UTC).isoformat(timespec="seconds")
     report = report_mod.build_report(cfg, results, run_timestamp)
@@ -206,6 +230,21 @@ def add_eval_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--groups", help="Comma-separated metric groups (e.g. source,chunk).")
     parser.add_argument("--max-cases", type=int, help="Truncate the queryset (dev runs).")
     parser.add_argument("--output-dir", type=Path, help="Where to write ledger + reports.")
+    # ---- LangSmith tracing (opt-in per run; uploads run data to the cloud) ----
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        help=(
+            "Trace this run to LangSmith (needs LANGSMITH_API_KEY in env/.env). "
+            "Uploads queries + retrieved chunks + answers; use only on a "
+            "non-sensitive corpus."
+        ),
+    )
+    parser.add_argument(
+        "--project",
+        metavar="NAME",
+        help="LangSmith project for --trace (default: knowledge-agent-eval).",
+    )
     # ---- read views (don't run an eval) ----
     parser.add_argument(
         "--history",
@@ -255,7 +294,17 @@ async def run_from_args(args: argparse.Namespace) -> int:
         return _show_history(cfg, args.export)
     if args.show is not None:
         return _show_run(cfg, args.show, args.export)
-    result = await run(cfg, on_progress=_cli_progress)
+    if args.trace and not (
+        os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGCHAIN_API_KEY")
+    ):
+        print(
+            "error: --trace needs a LangSmith API key — set LANGSMITH_API_KEY in .env.",
+            file=sys.stderr,
+        )
+        return 1
+    result = await run(
+        cfg, on_progress=_cli_progress, trace=args.trace, langsmith_project=args.project
+    )
     _print_summary(result)
     return 0
 

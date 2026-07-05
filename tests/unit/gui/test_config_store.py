@@ -256,6 +256,21 @@ def test_apply_keys_to_env_skips_empty_values(monkeypatch: pytest.MonkeyPatch):
     assert os.environ["VOYAGE_API_KEY"] == "shell-value"
 
 
+def test_langsmith_key_registered_and_bridges_to_env(monkeypatch: pytest.MonkeyPatch):
+    """The optional LangSmith key is a first-class keyring field and bridges
+    to LANGSMITH_API_KEY — the key alone never traces; a run must opt in."""
+    assert "langsmith" in config_store.API_KEY_NAMES
+    assert "langsmith" in config_store.SECRET_DISPLAY_LABELS
+    assert KEYRING_TO_ENV["langsmith"] == "LANGSMITH_API_KEY"
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    with patch(
+        "knowledge_agent.gui.config_store.get_api_key",
+        lambda name: "ls-key" if name == "langsmith" else None,
+    ):
+        apply_keys_to_env()
+    assert os.environ["LANGSMITH_API_KEY"] == "ls-key"  # pragma: allowlist secret
+
+
 # ---- apply_active_corpus_password_to_env (startup password bridge) ----
 
 
