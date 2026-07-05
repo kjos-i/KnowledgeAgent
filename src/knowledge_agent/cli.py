@@ -1,6 +1,6 @@
-"""CLI entry point — headless ops for ingest / query / health.
+"""CLI entry point — headless ops for ingest / query / health / eval.
 
-Three subcommands wired to the same async machinery the GUI calls:
+Four subcommands wired to the same async machinery the GUI calls:
 
   - `ka ingest <folder>` — recursively scan, plan, ingest every supported
     file via `ingestion.bulk_ops.ingest_folder_execute`. Failures
@@ -13,6 +13,11 @@ Three subcommands wired to the same async machinery the GUI calls:
   - `ka health` — basic liveness probe: Neo4j ping, LanceDB open,
     active LLM + embedder provider keys present. Exit 0 = all OK; non-
     zero = at least one failure (the message names which).
+  - `ka eval` — run the evaluation harness over a gold dataset; write the
+    JSON/CSV report + ledger row and print a summary. A dev/testing path
+    (reads `.env` like the other subcommands); the GUI Evaluation tab
+    calls the same `evaluation.runner.run()` in-process. Thin wrapper —
+    all logic lives self-contained in `evaluation/`.
 
 The CLI is intentionally thin — it composes existing async
 orchestrators rather than reimplementing logic, so the eval harness,
@@ -159,6 +164,23 @@ async def _cmd_health(_args: argparse.Namespace) -> int:
 
 
 # =============================================================================
+# eval
+# =============================================================================
+
+
+async def _cmd_eval(args: argparse.Namespace) -> int:
+    """Run the evaluation harness (dev/testing path — reads `.env`).
+
+    Delegates to the self-contained harness in `evaluation/`; the GUI
+    Evaluation tab calls the same `run()` in-process. Heavy imports stay
+    lazy so `ka`'s other subcommands don't pull the eval stack.
+    """
+    from knowledge_agent.evaluation import runner as eval_runner
+
+    return await eval_runner.run_from_args(args)
+
+
+# =============================================================================
 # Top-level parser + dispatcher
 # =============================================================================
 
@@ -233,6 +255,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Liveness probe: Neo4j + LanceDB + active provider keys.",
     )
     p_health.set_defaults(func=_cmd_health)
+
+    # `eval` — hosted here, but its flags + logic live in `evaluation/`
+    # (single source). Import is light (the heavy engine/adapter deps load
+    # lazily inside `run()`), so `ka health` etc. don't pull the eval stack.
+    from knowledge_agent.evaluation.runner import add_eval_args
+
+    p_eval = subparsers.add_parser(
+        "eval",
+        help="Run the evaluation harness over a gold dataset (dev/testing).",
+    )
+    add_eval_args(p_eval)
+    p_eval.set_defaults(func=_cmd_eval)
 
     return parser
 

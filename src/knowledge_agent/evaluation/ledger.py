@@ -99,7 +99,10 @@ def _try_add_column(conn: sqlite3.Connection, table: str, name: str, sqltype: st
 
 
 class EvalLedger:
-    """Thin SQLite wrapper. `save_run` is the only write entry point."""
+    """Thin SQLite wrapper. `save_run` writes; `list_runs` / `get_run` /
+    `get_run_cases` read. The readers back both the GUI history table and
+    `ka eval --history` / `--show` — plain row dicts, rendered by whichever
+    surface (widget / terminal / file export) consumes them."""
 
     def __init__(self, db_path: Path | str) -> None:
         self.db_path = Path(db_path)
@@ -163,6 +166,40 @@ class EvalLedger:
                 _insert(conn, "eval_cases", _case_columns(), case_row)
             conn.commit()
         return run_id
+
+    def list_runs(self, limit: int | None = None) -> list[dict[str, Any]]:
+        """Recorded runs, newest first — one dict per `eval_runs` row.
+
+        `limit` caps the count (None = all). Backs the GUI history table and
+        `ka eval --history`.
+        """
+        sql = "SELECT * FROM eval_runs ORDER BY run_id DESC"
+        params: tuple[Any, ...] = ()
+        if limit is not None:
+            sql += " LIMIT ?"
+            params = (int(limit),)
+        with closing(self._connect()) as conn:
+            conn.row_factory = sqlite3.Row
+            return [dict(row) for row in conn.execute(sql, params).fetchall()]
+
+    def get_run(self, run_id: int) -> dict[str, Any] | None:
+        """One run's summary row, or None when there's no such run."""
+        with closing(self._connect()) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM eval_runs WHERE run_id = ?", (int(run_id),)
+            ).fetchone()
+            return dict(row) if row is not None else None
+
+    def get_run_cases(self, run_id: int) -> list[dict[str, Any]]:
+        """Per-case rows for one run, in insertion order (empty if none)."""
+        with closing(self._connect()) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM eval_cases WHERE run_id = ? ORDER BY case_row_id",
+                (int(run_id),),
+            ).fetchall()
+            return [dict(row) for row in rows]
 
 
 def _json_or_none(value: Any) -> str | None:

@@ -20,6 +20,7 @@ import pytest
 
 from knowledge_agent.cli import (
     _build_parser,
+    _cmd_eval,
     _cmd_health,
     _cmd_ingest,
     _cmd_query,
@@ -63,6 +64,25 @@ def test_build_parser_routes_health():
     parser = _build_parser()
     args = parser.parse_args(["health"])
     assert args.command == "health"
+
+
+def test_build_parser_routes_eval():
+    parser = _build_parser()
+    args = parser.parse_args(["eval", "--groups", "source,chunk", "--max-cases", "5"])
+    assert args.command == "eval"
+    assert args.groups == "source,chunk"
+    assert args.max_cases == 5
+    assert args.func is _cmd_eval
+
+
+def test_build_parser_eval_read_flags():
+    """`ka eval --history` / `--show <id>` / `--export <path>` parse."""
+    parser = _build_parser()
+    hist = parser.parse_args(["eval", "--history"])
+    assert hist.history is True and hist.show is None
+    shown = parser.parse_args(["eval", "--show", "3", "--export", "out.csv"])
+    assert shown.show == 3
+    assert str(shown.export) == "out.csv"
 
 
 def test_main_help_exits_zero():
@@ -295,3 +315,23 @@ async def test_cmd_health_any_component_fail_returns_one():
         rc = await _cmd_health(args)
     assert rc == 1
     assert "FAIL" in out.getvalue()
+
+
+# ---- eval ----
+
+
+async def test_cmd_eval_delegates_to_runner():
+    """`ka eval` is a thin wrapper — it forwards the parsed args to the
+    harness's `run_from_args` and returns its exit code. The eval logic
+    itself lives self-contained in `evaluation/`."""
+    args = argparse.Namespace(
+        dataset=None, corpus=None, groups=None, max_cases=None, output_dir=None
+    )
+    with patch(
+        "knowledge_agent.evaluation.runner.run_from_args",
+        new_callable=AsyncMock,
+        return_value=0,
+    ) as run_mock:
+        rc = await _cmd_eval(args)
+    assert rc == 0
+    run_mock.assert_awaited_once_with(args)

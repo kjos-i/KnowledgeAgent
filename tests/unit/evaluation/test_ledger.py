@@ -94,3 +94,26 @@ def test_save_run_roundtrip(tmp_path):
         assert cases[0]["run_id"] == run_id  # FK wired
         assert json.loads(cases[1]["errors"]) == ["boom"]
         assert cases[1]["hit_at_k"] == 0.0
+
+
+def test_list_runs_and_get_run(tmp_path):
+    led = EvalLedger(tmp_path / "l.db")
+    id1 = led.save_run(_report())
+    id2 = led.save_run(_report())
+
+    runs = led.list_runs()
+    assert [r["run_id"] for r in runs] == [id2, id1]  # newest first
+    assert runs[0]["pass_count"] == 1
+    assert led.list_runs(limit=1) == [runs[0]]  # limit caps the count
+
+    assert led.get_run(id1)["run_id"] == id1
+    assert led.get_run(9999) is None  # miss → None, not an error
+
+
+def test_get_run_cases(tmp_path):
+    led = EvalLedger(tmp_path / "l.db")
+    run_id = led.save_run(_report())
+    cases = led.get_run_cases(run_id)
+    assert [c["case_id"] for c in cases] == ["c1", "c2"]  # insertion order
+    assert cases[0]["status"] == "PASS" and cases[0]["hit_at_k"] == 1.0
+    assert led.get_run_cases(9999) == []  # unknown run → empty
