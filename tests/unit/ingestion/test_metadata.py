@@ -5,6 +5,7 @@ go through the central `_http_client` and are stubbed by patching
 `knowledge_agent.ingestion.metadata._http_client.get` with AsyncMock.
 """
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -12,11 +13,27 @@ import httpx
 import pytest
 
 from knowledge_agent.ingestion.metadata import (
+    collect_doi_candidates,
+    doi_from_jats,
     extract_doi_candidates,
     resolve_doi,
     resolve_metadata,
 )
 from knowledge_agent.ingestion.parse import ParsedChunk
+
+
+def _write_jats(tmp_path: Path, article_meta_inner: str, *, name: str = "article.xml") -> Path:
+    """Write a minimal JATS file whose <article-meta> holds `article_meta_inner`."""
+    p = tmp_path / name
+    p.write_text(
+        "<?xml version='1.0'?>\n"
+        "<article><front><article-meta>\n"
+        f"{article_meta_inner}\n"
+        "<title-group><article-title>T</article-title></title-group>\n"
+        "</article-meta></front><body><p>body text</p></body></article>",
+        encoding="utf-8",
+    )
+    return p
 
 
 def _chunk(index: int, text: str) -> ParsedChunk:
@@ -209,3 +226,101 @@ async def test_resolve_metadata_returns_none_when_all_candidates_fail():
         return_value=None,
     ):
         assert await resolve_metadata(chunks) is None
+
+
+# ---- doi_from_jats (structured DOI straight from JATS XML) ----
+
+
+def test_doi_from_jats_reads_article_id_doi(tmp_path: Path):
+    p = _write_jats(
+        tmp_path, '<article-id pub-id-type="doi">10.1371/journal.pone.0001</article-id>'
+    )
+    assert doi_from_jats(p) == "10.1371/journal.pone.0001"
+
+
+def test_doi_from_jats_lowercases(tmp_path: Path):
+    p = _write_jats(tmp_path, '<article-id pub-id-type="doi">10.1371/ABC</article-id>')
+    assert doi_from_jats(p) == "10.1371/abc"
+
+
+def test_doi_from_jats_none_when_only_non_doi_ids(tmp_path: Path):
+    p = _write_jats(tmp_path, '<article-id pub-id-type="pmid">123456</article-id>')
+    assert doi_from_jats(p) is None
+
+
+def test_doi_from_jats_ignores_reference_pub_ids(tmp_path: Path):
+    """A cited reference's <pub-id> DOI must NOT be picked — only the
+    article's own <article-id>, so a bibliography can't hijack the DOI."""
+    p = tmp_path / "refs.xml"
+    p.write_text(
+        "<article><front><article-meta>"
+        '<article-id pub-id-type="doi">10.1371/self</article-id>'
+        "</article-meta></front>"
+        "<back><ref-list><ref><element-citation>"
+        '<pub-id pub-id-type="doi">10.9999/cited</pub-id>'
+        "</element-citation></ref></ref-list></back></article>",
+        encoding="utf-8",
+    )
+    assert doi_from_jats(p) == "10.1371/self"
+
+
+def test_doi_from_jats_namespace_agnostic(tmp_path: Path):
+    p = tmp_path / "ns.xml"
+    p.write_text(
+        '<article xmlns="http://jats.nlm.nih.gov"><front><article-meta>'
+        '<article-id pub-id-type="doi">10.1371/ns</article-id>'
+        "</article-meta></front></article>",
+        encoding="utf-8",
+    )
+    assert doi_from_jats(p) == "10.1371/ns"
+
+
+def test_doi_from_jats_none_on_unparseable(tmp_path: Path):
+    p = tmp_path / "bad.xml"
+    p.write_text("<not valid xml", encoding="utf-8")
+    assert doi_from_jats(p) is None
+
+
+# ---- collect_doi_candidates (structured-first, deduped) ----
+
+
+def test_collect_doi_candidates_regex_only_without_source_path():
+    chunks = [_chunk(0, "10.1234/abc")]
+    assert collect_doi_candidates(chunks) == ["10.1234/abc"]
+
+
+def test_collect_doi_candidates_structured_doi_first_for_xml(tmp_path: Path):
+    p = _write_jats(tmp_path, '<article-id pub-id-type="doi">10.1371/structured</article-id>')
+    chunks = [_chunk(0, "in-text mention 10.9999/intext")]
+    assert collect_doi_candidates(chunks, source_path=p) == [
+        "10.1371/structured",
+        "10.9999/intext",
+    ]
+
+
+def test_collect_doi_candidates_dedupes_structured_with_text(tmp_path: Path):
+    p = _write_jats(tmp_path, '<article-id pub-id-type="doi">10.1371/same</article-id>')
+    chunks = [_chunk(0, "also printed 10.1371/same")]
+    assert collect_doi_candidates(chunks, source_path=p) == ["10.1371/same"]
+
+
+def test_collect_doi_candidates_non_xml_source_ignores_structured(tmp_path: Path):
+    """A non-XML source path never triggers JATS reading (suffix-gated)."""
+    pdf = tmp_path / "paper.pdf"
+    chunks = [_chunk(0, "10.1234/frompdftext")]
+    assert collect_doi_candidates(chunks, source_path=pdf) == ["10.1234/frompdftext"]
+
+
+async def test_resolve_metadata_uses_structured_jats_doi_when_text_has_none(tmp_path: Path):
+    """The whole point: an XML article whose DOI is NOT in the chunk text
+    still resolves, via the structured <article-id>."""
+    p = _write_jats(tmp_path, '<article-id pub-id-type="doi">10.1371/xonly</article-id>')
+    chunks = [_chunk(0, "body text with no doi at all")]
+    work = {"id": "W1"}
+    with patch(
+        "knowledge_agent.ingestion.metadata.resolve_doi",
+        new_callable=AsyncMock,
+        return_value=work,
+    ) as mock_resolve:
+        assert await resolve_metadata(chunks, source_path=p) == work
+        mock_resolve.assert_called_once_with("10.1371/xonly")

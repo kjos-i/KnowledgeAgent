@@ -45,7 +45,7 @@ from knowledge_agent.ingestion import triples_extractor
 from knowledge_agent.ingestion.embed import embed_chunks
 from knowledge_agent.ingestion.ids import compute_doc_id, make_chunk_id
 from knowledge_agent.ingestion.metadata import (
-    extract_doi_candidates,
+    collect_doi_candidates,
     resolve_metadata,
 )
 from knowledge_agent.ingestion.metadata_resolution import (
@@ -1004,10 +1004,13 @@ async def ingest_document(
     )
 
     # ---- 3. Metadata resolution (one HTTP call) ----
-    work = await resolve_metadata(chunks)
+    # For XML/JATS the DOI lives in structured metadata that docling drops
+    # from the chunk text, so pass the source path — resolve_metadata reads
+    # it straight from the file and prioritises it over the text regex.
+    work = await resolve_metadata(chunks, source_path=path)
     if work is not None:
         metadata_status = "enriched"
-    elif extract_doi_candidates(chunks):
+    elif collect_doi_candidates(chunks, source_path=path):
         metadata_status = "pending"
     else:
         metadata_status = "baseline"
