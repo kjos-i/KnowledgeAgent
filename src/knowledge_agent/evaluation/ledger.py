@@ -19,8 +19,17 @@ Also, done to standard:
     grows (KG / judge metrics in later phases) extends an existing DB
     without a wipe.
 
-The ledger is disposable trend data — the DB lives under the git-ignored
-`output_dir`, never committed.
+Growth & retention — the ledger is APPEND-ONLY: every `save_run` adds one
+`eval_runs` row + one `eval_cases` row per case, and nothing prunes, caps,
+or ages rows out. That is deliberate: the accumulated history IS the trend
+data the dashboard plots, so auto-pruning would silently drop points. The
+footprint stays small — a run is dominated by the per-case `answer` text,
+so even hundreds of runs total only a few MB (SQLite scales comfortably to
+GB). It is disposable, git-ignored data under `output_dir`, never
+committed, and now lives ONE-PER-CORPUS (each corpus's `eval_output/`), so
+each corpus's history is self-contained. To reset, delete `eval_ledger.db`
+— only trend history is lost. There is no automatic retention policy and
+no in-app "clear"; deleting the file is the wipe.
 """
 
 from __future__ import annotations
