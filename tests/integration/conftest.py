@@ -214,6 +214,31 @@ def sample_pdf() -> Path:
 
 
 @pytest.fixture(scope="session")
+def doi_pdf() -> Path:
+    """A real, OpenAlex-resolvable research-paper PDF for the DOI /
+    metadata tests — kept SEPARATE from `sample_pdf`.
+
+    `sample_pdf` rotates with whatever corpus sits in `test_documents/`
+    and may be fictional (e.g. a made-up mission brief with no real DOI),
+    which is fine for the format-parsing tests but breaks the metadata
+    tests that resolve a DOI against OpenAlex. Those take THIS fixture
+    instead: any PDF placed under `test_documents/doi_ref/`.
+
+    Skips when absent — drop one open-access paper with a real DOI there
+    to activate the DOI / OpenAlex integration tests. It lives in a
+    subfolder so it never collides with `sample_pdf`, which globs the
+    top level only."""
+    ref_dir = TEST_DOCS / "doi_ref"
+    pdfs = sorted(ref_dir.glob("*.pdf")) if ref_dir.is_dir() else []
+    if not pdfs:
+        pytest.skip(
+            f"no DOI-reference PDF in {ref_dir} — drop an open-access "
+            f"paper with a real DOI there to run the metadata DOI tests"
+        )
+    return pdfs[0]
+
+
+@pytest.fixture(scope="session")
 def sample_jats_xml() -> Path:
     """First `.xml` file in `test_documents/` (assumed JATS-shaped).
 
