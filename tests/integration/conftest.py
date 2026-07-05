@@ -319,9 +319,10 @@ def sample_vtt() -> Path:
 @pytest.fixture(scope="session")
 def sample_image() -> Path:
     """First image file in `test_documents/` (png / jpg / jpeg /
-    tiff / gif / webp). Docling's IMAGE pipeline handles all of these
-    uniformly so a single fixture covers the category."""
-    p = _pick_first_of(".png", ".jpg", ".jpeg", ".tiff", ".gif", ".webp")
+    tiff / webp). Docling's IMAGE pipeline handles all of these
+    uniformly so a single fixture covers the category. gif is NOT a
+    docling image format, so it's intentionally excluded."""
+    p = _pick_first_of(".png", ".jpg", ".jpeg", ".tiff", ".webp")
     if p is None:
         pytest.skip(f"no image fixtures in {TEST_DOCS}")
     return p
