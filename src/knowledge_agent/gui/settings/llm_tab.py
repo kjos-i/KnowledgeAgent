@@ -67,10 +67,11 @@ logger = logging.getLogger(__name__)
 _PROVIDER_ORDER: tuple[str, ...] = ("anthropic", "openai", "google", "ollama")
 
 
-# Curated model menus shown in the per-node model dropdowns. Inline
-# constant because the data is local to this tab + small + has no
-# other consumer. Each dropdown is `editable=True` so the user can
-# override with a typed value when their preferred model isn't here.
+# Curated model menus for the per-node model dropdowns here AND the
+# Evaluation Run tab's judge-model panel (which imports this). Each
+# dropdown that uses it is `editable=True` so the user can override with a
+# typed value when their preferred model isn't listed. (If a third consumer
+# appears, promote this to a shared gui/_models.py.)
 LLM_AVAILABLE_MODELS: dict[str, tuple[str, ...]] = {
     "anthropic": (
         "claude-haiku-4-5-20251001",

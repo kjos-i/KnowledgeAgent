@@ -47,6 +47,7 @@ class EvaluationView:
         # is selected. Set by the Run tab on completion + the left-rail
         # selector.
         self.selected_run_id: int | None = None
+        self._tabs: ft.Tabs | None = None
         self.run_tab = RunTab(app, coordinator=self)
         self.run_summary_tab = RunSummaryTab(app, coordinator=self)
         self.deep_analysis_tab = DeepAnalysisTab(app, coordinator=self)
@@ -68,9 +69,21 @@ class EvaluationView:
             ],
             expand=True,
         )
-        return ft.Tabs(
+        self._tabs = ft.Tabs(
             length=len(SUB_TAB_LABELS),
             selected_index=0,
             content=ft.Column(controls=[sub_bar, sub_bodies], expand=True, spacing=0),
             expand=True,
         )
+        return self._tabs
+
+    def on_run_complete(self, run_id: int) -> None:
+        """A run finished in the Run tab: select it + jump to Run Summary.
+
+        Refreshing the result tabs' content lands as those tabs are built;
+        for now this records the run + switches to the Run Summary sub-tab.
+        """
+        self.selected_run_id = run_id
+        if self._tabs is not None:
+            self._tabs.selected_index = 1  # Run Summary
+            self.app.page.update()
