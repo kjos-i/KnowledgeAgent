@@ -205,3 +205,32 @@ async def test_delete_entities_preserves_entities_shared_with_other_docs(
         ).single()["n"]
     assert n_entities == 1  # survived because other_doc still mentions it
     assert n_mentions_other == 1
+
+
+async def test_write_entities_dedupes_same_entity_across_docs(
+    kg_client: Any, ensure_constraints: None, clean_kg: None
+) -> None:
+    """CROSS-DOC DEDUP: the same (key, type) mentioned from TWO docs collapses
+    to ONE shared :Entity node (MERGE on the composite key), with a :MENTIONS
+    edge from EACH doc's chunk — the property the L9 cross-doc pass relies on.
+    """
+    other_doc = "integ-doc-l6-other"
+    chunk_a = _seed_chunk(kg_client, SYNTHETIC_DOC_ID, 0)
+    chunk_b = _seed_chunk(kg_client, other_doc, 0)
+    shared = [Mention(raw_text="Metformin", entity_type="drug", offset=0)]
+    await kg_client.write_entities(SYNTHETIC_DOC_ID, [(chunk_a, shared)])
+    await kg_client.write_entities(other_doc, [(chunk_b, shared)])
+
+    with kg_client.driver.session() as session:
+        n_nodes = session.run(
+            "MATCH (e:Entity {key: 'metformin', entity_type: 'drug'}) RETURN count(e) AS n"
+        ).single()["n"]
+        mentioning_docs = sorted(
+            r["doc_id"]
+            for r in session.run(
+                "MATCH (c:Chunk)-[:MENTIONS]->(:Entity {key: 'metformin'}) "
+                "RETURN DISTINCT c.doc_id AS doc_id"
+            )
+        )
+    assert n_nodes == 1  # ONE shared node, not one per doc
+    assert mentioning_docs == sorted([SYNTHETIC_DOC_ID, other_doc])  # both docs cite it

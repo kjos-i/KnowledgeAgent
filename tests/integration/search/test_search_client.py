@@ -250,3 +250,34 @@ async def test_ensure_indexes_below_threshold_returns_true_without_failure(
 
     # success: returns None (typed-errors contract)
     assert await lance_client.ensure_indexes() is None
+
+
+async def test_retrieve_fts_surfaces_figure_chunk_with_multimodal_metadata(
+    lance_client: Any, clean_lance: None
+) -> None:
+    """A figure chunk (content_type='figure' + image_ref) is retrievable via
+    FTS on its caption text, and its multimodal metadata survives the round
+    trip into the RetrievedChunk — the property the multimodal citation path
+    depends on. FTS is pure BM25, so this needs no embedder / Voyage key.
+
+    (This file otherwise defers search() to the agent tier; the figure-metadata
+    round-trip is a storage-contract concern, so it's pinned here.)
+    """
+    await lance_client.ensure_schema()
+    text_chunk = _synthetic_chunk(0, "General discussion of membrane biology.")
+    figure_chunk = _synthetic_chunk(
+        1, "Figure 2 shows the ESCRT-III spiral assembly constricting the membrane neck."
+    )
+    figure_chunk["content_type"] = "figure"
+    figure_chunk["image_ref"] = "/corpus/figures/integ-doc-lance-001/1.png"
+    figure_chunk["page"] = 4
+    await lance_client.write_chunks([text_chunk, figure_chunk])
+    await lance_client.ensure_indexes()  # FTS index (created regardless of row count)
+
+    hits = await lance_client.retrieve("ESCRT-III spiral assembly", mode="fts", top_k=5)
+
+    figures = [h for h in hits if h.content_type == "figure"]
+    assert figures, "the figure chunk should surface for a query matching its caption"
+    fig = figures[0]
+    # Multimodal metadata survived storage → retrieval.
+    assert fig.image_ref == "/corpus/figures/integ-doc-lance-001/1.png"
