@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from langchain_core.messages import HumanMessage
 
+from knowledge_agent.artifacts import SaveError
 from knowledge_agent.gui.app import GuiApp, _LoadedFile
 from knowledge_agent.gui.config_store import GuiConfig
 from knowledge_agent.gui.right_panel import MODE_FILE, MODE_LATEST
@@ -308,6 +309,23 @@ async def test_save_chat_drops_json_and_falls_back_to_md(fake_page: MagicMock, t
 
     assert list(tmp_path.glob("*.md"))  # fell back to md
     assert not list(tmp_path.glob("*.json"))  # json dropped for a transcript
+
+
+async def test_save_answer_surfaces_save_error(fake_page: MagicMock, tmp_path: Path):
+    """A backend SaveError becomes a 'could not save' chat line, not a crash."""
+    app = _make_app(fake_page)
+    app.gui_config.results_dir = tmp_path
+    app.gui_config.save_formats = ["md"]
+    app.last_answer = AgentAnswer(answer="hi", chunk_sources=[], kg_sources=[])
+    app.last_query = "q"
+    app.file_picker = MagicMock()
+    app.file_picker.get_directory_path = AsyncMock()
+
+    with patch("knowledge_agent.gui.app.save_answer", side_effect=SaveError("disk full")):
+        await app.on_save_answer(MagicMock())
+
+    msgs = [c.args[0] for c in app.chat_panel.append_system.call_args_list]
+    assert any("could not save" in m for m in msgs)
 
 
 # ---- on_send: input-mode routing (the chat-router gating) ----

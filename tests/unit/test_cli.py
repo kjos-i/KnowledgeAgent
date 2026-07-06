@@ -272,6 +272,38 @@ async def test_cmd_query_output_saves_answer_files(tmp_path):
     assert "saved:" in err.getvalue()  # confirmations go to stderr
 
 
+async def test_cmd_query_output_invalid_format_returns_one(tmp_path):
+    """--output with an all-invalid --format → SaveError → exit 1 (not a crash)."""
+    config_path = tmp_path / "corpus.toml"
+    config_path.write_text("dummy", encoding="utf-8")
+    answer = AgentAnswer(answer="x", chunk_sources=[], kg_sources=[])
+    args = argparse.Namespace(
+        query="q",
+        config=str(config_path),
+        mode="auto",
+        json=False,
+        output=tmp_path / "out",
+        format="pdf,rtf",  # neither is a valid save format
+    )
+    with (
+        patch(
+            "knowledge_agent.kg.corpus_config.load_corpus_config",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "knowledge_agent.graph.graph.ainvoke",
+            new_callable=AsyncMock,
+            return_value={"final_answer": answer},
+        ),
+        redirect_stdout(io.StringIO()),
+        redirect_stderr(io.StringIO()) as err,
+    ):
+        rc = await _cmd_query(args)
+
+    assert rc == 1
+    assert "could not save" in err.getvalue()
+
+
 async def test_cmd_query_returns_one_when_no_answer(tmp_path):
     """Graph that returns no final_answer → exit 1."""
     config_path = tmp_path / "corpus.toml"

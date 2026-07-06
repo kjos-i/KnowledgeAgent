@@ -76,3 +76,33 @@ async def test_browse_folder_persists_results_dir(tmp_path):
         await tab.on_browse_folder(MagicMock())
     assert tab.app.gui_config.results_dir == tmp_path
     assert tab.results_dir_text.value == str(tmp_path)
+
+
+def test_save_format_rolls_back_on_save_failure():
+    tab = _tab()  # md checked by default
+    tab.save_format_checkboxes["txt"].value = True
+    with patch(_SAVE, side_effect=ConfigError("disk full")):
+        tab.on_save_format_changed(MagicMock())
+    # Save failed → config + checkboxes revert to the prior selection.
+    assert tab.app.gui_config.save_formats == ["md"]
+    assert tab.save_format_checkboxes["txt"].value is False
+    assert tab.save_format_checkboxes["md"].value is True
+
+
+async def test_browse_folder_cancel_leaves_dir_unchanged():
+    tab = _tab()  # results_dir defaults None
+    tab.app.file_picker = MagicMock()
+    tab.app.file_picker.get_directory_path = AsyncMock(return_value=None)  # cancelled
+    with patch(_SAVE) as save:
+        await tab.on_browse_folder(MagicMock())
+    save.assert_not_called()
+    assert tab.app.gui_config.results_dir is None
+
+
+async def test_browse_folder_rolls_back_on_save_failure(tmp_path):
+    tab = _tab()
+    tab.app.file_picker = MagicMock()
+    tab.app.file_picker.get_directory_path = AsyncMock(return_value=str(tmp_path))
+    with patch(_SAVE, side_effect=ConfigError("disk full")):
+        await tab.on_browse_folder(MagicMock())
+    assert tab.app.gui_config.results_dir is None  # reverted, not left half-set

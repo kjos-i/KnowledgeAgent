@@ -7,6 +7,8 @@ reopen the written file with python-docx and read its text back.
 from __future__ import annotations
 
 import json
+import struct
+import zlib
 from pathlib import Path
 
 import pytest
@@ -40,6 +42,30 @@ def _docx_text(path: Path) -> str:
     from docx import Document
 
     return "\n".join(p.text for p in Document(str(path)).paragraphs)
+
+
+def _tiny_png() -> bytes:
+    """A minimal but VALID 1x1 PNG (correct CRCs + real IDAT) for the docx
+    figure-embed SUCCESS path — an over-minimal base64 PNG trips python-docx's
+    stricter parser (UnexpectedEndOfFileError), so we build a real one."""
+
+    def chunk(typ: bytes, data: bytes) -> bytes:
+        body = typ + data
+        return (
+            struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+        )
+
+    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)  # 1x1, 8-bit RGB
+    raw = b"\x00\xff\x00\x00"  # one scanline: filter byte 0 + one red pixel
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
+_PNG_1x1 = _tiny_png()
 
 
 # ---- format constants ----
@@ -141,6 +167,59 @@ def test_save_answer_docx_notes_missing_figure_image(tmp_path: Path):
     )
     (path,) = save_answer(ans, "q", tmp_path, ("docx",))
     assert "image not found" in _docx_text(path)
+
+
+def test_save_answer_docx_embeds_present_figure(tmp_path: Path):
+    """A figure chunk with a real image file → embedded as an inline picture
+    (the add_picture SUCCESS path, distinct from the missing-image note)."""
+    from docx import Document
+
+    img = tmp_path / "fig.png"
+    img.write_bytes(_PNG_1x1)
+    ans = AgentAnswer(
+        answer="body",
+        chunk_sources=[
+            ChunkSource(chunk_id="c0", doc_id="d0", content_type="figure", image_ref=str(img))
+        ],
+    )
+    (path,) = save_answer(ans, "q", tmp_path, ("docx",))
+    assert len(Document(str(path)).inline_shapes) >= 1  # picture actually embedded
+
+
+def test_save_chat_docx_contains_roles_and_text(tmp_path: Path):
+    """Chat .docx reopens with the role labels + message text (content, not
+    just a file-exists check)."""
+    (path,) = save_chat(
+        [HumanMessage(content="hi there"), AIMessage(content="hello back")],
+        "q",
+        tmp_path,
+        ("docx",),
+    )
+    text = _docx_text(path)
+    assert "you" in text and "assistant" in text
+    assert "hi there" in text and "hello back" in text
+
+
+def test_render_answer_txt_includes_figure_and_quote_lines():
+    """Plain-text renders the figure path line + labels a figure quote as
+    caption/OCR and a text-chunk quote as quote."""
+    ans = AgentAnswer(
+        answer="body",
+        chunk_sources=[
+            ChunkSource(
+                chunk_id="c0",
+                doc_id="d0",
+                content_type="figure",
+                image_ref="/p/img.png",
+                quote="a caption",
+            ),
+            ChunkSource(chunk_id="c1", doc_id="d1", quote="a text quote"),
+        ],
+    )
+    txt = render_answer_txt(ans, "q")
+    assert "figure: /p/img.png" in txt
+    assert "caption / OCR: a caption" in txt
+    assert "quote: a text quote" in txt
 
 
 # ---- save_answer (multi-format) ----
