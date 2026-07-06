@@ -1,6 +1,11 @@
 """Settings → App sub-tab — behaviour toggles + DB connection + diagnostics.
 
-Three stacked blocks (top to bottom):
+Four stacked blocks (top to bottom):
+
+  0. Save results & chat — format checkboxes (md/txt/docx/json) + a
+     default folder (Browse). These drive the Search tab's Save Result /
+     Save Chat buttons (and the CLI shares the same backend renderers).
+     Each control auto-saves to GuiConfig on change.
 
   1. App behaviour — `restore_last_corpus` + `keep_loaded_file_on_clear`
      checkboxes. Mirrors ResearchArticlesAgent's "App behaviour"
@@ -31,11 +36,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import flet as ft
 from pydantic import ValidationError
 
+from knowledge_agent.artifacts import ANSWER_FORMATS, FORMAT_LABELS
 from knowledge_agent.config import get_settings
 from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, centered_label
 from knowledge_agent.gui.config_store import ConfigError, save_config
@@ -54,6 +61,12 @@ _DEBUG_BLURB = (
     "retrieved N chunks, ...) plus the search query, retrieval mode, "
     "and per-hit titles + scores. Off = clean chat with only the "
     "essential 'answer ready' closure line."
+)
+
+_SAVE_BLURB = (
+    "Where and in which format(s) the Search tab's Save Result and Save "
+    "Chat buttons write. Check one or more; JSON applies to answers only. "
+    "When no folder is set, the first Save asks for one and remembers it here."
 )
 
 _CONNECTION_BLURB = (
@@ -75,6 +88,9 @@ class AppTab:
         # loop doesn't GC them mid-flight (see `_spawn` uses below).
         self._bg_tasks: set[asyncio.Task] = set()
         self.status: ft.Text | None = None
+        self.save_format_checkboxes: dict[str, ft.Checkbox] = {}
+        self.results_dir_text: ft.Text | None = None
+        self.browse_folder_button: ft.Button | None = None
         self.restore_last_corpus_checkbox: ft.Checkbox | None = None
         self.keep_loaded_checkbox: ft.Checkbox | None = None
         self.debug_mode_checkbox: ft.Checkbox | None = None
@@ -96,6 +112,27 @@ class AppTab:
         # All three blocks share one status line at the bottom — RA pattern.
         # Mirrors `settings_status` in the sibling app.
         self.status = ft.Text("", size=11, color=ft.Colors.GREY_400)
+
+        # Block 0: Save results & chat (formats + default folder).
+        self.save_format_checkboxes = {
+            fmt: ft.Checkbox(
+                label=FORMAT_LABELS[fmt],
+                value=fmt in self.app.gui_config.save_formats,
+                on_change=self.on_save_format_changed,
+            )
+            for fmt in ANSWER_FORMATS
+        }
+        rd = self.app.gui_config.results_dir
+        self.results_dir_text = ft.Text(
+            str(rd) if rd else "(not set — first Save will ask)",
+            size=12,
+            color=ft.Colors.WHITE,
+            selectable=True,
+        )
+        self.browse_folder_button = ft.Button(
+            content=centered_label("Browse…"),
+            on_click=self.on_browse_folder,
+        )
 
         # Block 1: App behaviour.
         self.restore_last_corpus_checkbox = ft.Checkbox(
@@ -210,6 +247,17 @@ class AppTab:
             spacing=10,
             controls=[
                 view_header("App"),
+                # ---- Block 0: Save results & chat ----------------------
+                ft.Text("Save results & chat", weight=ft.FontWeight.BOLD),
+                ft.Text(_SAVE_BLURB, size=11, color=ft.Colors.GREY_500, italic=True),
+                ft.Row(
+                    controls=[self.save_format_checkboxes[f] for f in ANSWER_FORMATS],
+                    wrap=True,
+                    spacing=12,
+                ),
+                _kv_row("Default folder", self.results_dir_text),
+                ft.Row(controls=[self.browse_folder_button]),
+                ft.Divider(),
                 # ---- Block 1: App behaviour ----------------------------
                 ft.Text("App behaviour", weight=ft.FontWeight.BOLD),
                 self.restore_last_corpus_checkbox,
@@ -339,6 +387,64 @@ class AppTab:
         self.status.value = (
             "diagnostics on" if self.app.gui_config.debug_mode else "diagnostics off"
         )
+        self.app.page.update()
+
+    # ----- Block 0 (save results & chat) handlers --------------------------
+
+    def on_save_format_changed(self, e: ft.Event) -> None:
+        """Persist the checked save formats; keep at least one; rollback on fail."""
+        if self.status is None:
+            return
+        previous = list(self.app.gui_config.save_formats)
+        chosen = [f for f in ANSWER_FORMATS if self.save_format_checkboxes[f].value]
+        if not chosen:
+            # Never allow zero formats — restore the prior selection.
+            for fmt, cb in self.save_format_checkboxes.items():
+                cb.value = fmt in previous
+            self.status.value = "keep at least one save format"
+            self.app.page.update()
+            return
+        self.app.gui_config.save_formats = chosen
+        try:
+            save_config(self.app.gui_config)
+        except ConfigError as exc:
+            self.app.gui_config.save_formats = previous
+            for fmt, cb in self.save_format_checkboxes.items():
+                cb.value = fmt in previous
+            self.status.value = f"could not save: {exc}"
+            self.app.page.update()
+            return
+        self.status.value = f"save formats: {', '.join(chosen)}"
+        self.app.page.update()
+
+    async def on_browse_folder(self, e: ft.Event) -> None:
+        """Pick + persist the default save folder for results / chats."""
+        if self.status is None or self.results_dir_text is None:
+            return
+        rd = self.app.gui_config.results_dir
+        try:
+            chosen = await self.app.file_picker.get_directory_path(
+                dialog_title="Default folder for saved results & chats",
+                initial_directory=str(rd) if rd else None,
+            )
+        except Exception as exc:
+            logger.warning("folder picker failed: %r", exc)
+            self.status.value = f"folder picker error: {exc}"
+            self.app.page.update()
+            return
+        if not chosen:
+            return
+        previous = self.app.gui_config.results_dir
+        self.app.gui_config.results_dir = Path(chosen)
+        try:
+            save_config(self.app.gui_config)
+        except ConfigError as exc:
+            self.app.gui_config.results_dir = previous
+            self.status.value = f"could not save: {exc}"
+            self.app.page.update()
+            return
+        self.results_dir_text.value = chosen
+        self.status.value = "default save folder set"
         self.app.page.update()
 
     # ----- Block 2 (system_status chips) -----------------------------------

@@ -26,6 +26,7 @@ from knowledge_agent.cli import (
     _cmd_query,
     main,
 )
+from knowledge_agent.models import AgentAnswer
 
 # ---- parser ----
 
@@ -215,6 +216,8 @@ async def test_cmd_query_prints_answer_text(tmp_path):
         config=str(config_path),
         mode="auto",
         json=False,
+        output=None,
+        format="md",
     )
     with (
         patch(
@@ -232,6 +235,41 @@ async def test_cmd_query_prints_answer_text(tmp_path):
 
     assert rc == 0
     assert "The answer is 42." in out.getvalue()
+
+
+async def test_cmd_query_output_saves_answer_files(tmp_path):
+    """--output DIR saves the answer via the backend renderers (--format list)."""
+    config_path = tmp_path / "corpus.toml"
+    config_path.write_text("dummy", encoding="utf-8")
+    out_dir = tmp_path / "out"
+    answer = AgentAnswer(answer="The answer is 42.", chunk_sources=[], kg_sources=[])
+    args = argparse.Namespace(
+        query="what is X?",
+        config=str(config_path),
+        mode="auto",
+        json=False,
+        output=out_dir,
+        format="md,txt",
+    )
+    with (
+        patch(
+            "knowledge_agent.kg.corpus_config.load_corpus_config",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "knowledge_agent.graph.graph.ainvoke",
+            new_callable=AsyncMock,
+            return_value={"final_answer": answer},
+        ),
+        redirect_stdout(io.StringIO()),
+        redirect_stderr(io.StringIO()) as err,
+    ):
+        rc = await _cmd_query(args)
+
+    assert rc == 0
+    assert list(out_dir.glob("*.md"))
+    assert list(out_dir.glob("*.txt"))
+    assert "saved:" in err.getvalue()  # confirmations go to stderr
 
 
 async def test_cmd_query_returns_one_when_no_answer(tmp_path):

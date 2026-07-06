@@ -96,3 +96,14 @@ def test_file_view_renders_filename_in_header_and_content_as_markdown():
     md = body_col.controls[0]
     assert isinstance(md, ft.Markdown)
     assert md.value == "# Hello"
+
+
+def test_file_view_txt_renders_as_plain_text_not_markdown():
+    """A .txt opens as plain monospace Text (no Markdown parsing) so it shows
+    exactly its characters."""
+    view = FileView(name="saved.txt", content="Question: x\n  [1] doc: d")
+    ctl = view.build()
+    content = ctl.controls[1].controls[0]
+    assert isinstance(content, ft.Text)
+    assert not isinstance(content, ft.Markdown)
+    assert content.value == "Question: x\n  [1] doc: d"

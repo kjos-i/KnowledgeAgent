@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
-from knowledge_agent.gui.artifacts import render_answer_markdown
+from knowledge_agent.artifacts import render_answer_markdown
 from knowledge_agent.gui.views._frame import empty_state, view_with_header
 
 if TYPE_CHECKING:

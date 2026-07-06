@@ -432,10 +432,19 @@ class GuiConfig(BaseModel):
     results_dir: Path | None = Field(
         default=None,
         description=(
-            "Last folder the user picked for Save Result / Save (chat). "
-            "Internal state — the picker opens here by default; pressing "
-            "Save and choosing a different folder updates it. NOT exposed "
-            "as a Settings form field."
+            "Default folder Save Result / Save Chat writes to. Editable in "
+            "Settings → App → Save results & chat (with a Browse button). "
+            "When unset, the first Save auto-opens a folder picker and "
+            "remembers the choice here."
+        ),
+    )
+    save_formats: list[str] = Field(
+        default_factory=lambda: ["md"],
+        description=(
+            "Formats Save Result / Save Chat writes — any of 'md', 'txt', "
+            "'docx', 'json' (json = answers only). Default ['md']. Set via "
+            "Settings → App → Save results & chat; at least one format (the "
+            "Save buttons fall back to ['md'] if the list is empty)."
         ),
     )
     corpus_config_path: Path | None = Field(

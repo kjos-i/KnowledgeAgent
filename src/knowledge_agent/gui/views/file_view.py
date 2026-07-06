@@ -1,9 +1,10 @@
-"""File view — renders an opened `.md` answer file loaded via the Search
-tab's `Open Result` button or paste-path field.
+"""File view — renders an opened `.md` / `.txt` answer file loaded via the
+Search tab's `Open Result` button or paste-path field.
 
-Stateless: takes the filename + contents at construct time and
-renders the contents as Markdown. Same shape as `LatestView` so the
-right panel's mode switch is uniform.
+Stateless: takes the filename + contents at construct time. `.md` renders as
+Markdown; `.txt` renders as plain monospace text (no Markdown parsing) so a
+saved plain-text answer shows exactly its characters. Same shape as
+`LatestView` so the right panel's mode switch is uniform.
 """
 
 import flet as ft
@@ -19,14 +20,22 @@ class FileView:
         self.content = content
 
     def build(self) -> ft.Control:
+        # A .txt renders as-is (monospace, no Markdown parsing) so it shows
+        # exactly its characters; everything else renders as Markdown.
+        if self.name.lower().endswith(".txt"):
+            content_control: ft.Control = ft.Text(
+                self.content,
+                selectable=True,
+                font_family="monospace",
+            )
+        else:
+            content_control = ft.Markdown(
+                self.content,
+                selectable=True,
+                extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+            )
         body = ft.Column(
-            controls=[
-                ft.Markdown(
-                    self.content,
-                    selectable=True,
-                    extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-                )
-            ],
+            controls=[content_control],
             scroll=ft.ScrollMode.AUTO,
             expand=True,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,

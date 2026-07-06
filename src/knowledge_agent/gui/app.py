@@ -34,13 +34,14 @@ from langchain_core.messages import (
     SystemMessage,
 )
 
-from knowledge_agent.config import disable_env_file, get_settings
-from knowledge_agent.graph import graph
-from knowledge_agent.gui.artifacts import (
+from knowledge_agent.artifacts import (
+    CHAT_FORMATS,
     SaveError,
     save_answer,
     save_chat,
 )
+from knowledge_agent.config import disable_env_file, get_settings
+from knowledge_agent.graph import graph
 from knowledge_agent.gui.chat_panel import ChatPanel
 from knowledge_agent.gui.chat_router import (
     CHAT_SYSTEM_PROMPT,
@@ -387,89 +388,97 @@ class GuiApp:
             self.right_panel.switch_mode(MODE_LATEST)
         self.page.update()
 
-    async def _prompt_save_directory(self, dialog_title: str) -> Path | None:
-        """Open the OS folder picker; remember the choice.
+    async def _resolve_save_dir(self) -> tuple[Path | None, bool]:
+        """Resolve the folder a Save action writes to.
 
-        Returns the chosen path (and persists it as `gui_config.results_dir`
-        so the next press opens at the same place), or None on cancel.
-
-        `results_dir` is no longer a configurable default — it's hidden
-        last-used state behind the Save buttons. Settings has no form
-        entry for it.
+        Returns `(folder, asked)`. When a default folder is set (Settings →
+        App → Save results & chat), it's used silently (`asked=False`). When
+        none is set, the OS picker opens once, the choice is remembered as
+        `gui_config.results_dir`, and `asked=True` so the caller can point the
+        user at Settings for format / default-folder options. `folder` is None
+        on cancel or picker error.
         """
-        initial = (
-            str(self.gui_config.results_dir) if self.gui_config.results_dir is not None else None
-        )
+        existing = self.gui_config.results_dir
+        if existing is not None:
+            return existing, False
         try:
             chosen = await self.file_picker.get_directory_path(
-                dialog_title=dialog_title,
-                initial_directory=initial,
+                dialog_title="Choose a folder to save to",
             )
         except Exception as exc:
             logger.warning("folder picker failed: %r", exc)
             self.chat_panel.append_system(f"folder picker error: {exc}")
-            return None
+            return None, False
         if not chosen:
-            return None
+            return None, False
         path = Path(chosen)
-        # Remember the picked folder so the next press opens here.
-        previous = self.gui_config.results_dir
+        # Remember it so subsequent saves skip the picker.
         self.gui_config.results_dir = path
         try:
             save_config(self.gui_config)
         except ConfigError as exc:
-            # Save failure is non-fatal — the picker still works next time,
-            # but the picker won't restore this folder until restart.
+            # Non-fatal — this save still proceeds to `path`; it just won't be
+            # remembered until the folder is set again / in Settings.
             logger.warning("could not persist results_dir: %r", exc)
-            self.gui_config.results_dir = previous
-        return path
+            self.gui_config.results_dir = None
+        return path, True
+
+    def _settings_hint(self) -> None:
+        """Point the user at the Settings section — shown after a Save that had
+        to ask for a folder (i.e. the first save, before a default is set)."""
+        self.chat_panel.append_system(
+            "tip: choose formats (txt / docx / json) and a default folder in "
+            "Settings → App → Save results & chat"
+        )
 
     async def on_save_answer(self, e: ft.Event) -> None:
         if self.last_answer is None or self.last_query is None:
             self.chat_panel.append_system("nothing to save yet — ask a question first")
             return
-        target = await self._prompt_save_directory("Save result to folder")
+        target, asked = await self._resolve_save_dir()
         if target is None:
             return
+        formats = self.gui_config.save_formats or ["md"]
         try:
-            md_path, json_path = save_answer(
-                self.last_answer,
-                self.last_query,
-                target,
-            )
+            paths = save_answer(self.last_answer, self.last_query, target, formats)
         except SaveError as exc:
             self.chat_panel.append_system(f"could not save: {exc}")
             return
-        self.chat_panel.append_system(f"saved: {md_path}")
-        self.chat_panel.append_system(f"saved: {json_path}")
+        for path in paths:
+            self.chat_panel.append_system(f"saved: {path}")
+        if asked:
+            self._settings_hint()
 
     async def on_save_chat(self, e: ft.Event) -> None:
         if not self.messages:
             self.chat_panel.append_system("nothing to save — chat is empty")
             return
-        target = await self._prompt_save_directory("Save chat to folder")
+        target, asked = await self._resolve_save_dir()
         if target is None:
             return
+        # A chat transcript has no JSON form — keep only chat-capable formats
+        # (fall back to md if the user selected json-only).
+        chosen_formats = self.gui_config.save_formats or ["md"]
+        formats = [f for f in chosen_formats if f in CHAT_FORMATS] or ["md"]
         try:
-            path = save_chat(
-                self.messages,
-                self.last_query,
-                target,
-            )
+            paths = save_chat(self.messages, self.last_query, target, formats)
         except SaveError as exc:
             self.chat_panel.append_system(f"could not save: {exc}")
             return
-        self.chat_panel.append_system(f"saved: {path}")
+        for path in paths:
+            self.chat_panel.append_system(f"saved: {path}")
+        if asked:
+            self._settings_hint()
 
     # ----- Open Result / paste path ----------------------------------------
 
     async def on_open_result(self, e: ft.Event) -> None:
-        """Open the file picker, load the chosen `.md` into the File view."""
+        """Open the file picker, load the chosen `.md` / `.txt` into the File view."""
         try:
             files = await self.file_picker.pick_files(
                 dialog_title="Open saved answer",
                 file_type=ft.FilePickerFileType.CUSTOM,
-                allowed_extensions=["md"],
+                allowed_extensions=["md", "txt"],
             )
         except Exception as exc:
             logger.warning("file picker failed: %r", exc)

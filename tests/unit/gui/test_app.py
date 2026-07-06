@@ -12,9 +12,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from langchain_core.messages import HumanMessage
+
 from knowledge_agent.gui.app import GuiApp, _LoadedFile
 from knowledge_agent.gui.config_store import GuiConfig
 from knowledge_agent.gui.right_panel import MODE_FILE, MODE_LATEST
+from knowledge_agent.models import AgentAnswer
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -246,6 +249,65 @@ async def test_save_chat_empty_chat_appends_system_message(fake_page: MagicMock)
     await app.on_save_chat(MagicMock())
     msg = app.chat_panel.append_system.call_args.args[0]
     assert "empty" in msg.lower()
+
+
+async def test_save_answer_writes_configured_formats_to_default_dir(
+    fake_page: MagicMock, tmp_path: Path
+):
+    """Default folder set + formats [md,txt] → both written, no picker, no hint."""
+    app = _make_app(fake_page)
+    app.gui_config.results_dir = tmp_path
+    app.gui_config.save_formats = ["md", "txt"]
+    app.last_answer = AgentAnswer(answer="hi", chunk_sources=[], kg_sources=[])
+    app.last_query = "the q"
+    app.file_picker = MagicMock()
+    app.file_picker.get_directory_path = AsyncMock()
+
+    await app.on_save_answer(MagicMock())
+
+    app.file_picker.get_directory_path.assert_not_awaited()  # default dir → no picker
+    assert list(tmp_path.glob("*.md")) and list(tmp_path.glob("*.txt"))
+    msgs = [c.args[0] for c in app.chat_panel.append_system.call_args_list]
+    assert sum("saved:" in m for m in msgs) == 2
+    assert not any("Settings" in m for m in msgs)  # hint only on first (no-dir) save
+
+
+async def test_save_answer_without_default_dir_asks_then_hints(
+    fake_page: MagicMock, tmp_path: Path
+):
+    """No default folder → picker opens once, choice remembered, Settings hint shown."""
+    app = _make_app(fake_page)
+    app.gui_config.results_dir = None
+    app.gui_config.save_formats = ["md"]
+    app.last_answer = AgentAnswer(answer="hi", chunk_sources=[], kg_sources=[])
+    app.last_query = "q"
+    app.file_picker = MagicMock()
+    app.file_picker.get_directory_path = AsyncMock(return_value=str(tmp_path))
+
+    with patch("knowledge_agent.gui.app.save_config"):
+        await app.on_save_answer(MagicMock())
+
+    app.file_picker.get_directory_path.assert_awaited_once()
+    assert app.gui_config.results_dir == tmp_path  # remembered
+    assert list(tmp_path.glob("*.md"))
+    msgs = [c.args[0] for c in app.chat_panel.append_system.call_args_list]
+    assert any("Settings" in m for m in msgs)
+
+
+async def test_save_chat_drops_json_and_falls_back_to_md(fake_page: MagicMock, tmp_path: Path):
+    """json is answer-only — a chat save with json-only selection falls back to md."""
+    app = _make_app(fake_page)
+    app.gui_config.results_dir = tmp_path
+    app.gui_config.save_formats = ["json"]
+    app.messages = [HumanMessage(content="hi")]
+    app.last_query = "q"
+    app.file_picker = MagicMock()
+    app.file_picker.get_directory_path = AsyncMock()
+
+    await app.on_save_chat(MagicMock())
+
+    assert list(tmp_path.glob("*.md"))  # fell back to md
+    assert not list(tmp_path.glob("*.json"))  # json dropped for a transcript
 
 
 # ---- on_send: input-mode routing (the chat-router gating) ----

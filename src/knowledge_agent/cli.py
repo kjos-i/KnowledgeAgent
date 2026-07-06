@@ -177,6 +177,19 @@ async def _cmd_query(args: argparse.Namespace) -> int:
             print("\nKG sources:")
             for src in answer.kg_sources:
                 print(f"  [K{src.hit_index}]")
+
+    if args.output:
+        from knowledge_agent.artifacts import SaveError, save_answer
+
+        fmts = [f.strip() for f in args.format.split(",") if f.strip()]
+        try:
+            paths = save_answer(answer, args.query, args.output, fmts)
+        except SaveError as exc:
+            print(f"error: could not save: {exc}", file=sys.stderr)
+            return 1
+        # Confirmations to stderr so stdout stays the answer (pipeable).
+        for saved in paths:
+            print(f"saved: {saved}", file=sys.stderr)
     return 0
 
 
@@ -283,6 +296,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Print the full AgentAnswer as JSON instead of just the answer text.",
+    )
+    p_query.add_argument(
+        "--output",
+        type=Path,
+        metavar="DIR",
+        help="Also save the answer to this folder (files named by timestamp + query slug).",
+    )
+    p_query.add_argument(
+        "--format",
+        default="md",
+        metavar="FMTS",
+        help="Comma-separated save formats for --output: md,txt,docx,json (default: md).",
     )
     p_query.set_defaults(func=_cmd_query)
 
