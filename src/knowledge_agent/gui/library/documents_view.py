@@ -51,7 +51,8 @@ from typing import TYPE_CHECKING, Any
 
 import flet as ft
 
-from knowledge_agent.gui.views._frame import empty_state, view_with_header
+from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, PANEL_BG, labeled_field
+from knowledge_agent.gui.views._frame import empty_state
 from knowledge_agent.search.client import get_search_client
 
 if TYPE_CHECKING:
@@ -135,8 +136,11 @@ class DocumentsView:
 
     def _create_controls(self) -> None:
         self.search_field = ft.TextField(
-            hint_text="Filter by title or source path…",
+            hint_text="filename, title",
             on_change=self._on_search_changed,
+            border=ft.InputBorder.OUTLINE,
+            border_color=FRAME_BORDER_COLOR,
+            bgcolor=PANEL_BG,
             expand=True,
         )
         self.refresh_button = ft.Button(
@@ -144,7 +148,7 @@ class DocumentsView:
             tooltip="Reload the document list from the corpus index",
             on_click=self._on_refresh_clicked,
         )
-        self.coverage_text = ft.Text("", size=11, color=ft.Colors.GREY_400)
+        self.coverage_text = ft.Text("", size=14, color=ft.Colors.GREY_400)
         # Transient status for per-doc ops (re-ingest).
         self.op_status = ft.Text("", size=11, color=ft.Colors.GREY_400)
         # Plain Column — the parent (select_dataset right pane) already
@@ -156,22 +160,39 @@ class DocumentsView:
     def build(self) -> ft.Control:
         # Lazy: fetch when the active corpus changed since the last load.
         self._schedule_reload(force=False)
+        # Header: bold "Documents" + the count inline (smaller, non-bold),
+        # e.g. "Documents (3 documents)". `coverage_text` is updated in
+        # `_render_rows`; here it just sits beside the title.
+        header = ft.Column(
+            spacing=4,
+            controls=[
+                ft.Row(
+                    controls=[
+                        ft.Text("Documents", weight=ft.FontWeight.BOLD, size=18),
+                        self.coverage_text,
+                    ],
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                ft.Divider(),
+            ],
+        )
         body = ft.Column(
             spacing=8,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             controls=[
-                ft.Row(
-                    controls=[self.search_field, self.refresh_button],
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                self.coverage_text,
+                labeled_field("Filter", self.search_field, trailing=self.refresh_button),
                 self.op_status,
                 ft.Divider(),
                 self.doc_list,
             ],
         )
-        return view_with_header("Documents", body)
+        return ft.Column(
+            controls=[header, body],
+            expand=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            spacing=8,
+        )
 
     # ----- fetch ---------------------------------------------------------
 
@@ -277,9 +298,9 @@ class DocumentsView:
         filtered = [r for r in self._loaded_rows if self._matches_filter(r, needle)]
         total = len(self._loaded_rows)
         if needle:
-            self.coverage_text.value = f"{len(filtered)} of {total} documents"
+            self.coverage_text.value = f"({len(filtered)} of {total} documents)"
         else:
-            self.coverage_text.value = f"{total} document{'s' if total != 1 else ''}"
+            self.coverage_text.value = f"({total} document{'s' if total != 1 else ''})"
         if not filtered:
             self.doc_list.controls = [
                 ft.Text(

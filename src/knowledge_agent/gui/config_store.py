@@ -31,7 +31,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import keyring
 import keyring.errors
@@ -396,9 +396,25 @@ class GuiConfig(BaseModel):
     show_info_icons: bool = Field(
         default=True,
         description=(
-            "Show the small (i) help icons throughout the GUI. On = a "
+            "Show the standard (i) help icons throughout the GUI. On = a "
             "teaching-mode UI with contextual help on settings + features; "
-            "off = hide every icon for a clean, expert UI."
+            "off = hide every standard icon for a clean, expert UI."
+        ),
+    )
+    show_beginner_info: bool = Field(
+        default=False,
+        description=(
+            "Show the extra BEGINNER help icons (green) — gentler, "
+            "plain-language explanations aimed at new users. Independent of "
+            "the standard and technical tiers."
+        ),
+    )
+    show_technical_info: bool = Field(
+        default=False,
+        description=(
+            "Show the extra TECHNICAL help icons (orange) — deeper detail "
+            "for power users (env vars, backend behaviour, edge cases). "
+            "Independent of the standard and beginner tiers."
         ),
     )
     keep_loaded_file_on_clear: bool = Field(
@@ -503,9 +519,10 @@ class GuiConfig(BaseModel):
         default=None,
         description=(
             "Directory where LanceDB stores its dataset files. Bridged "
-            "to `LANCEDB_PATH` at GUI startup. None resolves to "
-            "`<user_data_dir>/lancedb` at apply time so the platform-"
-            "conventional location wins."
+            "to `LANCEDB_PATH` at GUI startup. None (no active corpus) "
+            "resolves to the `NO_CORPUS_SENTINEL` marker, which the "
+            "LanceDB client refuses to open — so no store is created and "
+            "nothing can be written until a corpus is active."
         ),
     )
     ontology_downloads_dir: Path | None = Field(
@@ -744,20 +761,24 @@ def apply_connection_to_env(cfg: GuiConfig) -> None:
     the end user configure backend connection through the GUI form
     instead of editing OS env vars.
 
-    `lancedb_path` resolution: if `cfg.lancedb_path is None`, falls
-    back to `<user_data_dir>/lancedb` (platform-conventional). The
-    directory is NOT created here — LanceDB creates it on first write.
+    `lancedb_path` resolution: if `cfg.lancedb_path is None` (no active
+    corpus), `LANCEDB_PATH` is set to the `NO_CORPUS_SENTINEL` marker the
+    LanceDB client refuses to open. The backend still gets a value (it
+    requires one), but no store is created and no read/write is possible
+    until a corpus is active.
     """
     os.environ["NEO4J_URI"] = cfg.neo4j_uri
     os.environ["NEO4J_USER"] = cfg.neo4j_user
     if cfg.lancedb_path is not None:
         os.environ["LANCEDB_PATH"] = str(cfg.lancedb_path)
     else:
-        # Platform-conventional fallback. Distinct from `_config_dir`
-        # (which is config files) — data goes under user_data_dir.
-        from platformdirs import user_data_dir
+        # No active corpus. The backend requires *some* LANCEDB_PATH, so
+        # hand it the sentinel the LanceDB client refuses to open — no
+        # phantom store gets created and nothing can be read/written
+        # until a corpus is active.
+        from knowledge_agent.search.client import NO_CORPUS_SENTINEL
 
-        os.environ["LANCEDB_PATH"] = str(Path(user_data_dir(APP_ID, appauthor=False)) / "lancedb")
+        os.environ["LANCEDB_PATH"] = NO_CORPUS_SENTINEL
 
 
 def apply_active_corpus_password_to_env(cfg: GuiConfig) -> bool:
@@ -789,6 +810,74 @@ def apply_active_corpus_password_to_env(cfg: GuiConfig) -> bool:
         return True
     os.environ.pop("NEO4J_PASSWORD", None)
     return False
+
+
+class SwitchOutcome(NamedTuple):
+    """Result of `switch_active_corpus`.
+
+    `ok` is False only on a HARD failure (unknown corpus / save error) that
+    left the config UNCHANGED — the caller must not refresh in that case.
+    `ok` True means the switch persisted; `message` then carries an optional
+    non-fatal note (a confirmation, or a warning that the corpus has no
+    Neo4j password stored yet).
+    """
+
+    ok: bool
+    message: str | None
+
+
+def switch_active_corpus(cfg: GuiConfig, name: str) -> SwitchOutcome:
+    """Make `name` the app-wide active corpus at the config + env level.
+
+    Mirrors the corpus's connection triple onto the top-level GuiConfig,
+    persists (rolling back on save failure), pushes the connection to env,
+    and bridges the corpus's Neo4j password (keyring -> env). Does NO UI
+    work and does NOT clear backend caches — the caller (`GuiApp.select_corpus`)
+    owns `reset_after_key_change` and the cross-tab refresh.
+
+    This is the single source of truth for "activate this corpus": the
+    top-bar selector, the Manage dialog, and the Library picker all route
+    here so the app-wide state can never diverge between entry points.
+    """
+    entry = next((c for c in cfg.corpora if c.name == name), None)
+    if entry is None:
+        return SwitchOutcome(ok=False, message=f"corpus {name!r} not found")
+
+    snapshot = (
+        cfg.active_corpus_name,
+        cfg.neo4j_uri,
+        cfg.neo4j_user,
+        cfg.lancedb_path,
+        cfg.corpus_config_path,
+    )
+    cfg.active_corpus_name = name
+    cfg.neo4j_uri = entry.neo4j_uri
+    cfg.neo4j_user = entry.neo4j_user
+    cfg.lancedb_path = entry.lancedb_path
+    cfg.corpus_config_path = entry.corpus_config_path
+    try:
+        save_config(cfg)
+    except ConfigError as exc:
+        (
+            cfg.active_corpus_name,
+            cfg.neo4j_uri,
+            cfg.neo4j_user,
+            cfg.lancedb_path,
+            cfg.corpus_config_path,
+        ) = snapshot
+        return SwitchOutcome(ok=False, message=f"could not save: {exc}")
+
+    apply_connection_to_env(cfg)
+    had_password = apply_active_corpus_password_to_env(cfg)
+    if not had_password:
+        return SwitchOutcome(
+            ok=True,
+            message=(
+                f"Active corpus set to {name!r}, but no Neo4j password is "
+                "stored for it — set one via Library → Create New."
+            ),
+        )
+    return SwitchOutcome(ok=True, message=f"Active corpus: {name}")
 
 
 def apply_ontology_downloads_dir_to_env(cfg: GuiConfig) -> None:

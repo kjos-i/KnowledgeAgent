@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING
 import flet as ft
 
 from knowledge_agent.config import reset_after_key_change
-from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, PANEL_BG
+from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, PANEL_BG, labeled_field
 from knowledge_agent.gui.config_store import (
     API_KEY_NAMES,
     SECRET_DISPLAY_LABELS,
@@ -61,6 +61,9 @@ class KeysTab:
     def __init__(self, app: GuiApp) -> None:
         self.app = app
         self.key_fields: dict[str, ft.TextField] = {}
+        # labeled_field caption Texts (one per key) — refs kept so
+        # `on_key_blur` can flip the "(saved)"/"(not set)" state instantly.
+        self.key_captions: dict[str, ft.Control] = {}
         self._key_revealed: dict[str, bool] = {}
         self.status: ft.Text | None = None
         self._create_controls()
@@ -71,7 +74,6 @@ class KeysTab:
         for name in API_KEY_NAMES:
             self._key_revealed[name] = False
             self.key_fields[name] = ft.TextField(
-                label=self._key_label(name),
                 value=get_api_key(name) or "",
                 password=True,
                 border=ft.InputBorder.OUTLINE,
@@ -80,6 +82,11 @@ class KeysTab:
                 suffix=ft.IconButton(
                     icon=ft.Icons.VISIBILITY_OFF,
                     icon_size=18,
+                    # Constrain the reveal button so it doesn't inflate the
+                    # field height above the plain fields on other tabs.
+                    width=28,
+                    height=28,
+                    padding=0,
                     tooltip="Show / hide key",
                     on_click=lambda e, n=name: self._toggle_key_reveal(n),
                 ),
@@ -90,11 +97,15 @@ class KeysTab:
     # ----- public API -------------------------------------------------------
 
     def build(self) -> ft.Control:
-        # Refresh "(saved)" / "(not set)" suffixes on every render so a
-        # save-and-tab-out is reflected the next time the user opens the
-        # tab.
+        # Build the caption:field rows fresh each render, stamping the
+        # current "(saved)" / "(not set)" state into each caption. Keep a ref
+        # to each caption Text so `on_key_blur` can flip it to "(saved)"
+        # instantly after a save (without a full re-render).
+        key_rows: list[ft.Control] = []
         for name in API_KEY_NAMES:
-            self.key_fields[name].label = self._key_label(name)
+            row = labeled_field(self._key_label(name), self.key_fields[name])
+            self.key_captions[name] = row.controls[0]
+            key_rows.append(row)
         return ft.Column(
             scroll=ft.ScrollMode.AUTO,
             expand=True,
@@ -116,7 +127,7 @@ class KeysTab:
                     size=11,
                     color=ft.Colors.GREY_500,
                 ),
-                *[self.key_fields[name] for name in API_KEY_NAMES],
+                *key_rows,
                 self.status,
             ],
         )
@@ -171,7 +182,9 @@ class KeysTab:
             # Cache-clear failure is non-fatal — the new key is stored,
             # but a restart will be needed before factories see it.
             logger.warning("reset_after_key_change failed: %r", exc)
-        field.label = self._key_label(name)
+        caption = self.key_captions.get(name)
+        if caption is not None:
+            caption.value = f"{self._key_label(name)}:"
         msg = f"saved {name} key"
         self.status.value = msg
         self.app.chat_panel.append_system(msg)

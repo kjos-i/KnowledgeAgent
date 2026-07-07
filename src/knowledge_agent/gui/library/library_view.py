@@ -39,14 +39,26 @@ class LibraryView:
         self.ingest_tab = IngestTab(app)
         self.create_tab = CreateNewDatasetTab(app)
         self.installs_tab = InstallsTab(app)
+        # Ingest sub-tab body container — held so it can be rebuilt in
+        # place when the active corpus changes (see `refresh_ingest`).
+        self._ingest_body: ft.Container | None = None
         # Cross-tab: after a successful ingest / bulk-op in the Ingest
         # sub-tab, refresh the Select sub-tab's card counts + Documents.
         self.ingest_tab.on_ingest_complete = self.select_tab.refresh_after_ingest
+        # Cross-tab: while editing config on the Ingest tab, keep the Select
+        # card's "changed since last ingest" section live (the config editor
+        # fires this after each draft-persist).
+        self.ingest_tab.config_editor.on_draft_changed = self.select_tab.refresh_pending_changes
 
     def build(self) -> ft.Control:
         sub_bar = ft.TabBar(
             tabs=[ft.Tab(label=label) for label in SUB_TAB_LABELS],
             secondary=True,
+        )
+        self._ingest_body = ft.Container(
+            content=self.ingest_tab.build(),
+            padding=8,
+            expand=True,
         )
         sub_bodies = ft.TabBarView(
             controls=[
@@ -55,11 +67,7 @@ class LibraryView:
                     padding=8,
                     expand=True,
                 ),
-                ft.Container(
-                    content=self.ingest_tab.build(),
-                    padding=8,
-                    expand=True,
-                ),
+                self._ingest_body,
                 ft.Container(
                     content=self.create_tab.build(),
                     padding=8,
@@ -83,3 +91,22 @@ class LibraryView:
             ),
             expand=True,
         )
+
+    def refresh_ingest(self) -> None:
+        """Rebuild the Ingest sub-tab body for the current active corpus.
+
+        The 4 sub-tab bodies are built once in `build()`; changing the
+        active corpus (create / switch / remove / relocate) otherwise
+        leaves Ingest frozen on the old corpus — a stale header and a
+        config editor still pointed at the previous corpus.toml. Called
+        from every corpus-mutation site so the header, config editor,
+        and diff card track the new active corpus. No-op before the
+        first `build()`.
+        """
+        if self._ingest_body is None:
+            return
+        # The editor caches by corpus NAME, so a relocate (same name,
+        # new path) wouldn't reload on its own — force it.
+        self.ingest_tab.config_editor.invalidate()
+        self._ingest_body.content = self.ingest_tab.build()
+        self.app.page.update()

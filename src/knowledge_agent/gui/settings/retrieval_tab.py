@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 import flet as ft
 
 from knowledge_agent.config import reset_after_key_change
-from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, PANEL_BG
+from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, PANEL_BG, labeled_field
 from knowledge_agent.gui._widgets.info_icon import info_icon
 from knowledge_agent.gui.config_store import (
     ConfigError,
@@ -105,7 +105,6 @@ class RetrievalTab:
         # in a narrow panel. 3-option LanceDB mode uses radios (all
         # options visible at once, one click to switch).
         self.mode_dropdown = ft.Dropdown(
-            label="Retrieval mode (agent-level)",
             value=cfg.retrieval_mode,
             options=[ft.DropdownOption(key=k, text=lbl) for k, lbl in _MODE_LABELS],
             border=ft.InputBorder.OUTLINE,
@@ -126,32 +125,26 @@ class RetrievalTab:
 
         # Integer fields.
         self.top_k_field = _int_field(
-            "top_k (final result count, 1–50)",
             cfg.top_k,
             self.on_top_k_blur,
         )
         self.num_candidates_field = _int_field(
-            "num_candidates (vector kNN pool size)",
             cfg.num_candidates,
             self.on_num_candidates_blur,
         )
         self.rrf_constant_field = _int_field(
-            "RRF rank constant k (1/(k+rank))",
             cfg.rrf_rank_constant,
             self.on_rrf_constant_blur,
         )
         self.rrf_window_field = _int_field(
-            "RRF rank window size",
             cfg.rrf_rank_window_size,
             self.on_rrf_window_blur,
         )
         self.mmr_multiplier_field = _int_field(
-            "MMR candidate multiplier",
             cfg.mmr_candidate_multiplier,
             self.on_mmr_multiplier_blur,
         )
         self.kg_max_rows_field = _int_field(
-            "kg_max_rows (cap on Neo4j rows per query)",
             cfg.kg_max_rows,
             self.on_kg_max_rows_blur,
         )
@@ -234,7 +227,7 @@ class RetrievalTab:
                 view_header("Retrieval"),
                 # ---- Mode ----------------------------------------------
                 ft.Text("Mode", weight=ft.FontWeight.BOLD),
-                self.mode_dropdown,
+                labeled_field("Retrieval mode (agent-level)", self.mode_dropdown),
                 ft.Text(
                     "LanceDB search mode (within-store):",
                     size=12,
@@ -244,7 +237,7 @@ class RetrievalTab:
                 ft.Divider(),
                 # ---- Result size ---------------------------------------
                 ft.Text("Result size", weight=ft.FontWeight.BOLD),
-                self.top_k_field,
+                labeled_field("top_k (final result count, 1–50)", self.top_k_field),
                 ft.Divider(),
                 # ---- Hybrid fusion (RRF) -------------------------------
                 ft.Text(
@@ -258,9 +251,9 @@ class RetrievalTab:
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),
-                self.num_candidates_field,
-                self.rrf_window_field,
-                self.rrf_constant_field,
+                labeled_field("num_candidates (vector kNN pool size)", self.num_candidates_field),
+                labeled_field("RRF rank window size", self.rrf_window_field),
+                labeled_field("RRF rank constant k (1/(k+rank))", self.rrf_constant_field),
                 ft.Divider(),
                 # ---- Diversity (MMR) -----------------------------------
                 ft.Text("Diversity (MMR)", weight=ft.FontWeight.BOLD),
@@ -271,11 +264,11 @@ class RetrievalTab:
                     self.mmr_lambda_slider,
                     self.mmr_lambda_value_text,
                 ),
-                self.mmr_multiplier_field,
+                labeled_field("MMR candidate multiplier", self.mmr_multiplier_field),
                 ft.Divider(),
                 # ---- Knowledge graph -----------------------------------
                 ft.Text("Knowledge graph", weight=ft.FontWeight.BOLD),
-                self.kg_max_rows_field,
+                labeled_field("kg_max_rows (cap on Neo4j rows per query)", self.kg_max_rows_field),
                 ft.Divider(),
                 # ---- Input mode + synthesis ----------------------------
                 ft.Row(
@@ -297,6 +290,22 @@ class RetrievalTab:
                                 "- Direct Cypher: power users - your text is "
                                 "run as raw Cypher against the Neo4j "
                                 "knowledge graph (read-only queries only)."
+                            ),
+                            beginner=(
+                                "Just leave this on 'Conversational' — you type "
+                                "a question like you would to a person, and the "
+                                "app figures out when and how to search for you. "
+                                "The other two are shortcuts for advanced users."
+                            ),
+                            technical=(
+                                "Conversational routes through the chat "
+                                "router + query-builder LLM nodes. Direct query "
+                                "bypasses both and passes your text straight to "
+                                "the retriever (vector / hybrid per the LanceDB "
+                                "search mode). Direct Cypher bypasses retrieval "
+                                "entirely and executes your text as a read-only "
+                                "Cypher statement against Neo4j (writes are "
+                                "rejected by the safety guard)."
                             ),
                         ),
                     ],
@@ -612,13 +621,12 @@ class RetrievalTab:
 
 
 def _int_field(
-    label: str,
     value: int,
     on_blur,
 ) -> ft.TextField:
-    """Standard integer-input TextField using the panel's style."""
+    """Standard integer-input TextField using the panel's style. The caption
+    is added at the build site via `labeled_field`."""
     return ft.TextField(
-        label=label,
         value=str(value),
         border=ft.InputBorder.OUTLINE,
         border_color=FRAME_BORDER_COLOR,
@@ -632,16 +640,9 @@ def _slider_row(
     slider: ft.Slider,
     value_text: ft.Text,
 ) -> ft.Control:
-    """Row: label + slider (expanding) + numeric value display."""
-    return ft.Row(
-        controls=[
-            ft.Text(label, size=12, color=ft.Colors.GREY_300, width=220),
-            ft.Container(content=slider, expand=True),
-            value_text,
-        ],
-        spacing=8,
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-    )
+    """Caption + slider (expanding) + numeric value display, in the shared
+    `labeled_field` style (caption hugs its text, value trails)."""
+    return labeled_field(label, slider, trailing=value_text)
 
 
 def _fmt_float(value: float | None) -> str:

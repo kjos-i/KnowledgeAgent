@@ -95,6 +95,8 @@ class AppTab:
         self.keep_loaded_checkbox: ft.Checkbox | None = None
         self.debug_mode_checkbox: ft.Checkbox | None = None
         self.show_info_icons_checkbox: ft.Checkbox | None = None
+        self.show_beginner_info_checkbox: ft.Checkbox | None = None
+        self.show_technical_info_checkbox: ft.Checkbox | None = None
         self.chips_row: ft.Row | None = None
         self.rerun_button: ft.Button | None = None
         self.active_corpus_text: ft.Text | None = None
@@ -146,9 +148,19 @@ class AppTab:
             on_change=self.on_keep_loaded_changed,
         )
         self.show_info_icons_checkbox = ft.Checkbox(
-            label="Show (i) help icons",
+            label="Show standard (i) help icons",
             value=self.app.gui_config.show_info_icons,
             on_change=self.on_show_info_icons_changed,
+        )
+        self.show_beginner_info_checkbox = ft.Checkbox(
+            label="Show beginner help icons (green)",
+            value=self.app.gui_config.show_beginner_info,
+            on_change=self.on_show_beginner_info_changed,
+        )
+        self.show_technical_info_checkbox = ft.Checkbox(
+            label="Show technical help icons (orange)",
+            value=self.app.gui_config.show_technical_info,
+            on_change=self.on_show_technical_info_changed,
         )
 
         # Block 2: Diagnostics.
@@ -263,6 +275,8 @@ class AppTab:
                 self.restore_last_corpus_checkbox,
                 self.keep_loaded_checkbox,
                 self.show_info_icons_checkbox,
+                self.show_beginner_info_checkbox,
+                self.show_technical_info_checkbox,
                 ft.Divider(),
                 # ---- Block 2: Diagnostics ------------------------------
                 ft.Text("Diagnostics", weight=ft.FontWeight.BOLD),
@@ -330,24 +344,41 @@ class AppTab:
         )
         self.app.page.update()
 
-    def on_show_info_icons_changed(self, e: ft.Event) -> None:
-        """Persist show_info_icons + flip every (i) help icon live."""
-        if self.status is None or self.show_info_icons_checkbox is None:
+    def _on_info_tier_changed(
+        self, tier: str, flag: str, checkbox: ft.Checkbox | None, label: str
+    ) -> None:
+        """Persist one `show_*_info` flag + flip that tier's (i) icons live.
+        Shared by the standard / beginner / technical toggles."""
+        if self.status is None or checkbox is None:
             return
-        previous = self.app.gui_config.show_info_icons
-        self.app.gui_config.show_info_icons = bool(self.show_info_icons_checkbox.value)
+        previous = getattr(self.app.gui_config, flag)
+        setattr(self.app.gui_config, flag, bool(checkbox.value))
         try:
             save_config(self.app.gui_config)
         except ConfigError as exc:
-            self.app.gui_config.show_info_icons = previous
-            self.show_info_icons_checkbox.value = previous
+            setattr(self.app.gui_config, flag, previous)
+            checkbox.value = previous
             self.status.value = f"could not save: {exc}"
             self.app.page.update()
             return
-        self.status.value = (
-            "help icons shown" if self.app.gui_config.show_info_icons else "help icons hidden"
+        shown = getattr(self.app.gui_config, flag)
+        self.status.value = f"{label} icons {'shown' if shown else 'hidden'}"
+        self.app.set_info_icons_visible(tier, shown)
+
+    def on_show_info_icons_changed(self, e: ft.Event) -> None:
+        self._on_info_tier_changed(
+            "standard", "show_info_icons", self.show_info_icons_checkbox, "standard help"
         )
-        self.app.set_info_icons_visible(self.app.gui_config.show_info_icons)
+
+    def on_show_beginner_info_changed(self, e: ft.Event) -> None:
+        self._on_info_tier_changed(
+            "beginner", "show_beginner_info", self.show_beginner_info_checkbox, "beginner help"
+        )
+
+    def on_show_technical_info_changed(self, e: ft.Event) -> None:
+        self._on_info_tier_changed(
+            "technical", "show_technical_info", self.show_technical_info_checkbox, "technical help"
+        )
 
     def on_keep_loaded_changed(self, e: ft.Event) -> None:
         """Persist keep_loaded_file_on_clear, with rollback on save failure."""

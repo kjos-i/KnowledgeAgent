@@ -47,12 +47,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import flet as ft
+from pydantic import ValidationError
 
 from knowledge_agent.config import reset_after_key_change
 from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     PANEL_BG,
-    centered_label,
 )
 from knowledge_agent.gui.config_store import (
     ConfigError,
@@ -61,7 +61,9 @@ from knowledge_agent.gui.config_store import (
     save_config,
     set_corpus_password,
 )
+from knowledge_agent.gui.library.config_diff import config_diff
 from knowledge_agent.gui.library.documents_view import DocumentsView
+from knowledge_agent.gui.library.session_state import load_session
 from knowledge_agent.gui.views._frame import view_header
 from knowledge_agent.kg.corpus_config import CorpusConfig, load_corpus_config
 from knowledge_agent.search.client import get_search_client
@@ -74,18 +76,45 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_LEFT_COLUMN_WIDTH = 420
+# Fixed card-column width; the Documents table (right) expands to fill the
+# rest. A touch wider than needed today so it stays uncrowded if the app
+# font size grows.
+_LEFT_COLUMN_WIDTH = 500
 
 
-# Layer coverage badges — key = LayerFlags field, label = short badge.
-# Displayed in a Row on the info card; grey when disabled, green when on.
-_LAYER_BADGES: tuple[tuple[str, str], ...] = (
-    ("chunks", "L4"),
-    ("openalex_papers", "OA"),
-    ("entities", "L6"),
-    ("triples", "L8"),
-    ("cross_doc", "L9"),
-    ("cross_doc_xrefs", "L10"),
+# Sentinel `field` for the L7 pill: ontology linking is a bundle of 18
+# per-ontology flags (no single LayerFlags bool), so its pill counts as
+# "configured" when ANY `ontology_*` flag is on. The detail — which
+# vocabularies — lives on the separate Ontologies line below.
+_ONTOLOGY_ANY = "__ontology_any__"
+
+# Layer pills — one per pipeline layer, in pipeline order: L1–L4
+# (OpenAlex) · L5 chunks · L6 entities · L7 ontology · L8 triples ·
+# L9 cross-doc · L10 cross-doc xrefs. Each entry is (field, label,
+# tooltip). A pill is GREEN only when its layer is configured AND the
+# corpus has ingested data (docs > 0); grey otherwise (not configured,
+# OR configured-but-empty). `field` is the LayerFlags attribute that
+# gates "configured", or `_ONTOLOGY_ANY` for the L7 bundle.
+_LAYER_BADGES: tuple[tuple[str, str, str], ...] = (
+    (
+        "openalex_papers",
+        "L1–L4",
+        "L1–L4 — OpenAlex bundle: citation / author / venue / topic graph",
+    ),
+    ("chunks", "L5", "L5 — per-chunk :Chunk nodes for retrieval"),
+    ("entities", "L6", "L6 — named-entity extraction per chunk"),
+    (
+        _ONTOLOGY_ANY,
+        "L7",
+        "L7 — ontology linking (which vocabularies: see Ontologies below)",
+    ),
+    ("triples", "L8", "L8 — (subject, predicate, object) edges per chunk"),
+    ("cross_doc", "L9", "L9 — shared-entity links across docs"),
+    (
+        "cross_doc_xrefs",
+        "L10",
+        "L10 — shared-canonical-concept links across docs",
+    ),
 )
 
 
@@ -118,13 +147,12 @@ class SelectDatasetTab:
 
     def __init__(self, app: GuiApp) -> None:
         self.app = app
+        # Corpus SELECTION + MANAGEMENT moved to the global top-bar
+        # `Corpus ▾` dropdown + `⚙ Manage` dialog (Phase 2). This tab is now
+        # a read-only "browse the active corpus" view: info card + Documents.
+        # The `on_{rename,relocate,remove,refresh}_clicked` handlers below
+        # stay — the Manage dialog reaches across to them.
         self.status: ft.Text | None = None
-        self.picker_container: ft.Container | None = None
-        self.picker_radio: ft.RadioGroup | None = None
-        self.rename_button: ft.Button | None = None
-        self.relocate_button: ft.Button | None = None
-        self.remove_button: ft.Button | None = None
-        self.refresh_button: ft.Button | None = None
 
         # Right column — read-only info card. Every field is a Text
         # control we repopulate on switch / refresh; the container
@@ -146,8 +174,17 @@ class SelectDatasetTab:
         self.info_figures: ft.Text | None = None
         self.info_embedder: ft.Text | None = None
         self.info_llm: ft.Text | None = None
+        # "Changed since last ingest" section — the unsaved config draft
+        # (from the Ingest tab) diffed against the ingested baseline. The
+        # whole section hides when there are no pending changes.
+        self.info_pending: ft.Text | None = None
+        self.info_pending_section: ft.Container | None = None
         # Strong refs to in-flight count-fetch tasks (they self-discard).
         self._bg_tasks: set[asyncio.Task] = set()
+        # Config of the active corpus, stashed by `_populate_info_card`
+        # so the async count fetch can re-colour the layer pills (green
+        # needs data, which is only known after the count returns).
+        self._active_cfg: CorpusConfig | None = None
 
         self.documents = DocumentsView(app)
         self._create_controls()
@@ -156,32 +193,6 @@ class SelectDatasetTab:
 
     def _create_controls(self) -> None:
         self.status = ft.Text("", size=11, color=ft.Colors.GREY_400)
-
-        self.picker_container = ft.Container(
-            content=ft.Text(
-                "(building picker…)",
-                size=12,
-                color=ft.Colors.GREY_500,
-                italic=True,
-            ),
-        )
-
-        self.rename_button = ft.Button(
-            content=centered_label("Rename"),
-            on_click=self.on_rename_clicked,
-        )
-        self.relocate_button = ft.Button(
-            content=centered_label("Relocate"),
-            on_click=self.on_relocate_clicked,
-        )
-        self.remove_button = ft.Button(
-            content=centered_label("Remove"),
-            on_click=self.on_remove_clicked,
-        )
-        self.refresh_button = ft.Button(
-            content=centered_label("Refresh"),
-            on_click=self.on_refresh_clicked,
-        )
 
         # ---- info card controls ----
         self.info_name = ft.Text(
@@ -216,6 +227,25 @@ class SelectDatasetTab:
         self.info_figures = ft.Text("", size=12, color=ft.Colors.GREY_300)
         self.info_embedder = ft.Text("", size=12, color=ft.Colors.GREY_300)
         self.info_llm = ft.Text("", size=12, color=ft.Colors.GREY_300)
+        # "Changed since last ingest" — hidden unless the corpus has an
+        # unsaved config draft (edited on the Ingest tab, not yet ingested).
+        self.info_pending = ft.Text("", size=11, color=ft.Colors.AMBER_300, selectable=True)
+        self.info_pending_section = ft.Container(
+            visible=False,
+            content=ft.Column(
+                spacing=4,
+                controls=[
+                    ft.Divider(height=1),
+                    ft.Text(
+                        "Changed since last ingest (unsaved)",
+                        size=12,
+                        weight=ft.FontWeight.BOLD,
+                        color=ft.Colors.AMBER_300,
+                    ),
+                    self.info_pending,
+                ],
+            ),
+        )
 
         self.info_container = ft.Container(
             padding=12,
@@ -256,6 +286,7 @@ class SelectDatasetTab:
                     ft.Divider(height=1),
                     _kv_row("Embedder", self.info_embedder),
                     _kv_row("LLM", self.info_llm),
+                    self.info_pending_section,
                 ],
             ),
         )
@@ -263,14 +294,13 @@ class SelectDatasetTab:
     # ----- public API -------------------------------------------------------
 
     def build(self) -> ft.Control:
-        # Rebuild the picker + info card every time the sub-tab renders
-        # — cheap, avoids stale state after sibling-tab mutations.
-        self._sync_picker()
+        # Refresh the info card every render — cheap, avoids stale state
+        # after sibling-tab mutations (corpus switch / ingest).
         self._populate_info_card()
 
-        # Left column: picker + Rename/Remove/Refresh + info card + status.
-        # Scrollable so the info card + picker don't get clipped on
-        # short viewports.
+        # Left column: the read-only info card + a status line. Corpus
+        # selection + management moved to the global top-bar `Corpus ▾`
+        # dropdown + `⚙ Manage` dialog.
         left_pane = ft.Container(
             width=_LEFT_COLUMN_WIDTH,
             content=ft.Column(
@@ -279,25 +309,8 @@ class SelectDatasetTab:
                 spacing=10,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                 controls=[
-                    ft.Text(
-                        "Switch active corpus:",
-                        size=12,
-                        color=ft.Colors.GREY_400,
-                    ),
-                    self.picker_container,
-                    ft.Row(
-                        controls=[
-                            self.rename_button,
-                            self.relocate_button,
-                            self.remove_button,
-                            self.refresh_button,
-                        ],
-                        spacing=8,
-                        wrap=True,
-                    ),
-                    self.status,
-                    ft.Divider(),
                     self.info_container,
+                    self.status,
                 ],
             ),
         )
@@ -328,50 +341,6 @@ class SelectDatasetTab:
             controls=[view_header("Select Dataset"), body],
         )
 
-    # ----- picker rebuild --------------------------------------------------
-
-    def _sync_picker(self) -> None:
-        """Rebuild the picker from `GuiConfig.corpora`.
-
-        No corpora → amber hint pointing to Create New.
-        One or more → RadioGroup with the active one selected.
-        """
-        if self.picker_container is None:
-            return
-        corpora = self.app.gui_config.corpora
-        if not corpora:
-            self.picker_radio = None
-            self.picker_container.content = ft.Text(
-                "No corpora registered yet — open Create New to register your first corpus.",
-                size=12,
-                color=ft.Colors.AMBER_300,
-                italic=True,
-            )
-            self._sync_button_disable_state(has_corpora=False)
-            return
-        active_name = self.app.gui_config.active_corpus_name or corpora[0].name
-        self.picker_radio = ft.RadioGroup(
-            value=active_name,
-            on_change=self.on_active_changed,
-            content=ft.Column(
-                controls=[ft.Radio(value=c.name, label=self._radio_label(c)) for c in corpora],
-                spacing=4,
-            ),
-        )
-        self.picker_container.content = self.picker_radio
-        self._sync_button_disable_state(has_corpora=True)
-
-    def _radio_label(self, entry: CorpusEntry) -> str:
-        return f"{entry.name}   ({entry.neo4j_uri})"
-
-    def _sync_button_disable_state(self, has_corpora: bool) -> None:
-        if self.rename_button is not None:
-            self.rename_button.disabled = not has_corpora
-        if self.relocate_button is not None:
-            self.relocate_button.disabled = not has_corpora
-        if self.remove_button is not None:
-            self.remove_button.disabled = not has_corpora
-
     # ----- info card population -------------------------------------------
 
     def _populate_info_card(self) -> None:
@@ -400,16 +369,79 @@ class SelectDatasetTab:
         self.info_toml.value = str(entry.corpus_config_path)
 
         cfg = self._safe_load_config(entry)
-        self._populate_layer_badges(cfg)
+        self._active_cfg = cfg
+        # Pills start grey; `_reload_counts` re-colours them once the
+        # doc count is known (green needs data, not just config).
+        self._populate_layer_badges(cfg, has_data=False)
         self._populate_ontologies(cfg)
         self._populate_extractor(cfg)
         self._populate_xrefs(cfg)
         self._populate_ingest_settings(cfg)
         self._populate_models()
+        self._populate_pending_changes()
         self._schedule_counts()
+
+    def refresh_pending_changes(self) -> None:
+        """Live-refresh just the "changed since last ingest" section.
+
+        Wired to the Ingest tab's config editor (`on_draft_changed`), so
+        editing config on the right updates this card immediately without a
+        full info-card re-fetch (which would also re-run the count query).
+        """
+        self._populate_pending_changes()
+        self.app.page.update()
+
+    def _populate_pending_changes(self) -> None:
+        """Fill the "changed since last ingest" section from the corpus's
+        unsaved config draft, diffed against the ingested baseline.
+
+        The card keeps showing the *ingested* config (its whole reason for
+        existing); this section adds what's been changed on the Ingest tab
+        but not yet re-ingested. Hidden when there's no draft, or the draft
+        matches the baseline.
+        """
+        section = self.info_pending_section
+        text = self.info_pending
+        if section is None or text is None:
+            return
+        baseline = self._active_cfg
+        draft = self._load_draft_config()
+        diffs = config_diff(baseline, draft) if baseline is not None and draft is not None else []
+        if not diffs:
+            section.visible = False
+            text.value = ""
+            return
+        header = (
+            f"{len(diffs)} setting{'s' if len(diffs) != 1 else ''} changed "
+            "(edit on the Ingest tab; re-ingest to apply):"
+        )
+        lines = [header]
+        lines.extend(f"  • {name}: {old} → {new}" for name, old, new in diffs)
+        text.value = "\n".join(lines)
+        section.visible = True
+
+    def _load_draft_config(self) -> CorpusConfig | None:
+        """The active corpus's persisted unsaved draft, if present and valid.
+
+        A draft that no longer validates (schema drift) is treated as
+        absent — the card falls back to showing no pending changes."""
+        active_name = self.app.gui_config.active_corpus_name
+        if active_name is None:
+            return None
+        entry = self._find_corpus(active_name)
+        if entry is None:
+            return None
+        session = load_session(entry.corpus_config_path)
+        if session.draft_config is None:
+            return None
+        try:
+            return CorpusConfig.model_validate(session.draft_config)
+        except ValidationError:
+            return None
 
     def _info_empty_state(self) -> None:
         """When there's no active corpus, blank out all the fields."""
+        self._active_cfg = None
         for text in (
             self.info_name,
             self.info_uri,
@@ -434,6 +466,8 @@ class SelectDatasetTab:
             self.info_layers.controls = [
                 ft.Text("—", size=12, color=ft.Colors.GREY_600),
             ]
+        if self.info_pending_section is not None:
+            self.info_pending_section.visible = False
 
     def _safe_load_config(self, entry: CorpusEntry) -> CorpusConfig | None:
         try:
@@ -453,48 +487,40 @@ class SelectDatasetTab:
             )
             return None
 
-    def _populate_layer_badges(self, cfg: CorpusConfig | None) -> None:
+    def _populate_layer_badges(self, cfg: CorpusConfig | None, *, has_data: bool) -> None:
+        """Render one pill per pipeline layer. GREEN only when the layer
+        is configured AND the corpus has ingested data (`has_data`); grey
+        otherwise. `has_data` is known only after the async doc count, so
+        the first (sync) call passes False — an un-ingested corpus starts
+        all-grey — and `_reload_counts` re-populates with the real value."""
         if self.info_layers is None:
             return
         badges: list[ft.Control] = []
-        for field, label in _LAYER_BADGES:
-            on = cfg is not None and bool(getattr(cfg.layers, field, False))
-            badges.append(_badge(label, on=on))
+        for field, label, tooltip in _LAYER_BADGES:
+            configured = cfg is not None and self._layer_configured(cfg, field)
+            badges.append(_badge(label, on=configured and has_data, tooltip=tooltip))
         self.info_layers.controls = badges
+
+    @staticmethod
+    def _layer_configured(cfg: CorpusConfig, field: str) -> bool:
+        """True when `field` is enabled in the corpus config. `field` is a
+        `LayerFlags` attribute, or `_ONTOLOGY_ANY` — the L7 bundle, on when
+        any single `ontology_*` flag is set."""
+        if field == _ONTOLOGY_ANY:
+            return any(
+                bool(getattr(cfg.layers, f"ontology_{key}", False)) for key, _ in _ONTOLOGY_KEYS
+            )
+        return bool(getattr(cfg.layers, field, False))
 
     def _populate_ontologies(self, cfg: CorpusConfig | None) -> None:
         if self.info_ontologies is None:
             return
-        if cfg is None:
-            self.info_ontologies.value = "—"
-            return
-        active = [
-            display
-            for key, display in _ONTOLOGY_KEYS
-            if bool(getattr(cfg.layers, f"ontology_{key}", False))
-        ]
-        self.info_ontologies.value = ", ".join(active) if active else "none enabled"
+        self.info_ontologies.value = _ontologies_str(cfg) if cfg is not None else "—"
 
     def _populate_extractor(self, cfg: CorpusConfig | None) -> None:
         if self.info_extractor is None:
             return
-        if cfg is None or cfg.entities is None:
-            self.info_extractor.value = "not configured"
-            return
-        ents = cfg.entities
-        extractors = list(getattr(ents, "extractors", None) or [])
-        if not extractors:
-            # Fall back to the legacy singular field for old configs.
-            single = getattr(ents, "extractor", None)
-            extractors = [single] if single else []
-        parts = [", ".join(extractors) or "—"]
-        mode = getattr(ents, "entity_types_mode", None)
-        if mode:
-            parts.append(f"mode: {mode}")
-        types = ents.entity_types
-        if types:
-            parts.append(f"types: {', '.join(types)}")
-        self.info_extractor.value = " · ".join(parts)
+        self.info_extractor.value = _extractor_str(cfg) if cfg is not None else "not configured"
 
     def _populate_xrefs(self, cfg: CorpusConfig | None) -> None:
         if self.info_xrefs is None:
@@ -512,25 +538,12 @@ class SelectDatasetTab:
                 if t is not None:
                     t.value = "—"
             return
-
-        def g(name: str, default: object = "?") -> object:
-            return getattr(cfg, name, default)
-
         if self.info_chunking is not None:
-            self.info_chunking.value = (
-                f"{g('chunker_strategy')} · max {g('chunk_max_tokens')} tok "
-                f"· merge_peers {_onoff(bool(g('merge_peers', False)))}"
-            )
+            self.info_chunking.value = _chunking_str(cfg)
         if self.info_ocr is not None:
-            self.info_ocr.value = (
-                f"pdf {_onoff(bool(g('enable_pdf_ocr', False)))} · "
-                f"image {_onoff(bool(g('enable_image_ocr', False)))}"
-            )
+            self.info_ocr.value = _ocr_str(cfg)
         if self.info_figures is not None:
-            self.info_figures.value = (
-                f"extract {_onoff(bool(g('extract_figures', False)))} · "
-                f"scale {g('images_scale')} · min {g('min_figure_bytes')} B"
-            )
+            self.info_figures.value = _figures_str(cfg)
 
     def _populate_models(self) -> None:
         """Show the active embedder (provider · model · dims) + the LLM
@@ -574,19 +587,26 @@ class SelectDatasetTab:
     async def _reload_counts(self) -> None:
         """Fill the Counts line (docs/chunks from LanceDB, mentions from
         Neo4j) + the metadata-status breakdown. Each source degrades to
-        '—' independently, so one failure doesn't blank the rest."""
+        '—' independently, so one failure doesn't blank the rest.
+
+        Also re-colours the layer pills: green needs real data, so a pill
+        lights up only once we've confirmed the corpus has ≥ 1 indexed
+        doc. When the LanceDB read fails, docs is unknown → all grey (we
+        never claim green we can't confirm)."""
         if self.info_counts is None:
             return
         docs_str = "—"
         chunks_str = "—"
         breakdown = "—"
+        n_docs = 0
         try:
             rows = await get_search_client().list_indexed_docs()
         except Exception as exc:
             logger.warning("SelectDataset: list_indexed_docs failed: %r", exc)
             rows = None
         if rows is not None:
-            docs_str = str(len(rows))
+            n_docs = len(rows)
+            docs_str = str(n_docs)
             chunks_str = str(sum(int(r.get("n_chunks") or 0) for r in rows))
             counts = Counter((r.get("metadata_status") or "unknown") for r in rows)
             breakdown = " · ".join(f"{k}: {v}" for k, v in sorted(counts.items())) or "—"
@@ -602,55 +622,18 @@ class SelectDatasetTab:
         )
         if self.info_breakdown is not None:
             self.info_breakdown.value = breakdown
+        # Now that we know whether the corpus holds data, re-colour the
+        # pills: a configured layer only shows green when n_docs > 0.
+        self._populate_layer_badges(self._active_cfg, has_data=n_docs > 0)
         self.app.page.update()
 
-    # ----- switch handler --------------------------------------------------
+    def refresh_after_switch(self) -> None:
+        """Refresh the info card + Documents after an app-wide corpus switch
+        (called by `GuiApp.refresh_after_corpus_change`).
 
-    def on_active_changed(self, e: ft.Event) -> None:
-        if self.picker_radio is None or self.status is None:
-            return
-        new_name = self.picker_radio.value
-        if new_name == self.app.gui_config.active_corpus_name:
-            return
-        entry = self._find_corpus(new_name)
-        if entry is None:
-            self.status.value = f"corpus {new_name!r} not found"
-            self.app.page.update()
-            return
-        previous_state = self._snapshot_active_state()
-        self.app.gui_config.active_corpus_name = new_name
-        self.app.gui_config.neo4j_uri = entry.neo4j_uri
-        self.app.gui_config.neo4j_user = entry.neo4j_user
-        self.app.gui_config.lancedb_path = entry.lancedb_path
-        self.app.gui_config.corpus_config_path = entry.corpus_config_path
-        try:
-            save_config(self.app.gui_config)
-        except ConfigError as exc:
-            self._restore_active_state(previous_state)
-            self.picker_radio.value = previous_state["active_corpus_name"]
-            self.status.value = f"could not save: {exc}"
-            self.app.page.update()
-            return
-        apply_connection_to_env(self.app.gui_config)
-        password = get_corpus_password(new_name) or ""
-        if password:
-            os.environ["NEO4J_PASSWORD"] = password
-        else:
-            os.environ.pop("NEO4J_PASSWORD", None)
-            self.status.value = (
-                f"active corpus set to {new_name!r} but no Neo4j "
-                f"password is stored for it — set one via Create New "
-                f"first."
-            )
-        try:
-            reset_after_key_change()
-        except Exception as exc:
-            logger.warning("reset_after_key_change failed: %r", exc)
-        if password:
-            self.status.value = f"active corpus: {new_name}"
+        No `page.update()` here — the app broadcast issues one at the end."""
         self._populate_info_card()
-        self.app.chat_panel.append_system(f"switched to corpus {new_name!r}")
-        self.app.page.update()
+        self.documents._schedule_reload(force=True)
 
     def _find_corpus(self, name: str) -> CorpusEntry | None:
         for c in self.app.gui_config.corpora:
@@ -658,26 +641,9 @@ class SelectDatasetTab:
                 return c
         return None
 
-    def _snapshot_active_state(self) -> dict[str, object]:
-        return {
-            "active_corpus_name": self.app.gui_config.active_corpus_name,
-            "neo4j_uri": self.app.gui_config.neo4j_uri,
-            "neo4j_user": self.app.gui_config.neo4j_user,
-            "lancedb_path": self.app.gui_config.lancedb_path,
-            "corpus_config_path": self.app.gui_config.corpus_config_path,
-        }
-
-    def _restore_active_state(self, snap: dict[str, object]) -> None:
-        self.app.gui_config.active_corpus_name = snap["active_corpus_name"]  # type: ignore[assignment]
-        self.app.gui_config.neo4j_uri = snap["neo4j_uri"]  # type: ignore[assignment]
-        self.app.gui_config.neo4j_user = snap["neo4j_user"]  # type: ignore[assignment]
-        self.app.gui_config.lancedb_path = snap["lancedb_path"]  # type: ignore[assignment]
-        self.app.gui_config.corpus_config_path = snap["corpus_config_path"]  # type: ignore[assignment]
-
-    # ----- Refresh --------------------------------------------------------
+    # ----- Refresh (reached from the Manage dialog) -----------------------
 
     def on_refresh_clicked(self, e: ft.Event) -> None:
-        self._sync_picker()
         self._populate_info_card()
         if self.status is not None:
             self.status.value = "refreshed"
@@ -791,8 +757,7 @@ class SelectDatasetTab:
                     old_name,
                     exc,
                 )
-        self._sync_picker()
-        self._populate_info_card()
+        self.app.refresh_after_corpus_change()  # dropdown + card + Ingest
         self.status.value = f"renamed {old_name!r} → {new_name!r}"
         self.app.chat_panel.append_system(f"renamed corpus {old_name!r} → {new_name!r}")
         self.app.page.update()
@@ -874,8 +839,7 @@ class SelectDatasetTab:
                 reset_after_key_change()
             except Exception as exc:
                 logger.warning("reset_after_key_change failed: %r", exc)
-        self._sync_picker()
-        self._populate_info_card()
+        self.app.refresh_after_corpus_change()  # dropdown + card + Ingest
         self.status.value = f"relocated {name!r} → {new_folder}"
         self.app.chat_panel.append_system(f"relocated corpus {name!r} → {new_folder}")
         self.app.page.update()
@@ -925,6 +889,13 @@ class SelectDatasetTab:
                 self.app.gui_config.neo4j_user = new_active.neo4j_user
                 self.app.gui_config.lancedb_path = new_active.lancedb_path
                 self.app.gui_config.corpus_config_path = new_active.corpus_config_path
+            else:
+                # Removed the last corpus — clear the stale path mirrors so
+                # the no-corpus state is consistent: LANCEDB_PATH lands on
+                # the sentinel below instead of pointing at the removed
+                # corpus's folder.
+                self.app.gui_config.lancedb_path = None
+                self.app.gui_config.corpus_config_path = None
         try:
             save_config(self.app.gui_config)
         except ConfigError as exc:
@@ -940,19 +911,24 @@ class SelectDatasetTab:
                 exc,
             )
         new_active_name = self.app.gui_config.active_corpus_name
+        # Always re-bridge: when a corpus remains it points env at that
+        # corpus; when none remain (mirror now None) it lands LANCEDB_PATH
+        # on the sentinel. Either way, drop caches so the next backend read
+        # rebuilds against the new target.
+        apply_connection_to_env(self.app.gui_config)
         if new_active_name is not None:
-            apply_connection_to_env(self.app.gui_config)
             password = get_corpus_password(new_active_name) or ""
             if password:
                 os.environ["NEO4J_PASSWORD"] = password
             else:
                 os.environ.pop("NEO4J_PASSWORD", None)
-            try:
-                reset_after_key_change()
-            except Exception as exc:
-                logger.warning("reset_after_key_change failed: %r", exc)
-        self._sync_picker()
-        self._populate_info_card()
+        else:
+            os.environ.pop("NEO4J_PASSWORD", None)
+        try:
+            reset_after_key_change()
+        except Exception as exc:
+            logger.warning("reset_after_key_change failed: %r", exc)
+        self.app.refresh_after_corpus_change()  # dropdown + card + Ingest
         self.status.value = f"removed {name!r} from the corpus list"
         self.app.chat_panel.append_system(f"unregistered corpus {name!r} (external files kept)")
         self.app.page.update()
@@ -962,22 +938,30 @@ class SelectDatasetTab:
 
 
 def _kv_row(label: str, value_control: ft.Control) -> ft.Row:
-    """A `label: value` row where the label is fixed-width so keys align."""
+    """A `label: value` row where the label is fixed-width so keys align.
+
+    The value sits in an `expand=True` container so long values (LanceDB /
+    corpus.toml paths, ontology lists) wrap onto multiple lines instead of
+    being clipped on the right. Top-aligned so the label stays on the
+    value's first line when it wraps.
+    """
     return ft.Row(
         controls=[
             ft.Text(label, size=12, color=ft.Colors.GREY_500, width=110),
-            value_control,
+            ft.Container(content=value_control, expand=True),
         ],
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        vertical_alignment=ft.CrossAxisAlignment.START,
     )
 
 
-def _badge(label: str, *, on: bool) -> ft.Control:
-    """Small pill showing a layer flag on/off state."""
+def _badge(label: str, *, on: bool, tooltip: str | None = None) -> ft.Control:
+    """Small pill showing a layer's state: green = configured + populated,
+    grey otherwise. `tooltip` (hover) spells out which layer the pill is."""
     return ft.Container(
         padding=ft.Padding.symmetric(vertical=2, horizontal=6),
         border_radius=10,
         bgcolor=(ft.Colors.GREEN_900 if on else ft.Colors.GREY_800),
+        tooltip=tooltip,
         content=ft.Text(
             label,
             size=11,
@@ -989,3 +973,56 @@ def _badge(label: str, *, on: bool) -> ft.Control:
 def _onoff(v: bool) -> str:
     """Compact on/off label for a boolean corpus setting."""
     return "on" if v else "off"
+
+
+# ---- corpus summary formatters (single source) -------------------------------
+#
+# Shared by this tab's info card (`_populate_*`) AND the global Manage
+# dialog's card (`corpus_card.build_corpus_card`), so the two can't drift.
+# Pure cfg -> display string; callers guard `cfg is None` themselves.
+
+
+def _chunking_str(cfg: CorpusConfig) -> str:
+    return (
+        f"{cfg.chunker_strategy} · max {cfg.chunk_max_tokens} tok "
+        f"· merge_peers {_onoff(bool(cfg.merge_peers))}"
+    )
+
+
+def _ocr_str(cfg: CorpusConfig) -> str:
+    return f"pdf {_onoff(bool(cfg.enable_pdf_ocr))} · image {_onoff(bool(cfg.enable_image_ocr))}"
+
+
+def _figures_str(cfg: CorpusConfig) -> str:
+    return (
+        f"extract {_onoff(bool(cfg.extract_figures))} · "
+        f"scale {cfg.images_scale} · min {cfg.min_figure_bytes} B"
+    )
+
+
+def _ontologies_str(cfg: CorpusConfig) -> str:
+    active = [
+        display
+        for key, display in _ONTOLOGY_KEYS
+        if bool(getattr(cfg.layers, f"ontology_{key}", False))
+    ]
+    return ", ".join(active) if active else "none enabled"
+
+
+def _extractor_str(cfg: CorpusConfig) -> str:
+    """`extractor(s) [· mode · types]` summary, or 'not configured' when the
+    entities layer has no [entities] section."""
+    if cfg.entities is None:
+        return "not configured"
+    ents = cfg.entities
+    extractors = list(getattr(ents, "extractors", None) or [])
+    if not extractors:
+        single = getattr(ents, "extractor", None)  # legacy singular field
+        extractors = [single] if single else []
+    parts = [", ".join(extractors) or "—"]
+    mode = getattr(ents, "entity_types_mode", None)
+    if mode:
+        parts.append(f"mode: {mode}")
+    if ents.entity_types:
+        parts.append(f"types: {', '.join(ents.entity_types)}")
+    return " · ".join(parts)

@@ -26,7 +26,8 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
-from knowledge_agent.gui._styles import FRAME_BORDER_COLOR
+from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, centered_label, labeled_field
+from knowledge_agent.gui.evaluation._case_view import render_case_cards
 from knowledge_agent.gui.views._frame import view_header
 
 if TYPE_CHECKING:
@@ -34,7 +35,6 @@ if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
     from knowledge_agent.gui.evaluation.evaluation_view import EvaluationView
 
-_LIST_W = 320
 _NONE = ""  # the expected_mode "(none)" sentinel (maps to None on read)
 
 
@@ -45,7 +45,6 @@ class DatasetTab:
         self.app = app
         self.coordinator = coordinator
         self.dataset_dropdown: ft.Dropdown | None = None
-        self.name_field: ft.TextField | None = None
         self.status_dropdown: ft.Dropdown | None = None
         self.case_list: ft.Column | None = None
         self.form: ft.Column | None = None
@@ -81,19 +80,21 @@ class DatasetTab:
             ft.DropdownOption(key=str(p), text=p.name) for p in sorted(datasets_dir.glob("*.json"))
         ]
         self.dataset_dropdown = ft.Dropdown(
-            label="Dataset (pick or type a path)",
+            hint_text="pick or type a path",
             editable=True,
             options=options,
             value=str(DEFAULT_DATASET_PATH) if DEFAULT_DATASET_PATH.exists() else None,
-            width=_LIST_W,
+            # Selecting a packaged dataset loads it straight away — no Load step.
+            on_select=self._on_dataset_selected,
         )
-        load_button = ft.TextButton("Load", icon=ft.Icons.FOLDER_OPEN, on_click=self._on_load)
-        self.name_field = ft.TextField(label="Dataset name", width=_LIST_W, dense=True)
+        browse_button = ft.Button(
+            content=centered_label("Browse"),
+            tooltip="Browse for a gold-dataset JSON",
+            on_click=self._on_browse_clicked,
+        )
         self.status_dropdown = ft.Dropdown(
-            label="Status",
             options=[ft.DropdownOption(key=s, text=s) for s in statuses],
             value="draft",
-            width=_LIST_W,
         )
         new_button = ft.TextButton("New case", icon=ft.Icons.ADD, on_click=self._on_new)
         capture_button = ft.TextButton(
@@ -114,55 +115,48 @@ class DatasetTab:
 
         # ---- form field widgets ----
         self.f = {
-            "id": ft.TextField(label="id", dense=True),
-            "question": ft.TextField(label="question", multiline=True, min_lines=2, max_lines=4),
+            "id": ft.TextField(dense=True),
+            "question": ft.TextField(multiline=True, min_lines=2, max_lines=4),
             "origin": ft.Dropdown(
-                label="origin",
                 options=[ft.DropdownOption(key=o, text=o) for o in origins],
                 value="manual",
             ),
-            "category": ft.TextField(label="category", dense=True),
-            "notes": ft.TextField(label="notes", multiline=True, min_lines=1, max_lines=3),
+            "category": ft.TextField(dense=True),
+            "notes": ft.TextField(multiline=True, min_lines=1, max_lines=3),
             "retrieval_mode": ft.Dropdown(
-                label="retrieval_mode",
                 options=[ft.DropdownOption(key=m, text=m) for m in modes],
                 value="lancedb_only",
             ),
             "lancedb_search_mode": ft.Dropdown(
-                label="lancedb_search_mode",
                 options=[ft.DropdownOption(key=m, text=m) for m in search_modes],
                 value="hybrid",
             ),
-            "top_k": ft.TextField(label="top_k", value="5", width=100, dense=True),
+            "top_k": ft.TextField(value="5", width=100, dense=True),
             "skip_query_builder": ft.Checkbox(label="skip_query_builder", value=False),
             "direct_retrieval": ft.Checkbox(label="direct_retrieval", value=False),
-            "expected_sources": _list_field("expected_sources (one doc_id per line)"),
-            "expected_chunks": _list_field("expected_chunks (one substring per line)"),
-            "required_keywords": _list_field("required_keywords (one per line)"),
-            "disallowed_keywords": _list_field("disallowed_keywords (one per line)"),
-            "expected_answer_points": _list_field("expected_answer_points (one per line)"),
-            "expected_entities": _list_field("expected_entities (one per line)"),
+            "expected_sources": _list_field("one doc_id per line"),
+            "expected_chunks": _list_field("one substring per line"),
+            "required_keywords": _list_field("one per line"),
+            "disallowed_keywords": _list_field("one per line"),
+            "expected_answer_points": _list_field("one per line"),
+            "expected_entities": _list_field("one per line"),
             "expected_mode": ft.Dropdown(
-                label="expected_mode",
                 options=[
                     ft.DropdownOption(key=_NONE, text="(none)"),
                     *(ft.DropdownOption(key=m, text=m) for m in modes),
                 ],
                 value=_NONE,
             ),
-            "user_cypher": ft.TextField(
-                label="user_cypher", multiline=True, min_lines=1, max_lines=4
-            ),
+            "user_cypher": ft.TextField(multiline=True, min_lines=1, max_lines=4),
         }
 
+        # Delete lives on each case card in the right column now; the form
+        # just saves (New/Edit both funnel through Save).
         save_button = ft.Button("Save case", icon=ft.Icons.SAVE, on_click=self._on_save_case)
-        delete_button = ft.TextButton(
-            "Delete case", icon=ft.Icons.DELETE_OUTLINE, on_click=self._on_delete
-        )
 
         self.form = ft.Column(
             controls=[
-                ft.Row([save_button, delete_button], spacing=8),
+                ft.Row([save_button], spacing=8),
                 *self._group("Identity", ["id", "question", "origin", "category", "notes"]),
                 *self._group(
                     "Retrieval settings",
@@ -179,56 +173,96 @@ class DatasetTab:
                 *self._group("Judge gold", ["expected_answer_points"]),
                 *self._group("KG gold", ["expected_entities", "expected_mode", "user_cypher"]),
             ],
-            scroll=ft.ScrollMode.AUTO,
-            expand=True,
-            spacing=6,
+            # Fields fill the form width so it reads as one clean column
+            # instead of ragged intrinsic-width inputs. No own scroll — the
+            # left column scrolls the whole editing surface.
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            spacing=8,
         )
 
+        # LEFT: dataset file selection + metadata + the case-edit form.
         left = ft.Container(
-            width=_LIST_W,
+            expand=1,
             content=ft.Column(
                 [
-                    ft.Row([self.dataset_dropdown, load_button], spacing=4, wrap=True),
-                    self.name_field,
-                    self.status_dropdown,
+                    labeled_field("Dataset", self.dataset_dropdown, trailing=browse_button),
+                    labeled_field("Status", self.status_dropdown),
                     self.status,
                     ft.Row([new_button, capture_button], wrap=True),
                     ft.Row(
-                        [self.gen_button, self.gen_count],
+                        [
+                            self.gen_button,
+                            ft.Text("count:", size=14, color=ft.Colors.GREY_300),
+                            self.gen_count,
+                        ],
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
+                    ft.Divider(),
+                    self.form,
+                ],
+                scroll=ft.ScrollMode.AUTO,
+                expand=True,
+                spacing=8,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            ),
+        )
+        # RIGHT: the case list (click a card or Edit to load it left; Delete
+        # removes it). Same card renderer the Run tab uses read-only.
+        right = ft.Container(
+            expand=1,
+            border=ft.Border.all(1, FRAME_BORDER_COLOR),
+            border_radius=6,
+            padding=12,
+            content=ft.Column(
+                [
+                    ft.Text("Cases", weight=ft.FontWeight.BOLD, size=13),
                     ft.Divider(height=1),
                     self.case_list,
                 ],
                 expand=True,
-                spacing=6,
+                spacing=8,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
-        )
-        right = ft.Container(
-            expand=True,
-            border=ft.Border.all(1, FRAME_BORDER_COLOR),
-            border_radius=6,
-            padding=12,
-            content=self.form,
         )
         body = ft.Row([left, right], expand=True, spacing=12)
         return ft.Column([view_header("Dataset"), body], expand=True, spacing=8)
 
     def _group(self, title: str, keys: list[str]) -> list[ft.Control]:
-        return [
-            ft.Text(title, weight=ft.FontWeight.BOLD, size=13),
-            *(self.f[k] for k in keys),
-            ft.Divider(height=1),
-        ]
+        # Each field gets its key as a caption via the shared labeled_field
+        # style (multiline boxes top-align their caption); checkboxes keep
+        # their own built-in label.
+        rows: list[ft.Control] = [ft.Text(title, weight=ft.FontWeight.BOLD, size=13)]
+        for k in keys:
+            control = self.f[k]
+            if isinstance(control, ft.Checkbox):
+                rows.append(control)
+            else:
+                rows.append(labeled_field(k, control))
+        rows.append(ft.Divider(height=1))
+        return rows
 
     # ---- load -------------------------------------------------------------
 
-    def _on_load(self, _e: ft.Event) -> None:
-        if not (self.dataset_dropdown and self.dataset_dropdown.value):
-            self._set_status("Pick or type a dataset path first.")
+    def _on_dataset_selected(self, _e: ft.Event) -> None:
+        """Selecting a dataset from the dropdown loads it immediately."""
+        v = self.dataset_dropdown.value if self.dataset_dropdown else None
+        if v:
+            self._load(Path(v))
+
+    async def _on_browse_clicked(self, _e: ft.Event) -> None:
+        """Browse for a gold-dataset JSON and load it automatically once picked."""
+        try:
+            files = await self.app.file_picker.pick_files(
+                dialog_title="Pick a gold-dataset JSON",
+                allowed_extensions=["json"],
+            )
+        except Exception as exc:  # broad: surface any picker failure in-line
+            self._set_status(f"file picker error: {exc}")
             return
-        self._load(Path(self.dataset_dropdown.value))
+        if files and files[0].path and self.dataset_dropdown is not None:
+            self.dataset_dropdown.value = files[0].path
+            self._load(Path(files[0].path))
 
     def _load(self, path: Path) -> None:
         from knowledge_agent.evaluation.models import load_dataset
@@ -242,8 +276,6 @@ class DatasetTab:
         self._cases = ds.cases
         self._path = path
         self._selected = None
-        if self.name_field is not None:
-            self.name_field.value = ds.name
         if self.status_dropdown is not None:
             self.status_dropdown.value = ds.status
         self._clear_form()
@@ -256,41 +288,16 @@ class DatasetTab:
     def _render_list(self) -> None:
         if self.case_list is None:
             return
-        if not self._cases:
-            self.case_list.controls = [ft.Text("No cases yet — New case to add one.", italic=True)]
-            return
-        rows: list[ft.Control] = []
-        for i, case in enumerate(self._cases):
-            selected = i == self._selected
-            rows.append(
-                ft.Container(
-                    on_click=lambda _e, idx=i: self._select(idx),
-                    padding=8,
-                    border_radius=4,
-                    bgcolor=ft.Colors.BLUE_GREY_900 if selected else None,
-                    content=ft.Column(
-                        [
-                            ft.Row(
-                                [
-                                    ft.Text(
-                                        case.id, weight=ft.FontWeight.BOLD, size=12, expand=True
-                                    ),
-                                    ft.Text(case.origin, size=10, color=ft.Colors.GREY_500),
-                                ]
-                            ),
-                            ft.Text(
-                                case.question,
-                                size=11,
-                                color=ft.Colors.GREY_400,
-                                max_lines=2,
-                                overflow=ft.TextOverflow.ELLIPSIS,
-                            ),
-                        ],
-                        spacing=1,
-                    ),
-                )
-            )
-        self.case_list.controls = rows
+        # Shared renderer (same cards the Run tab shows read-only); here it's
+        # editable — click a card or Edit to load it into the form, Delete to
+        # remove it.
+        self.case_list.controls = render_case_cards(
+            self._cases,
+            selected=self._selected,
+            on_edit=self._select,
+            on_delete=self._delete_case,
+            empty_hint="No cases yet — New case to add one.",
+        )
 
     def _select(self, idx: int) -> None:
         self._selected = idx
@@ -458,8 +465,6 @@ class DatasetTab:
 
         if self._dataset is None:
             self._dataset = EvalDataset()
-            if self.name_field is not None:
-                self.name_field.value = self._dataset.name
             if self.status_dropdown is not None:
                 self.status_dropdown.value = self._dataset.status
         self._dataset.cases.extend(cases)
@@ -490,9 +495,8 @@ class DatasetTab:
             return
         if self._dataset is None:
             self._dataset = EvalDataset()
-        # header edits ride along with any save
-        if self.name_field is not None:
-            self._dataset.name = (self.name_field.value or "").strip()
+        # Status edit rides along with any save (name is the filename now —
+        # the human `name` header field was dropped from the UI).
         if self.status_dropdown is not None:
             self._dataset.status = self.status_dropdown.value or "draft"
 
@@ -514,27 +518,32 @@ class DatasetTab:
         self._set_status(f"{verb} — saved {len(self._cases)} case(s) to {path.name}")
         self.app.page.update()
 
-    def _on_delete(self, _e: ft.Event) -> None:
+    def _delete_case(self, idx: int) -> None:
+        """Delete case `idx` (wired to each card's Delete button) and persist."""
         from knowledge_agent.evaluation.models import save_dataset
 
-        if self._dataset is None or self._selected is None:
-            self._set_status("Select a case to delete.")
+        if self._dataset is None or not (0 <= idx < len(self._dataset.cases)):
             return
         path = self._current_path()
         if path is None:
             self._set_status("No dataset path to save to.")
             return
-        del self._dataset.cases[self._selected]
+        del self._dataset.cases[idx]
         try:
             save_dataset(self._dataset, path)
         except Exception as exc:  # broad: I/O failure → status line
             self._set_status(f"save failed: {exc}")
             return
-        self._selected = None
+        # Keep the form + selection sensible after the delete.
+        if self._selected == idx:
+            self._selected = None
+            self._clear_form()
+        elif self._selected is not None and self._selected > idx:
+            self._selected -= 1
         self._cases = self._dataset.cases
-        self._clear_form()
         self._render_list()
         self._set_status(f"deleted — {len(self._cases)} case(s) remain")
+        self.app.page.update()
         self.app.page.update()
 
     # ---- helpers ----------------------------------------------------------
@@ -546,7 +555,7 @@ class DatasetTab:
 
 
 def _list_field(hint: str) -> ft.TextField:
-    return ft.TextField(label=hint, multiline=True, min_lines=2, max_lines=5)
+    return ft.TextField(hint_text=hint, multiline=True, min_lines=2, max_lines=5)
 
 
 def _lines(text: str | None) -> list[str]:

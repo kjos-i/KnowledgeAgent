@@ -40,7 +40,7 @@ from knowledge_agent.artifacts import (
     save_answer,
     save_chat,
 )
-from knowledge_agent.config import disable_env_file, get_settings
+from knowledge_agent.config import disable_env_file, get_settings, reset_after_key_change
 from knowledge_agent.graph import graph
 from knowledge_agent.gui.chat_panel import ChatPanel
 from knowledge_agent.gui.chat_router import (
@@ -61,6 +61,7 @@ from knowledge_agent.gui.config_store import (
     get_api_key,
     load_config,
     save_config,
+    switch_active_corpus,
 )
 from knowledge_agent.gui.right_panel import (
     MODE_FILE,
@@ -112,7 +113,10 @@ class GuiApp:
     evaluation_tab: EvaluationTab = field(init=False)
     file_picker: ft.FilePicker = field(init=False)
     _send_task: asyncio.Task | None = field(default=None, init=False)
-    _info_icons: list[ft.IconButton] = field(default_factory=list, init=False)
+    _info_icons: dict[str, list[ft.IconButton]] = field(default_factory=dict, init=False)
+    # Global corpus selector on the top tab row (built in build()).
+    corpus_dropdown: ft.Dropdown | None = field(default=None, init=False)
+    manage_button: ft.IconButton | None = field(default=None, init=False)
 
     # ----- diagnostic chatter ----------------------------------------------
 
@@ -129,14 +133,165 @@ class GuiApp:
 
     # ----- info-icon registry ----------------------------------------------
 
-    def register_info_icon(self, button: ft.IconButton) -> None:
-        """Track an `(i)` help icon so `set_info_icons_visible` can flip it."""
-        self._info_icons.append(button)
+    def register_info_icon(self, button: ft.IconButton, tier: str = "standard") -> None:
+        """Track an `(i)` help icon under its tier so `set_info_icons_visible`
+        can flip that tier live."""
+        self._info_icons.setdefault(tier, []).append(button)
 
-    def set_info_icons_visible(self, visible: bool) -> None:
-        """Show/hide every registered (i) help icon at once (live)."""
-        for button in self._info_icons:
+    def set_info_icons_visible(self, tier: str, visible: bool) -> None:
+        """Show/hide every registered (i) icon of one tier at once (live)."""
+        for button in self._info_icons.get(tier, []):
             button.visible = visible
+        self.page.update()
+
+    # ----- global corpus selection -----------------------------------------
+
+    def select_corpus(self, name: str) -> None:
+        """The one entry point for switching the app-wide active corpus.
+
+        Every selector — the top-bar dropdown, the Manage dialog, the
+        Library picker — routes here. Applies the switch (config + env, via
+        `switch_active_corpus`), clears cached backend clients, then
+        refreshes every tab and re-syncs the top-bar selector. A hard
+        failure leaves state unchanged and only bounces the selector back.
+        """
+        if not name or name == self.gui_config.active_corpus_name:
+            return
+        outcome = switch_active_corpus(self.gui_config, name)
+        if not outcome.ok:
+            if outcome.message:
+                self.chat_panel.append_system(outcome.message)
+            self._sync_corpus_selector()  # bounce selector back to the real active
+            self.page.update()
+            return
+        try:
+            reset_after_key_change()
+        except Exception as exc:
+            logger.warning("reset_after_key_change failed after corpus switch: %r", exc)
+        if outcome.message:
+            self.chat_panel.append_system(outcome.message)
+        self.refresh_after_corpus_change()
+        self.page.update()
+
+    def refresh_after_corpus_change(self) -> None:
+        """Broadcast an app-wide corpus switch to every surface that shows
+        or depends on the active corpus (best-effort per surface, so one
+        failing tab never blocks the rest)."""
+        self._sync_corpus_selector()
+        try:
+            view = self.library_tab.view
+            view.select_tab.refresh_after_switch()
+            view.refresh_ingest()
+        except Exception as exc:
+            logger.warning("library refresh after corpus switch failed: %r", exc)
+        try:
+            self.evaluation_tab.view.run_tab.refresh_active_corpus()
+        except Exception as exc:
+            logger.warning("eval refresh after corpus switch failed: %r", exc)
+
+    def _build_corpus_selector(self) -> tuple[ft.Dropdown, ft.IconButton]:
+        """Build the global corpus dropdown + `⚙ Manage` button for the top
+        tab row. Options / value are filled by `_sync_corpus_selector`.
+
+        NOTE: Flet 0.85's `Dropdown` takes `on_select` (NOT `on_change`) and
+        rejects `hint_text` / `text_size` — mirror the other Dropdowns in the
+        app (e.g. the config editor's sub-label dropdown). Extracted so
+        `test_app` can construct it and catch a bad kwarg without launching
+        Flet (build() itself is not unit-tested)."""
+        # No floating `label` — the "Selected corpus:" caption sits inline to
+        # the LEFT of the dropdown (added in build()'s top row).
+        dropdown = ft.Dropdown(
+            width=240,
+            on_select=self._on_corpus_dropdown_changed,
+        )
+        manage = ft.IconButton(
+            icon=ft.Icons.SETTINGS,
+            tooltip="Manage corpora",
+            on_click=self._open_manage_dialog,
+        )
+        return dropdown, manage
+
+    def _sync_corpus_selector(self) -> None:
+        """Rebuild the top-bar dropdown's options + value from gui_config."""
+        if self.corpus_dropdown is None:
+            return
+        self.corpus_dropdown.options = [
+            ft.DropdownOption(key=c.name, text=c.name) for c in self.gui_config.corpora
+        ]
+        self.corpus_dropdown.value = self.gui_config.active_corpus_name
+
+    def _on_corpus_dropdown_changed(self, e: ft.Event) -> None:
+        if self.corpus_dropdown is not None and self.corpus_dropdown.value:
+            self.select_corpus(self.corpus_dropdown.value)
+
+    def _open_manage_dialog(self, e: ft.Event) -> None:
+        """Open the 'Manage corpora' dialog: the active corpus's read-only
+        card (notes #34 — paths, layers, extractor, chunking, **embedder +
+        LLM**) plus Rename / Relocate / Remove / Refresh.
+
+        The actions reach across to the Library → Select handlers (single
+        source of truth — they act on the active corpus, not the Library
+        picker). Each closes this dialog first so its own prompt / picker
+        isn't stacked underneath.
+        """
+        from knowledge_agent.gui.library.corpus_card import build_corpus_card
+
+        select_tab = self.library_tab.view.select_tab
+
+        def _act(handler):
+            async def _run(ev: ft.Event) -> None:
+                self.page.pop_dialog()  # close Manage before the action's own dialog
+                result = handler(ev)
+                if asyncio.iscoroutine(result):  # on_relocate_clicked is async
+                    await result
+
+            return _run
+
+        has_active = bool(self.gui_config.active_corpus_name)
+        buttons = ft.Row(
+            spacing=8,
+            wrap=True,
+            controls=[
+                ft.Button(
+                    content=ft.Text("Rename"),
+                    on_click=_act(select_tab.on_rename_clicked),
+                    disabled=not has_active,
+                ),
+                ft.Button(
+                    content=ft.Text("Relocate"),
+                    on_click=_act(select_tab.on_relocate_clicked),
+                    disabled=not has_active,
+                ),
+                ft.Button(
+                    content=ft.Text("Remove"),
+                    on_click=_act(select_tab.on_remove_clicked),
+                    disabled=not has_active,
+                ),
+                ft.Button(
+                    content=ft.Text("Refresh"),
+                    on_click=_act(select_tab.on_refresh_clicked),
+                ),
+            ],
+        )
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Manage corpora"),
+            content=ft.Container(
+                width=520,
+                content=ft.Column(
+                    tight=True,
+                    scroll=ft.ScrollMode.AUTO,
+                    spacing=10,
+                    controls=[
+                        build_corpus_card(self),
+                        ft.Divider(),
+                        buttons,
+                    ],
+                ),
+            ),
+            actions=[ft.TextButton("Close", on_click=lambda _c: self.page.pop_dialog())],
+        )
+        self.page.show_dialog(dialog)
         self.page.update()
 
     # ----- API-key preflight ------------------------------------------------
@@ -570,11 +725,29 @@ class GuiApp:
             ],
             expand=True,
         )
+        # Global corpus selector on the SAME line as the tabs — the active
+        # corpus is app-wide, so its selector belongs in global chrome, not
+        # buried in Library → Select. A spacer pushes it to the right;
+        # `⚙ Manage` opens the corpus-management dialog. Both the dropdown
+        # and the dialog route through `select_corpus` (single source).
+        self.corpus_dropdown, self.manage_button = self._build_corpus_selector()
+        self._sync_corpus_selector()
+        top_row = ft.Row(
+            controls=[
+                tab_bar,
+                ft.Container(expand=True),  # spacer → right-align the selector
+                ft.Text("Selected corpus:", size=13),
+                self.corpus_dropdown,
+                self.manage_button,
+            ],
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=8,
+        )
         tabs = ft.Tabs(
             length=3,
             selected_index=0,
             content=ft.Column(
-                controls=[tab_bar, tab_bodies],
+                controls=[top_row, tab_bodies],
                 expand=True,
                 spacing=0,
             ),

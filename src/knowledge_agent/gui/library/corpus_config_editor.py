@@ -59,8 +59,11 @@ from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     PANEL_BG,
     centered_label,
+    labeled_field,
 )
+from knowledge_agent.gui._widgets.info_icon import info_icon
 from knowledge_agent.gui.library.create_new_dataset import _write_corpus_toml
+from knowledge_agent.gui.library.session_state import load_session, update_draft
 from knowledge_agent.gui.settings.llm_tab import LLM_AVAILABLE_MODELS
 from knowledge_agent.kg.corpus_config import (
     CorpusConfig,
@@ -78,6 +81,8 @@ from knowledge_agent.kg.schema import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from knowledge_agent.gui.app import GuiApp
 
 
@@ -132,13 +137,22 @@ class CorpusConfigEditor:
         self.app = app
         self.status: ft.Text | None = None
         # In-memory config being edited + which corpus it's for. Toggles
-        # mutate this in memory only — nothing writes to disk until an
-        # Ingest action fires. `_baseline_config` snapshots the on-disk
-        # state at load time so we can detect pending changes and offer
-        # a Discard button that reverts to it.
+        # mutate this in memory only — nothing writes to corpus.toml until
+        # an Ingest action fires. `_baseline_config` snapshots the on-disk
+        # (last-ingested) state at load time so we can detect pending
+        # changes and offer a Discard button that reverts to it.
+        #
+        # Unsaved edits ARE persisted, though: every mutation mirrors the
+        # draft to the corpus's session sidecar (see `session_state`), so
+        # closing the app mid-edit and reopening the corpus restores the
+        # draft — Discard button lit, pending-changes summary intact.
         self._corpus_config: CorpusConfig | None = None
         self._baseline_config: CorpusConfig | None = None
         self._loaded_for_corpus: str | None = None
+        # Fired after the draft is (re)persisted, so a sibling view (the
+        # Select tab's corpus card) can refresh its "changed since ingest"
+        # section live. Wired by `LibraryView`.
+        self.on_draft_changed: Callable[[], None] | None = None
 
         # Dirty-state indicator + Discard button — created in
         # `_create_controls`, mounted in `build()`.
@@ -285,7 +299,6 @@ class CorpusConfigEditor:
 
         # ----- Labels and sub-labels (per-run args) -----
         self.main_label_dropdown = ft.Dropdown(
-            label="Main label",
             value=DOCUMENT_LABEL,
             options=[ft.DropdownOption(key=lbl, text=lbl) for lbl in MAIN_LABELS],
             border=ft.InputBorder.OUTLINE,
@@ -294,7 +307,6 @@ class CorpusConfigEditor:
             on_select=self._on_main_label_changed,
         )
         self.sub_label_dropdown = ft.Dropdown(
-            label="Sub-label",
             value=_SUB_NONE_KEY,
             options=[
                 ft.DropdownOption(key=_SUB_NONE_KEY, text=_SUB_NONE_TEXT),
@@ -469,7 +481,6 @@ class CorpusConfigEditor:
         # whenever any non-HunFlair2 extractor is selected (see
         # `_refresh_extractor_groups`).
         self.entity_types_field = ft.TextField(
-            label="Types to extract (comma-separated)",
             hint_text="e.g. GENE, DISEASE, CHEMICAL",
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
@@ -501,7 +512,6 @@ class CorpusConfigEditor:
             for m in LLM_AVAILABLE_MODELS.get(self.app.gui_config.llm_provider, ())
         ]
         self.entity_extractor_model_field = ft.Dropdown(
-            label="entity_extractor_model",
             value="claude-haiku-4-5-20251001",
             options=list(provider_options),
             editable=True,
@@ -528,7 +538,6 @@ class CorpusConfigEditor:
 
         # ----- Triples (L8) LLM adapter — model + temperature -----
         self.triples_extractor_model_field = ft.Dropdown(
-            label="triples_extractor_model",
             value="claude-haiku-4-5-20251001",
             options=list(provider_options),
             editable=True,
@@ -577,23 +586,15 @@ class CorpusConfigEditor:
                         color=ft.Colors.GREY_500,
                         italic=True,
                     ),
-                    self.entity_extractor_model_field,
-                    ft.Row(
-                        controls=[
-                            ft.Text(
-                                "entity_extractor_temperature",
-                                size=12,
-                                color=ft.Colors.GREY_300,
-                                width=220,
-                            ),
-                            ft.Container(
-                                content=self.entity_extractor_temperature_slider,
-                                expand=True,
-                            ),
-                            self.entity_extractor_temperature_readout,
-                        ],
-                        spacing=8,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    # model on its own line, temperature below it.
+                    labeled_field(
+                        "entity_extractor_model",
+                        self.entity_extractor_model_field,
+                    ),
+                    labeled_field(
+                        "temperature",
+                        self.entity_extractor_temperature_slider,
+                        trailing=self.entity_extractor_temperature_readout,
                     ),
                 ],
             ),
@@ -654,7 +655,6 @@ class CorpusConfigEditor:
 
         # ----- Chunks (L5) per-corpus fields -----
         self.chunker_strategy_dropdown = ft.Dropdown(
-            label="chunker_strategy",
             value="hybrid",
             options=[
                 ft.DropdownOption(key="hybrid", text="hybrid"),
@@ -666,7 +666,6 @@ class CorpusConfigEditor:
             on_select=self._on_chunker_strategy_changed,
         )
         self.chunk_max_tokens_field = ft.TextField(
-            label="chunk_max_tokens",
             value="512",
             hint_text="e.g. 512 (HybridChunker only)",
             border=ft.InputBorder.OUTLINE,
@@ -709,7 +708,6 @@ class CorpusConfigEditor:
             ),
         )
         self.images_scale_field = ft.TextField(
-            label="images_scale (Docling render scale)",
             value="1.0",
             hint_text="e.g. 1.0 (higher = more detail, slower)",
             border=ft.InputBorder.OUTLINE,
@@ -745,7 +743,6 @@ class CorpusConfigEditor:
             ),
         )
         self.min_figure_bytes_field = ft.TextField(
-            label="min_figure_bytes",
             value="2048",
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
@@ -778,7 +775,6 @@ class CorpusConfigEditor:
 
         # ----- Cross-doc thresholds -----
         self.cross_doc_threshold_field = ft.TextField(
-            label="cross_doc threshold (min shared entities)",
             value="2",
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
@@ -786,7 +782,6 @@ class CorpusConfigEditor:
             on_blur=self._on_cross_doc_threshold_blur,
         )
         self.cross_doc_xrefs_threshold_field = ft.TextField(
-            label="cross_doc_xrefs threshold (min shared xrefs)",
             value="2",
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
@@ -795,6 +790,25 @@ class CorpusConfigEditor:
         )
 
     # ----- public API -------------------------------------------------------
+
+    def _section_title(self, label: str, help_text: str) -> ft.Control:
+        """Section header: the label plus an `(i)` whose dialog carries the
+        section's help prose.
+
+        The descriptive text that used to sit inline under each section is
+        moved into this dialog to keep the panel uncluttered; the `(i)`
+        obeys the global teaching-mode toggle (Settings → App). Read-only
+        VALUE displays (allowed_types, the process-wide globals) stay inline
+        — only the explanatory prose moves here.
+        """
+        return ft.Row(
+            controls=[
+                ft.Text(label),
+                info_icon(self.app, title=label, text=help_text),
+            ],
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
 
     def build(self) -> ft.Control:
         """Load the active corpus's config (if a different one from the
@@ -845,25 +859,30 @@ class CorpusConfigEditor:
                 self._build_ingest_infrastructure_block(),
                 # ---- Section 1: Labels and sub-labels (per-run) ----
                 ft.ExpansionTile(
-                    title=ft.Text("Labels and sub-labels"),
+                    title=self._section_title(
+                        "Labels and sub-labels",
+                        "Applied to every file in the next ingest. Not "
+                        "persisted to corpus.toml — pick fresh each run.\n\n"
+                        "allowed_types (shown below, read-only): default = all "
+                        "14 sub-labels. Hand-edit corpus.toml to restrict this "
+                        "corpus's accepted sub-labels.",
+                    ),
                     subtitle=self.labels_subtitle,
                     expanded=True,
                     controls=[
-                        ft.Text(
-                            "Applied to every file in the next ingest. "
-                            "Not persisted to corpus.toml — pick fresh "
-                            "each run.",
-                            size=11,
-                            color=ft.Colors.GREY_500,
-                            italic=True,
-                        ),
-                        ft.Row(
-                            controls=[
+                        ft.Container(
+                            padding=ft.Padding.symmetric(vertical=6),
+                            content=labeled_field(
+                                "Main label",
                                 self.main_label_dropdown,
+                            ),
+                        ),
+                        ft.Container(
+                            padding=ft.Padding.symmetric(vertical=6),
+                            content=labeled_field(
+                                "Sub-label",
                                 self.sub_label_dropdown,
-                            ],
-                            spacing=8,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
                         ),
                         self.sub_label_hint,
                         self.overwrite_checkbox,
@@ -887,15 +906,6 @@ class CorpusConfigEditor:
                                         color=ft.Colors.GREY_400,
                                     ),
                                     self.allowed_types_display,
-                                    ft.Text(
-                                        "Default = all 14 sub-labels. "
-                                        "Hand-edit corpus.toml to "
-                                        "restrict this corpus's accepted "
-                                        "sub-labels.",
-                                        size=10,
-                                        color=ft.Colors.GREY_500,
-                                        italic=True,
-                                    ),
                                 ],
                             ),
                         ),
@@ -903,19 +913,15 @@ class CorpusConfigEditor:
                 ),
                 # ---- Section 2: openalex_papers (L1–L4) ----
                 ft.ExpansionTile(
-                    title=ft.Text("openalex_papers (L1–L4)"),
+                    title=self._section_title(
+                        "openalex_papers (L1–L4)",
+                        "L1–L4 bundle: citation + author + venue + topic graph "
+                        "from a single OpenAlex API lookup per doc. Turn on for "
+                        "scientific papers.",
+                    ),
                     subtitle=self.openalex_subtitle,
                     controls=[
                         self.openalex_checkbox,
-                        ft.Text(
-                            "L1–L4 bundle: citation + author + venue + "
-                            "topic graph from a single OpenAlex API "
-                            "lookup per doc. Turn on for scientific "
-                            "papers.",
-                            size=11,
-                            color=ft.Colors.GREY_500,
-                            italic=True,
-                        ),
                         _globals_block(
                             [
                                 ("openalex_mailto", self._read_global("openalex_mailto")),
@@ -925,25 +931,24 @@ class CorpusConfigEditor:
                 ),
                 # ---- Section 3: Chunks (L5) ----
                 ft.ExpansionTile(
-                    title=ft.Text("Chunks (L5)"),
+                    title=self._section_title(
+                        "Chunks (L5)",
+                        "Per-chunk :Chunk nodes joinable with LanceDB via "
+                        "`chunk_id`. Required for retrieval — effectively "
+                        "always on.",
+                    ),
                     subtitle=self.chunks_subtitle,
                     controls=[
                         self.chunks_checkbox,
-                        ft.Text(
-                            "Per-chunk :Chunk nodes joinable with LanceDB "
-                            "via `chunk_id`. Required for retrieval — "
-                            "effectively always on.",
-                            size=11,
-                            color=ft.Colors.GREY_500,
-                            italic=True,
+                        ft.Container(
+                            padding=ft.Padding.symmetric(vertical=6),
+                            content=labeled_field(
+                                "Chunker strategy", self.chunker_strategy_dropdown
+                            ),
                         ),
-                        ft.Row(
-                            controls=[
-                                self.chunker_strategy_dropdown,
-                                self.chunk_max_tokens_field,
-                            ],
-                            spacing=8,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ft.Container(
+                            padding=ft.Padding.symmetric(vertical=6),
+                            content=labeled_field("Chunk max tokens", self.chunk_max_tokens_field),
                         ),
                         self.merge_peers_checkbox,
                         ft.Row(
@@ -954,7 +959,13 @@ class CorpusConfigEditor:
                             spacing=16,
                             wrap=True,
                         ),
-                        self.images_scale_field,
+                        # Fields use the app-wide `Label: [input]` row style;
+                        # padding gives them more breathing room than the
+                        # tightly-stacked checkboxes.
+                        ft.Container(
+                            padding=ft.Padding.symmetric(vertical=6),
+                            content=labeled_field("Images scale", self.images_scale_field),
+                        ),
                         ft.Row(
                             controls=[
                                 self.extract_figures_checkbox,
@@ -963,7 +974,10 @@ class CorpusConfigEditor:
                             spacing=16,
                             wrap=True,
                         ),
-                        self.min_figure_bytes_field,
+                        ft.Container(
+                            padding=ft.Padding.symmetric(vertical=6),
+                            content=labeled_field("Min figure bytes", self.min_figure_bytes_field),
+                        ),
                         self.optimize_indexes_checkbox,
                         _globals_block(
                             [
@@ -982,16 +996,13 @@ class CorpusConfigEditor:
                 ),
                 # ---- Section 4: Entities (L6) ----
                 ft.ExpansionTile(
-                    title=ft.Text("Entities (L6)"),
+                    title=self._section_title(
+                        "Entities (L6)",
+                        "Chunk-level entity extraction. Requires the chunks layer.",
+                    ),
                     subtitle=self.entities_subtitle,
                     controls=[
                         self.entities_checkbox,
-                        ft.Text(
-                            "Chunk-level entity extraction. Requires the chunks layer.",
-                            size=11,
-                            color=ft.Colors.GREY_500,
-                            italic=True,
-                        ),
                         # Multi-extractor: select any subset + order them
                         # (top = base, owns overlapping spans; later ones
                         # add only spans the earlier ones didn't find).
@@ -1007,8 +1018,12 @@ class CorpusConfigEditor:
                         # Shared entity_types field + Replace/Add mode.
                         # Label/disabled reshape by set membership (see
                         # `_refresh_extractor_groups`). Kept at section
-                        # root so each stays a single widget.
-                        self.entity_types_field,
+                        # root so each stays a single widget. Spacer Row
+                        # pins the bare field left (else the column centres it).
+                        ft.Container(
+                            padding=ft.Padding.symmetric(vertical=6),
+                            content=labeled_field("Types to extract", self.entity_types_field),
+                        ),
                         self.entity_types_mode_radio,
                         # Per-extractor extras — the three groups toggle
                         # `.visible` by set membership (a group shows if
@@ -1022,21 +1037,17 @@ class CorpusConfigEditor:
                 ),
                 # ---- Section 5: Ontology linking (L7) ----
                 ft.ExpansionTile(
-                    title=ft.Text("Ontology linking (L7)"),
+                    title=self._section_title(
+                        "Ontology linking (L7)",
+                        "Canonicalise entities against curated vocabularies "
+                        "(MeSH, GO, ...). Requires the entities layer. Each "
+                        "ontology must first be installed via the Installs "
+                        "tab; the checkboxes below only toggle whether the "
+                        "already-installed ontology gets linked against for "
+                        "this corpus.",
+                    ),
                     subtitle=self.ontology_subtitle,
                     controls=[
-                        ft.Text(
-                            "Canonicalise entities against curated "
-                            "vocabularies (MeSH, GO, ...). Requires the "
-                            "entities layer. Each ontology must first be "
-                            "installed via the Installs tab; the "
-                            "checkboxes below only toggle whether the "
-                            "already-installed ontology gets linked "
-                            "against for this corpus.",
-                            size=11,
-                            color=ft.Colors.GREY_500,
-                            italic=True,
-                        ),
                         # Nested collapsible sub-folder — 18 ontology
                         # rows with checkbox + matching Dropdown each.
                         ft.ExpansionTile(
@@ -1046,93 +1057,92 @@ class CorpusConfigEditor:
                             ],
                         ),
                         # Cross-ontology equivalence edges (xrefs)
-                        ft.Text(
-                            "Cross-ontology equivalence edges (xrefs)",
-                            size=12,
-                            weight=ft.FontWeight.BOLD,
-                            color=ft.Colors.GREY_400,
-                        ),
-                        ft.Text(
-                            "Materialise `:<X>_XREF` edges between term "
-                            "nodes across ontologies (MeSH ↔ MONDO, "
-                            "MONDO ↔ ChEBI, ...). L10 cross-doc xrefs "
-                            'requires this be set to "Materialize '
-                            'edges now".',
-                            size=11,
-                            color=ft.Colors.GREY_500,
-                            italic=True,
+                        ft.Row(
+                            controls=[
+                                ft.Text(
+                                    "Cross-ontology equivalence edges (xrefs)",
+                                    size=12,
+                                    weight=ft.FontWeight.BOLD,
+                                    color=ft.Colors.GREY_400,
+                                ),
+                                info_icon(
+                                    self.app,
+                                    title="Cross-ontology equivalence edges (xrefs)",
+                                    text=(
+                                        "Materialise `:<X>_XREF` edges between term nodes "
+                                        "across ontologies (MeSH ↔ MONDO, MONDO ↔ ChEBI, "
+                                        "...). L10 cross-doc xrefs requires this be set to "
+                                        '"Materialize edges now".'
+                                    ),
+                                ),
+                            ],
+                            spacing=4,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
                         self.xrefs_radio,
                     ],
                 ),
                 # ---- Section 6: Triples (L8) ----
                 ft.ExpansionTile(
-                    title=ft.Text("Triples (L8)"),
+                    title=self._section_title(
+                        "Triples (L8)",
+                        "LLM-extracted (subject, predicate, object) edges "
+                        "between entities per chunk. Requires the entities "
+                        "layer. The 15 predicate types (INHIBITS / ACTIVATES "
+                        "/ ...) are fixed at the code level.",
+                    ),
                     subtitle=self.triples_subtitle,
                     controls=[
                         self.triples_checkbox,
-                        ft.Text(
-                            "LLM-extracted (subject, predicate, object) "
-                            "edges between entities per chunk. Requires "
-                            "the entities layer. The 15 predicate types "
-                            "(INHIBITS / ACTIVATES / ...) are fixed at "
-                            "the code level.",
-                            size=11,
-                            color=ft.Colors.GREY_500,
-                            italic=True,
+                        # model on its own line, temperature below it.
+                        labeled_field(
+                            "triples_extractor_model",
+                            self.triples_extractor_model_field,
                         ),
-                        self.triples_extractor_model_field,
-                        ft.Row(
-                            controls=[
-                                ft.Text(
-                                    "triples_extractor_temperature",
-                                    size=12,
-                                    color=ft.Colors.GREY_300,
-                                    width=220,
-                                ),
-                                ft.Container(
-                                    content=self.triples_extractor_temperature_slider,
-                                    expand=True,
-                                ),
-                                self.triples_extractor_temperature_readout,
-                            ],
-                            spacing=8,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        labeled_field(
+                            "temperature",
+                            self.triples_extractor_temperature_slider,
+                            trailing=self.triples_extractor_temperature_readout,
                         ),
                     ],
                 ),
                 # ---- Section 7: Cross-doc (L9) ----
                 ft.ExpansionTile(
-                    title=ft.Text("Cross-doc (L9)"),
+                    title=self._section_title(
+                        "Cross-doc (L9)",
+                        ":RELATED_TO edges between docs sharing ≥ N L6 "
+                        "entities. Requires the entities layer.",
+                    ),
                     subtitle=self.cross_doc_subtitle,
                     controls=[
                         self.cross_doc_checkbox,
-                        ft.Text(
-                            ":RELATED_TO edges between docs sharing ≥ N "
-                            "L6 entities. Requires the entities layer.",
-                            size=11,
-                            color=ft.Colors.GREY_500,
-                            italic=True,
+                        ft.Container(
+                            padding=ft.Padding.symmetric(vertical=6),
+                            content=labeled_field(
+                                "Threshold (min shared entities)",
+                                self.cross_doc_threshold_field,
+                            ),
                         ),
-                        self.cross_doc_threshold_field,
                     ],
                 ),
                 # ---- Section 8: Cross-doc xrefs (L10) ----
                 ft.ExpansionTile(
-                    title=ft.Text("Cross-doc xrefs (L10)"),
+                    title=self._section_title(
+                        "Cross-doc xrefs (L10)",
+                        ":RELATED_BY_XREF edges between docs sharing ≥ N "
+                        "canonical concepts (via xref equivalence). Requires "
+                        'entities + xrefs="use".',
+                    ),
                     subtitle=self.cross_doc_xrefs_subtitle,
                     controls=[
                         self.cross_doc_xrefs_checkbox,
-                        ft.Text(
-                            ":RELATED_BY_XREF edges between docs sharing "
-                            "≥ N canonical concepts (via xref "
-                            "equivalence). Requires entities + "
-                            'xrefs="use".',
-                            size=11,
-                            color=ft.Colors.GREY_500,
-                            italic=True,
+                        ft.Container(
+                            padding=ft.Padding.symmetric(vertical=6),
+                            content=labeled_field(
+                                "Threshold (min shared xrefs)",
+                                self.cross_doc_xrefs_threshold_field,
+                            ),
                         ),
-                        self.cross_doc_xrefs_threshold_field,
                     ],
                 ),
                 self.status,
@@ -1153,6 +1163,21 @@ class CorpusConfigEditor:
             return
         if active_name != self._loaded_for_corpus:
             self._reload_for_active_corpus(active_name)
+
+    def invalidate(self) -> None:
+        """Drop the load cache so the next `build()` / `ensure_loaded()`
+        reloads from disk.
+
+        The cache is keyed by corpus NAME (`_loaded_for_corpus`), so a
+        plain corpus SWITCH already reloads. This covers the cases the
+        name-key misses: a relocate (same name, new corpus.toml path)
+        and the rebuild `LibraryView.refresh_ingest` forces after any
+        corpus mutation. In-memory edits aren't lost on reload — every
+        edit is mirrored to the corpus's session sidecar, so the reload
+        restores that corpus's own draft (one corpus's unsaved config is
+        never carried onto another).
+        """
+        self._loaded_for_corpus = None
 
     def _reload_for_active_corpus(self, name: str) -> None:
         """Load the active corpus's config from its `corpus.toml` and
@@ -1186,7 +1211,14 @@ class CorpusConfigEditor:
         # the two.
         self._baseline_config = self._corpus_config.model_copy(deep=True)
         self._loaded_for_corpus = name
+        # Restore any unsaved draft from the session sidecar so reopening a
+        # corpus resumes mid-edit: the baseline stays the on-disk config
+        # and the draft rides on top → Discard button lit + pending-changes
+        # summary intact.
+        self._restore_draft(entry.corpus_config_path)
         self._populate_controls()
+        self._refresh_availability()
+        self._refresh_dirty_indicator()
         self.status.value = ""
 
     def _populate_controls(self) -> None:
@@ -1494,9 +1526,13 @@ class CorpusConfigEditor:
         # subsections, etc.) becomes the new baseline.
         self._corpus_config = validated
         self._baseline_config = validated.model_copy(deep=True)
+        # The draft is now the saved baseline — drop the persisted draft so
+        # a later reopen doesn't resurrect stale "pending" changes.
+        self._clear_draft()
         self._refresh_subtitles()
         self._refresh_availability()
         self._refresh_dirty_indicator()
+        self._notify_draft_changed()
         if self.status is not None:
             self.status.value = "saved"
             self.app.page.update()
@@ -1645,6 +1681,16 @@ class CorpusConfigEditor:
         self._corpus_config = self._corpus_config.model_copy(
             update={"layers": new_layers},
         )
+        # Turning the entities layer ON needs a valid [entities] section: the
+        # model validator refuses `layers.entities=true` with no section (it
+        # would have no extractor to dispatch to). Seed one from the current
+        # extractor selection (defaults to ["llm"]) so the config stays valid
+        # and the extractor UI shows the default — otherwise the invalid state
+        # sits in the draft and only surfaces at the next ingest / bulk-op
+        # pre-flight ("layers.entities=true requires an [entities] section").
+        if field_name == "entities" and new_value and self._corpus_config.entities is None:
+            self._commit_extractors()  # builds EntityConfig + runs _after_mutation
+            return
         self._after_mutation()
 
     def _on_xrefs_changed(self, e: ft.Event) -> None:
@@ -1912,16 +1958,13 @@ class CorpusConfigEditor:
                     ],
                 ),
             )
-        note = ft.Text(
-            "Process-wide (shared across all corpora, not per-corpus). "
-            "Edit via `.env` / global Settings; the Ollama daemon probe "
-            "uses its own timeout=1.0 override.",
-            size=10,
-            color=ft.Colors.GREY_500,
-            italic=True,
-        )
         return ft.ExpansionTile(
-            title=ft.Text("Ingest infrastructure (read-only)"),
+            title=self._section_title(
+                "Ingest infrastructure (read-only)",
+                "Process-wide (shared across all corpora, not per-corpus). "
+                "Edit via `.env` / global Settings; the Ollama daemon probe "
+                "uses its own timeout=1.0 override.",
+            ),
             controls=[
                 ft.Container(
                     padding=ft.Padding.symmetric(
@@ -1932,7 +1975,7 @@ class CorpusConfigEditor:
                     border_radius=4,
                     content=ft.Column(
                         spacing=3,
-                        controls=[*rows, ft.Container(height=4), note],
+                        controls=list(rows),
                     ),
                 ),
             ],
@@ -2030,12 +2073,11 @@ class CorpusConfigEditor:
             self.entities_hunflair2_group.visible = hunflair2_on
 
         if self.entity_types_field is not None:
+            # HunFlair2-only selection ignores entity_types: grey the field out.
+            # The "entity_types has no effect here" note in the HunFlair2 group
+            # (visible whenever HunFlair2 is selected) explains why, so the
+            # field no longer restates it via a dynamic label.
             self.entity_types_field.disabled = not types_consumed
-            self.entity_types_field.label = (
-                "Types to extract (comma-separated)"
-                if types_consumed
-                else "Types to extract (ignored by HunFlair2)"
-            )
         # Replace/Add only affects adapters with DEFAULT_LABELS (GLiNERs).
         if self.entity_types_mode_radio is not None:
             self.entity_types_mode_radio.visible = gliner_on
@@ -2231,11 +2273,64 @@ class CorpusConfigEditor:
     # ============ Cross-cutting helpers (staging, deps, dirty, discard) =====
 
     def _after_mutation(self) -> None:
-        """Run after every in-memory mutation — refresh derived UI."""
+        """Run after every in-memory mutation — refresh derived UI and
+        mirror the draft to the session sidecar so it survives a restart."""
         self._refresh_subtitles()
         self._refresh_availability()
         self._refresh_dirty_indicator()
+        self._persist_draft()
         self.app.page.update()
+
+    # ----- draft persistence (session sidecar) ------------------------------
+
+    def _active_corpus_toml_path(self):
+        """The loaded corpus's `corpus.toml` path, or None when unresolved.
+
+        Used to locate the session sidecar (which lives beside it)."""
+        name = self._loaded_for_corpus
+        if name is None:
+            return None
+        entry = self._find_active_entry(name)
+        return entry.corpus_config_path if entry is not None else None
+
+    def _persist_draft(self) -> None:
+        """Mirror the current draft to the sidecar — or clear it when the
+        draft equals the saved baseline — then notify any listener."""
+        path = self._active_corpus_toml_path()
+        if path is None:
+            return
+        if self.is_dirty() and self._corpus_config is not None:
+            update_draft(path, self._corpus_config.model_dump(mode="json"))
+        else:
+            update_draft(path, None)
+        self._notify_draft_changed()
+
+    def _clear_draft(self) -> None:
+        """Drop the persisted draft (the draft now equals the baseline)."""
+        path = self._active_corpus_toml_path()
+        if path is not None:
+            update_draft(path, None)
+
+    def _restore_draft(self, corpus_toml_path) -> None:
+        """Override `_corpus_config` with the persisted unsaved draft, if any.
+
+        Called right after the baseline is loaded. A draft that no longer
+        validates (e.g. after a schema upgrade) is dropped and its sidecar
+        entry cleared, falling back to the baseline.
+        """
+        session = load_session(corpus_toml_path)
+        if session.draft_config is None:
+            return
+        try:
+            self._corpus_config = CorpusConfig.model_validate(session.draft_config)
+        except ValidationError:
+            logger.info("discarding incompatible persisted draft at %s", corpus_toml_path)
+            update_draft(corpus_toml_path, None)
+
+    def _notify_draft_changed(self) -> None:
+        """Tell the wired listener (Select card) the draft moved."""
+        if self.on_draft_changed is not None:
+            self.on_draft_changed()
 
     def is_dirty(self) -> bool:
         """True when in-memory config differs from the on-disk baseline."""
@@ -2251,11 +2346,18 @@ class CorpusConfigEditor:
             self.discard_button.disabled = not dirty
 
     def _refresh_availability(self) -> None:
-        """Grey out controls whose cross-field dependencies aren't met.
+        """Grey out controls that can't currently apply. Two kinds:
 
-        Uses `label_style` (not `disabled=True`) so click still fires
-        on_change — that lets us show the warning dialog + revert. A
-        truly disabled control wouldn't fire.
+        1. Cross-field *dependency* greying on the layer TOGGLE checkboxes
+           (e.g. entities requires chunks) — uses `label_style`, NOT
+           `disabled=True`, so the click still fires `on_change` and we can
+           show the warning dialog + revert.
+        2. Layer-off greying of a section's SUB-controls when its own toggle
+           is off — uses `disabled=True` (no revert needed), so it's clear
+           those settings won't apply. The toggle itself stays enabled, so
+           the layer can be turned back on. `entity_types_field` / its mode
+           radio are intentionally left to `_refresh_extractor_groups`,
+           which owns their disabled/visible state by extractor membership.
         """
         cfg = self._corpus_config
         if cfg is None:
@@ -2303,6 +2405,43 @@ class CorpusConfigEditor:
                 tip = ""
             _grey(self.cross_doc_xrefs_checkbox, ok, tip)
 
+        # ---- Layer-off greying of each section's sub-controls ----
+        def _set_disabled(controls: list[ft.Control | None], disabled: bool) -> None:
+            for control in controls:
+                if control is not None:
+                    control.disabled = disabled
+
+        _set_disabled(
+            [
+                self.chunker_strategy_dropdown,
+                self.chunk_max_tokens_field,
+                self.merge_peers_checkbox,
+                self.enable_pdf_ocr_checkbox,
+                self.enable_image_ocr_checkbox,
+                self.images_scale_field,
+                self.extract_figures_checkbox,
+                self.embed_images_checkbox,
+                self.min_figure_bytes_field,
+                self.optimize_indexes_checkbox,
+            ],
+            not chunks_on,
+        )
+        _set_disabled(
+            [
+                self.extractor_rows_column,
+                self.entities_llm_group,
+                self.entities_gliner_group,
+                self.entities_hunflair2_group,
+            ],
+            not entities_on,
+        )
+        _set_disabled(
+            [self.triples_extractor_model_field, self.triples_extractor_temperature_slider],
+            not cfg.layers.triples,
+        )
+        _set_disabled([self.cross_doc_threshold_field], not cfg.layers.cross_doc)
+        _set_disabled([self.cross_doc_xrefs_threshold_field], not cfg.layers.cross_doc_xrefs)
+
     def _dependency_error_for(
         self,
         field_name: str,
@@ -2349,11 +2488,14 @@ class CorpusConfigEditor:
         self.app.page.show_dialog(dialog)
 
     def _on_discard_clicked(self, e: ft.Event) -> None:
-        """Revert in-memory state to the on-disk baseline."""
+        """Revert in-memory state to the on-disk baseline + drop the draft."""
         if self._baseline_config is None or self._loaded_for_corpus is None:
             return
         self._corpus_config = self._baseline_config.model_copy(deep=True)
         self._populate_controls()
+        self._clear_draft()
+        self._refresh_dirty_indicator()
+        self._notify_draft_changed()
         self.app.page.update()
 
 

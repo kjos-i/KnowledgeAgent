@@ -225,16 +225,20 @@ def test_adopt_mode_registers_folder_as_corpus_home(tmp_path: Path, monkeypatch)
 
 
 def test_mode_change_relabels_folder_field_and_structure_tree():
-    """Toggling the radio swaps the folder label/hint + the right-pane tree."""
+    """Toggling the radio swaps the folder caption/hint + the right-pane tree.
+
+    The folder caption is the labeled_field row's caption Text (with a
+    trailing colon), not a floating TextField `label` anymore.
+    """
     tab = _tab()
     # Flip to adopt.
     tab.location_mode_radio.value = "adopt"
     tab._on_location_mode_change(MagicMock())
-    assert tab.folder_field.label == "Corpus folder"
+    assert tab._folder_caption.value == "Corpus folder:"
     assert "BE this corpus" in tab.folder_field.hint_text
     assert "<selected folder>" in tab._structure_tree.value
     # Flip back to create.
     tab.location_mode_radio.value = "create"
     tab._on_location_mode_change(MagicMock())
-    assert tab.folder_field.label == "Location"
+    assert tab._folder_caption.value == "Location:"
     assert "<corpus name>" in tab._structure_tree.value

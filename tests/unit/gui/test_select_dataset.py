@@ -184,7 +184,6 @@ def test_relocate_corpus_rewrites_paths(fake_app, tmp_path):
         patch(f"{_MOD}.save_config"),
         patch(f"{_MOD}.apply_connection_to_env"),
         patch(f"{_MOD}.reset_after_key_change"),
-        patch.object(tab, "_sync_picker"),
         patch.object(tab, "_populate_info_card"),
     ):
         tab._relocate_corpus("c1", new)

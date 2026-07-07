@@ -37,6 +37,7 @@ from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     PANEL_BG,
     centered_label,
+    labeled_field,
 )
 from knowledge_agent.gui._widgets.info_icon import info_icon
 from knowledge_agent.gui.config_store import (
@@ -173,7 +174,6 @@ class LlmTab:
 
         # Ollama base URL.
         self.ollama_url_field = ft.TextField(
-            label="Ollama base URL (used when Ollama is active)",
             value=cfg.ollama_base_url,
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
@@ -201,7 +201,6 @@ class LlmTab:
             ("chat_router", cfg.chat_router_temperature),
         ):
             self.node_model_fields[node_name] = ft.Dropdown(
-                label=f"{node_name} model",
                 value=getattr(cfg, f"{node_name}_model"),
                 options=list(provider_options),
                 editable=True,
@@ -230,7 +229,6 @@ class LlmTab:
         for provider in _PROVIDER_ORDER:
             current = getattr(cfg, f"{provider}_requests_per_second")
             self.rate_limit_fields[provider] = ft.TextField(
-                label=f"{provider} requests/sec",
                 value="" if current is None else str(current),
                 hint_text="(empty = no limit)",
                 border=ft.InputBorder.OUTLINE,
@@ -241,7 +239,6 @@ class LlmTab:
 
         # llm_max_retries — int.
         self.max_retries_field = ft.TextField(
-            label="LLM max retries (1-10)",
             value=str(cfg.llm_max_retries),
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
@@ -304,7 +301,10 @@ class LlmTab:
                 ft.Divider(),
                 # ---- Ollama base URL -----------------------------------
                 ft.Text("Ollama", weight=ft.FontWeight.BOLD),
-                self.ollama_url_field,
+                labeled_field(
+                    "Ollama base URL (used when Ollama is active)",
+                    self.ollama_url_field,
+                ),
                 ft.Divider(),
                 # ---- Per-node models + temperatures --------------------
                 ft.Text(
@@ -366,8 +366,11 @@ class LlmTab:
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),
-                *[self.rate_limit_fields[p] for p in _PROVIDER_ORDER],
-                self.max_retries_field,
+                *[
+                    labeled_field(f"{p} requests/sec", self.rate_limit_fields[p])
+                    for p in _PROVIDER_ORDER
+                ],
+                labeled_field("LLM max retries (1-10)", self.max_retries_field),
                 # ---- Shared status text --------------------------------
                 self.status,
             ],
@@ -519,26 +522,15 @@ class LlmTab:
         )
 
     def _render_node_block(self, node_name: str) -> ft.Control:
-        """One node's model TextField + temperature slider row."""
+        """One node's model dropdown + temperature slider, stacked (model on
+        its own line, temperature below it — matches the extractor layout)."""
         return ft.Column(
             controls=[
-                self.node_model_fields[node_name],
-                ft.Row(
-                    controls=[
-                        ft.Text(
-                            f"{node_name} temperature",
-                            size=12,
-                            color=ft.Colors.GREY_300,
-                            width=220,
-                        ),
-                        ft.Container(
-                            content=self.node_temp_sliders[node_name],
-                            expand=True,
-                        ),
-                        self.node_temp_value_texts[node_name],
-                    ],
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                labeled_field(f"{node_name} model", self.node_model_fields[node_name]),
+                labeled_field(
+                    f"{node_name} temperature",
+                    self.node_temp_sliders[node_name],
+                    trailing=self.node_temp_value_texts[node_name],
                 ),
             ],
             spacing=4,

@@ -70,6 +70,7 @@ from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     PANEL_BG,
     centered_label,
+    labeled_field,
 )
 from knowledge_agent.gui.config_store import (
     ConfigError,
@@ -165,6 +166,9 @@ class InstallsTab:
     def __init__(self, app: GuiApp) -> None:
         self.app = app
         self.status: ft.Text | None = None
+        # Strong refs to in-flight background tasks (folder picker) so they
+        # aren't GC'd mid-run; they self-discard on completion.
+        self._bg_tasks: set[asyncio.Task] = set()
 
         # Ontology row widgets. One button axis: Download ↔ Delete
         # download (disk only; Neo4j node writes remain ingest's job).
@@ -211,13 +215,16 @@ class InstallsTab:
         # default (bridge deletes the env var in that case).
         stored = getattr(self.app.gui_config, "ontology_downloads_dir", None)
         self.downloads_dir_field = ft.TextField(
-            label="ontology_downloads_dir",
             value="" if stored is None else str(stored),
             hint_text="Leave blank to use the backend default",
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
             on_blur=self._on_downloads_dir_blur,
+        )
+        self.downloads_dir_browse_button = ft.Button(
+            content=centered_label("Browse"),
+            on_click=self._on_downloads_dir_browse_clicked,
         )
         self.hf_hub_display = ft.Text(
             "(checking…)",
@@ -317,8 +324,12 @@ class InstallsTab:
                 color=ft.Colors.GREY_500,
                 italic=True,
             ),
-            # ontology_downloads_dir — editable
-            self.downloads_dir_field,
+            # ontology_downloads_dir — editable + Browse
+            labeled_field(
+                "ontology_downloads_dir",
+                self.downloads_dir_field,
+                trailing=self.downloads_dir_browse_button,
+            ),
             # HF hub cache dir — read-only display
             ft.Row(
                 spacing=6,
@@ -489,6 +500,38 @@ class InstallsTab:
                 self.hf_hub_display.value = str(hf)
         if self.ollama_models_display is not None:
             self.ollama_models_display.value = str(_resolve_ollama_models_dir())
+
+    def _spawn(self, coro) -> None:
+        """Fire-and-forget a coroutine while holding a strong reference
+        until it completes (avoids the task being garbage-collected)."""
+        task = asyncio.create_task(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
+    def _on_downloads_dir_browse_clicked(self, e: ft.Event) -> None:
+        """Open a native folder picker for `ontology_downloads_dir`.
+
+        Guarded off without a running loop so unit tests can call it
+        without leaving an un-awaited coroutine."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._spawn(self._pick_downloads_dir(e))
+
+    async def _pick_downloads_dir(self, e: ft.Event) -> None:
+        try:
+            chosen = await self.app.file_picker.get_directory_path(
+                dialog_title="Pick the ontology downloads folder",
+            )
+        except Exception as exc:
+            self._set_status(f"folder picker error: {exc}", ok=False)
+            return
+        if chosen and self.downloads_dir_field is not None:
+            self.downloads_dir_field.value = chosen
+            # Reuse the blur persist path (validate → save → env bridge →
+            # re-probe). It reads the field value and ignores the event.
+            self._on_downloads_dir_blur(e)
 
     def _on_downloads_dir_blur(self, e: ft.Event) -> None:
         """Persist `ontology_downloads_dir` to GuiConfig on blur.

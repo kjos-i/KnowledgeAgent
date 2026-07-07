@@ -42,10 +42,17 @@ from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     PANEL_BG,
     centered_label,
+    labeled_field,
 )
+from knowledge_agent.gui.library.config_diff import config_diff
 from knowledge_agent.gui.library.corpus_config_editor import (
     _ONTOLOGY_DISPLAY,
     CorpusConfigEditor,
+)
+from knowledge_agent.gui.library.session_state import (
+    load_session,
+    update_last_file,
+    update_last_folder,
 )
 from knowledge_agent.gui.views._frame import view_header
 
@@ -81,6 +88,9 @@ class IngestTab:
 
         # Progress + busy state, shared across the 4 ingest actions.
         self.progress_ring: ft.ProgressRing | None = None
+        # Determinate per-file bar shown during the execute phase (the
+        # ring covers the indeterminate scan phase before the dialog).
+        self.progress_bar: ft.ProgressBar | None = None
         self._busy = False
         self._bg_tasks: set[asyncio.Task] = set()
         # Bulk-ops: Skip-manually-edited toggle for bulk_resolve_openalex
@@ -89,17 +99,29 @@ class IngestTab:
         # Set by LibraryView — called after a successful ingest / bulk-op
         # so the Select sub-tab refreshes its counts + Documents list.
         self.on_ingest_complete: Callable[[], None] | None = None
+        # Which corpus the folder / file pickers were last restored for, so
+        # `build()` re-pre-fills them from the session sidecar only on a
+        # corpus change (not on every render, which would clobber typing).
+        self._session_restored_for: str | None = None
 
         self._create_controls()
 
     def _create_controls(self) -> None:
-        self.status = ft.Text("", size=11, color=ft.Colors.GREY_400)
+        # Idle placeholder — italic/dim "Empty" until a run writes a real
+        # status via `_write_status` (which clears the placeholder styling).
+        self.status = ft.Text(
+            "Empty",
+            size=11,
+            italic=True,
+            color=ft.Colors.GREY_500,
+        )
         self.progress_ring = ft.ProgressRing(
             width=16,
             height=16,
             stroke_width=2,
             visible=False,
         )
+        self.progress_bar = ft.ProgressBar(value=0, visible=False)
         self.skip_manual_checkbox = ft.Checkbox(
             label="Skip manually edited",
             value=True,
@@ -114,12 +136,12 @@ class IngestTab:
 
         # ---- Folder picker + 3 folder-action buttons ----
         self.folder_field = ft.TextField(
-            label="Folder",
             hint_text="Pick a folder of documents",
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
             expand=True,
+            on_blur=self._on_folder_blur,
         )
         self.folder_browse_button = ft.Button(
             content=centered_label("Browse"),
@@ -140,12 +162,12 @@ class IngestTab:
 
         # ---- File picker + Ingest single file ----
         self.file_field = ft.TextField(
-            label="File",
             hint_text="Pick a single file to ingest",
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
             expand=True,
+            on_blur=self._on_file_blur,
         )
         self.file_browse_button = ft.Button(
             content=centered_label("Browse"),
@@ -184,8 +206,13 @@ class IngestTab:
         # so first render has state ready.
         self.config_editor.ensure_loaded()
 
+        # Pre-fill the folder / file pickers from this corpus's saved
+        # session — only when the corpus changed, so a plain re-render
+        # never clobbers a path the user is mid-way through typing.
+        self._restore_session_paths(active_name)
+
         left_pane = ft.Container(
-            expand=1,
+            expand=1,  # 50/50 with the config editor
             padding=12,
             border=ft.Border.all(1, FRAME_BORDER_COLOR),
             bgcolor=PANEL_BG,
@@ -205,13 +232,10 @@ class IngestTab:
                     ),
                     ft.Divider(),
                     # Folder picker + 3 folder actions.
-                    ft.Row(
-                        controls=[
-                            self.folder_field,
-                            self.folder_browse_button,
-                        ],
-                        spacing=8,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    labeled_field(
+                        "Folder",
+                        self.folder_field,
+                        trailing=self.folder_browse_button,
                     ),
                     ft.Row(
                         controls=[
@@ -224,24 +248,23 @@ class IngestTab:
                     ),
                     ft.Divider(),
                     # File picker + single-file ingest.
-                    ft.Row(
-                        controls=[
-                            self.file_field,
-                            self.file_browse_button,
-                        ],
-                        spacing=8,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    labeled_field(
+                        "File",
+                        self.file_field,
+                        trailing=self.file_browse_button,
                     ),
                     ft.Row(
                         controls=[self.ingest_file_button],
                         spacing=8,
                     ),
                     ft.Divider(),
+                    ft.Text("Progress", size=13, weight=ft.FontWeight.BOLD),
                     ft.Row(
                         controls=[self.progress_ring, self.status],
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
+                    self.progress_bar,
                     ft.Divider(),
                     self._build_diff_card(),
                     ft.Divider(),
@@ -264,7 +287,7 @@ class IngestTab:
         )
 
         right_pane = ft.Container(
-            expand=1,
+            expand=1,  # 50/50 with the left action pane
             content=ft.Column(
                 expand=True,
                 scroll=ft.ScrollMode.AUTO,
@@ -291,89 +314,18 @@ class IngestTab:
 
     def _build_diff_card(self) -> ft.Control:
         """Compact `field: current → new` summary of pending config
-        changes. Only rows where baseline differs from in-memory are
-        shown. Empty state when nothing pending.
+        changes. Only rows where the saved baseline differs from the
+        in-memory draft are shown. Empty state when nothing pending.
+
+        The diff is computed by `config_diff` — shared with the Select
+        tab's corpus card so the two views can never disagree.
         """
         baseline = self.config_editor._baseline_config
         inmem = self.config_editor._corpus_config
         if baseline is None or inmem is None:
             return ft.Container()
 
-        diffs: list[tuple[str, str, str]] = []
-        # Layer bools.
-        for field, label in (
-            ("openalex_papers", "openalex_papers"),
-            ("chunks", "chunks"),
-            ("entities", "entities"),
-            ("triples", "triples"),
-            ("cross_doc", "cross_doc"),
-            ("cross_doc_xrefs", "cross_doc_xrefs"),
-        ):
-            b = getattr(baseline.layers, field, False)
-            i = getattr(inmem.layers, field, False)
-            if b != i:
-                diffs.append((label, _fmt_bool(b), _fmt_bool(i)))
-        # xrefs (3-state).
-        if baseline.layers.xrefs != inmem.layers.xrefs:
-            diffs.append(("xrefs", baseline.layers.xrefs, inmem.layers.xrefs))
-        # Per-ontology bools.
-        for key, display in _ONTOLOGY_DISPLAY.items():
-            b = getattr(baseline.layers, f"ontology_{key}", False)
-            i = getattr(inmem.layers, f"ontology_{key}", False)
-            if b != i:
-                diffs.append(
-                    (f"ontology_{key} ({display})", _fmt_bool(b), _fmt_bool(i)),
-                )
-        # Extractor + entity_types.
-        base_extractor = baseline.entities.extractor if baseline.entities is not None else "—"
-        cur_extractor = inmem.entities.extractor if inmem.entities is not None else "—"
-        if base_extractor != cur_extractor:
-            diffs.append(("extractor", base_extractor, cur_extractor))
-        base_types = (
-            ", ".join(baseline.entities.entity_types) if baseline.entities is not None else "—"
-        ) or "(default)"
-        cur_types = (
-            ", ".join(inmem.entities.entity_types) if inmem.entities is not None else "—"
-        ) or "(default)"
-        if base_types != cur_types:
-            diffs.append(("entity_types", base_types, cur_types))
-        # Chunks (L5) per-corpus fields (promoted 2026-07-02).
-        # Entities (L6) per-corpus fields (promoted 2026-07-02).
-        for name in (
-            "chunker_strategy",
-            "chunk_max_tokens",
-            "merge_peers",
-            "enable_pdf_ocr",
-            "enable_image_ocr",
-            "images_scale",
-            "optimize_indexes_per_ingest",
-            "entity_extractor_model",
-            "entity_extractor_temperature",
-            "triples_extractor_model",
-            "triples_extractor_temperature",
-        ):
-            base_val = getattr(baseline, name)
-            cur_val = getattr(inmem, name)
-            if base_val != cur_val:
-                if isinstance(base_val, bool):
-                    diffs.append(
-                        (name, _fmt_bool(base_val), _fmt_bool(cur_val)),
-                    )
-                else:
-                    diffs.append((name, str(base_val), str(cur_val)))
-        # Cross-doc thresholds.
-        base_thr = baseline.cross_doc.threshold if baseline.cross_doc is not None else 2
-        cur_thr = inmem.cross_doc.threshold if inmem.cross_doc is not None else 2
-        if base_thr != cur_thr:
-            diffs.append(("cross_doc.threshold", str(base_thr), str(cur_thr)))
-        base_xthr = (
-            baseline.cross_doc_xrefs.threshold if baseline.cross_doc_xrefs is not None else 2
-        )
-        cur_xthr = inmem.cross_doc_xrefs.threshold if inmem.cross_doc_xrefs is not None else 2
-        if base_xthr != cur_xthr:
-            diffs.append(
-                ("cross_doc_xrefs.threshold", str(base_xthr), str(cur_xthr)),
-            )
+        diffs = config_diff(baseline, inmem)
 
         header = ft.Text(
             "Ingestion summary",
@@ -462,14 +414,21 @@ class IngestTab:
             ]
 
         controls: list[ft.Control] = []
-        controls.extend(
-            layer_group(
-                "openalex_papers (L1–L4)",
-                ["bulk_resolve_openalex"],
+        # openalex: the resolve button and its "Skip manually edited" toggle
+        # share ONE line — the toggle governs what the button does, so they
+        # read as a pair.
+        openalex_row: list[ft.Control] = [op_button("bulk_resolve_openalex")]
+        if self.skip_manual_checkbox is not None:
+            openalex_row.append(self.skip_manual_checkbox)
+        controls.append(ft.Text("openalex_papers (L1–L4)", size=12, color=ft.Colors.GREY_300))
+        controls.append(
+            ft.Row(
+                wrap=True,
+                spacing=12,
+                controls=openalex_row,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             )
         )
-        if self.skip_manual_checkbox is not None:
-            controls.append(self.skip_manual_checkbox)
         controls.extend(
             layer_group(
                 "Chunks (L5)",
@@ -748,9 +707,16 @@ class IngestTab:
         task.add_done_callback(self._bg_tasks.discard)
 
     def _set_status(self, msg: str) -> None:
+        self._write_status(msg)
+        self.app.page.update()
+
+    def _write_status(self, msg: str) -> None:
+        """Write a real status message, clearing the idle 'Empty' placeholder
+        styling (italic / dim grey) so live messages read at full weight."""
         if self.status is not None:
             self.status.value = msg
-            self.app.page.update()
+            self.status.italic = False
+            self.status.color = ft.Colors.GREY_400
 
     def _set_busy(self, busy: bool, msg: str | None = None) -> None:
         """Toggle the spinner + disable every action button during a run
@@ -768,8 +734,8 @@ class IngestTab:
         ):
             if btn is not None:
                 btn.disabled = busy
-        if msg is not None and self.status is not None:
-            self.status.value = msg
+        if msg is not None:
+            self._write_status(msg)
         self.app.page.update()
 
     def _notify_ingest_complete(self) -> None:
@@ -799,6 +765,7 @@ class IngestTab:
             return
         if chosen and self.folder_field is not None:
             self.folder_field.value = chosen
+            self._persist_folder(chosen)
             self.app.page.update()
 
     def _on_file_browse_clicked(self, e: ft.Event) -> None:
@@ -816,7 +783,50 @@ class IngestTab:
             return
         if files and files[0].path and self.file_field is not None:
             self.file_field.value = files[0].path
+            self._persist_file(files[0].path)
             self.app.page.update()
+
+    # ---- session persistence (folder / file pickers) ----
+
+    def _corpus_toml_path(self) -> Path | None:
+        """Active corpus's `corpus.toml` path (the sidecar lives beside it)."""
+        raw = self.app.gui_config.corpus_config_path
+        return Path(raw) if raw is not None else None
+
+    def _restore_session_paths(self, active_name: str) -> None:
+        """Pre-fill the folder / file pickers from the corpus's saved
+        session — once per corpus, so re-renders don't clobber typing."""
+        if active_name == self._session_restored_for:
+            return
+        self._session_restored_for = active_name
+        toml_path = self._corpus_toml_path()
+        if toml_path is None:
+            return
+        session = load_session(toml_path)
+        if self.folder_field is not None:
+            self.folder_field.value = session.last_folder or ""
+        if self.file_field is not None:
+            self.file_field.value = session.last_file or ""
+
+    def _persist_folder(self, folder: str | None) -> None:
+        toml_path = self._corpus_toml_path()
+        if toml_path is not None:
+            update_last_folder(toml_path, folder)
+
+    def _persist_file(self, file: str | None) -> None:
+        toml_path = self._corpus_toml_path()
+        if toml_path is not None:
+            update_last_file(toml_path, file)
+
+    def _on_folder_blur(self, e: ft.Event) -> None:
+        """Persist a hand-typed folder path when focus leaves the field."""
+        if self.folder_field is not None:
+            self._persist_folder(self.folder_field.value)
+
+    def _on_file_blur(self, e: ft.Event) -> None:
+        """Persist a hand-typed file path when focus leaves the field."""
+        if self.file_field is not None:
+            self._persist_file(self.file_field.value)
 
     # ---- action buttons ----
 
@@ -866,6 +876,15 @@ class IngestTab:
             self._set_status(f"could not load corpus.toml: {exc}")
             return
 
+        # Pre-flight: ingestion embeds every chunk (and may extract with an
+        # LLM), so the required provider key(s) must be present. A missing
+        # key aborts with a clear message instead of a silent "N succeeded"
+        # that actually persisted nothing.
+        missing_key = self._missing_ingest_key(config)
+        if missing_key is not None:
+            self._show_missing_key_dialog(action, missing_key)
+            return
+
         if action == "Ingest single file":
             self._plan_single_file(config, main, sub, overwrite)
             return
@@ -878,6 +897,12 @@ class IngestTab:
             return
         folder = Path(folder_str)
 
+        # Building the plan hashes every file in the folder (~5-10s for a
+        # 100-file folder). The *_plan functions run that hash off the
+        # event loop (asyncio.to_thread), so the loop stays free and this
+        # spinner both renders and animates for the whole scan. Cleared
+        # the moment the dialog / empty / error result is ready.
+        self._set_busy(True, f"{action}: scanning {folder.name}…")
         try:
             if action == "Ingest folder":
                 plan = await bulk_ops.add_plan(folder, main, sub)
@@ -889,13 +914,14 @@ class IngestTab:
                 plan = await bulk_ops.sync_plan(folder, main, sub)
                 empty = (plan.n_new + plan.n_moved + plan.n_edited + plan.n_orphans) == 0
         except Exception as exc:
-            self._set_status(f"{action}: could not plan — {exc}")
+            self._set_busy(False, f"{action}: could not plan — {exc}")
             return
 
         if empty:
-            self._set_status(f"{action}: nothing to do in {folder}.")
+            self._set_busy(False, f"{action}: nothing to do in {folder}.")
             return
 
+        self._set_busy(False, "")
         self._show_ingest_confirm(
             action,
             plan.summary,
@@ -966,26 +992,79 @@ class IngestTab:
         from knowledge_agent.ingestion import bulk_ops
 
         preserve = not overwrite
+        total = self._ingest_progress_total(action, plan)
         self._set_busy(True, f"{action}: working…")
+        self._begin_progress(total)
+
+        def progress(done: int, tot: int) -> None:
+            self._on_ingest_progress(action, done, tot)
+
+        cb = progress if total > 0 else None
         try:
             if action == "Ingest folder":
-                result = await bulk_ops.add_execute(plan, config, preserve)
+                result = await bulk_ops.add_execute(plan, config, preserve, progress_cb=cb)
                 msg = self._fmt_ingest_result(action, result)
             elif action == "Re-ingest":
                 result = await bulk_ops.ingest_folder_execute(
                     plan,
                     config,
                     preserve,
+                    progress_cb=cb,
                 )
                 msg = self._fmt_ingest_result(action, result)
             else:  # Sync
-                result = await bulk_ops.sync_execute(plan, config, preserve)
+                result = await bulk_ops.sync_execute(plan, config, preserve, progress_cb=cb)
                 msg = self._fmt_sync_result(result)
         except Exception as exc:
+            self._end_progress()
             self._set_busy(False, f"{action} failed: {exc}")
             return
+        self._end_progress()
         self._set_busy(False, msg)
         self._notify_ingest_complete()
+
+    # ----- progress bar (execute phase) -----------------------------------
+
+    def _ingest_progress_total(self, action: str, plan: object) -> int:
+        """Per-file step count `_execute_action` reports for the bar.
+
+        Matches each executor's own loop length so the bar reaches 100%
+        exactly: Ingest folder = new files, Re-ingest = all files, Sync =
+        new + moved + edited + orphan items."""
+        if action == "Ingest folder":
+            return int(getattr(plan, "n_new", 0))
+        if action == "Re-ingest":
+            return int(getattr(plan, "n_files", 0))
+        return int(
+            getattr(plan, "n_new", 0)
+            + getattr(plan, "n_moved", 0)
+            + getattr(plan, "n_edited", 0)
+            + getattr(plan, "n_orphans", 0)
+        )
+
+    def _begin_progress(self, total: int) -> None:
+        """Enter the execute phase: hide the indeterminate ring, show the
+        determinate bar at 0 (only when there's something to count)."""
+        if self.progress_ring is not None:
+            self.progress_ring.visible = False
+        if self.progress_bar is not None:
+            self.progress_bar.visible = total > 0
+            self.progress_bar.value = 0.0
+        self.app.page.update()
+
+    def _on_ingest_progress(self, action: str, done: int, total: int) -> None:
+        """Per-file callback from the executor — advance the bar + count."""
+        if self.progress_bar is not None and total > 0:
+            self.progress_bar.value = done / total
+        self._write_status(f"{action}: {done} / {total} files")
+        self.app.page.update()
+
+    def _end_progress(self) -> None:
+        """Leave the execute phase: hide + reset the bar."""
+        if self.progress_bar is not None:
+            self.progress_bar.visible = False
+            self.progress_bar.value = 0.0
+        self.app.page.update()
 
     async def _execute_single_file(
         self,
@@ -1029,6 +1108,80 @@ class IngestTab:
             f"{result.n_new_failed + result.n_edited_failed} failed."
         )
 
+    def _missing_ingest_key(self, config: object) -> str | None:
+        """Env var name of a provider key ingestion needs but the active
+        provider lacks, or None when every needed key is present.
+
+        Ingestion embeds every chunk, so the EMBEDDER key is always
+        required; the LLM key is required only when this corpus extracts
+        with an LLM (entities extractor includes 'llm', or triples on).
+        Local providers (Ollama / HuggingFace) need no key, so they never
+        report a miss. A key counts as present if it's in the keyring OR
+        already in the env (a shell export still works)."""
+        import os
+
+        from knowledge_agent.config import get_settings
+        from knowledge_agent.gui.config_store import get_api_key
+
+        try:
+            settings = get_settings()
+        except Exception:
+            # Can't resolve settings — don't block; the real error (if
+            # any) surfaces downstream rather than here.
+            return None
+
+        embed_env = {
+            "voyage": "VOYAGE_API_KEY",
+            "openai": "OPENAI_API_KEY",
+            "google": "GOOGLE_API_KEY",
+        }.get(settings.embedding_provider)
+        if embed_env and not (os.getenv(embed_env) or get_api_key(settings.embedding_provider)):
+            return embed_env
+
+        uses_llm = bool(getattr(getattr(config, "layers", None), "triples", False))
+        entities = getattr(config, "entities", None)
+        if entities is not None and "llm" in (getattr(entities, "extractors", None) or []):
+            uses_llm = True
+        if uses_llm:
+            llm_env = {
+                "anthropic": "ANTHROPIC_API_KEY",
+                "openai": "OPENAI_API_KEY",
+                "google": "GOOGLE_API_KEY",
+            }.get(settings.llm_provider)
+            if llm_env and not (os.getenv(llm_env) or get_api_key(settings.llm_provider)):
+                return llm_env
+        return None
+
+    def _show_missing_key_dialog(self, action: str, env_var: str) -> None:
+        """Modal: the ingest can't start without a provider key. The GUI
+        reads keys from the OS keyring (Settings → Keys), NOT `.env` — so
+        a `.env` that works for the CLI won't help the GUI."""
+
+        def _close(_ev: ft.Event) -> None:
+            self.app.page.pop_dialog()
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text(f"Can't {action.lower()} — missing API key"),
+            content=ft.Column(
+                tight=True,
+                spacing=6,
+                controls=[
+                    ft.Text(f"Ingestion needs {env_var}, but it isn't set.", size=12),
+                    ft.Text(
+                        "Add it in Settings → Keys, then try again. The GUI "
+                        "reads keys from the OS keyring there, not from a "
+                        ".env file.",
+                        size=11,
+                        italic=True,
+                        color=ft.Colors.GREY_400,
+                    ),
+                ],
+            ),
+            actions=[ft.TextButton("OK", on_click=_close)],
+        )
+        self.app.page.show_dialog(dialog)
+
     def _show_invalid_config_dialog(self, action: str, message: str) -> None:
         """Modal explaining why the ingest can't start. One [OK]
         button — the config is untouched on disk (validation happens
@@ -1060,7 +1213,3 @@ class IngestTab:
             actions=[ft.TextButton("OK", on_click=_close)],
         )
         self.app.page.show_dialog(dialog)
-
-
-def _fmt_bool(v: bool) -> str:
-    return "on" if v else "off"

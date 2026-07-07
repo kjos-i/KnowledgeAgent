@@ -73,13 +73,12 @@ def test_new_case_saves_to_file(fake_app, tmp_path):
     tab.f["id"].value = "brandnew"
     tab.f["question"].value = "a new question?"
     tab.f["required_keywords"].value = "alpha\nbeta"
-    tab.name_field.value = "My set"
     tab.status_dropdown.value = "final"
     tab._on_save_case(MagicMock())
 
     assert p.exists()
     ds = load_dataset(p)
-    assert ds.name == "My set" and ds.status == "final"  # header rode along
+    assert ds.status == "final"  # status header rode along (name field dropped)
     assert [c.id for c in ds.cases] == ["brandnew"]
     assert ds.cases[0].required_keywords == ["alpha", "beta"]  # lines → list
 
@@ -97,12 +96,12 @@ def test_edit_selected_case_persists(fake_app, tmp_path):
     assert len(reloaded.cases) == 2  # edited in place, not appended
 
 
-def test_delete_selected_case_persists(fake_app, tmp_path):
+def test_delete_case_persists(fake_app, tmp_path):
     p = _dataset_file(tmp_path)
     tab = _tab(fake_app)
     tab._load(p)
-    tab._select(0)
-    tab._on_delete(MagicMock())
+    # Each case card's Delete button calls _delete_case with its index.
+    tab._delete_case(0)
 
     assert [c.id for c in load_dataset(p).cases] == ["c2"]
 

@@ -140,3 +140,30 @@ def test_mode_radio_visible_only_when_gliner_selected(fake_app):
     assert ed.entity_types_mode_radio.visible is False
     ed._on_extractor_toggle("gliner_biomed")
     assert ed.entity_types_mode_radio.visible is True
+
+
+def test_toggling_entities_on_seeds_a_valid_section(fake_app):
+    """Ticking the entities layer ON when there is no [entities] section
+    seeds a default EntityConfig, so the config stays valid.
+
+    Regression: `_on_layer_toggle` used to flip only `layers.entities`,
+    leaving `entities=None` — an invalid combo the model validator rejects,
+    which sat silently in the draft until the next ingest / bulk-op
+    pre-flight blew up ("layers.entities=true requires an [entities]
+    section")."""
+    ed = _editor(fake_app)
+    ed._corpus_config = CorpusConfig(
+        allowed_types=["Paper"],
+        layers=LayerFlags(chunks=True, entities=False),  # off → no [entities] section
+    )
+    ed._baseline_config = ed._corpus_config.model_copy(deep=True)
+    ed._populate_controls()
+
+    ed.entities_checkbox.value = True  # user ticks the entities layer
+    ed._on_layer_toggle("entities")
+
+    assert ed._corpus_config.layers.entities is True
+    assert ed._corpus_config.entities is not None
+    assert ed._corpus_config.entities.extractors  # >= 1 extractor seeded
+    # The whole config validates now (this raised before the fix).
+    CorpusConfig.model_validate(ed._corpus_config.model_dump(mode="json"))

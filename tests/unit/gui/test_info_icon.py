@@ -1,9 +1,9 @@
 """Tests for the reusable `(i)` info-icon widget + the GuiApp registry
-that powers the global show/hide toggle.
+that powers the per-tier show/hide toggles.
 
 Pure control construction — no Flet render, no dialog clicks (those need
-a live page). We check: the button reflects the toggle, registers itself,
-and the app registry flips every registered icon live.
+a live page). We check: each tier icon reflects its toggle, registers
+itself under its tier, and the app registry flips one tier at a time.
 """
 
 from __future__ import annotations
@@ -15,36 +15,61 @@ import flet as ft
 from knowledge_agent.gui._widgets.info_icon import info_icon
 
 
-def test_info_icon_returns_button_visible_when_toggle_on(fake_app):
+def test_info_icon_standard_only_returns_one_icon(fake_app):
     fake_app.gui_config.show_info_icons = True
-    registered: list[ft.IconButton] = []
-    fake_app.register_info_icon = registered.append
-    btn = info_icon(fake_app, title="Router", text="what the router does")
-    assert isinstance(btn, ft.IconButton)
-    assert btn.visible is True
-    assert btn in registered  # registered so the global toggle can flip it
+    registered: list[tuple[str, ft.IconButton]] = []
+    fake_app.register_info_icon = lambda btn, tier="standard": registered.append((tier, btn))
+    row = info_icon(fake_app, title="Router", text="what the router does")
+    assert isinstance(row, ft.Row)
+    assert len(row.controls) == 1  # only the standard tier has text
+    assert row.controls[0].visible is True
+    assert registered == [("standard", row.controls[0])]
 
 
 def test_info_icon_hidden_when_toggle_off(fake_app):
     fake_app.gui_config.show_info_icons = False
     fake_app.register_info_icon = MagicMock()
-    btn = info_icon(fake_app, title="T", text="body")
-    assert btn.visible is False
+    row = info_icon(fake_app, title="T", text="body")
+    assert row.controls[0].visible is False
 
 
-def test_app_registry_flips_all_icons_live():
+def test_info_icon_three_tiers_side_by_side(fake_app):
+    """All three tier texts → three icons next to each other, each gated by
+    its own flag."""
+    fake_app.gui_config.show_info_icons = True
+    fake_app.gui_config.show_beginner_info = False
+    fake_app.gui_config.show_technical_info = True
+    tiers: list[str] = []
+    fake_app.register_info_icon = lambda btn, tier="standard": tiers.append(tier)
+    row = info_icon(fake_app, title="X", text="std", beginner="beg", technical="tech")
+    assert len(row.controls) == 3
+    assert tiers == ["standard", "beginner", "technical"]  # standard first, in order
+    visibility = {t: c.visible for t, c in zip(tiers, row.controls, strict=True)}
+    assert visibility == {"standard": True, "beginner": False, "technical": True}
+
+
+def test_info_icon_omits_tiers_without_text(fake_app):
+    """A point with only technical text renders just the one technical icon."""
+    fake_app.gui_config.show_technical_info = True
+    fake_app.register_info_icon = MagicMock()
+    row = info_icon(fake_app, title="X", technical="tech only")
+    assert len(row.controls) == 1
+
+
+def test_app_registry_flips_one_tier_live():
     from knowledge_agent.gui.app import GuiApp
 
     app = GuiApp(page=MagicMock())
-    b1 = ft.IconButton(visible=True)
-    b2 = ft.IconButton(visible=True)
-    app.register_info_icon(b1)
-    app.register_info_icon(b2)
+    std1 = ft.IconButton(visible=True)
+    std2 = ft.IconButton(visible=True)
+    beg = ft.IconButton(visible=True)
+    app.register_info_icon(std1, "standard")
+    app.register_info_icon(std2, "standard")
+    app.register_info_icon(beg, "beginner")
 
-    app.set_info_icons_visible(False)
-    assert b1.visible is False
-    assert b2.visible is False
+    app.set_info_icons_visible("standard", False)
+    assert std1.visible is False and std2.visible is False
+    assert beg.visible is True  # a different tier is untouched
 
-    app.set_info_icons_visible(True)
-    assert b1.visible is True
-    assert b2.visible is True
+    app.set_info_icons_visible("standard", True)
+    assert std1.visible is True and std2.visible is True

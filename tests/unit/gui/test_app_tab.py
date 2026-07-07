@@ -29,7 +29,7 @@ def test_toggle_off_persists_and_flips_icons():
     with patch(_SAVE):
         tab.on_show_info_icons_changed(MagicMock())
     assert tab.app.gui_config.show_info_icons is False
-    tab.app.set_info_icons_visible.assert_called_once_with(False)
+    tab.app.set_info_icons_visible.assert_called_once_with("standard", False)
 
 
 def test_toggle_rolls_back_on_save_failure():

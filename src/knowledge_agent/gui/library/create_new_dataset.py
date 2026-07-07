@@ -55,6 +55,7 @@ from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     PANEL_BG,
     centered_label,
+    labeled_field,
 )
 from knowledge_agent.gui.config_store import (
     ConfigError,
@@ -82,8 +83,8 @@ _NEO4J_PING_TIMEOUT = 5.0
 # Split proportions for the internal 2-column layout — form on the left,
 # helper info on the right. Fixed (no dragger) — the right column exists
 # only to organise the content and give future info a home.
-_LEFT_FLEX = 60
-_RIGHT_FLEX = 40
+_LEFT_FLEX = 50
+_RIGHT_FLEX = 50
 
 
 # Folder-mode radio values + the copy that swaps when the mode flips.
@@ -113,15 +114,23 @@ _STRUCTURE_TREE = {
     _MODE_CREATE: (
         "  <location>/\n"
         "    └── <corpus name>/\n"
-        "          ├── lancedb/       (vector store)\n"
-        "          ├── corpus.toml    (config file)\n"
-        "          └── figures/       (multimodal figures)"
+        "          ├── lancedb/        (vector store)\n"
+        "          ├── corpus.toml     (config file)\n"
+        "          ├── figures/        (multimodal figures)\n"
+        "          └── eval_output/    (evaluation results)\n"
+        "                ├── eval_ledger.db          (run history)\n"
+        "                ├── eval_report_<ts>.json   (per-run report)\n"
+        "                └── eval_summary_<ts>.csv   (per-run summary)"
     ),
     _MODE_ADOPT: (
         "  <selected folder>/\n"
-        "    ├── lancedb/       (vector store)\n"
-        "    ├── corpus.toml    (config file)\n"
-        "    └── figures/       (multimodal figures)"
+        "    ├── lancedb/        (vector store)\n"
+        "    ├── corpus.toml     (config file)\n"
+        "    ├── figures/        (multimodal figures)\n"
+        "    └── eval_output/    (evaluation results)\n"
+        "          ├── eval_ledger.db          (run history)\n"
+        "          ├── eval_report_<ts>.json   (per-run report)\n"
+        "          └── eval_summary_<ts>.csv   (per-run summary)"
     ),
 }
 
@@ -140,6 +149,11 @@ class CreateNewDatasetTab:
         self.location_mode_radio: ft.RadioGroup | None = None
         self.browse_button: ft.Button | None = None
         self.create_button: ft.Button | None = None
+        # Folder row (shared labeled_field style) + its dynamic caption Text —
+        # the mode radio rewrites the caption (Location ⇄ Corpus folder) in
+        # place, so we keep a handle to it.
+        self._folder_row: ft.Row | None = None
+        self._folder_caption: ft.Control | None = None
         # Right-pane "what gets created" text — kept as refs so the
         # folder-mode radio can rewrite them in place.
         self._structure_caption: ft.Text | None = None
@@ -152,28 +166,24 @@ class CreateNewDatasetTab:
         self.status = ft.Text("", size=11, color=ft.Colors.GREY_400)
 
         self.name_field = ft.TextField(
-            label="Corpus name",
             hint_text="e.g. my-papers-2026",
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
         )
         self.uri_field = ft.TextField(
-            label="Neo4j URI",
             value="neo4j://127.0.0.1:7687",
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
         )
         self.user_field = ft.TextField(
-            label="Neo4j user",
             value="neo4j",
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
         )
         self.password_field = ft.TextField(
-            label="Neo4j password",
             password=True,
             can_reveal_password=True,
             border=ft.InputBorder.OUTLINE,
@@ -181,7 +191,6 @@ class CreateNewDatasetTab:
             bgcolor=PANEL_BG,
         )
         self.folder_field = ft.TextField(
-            label=_FOLDER_LABEL[_MODE_CREATE],
             hint_text=_FOLDER_HINT[_MODE_CREATE],
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
@@ -228,6 +237,16 @@ class CreateNewDatasetTab:
             content=centered_label("Create corpus"),
             on_click=self.on_create_clicked,
         )
+        # Folder row: shared labeled_field style with a trailing Browse. Its
+        # caption is dynamic (Location ⇄ Corpus folder as the mode radio
+        # flips), so keep a handle to the caption Text (the row's first
+        # control) and rewrite it in `_on_location_mode_change`.
+        self._folder_row = labeled_field(
+            _FOLDER_LABEL[_MODE_CREATE],
+            self.folder_field,
+            trailing=self.browse_button,
+        )
+        self._folder_caption = self._folder_row.controls[0]
 
     # ----- public API -------------------------------------------------------
 
@@ -248,21 +267,17 @@ class CreateNewDatasetTab:
                         color=ft.Colors.GREY_500,
                         italic=True,
                     ),
-                    self.name_field,
-                    self.uri_field,
-                    self.user_field,
-                    self.password_field,
+                    labeled_field("Corpus name", self.name_field),
+                    labeled_field("Neo4j URI", self.uri_field),
+                    labeled_field("Neo4j user", self.user_field),
+                    labeled_field("Neo4j password", self.password_field),
                     ft.Text(
                         "Where to put the corpus:",
                         size=12,
                         color=ft.Colors.GREY_400,
                     ),
                     self.location_mode_radio,
-                    ft.Row(
-                        controls=[self.folder_field, self.browse_button],
-                        spacing=8,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
+                    self._folder_row,
                     ft.Row(
                         controls=[self.create_button],
                         alignment=ft.MainAxisAlignment.END,
@@ -394,8 +409,9 @@ class CreateNewDatasetTab:
         """
         mode = self._folder_mode()
         if self.folder_field is not None:
-            self.folder_field.label = _FOLDER_LABEL[mode]
             self.folder_field.hint_text = _FOLDER_HINT[mode]
+        if self._folder_caption is not None:
+            self._folder_caption.value = f"{_FOLDER_LABEL[mode]}:"
         if self._structure_caption is not None:
             self._structure_caption.value = _STRUCTURE_CAPTION[mode]
         if self._structure_tree is not None:
@@ -604,7 +620,11 @@ class CreateNewDatasetTab:
         # Refresh manually. Reach via `app.library_tab.view.select_tab`
         # — the LibraryView coordinator holds the sibling instance.
         try:
-            self.app.library_tab.view.select_tab.on_refresh_clicked(None)
+            view = self.app.library_tab.view
+            view.select_tab.on_refresh_clicked(None)
+            # Rebuild Ingest too so its header + config editor point at
+            # the newly-created corpus (not whatever was active before).
+            view.refresh_ingest()
         except Exception as exc:
             logger.warning(
                 "sibling refresh after create failed: %r",

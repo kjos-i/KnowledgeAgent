@@ -306,3 +306,84 @@ def test_apply_active_corpus_password_no_active_corpus(monkeypatch):
     cfg = config_store.GuiConfig(active_corpus_name=None)
     assert config_store.apply_active_corpus_password_to_env(cfg) is False
     assert "NEO4J_PASSWORD" not in os.environ
+
+
+# ---- switch_active_corpus (single-source app-wide corpus switch) ----
+
+
+def _entry(name: str = "c2") -> config_store.CorpusEntry:
+    return config_store.CorpusEntry(
+        name=name,
+        neo4j_uri=f"neo4j://{name}:7687",
+        neo4j_user="neo4j",
+        lancedb_path=Path(f"/data/{name}/lancedb"),
+        corpus_config_path=Path(f"/data/{name}/corpus.toml"),
+    )
+
+
+def test_switch_active_corpus_mirrors_persists_and_bridges(monkeypatch):
+    """Success: the target's connection triple is mirrored onto GuiConfig,
+    persisted, and its password bridged → ok + confirmation message."""
+    saved: list[object] = []
+    monkeypatch.setattr(config_store, "save_config", lambda cfg: saved.append(cfg))
+    monkeypatch.setattr(config_store, "get_corpus_password", lambda name: "pw")
+    monkeypatch.delenv("NEO4J_PASSWORD", raising=False)
+    cfg = config_store.GuiConfig(active_corpus_name="c1", corpora=[_entry("c2")])
+
+    outcome = config_store.switch_active_corpus(cfg, "c2")
+
+    assert outcome.ok is True
+    assert "c2" in (outcome.message or "")
+    assert cfg.active_corpus_name == "c2"
+    assert cfg.neo4j_uri == "neo4j://c2:7687"
+    assert cfg.corpus_config_path == Path("/data/c2/corpus.toml")
+    assert saved == [cfg]
+    assert os.environ["NEO4J_PASSWORD"] == "pw"  # pragma: allowlist secret
+
+
+def test_switch_active_corpus_warns_when_no_password(monkeypatch):
+    """Switch still succeeds with no stored password, but message warns."""
+    monkeypatch.setattr(config_store, "save_config", lambda cfg: None)
+    monkeypatch.setattr(config_store, "get_corpus_password", lambda name: None)
+    cfg = config_store.GuiConfig(active_corpus_name="c1", corpora=[_entry("c2")])
+
+    outcome = config_store.switch_active_corpus(cfg, "c2")
+
+    assert outcome.ok is True
+    assert "no Neo4j password" in (outcome.message or "")
+    assert cfg.active_corpus_name == "c2"
+
+
+def test_switch_active_corpus_unknown_is_noop(monkeypatch):
+    """Unknown target → hard failure, state unchanged, nothing saved."""
+    save_calls: list[object] = []
+    monkeypatch.setattr(config_store, "save_config", lambda cfg: save_calls.append(cfg))
+    cfg = config_store.GuiConfig(active_corpus_name="c1", corpora=[_entry("c2")])
+
+    outcome = config_store.switch_active_corpus(cfg, "nope")
+
+    assert outcome.ok is False
+    assert "not found" in (outcome.message or "")
+    assert cfg.active_corpus_name == "c1"  # unchanged
+    assert save_calls == []
+
+
+def test_switch_active_corpus_rolls_back_on_save_error(monkeypatch):
+    """A save failure rolls the mirrored fields back to the previous corpus."""
+
+    def _boom(cfg: object) -> None:
+        raise config_store.ConfigError("disk full")
+
+    monkeypatch.setattr(config_store, "save_config", _boom)
+    cfg = config_store.GuiConfig(
+        active_corpus_name="c1",
+        neo4j_uri="neo4j://c1:7687",
+        corpora=[_entry("c2")],
+    )
+
+    outcome = config_store.switch_active_corpus(cfg, "c2")
+
+    assert outcome.ok is False
+    assert "could not save" in (outcome.message or "")
+    assert cfg.active_corpus_name == "c1"  # rolled back
+    assert cfg.neo4j_uri == "neo4j://c1:7687"  # rolled back

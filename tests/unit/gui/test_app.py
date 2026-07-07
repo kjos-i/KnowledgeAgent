@@ -12,11 +12,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import flet as ft
 from langchain_core.messages import HumanMessage
 
 from knowledge_agent.artifacts import SaveError
 from knowledge_agent.gui.app import GuiApp, _LoadedFile
-from knowledge_agent.gui.config_store import GuiConfig
+from knowledge_agent.gui.config_store import GuiConfig, SwitchOutcome
 from knowledge_agent.gui.right_panel import MODE_FILE, MODE_LATEST
 from knowledge_agent.models import AgentAnswer
 
@@ -398,3 +399,66 @@ async def test_on_send_conversational_runs_router_and_gates_retrieval(fake_page:
     router.ainvoke.assert_awaited_once()
     fake_graph.ainvoke.assert_not_awaited()  # not ready → no retrieval leg
     app.chat_panel.append_assistant.assert_called_once_with("Could you clarify?")
+
+
+# ---- select_corpus (global corpus switch orchestration) ----
+
+
+def test_build_corpus_selector_constructs(fake_page: MagicMock):
+    """Guard the top-bar controls against a bad Flet kwarg (Flet 0.85's
+    Dropdown uses on_select, not on_change; no hint_text/text_size). build()
+    isn't unit-tested, so construct the real controls here."""
+    app = _make_app(fake_page)
+    dropdown, manage = app._build_corpus_selector()
+    assert isinstance(dropdown, ft.Dropdown)
+    assert isinstance(manage, ft.IconButton)
+
+
+def test_select_corpus_noop_when_same_corpus(fake_page: MagicMock):
+    """Selecting the already-active corpus does nothing (no switch)."""
+    app = _make_app(fake_page)
+    app.gui_config = GuiConfig(active_corpus_name="c1")
+    with patch("knowledge_agent.gui.app.switch_active_corpus") as sw:
+        app.select_corpus("c1")
+    sw.assert_not_called()
+
+
+def test_select_corpus_ok_resets_caches_and_broadcasts(fake_page: MagicMock):
+    """A successful switch clears backend caches and refreshes the Library
+    tabs (card + Ingest), and surfaces the confirmation message."""
+    app = _make_app(fake_page)
+    app.gui_config = GuiConfig(active_corpus_name="c1")
+    app.library_tab = MagicMock(name="LibraryTab")
+    app.corpus_dropdown = None  # selector sync is a no-op without the control
+    with (
+        patch(
+            "knowledge_agent.gui.app.switch_active_corpus",
+            return_value=SwitchOutcome(ok=True, message="Active corpus: c2"),
+        ),
+        patch("knowledge_agent.gui.app.reset_after_key_change") as reset,
+    ):
+        app.select_corpus("c2")
+    reset.assert_called_once()
+    app.library_tab.view.select_tab.refresh_after_switch.assert_called_once()
+    app.library_tab.view.refresh_ingest.assert_called_once()
+    app.chat_panel.append_system.assert_called()
+
+
+def test_select_corpus_hard_failure_no_reset_no_broadcast(fake_page: MagicMock):
+    """A hard failure (unknown corpus / save error) must NOT clear caches or
+    refresh tabs — state is unchanged; only the message surfaces."""
+    app = _make_app(fake_page)
+    app.gui_config = GuiConfig(active_corpus_name="c1")
+    app.library_tab = MagicMock(name="LibraryTab")
+    app.corpus_dropdown = None
+    with (
+        patch(
+            "knowledge_agent.gui.app.switch_active_corpus",
+            return_value=SwitchOutcome(ok=False, message="could not save: boom"),
+        ),
+        patch("knowledge_agent.gui.app.reset_after_key_change") as reset,
+    ):
+        app.select_corpus("c2")
+    reset.assert_not_called()
+    app.library_tab.view.select_tab.refresh_after_switch.assert_not_called()
+    app.chat_panel.append_system.assert_called()  # the error message

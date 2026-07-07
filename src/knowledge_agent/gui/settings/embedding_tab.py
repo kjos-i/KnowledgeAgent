@@ -44,6 +44,7 @@ from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     PANEL_BG,
     centered_label,
+    labeled_field,
 )
 from knowledge_agent.gui.config_store import (
     ConfigError,
@@ -161,7 +162,6 @@ class EmbeddingTab:
         # Single editable model dropdown — options driven by the active
         # provider's curated list; value reflects the active model.
         self.model_field = ft.Dropdown(
-            label="Embedding model",
             value=cfg.embedding_model,
             options=[
                 ft.DropdownOption(key=m, text=m)
@@ -177,7 +177,6 @@ class EmbeddingTab:
 
         # Voyage rate limit — Optional[float], empty = no limit.
         self.voyage_rate_field = ft.TextField(
-            label="Voyage requests/sec",
             value=(
                 ""
                 if cfg.voyage_requests_per_second is None
@@ -239,7 +238,7 @@ class EmbeddingTab:
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),
-                self.model_field,
+                labeled_field("Embedding model", self.model_field),
                 ft.Divider(),
                 # ---- Rate limit ----------------------------------------
                 ft.Text("Rate limit", weight=ft.FontWeight.BOLD),
@@ -251,7 +250,7 @@ class EmbeddingTab:
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),
-                self.voyage_rate_field,
+                labeled_field("Voyage requests/sec", self.voyage_rate_field),
                 # ---- Shared status text --------------------------------
                 self.status,
             ],

@@ -78,6 +78,22 @@ def test_loop_running_false_without_loop(fake_app):
     assert tab._loop_running() is False
 
 
+def test_status_starts_as_empty_placeholder(fake_app):
+    """Idle progress line shows the italic 'Empty' placeholder (#39)."""
+    tab = IngestTab(fake_app)
+    assert tab.status.value == "Empty"
+    assert tab.status.italic is True
+
+
+def test_write_status_clears_placeholder_styling(fake_app):
+    """A real status message drops the italic/dim placeholder styling so it
+    reads at full weight."""
+    tab = IngestTab(fake_app)
+    tab._write_status("Ingest folder: 3 / 3 files")
+    assert tab.status.value == "Ingest folder: 3 / 3 files"
+    assert tab.status.italic is False
+
+
 def test_start_action_noop_while_busy(fake_app):
     """A second action can't start while one is in flight."""
     tab = IngestTab(fake_app)

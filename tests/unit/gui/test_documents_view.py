@@ -99,7 +99,7 @@ def test_render_rows_one_card_per_doc(fake_app):
     dv = _view(fake_app)
     dv._render_rows()
     assert len(dv.doc_list.controls) == 2
-    assert dv.coverage_text.value == "2 documents"
+    assert dv.coverage_text.value == "(2 documents)"
 
 
 def test_render_rows_filter_narrows_and_updates_coverage(fake_app):
@@ -107,7 +107,7 @@ def test_render_rows_filter_narrows_and_updates_coverage(fake_app):
     dv.search_field.value = "mercury"
     dv._render_rows()
     assert len(dv.doc_list.controls) == 1
-    assert dv.coverage_text.value == "1 of 2 documents"
+    assert dv.coverage_text.value == "(1 of 2 documents)"
 
 
 def test_render_rows_no_match_shows_message(fake_app):
@@ -116,7 +116,7 @@ def test_render_rows_no_match_shows_message(fake_app):
     dv._render_rows()
     assert len(dv.doc_list.controls) == 1  # the "no match" text
     # coverage still reflects the full set
-    assert dv.coverage_text.value == "0 of 2 documents"
+    assert dv.coverage_text.value == "(0 of 2 documents)"
 
 
 def test_render_rows_empty_set_shows_empty_state(fake_app):
