@@ -796,6 +796,11 @@ def reset_after_key_change() -> None:
         api_key at native-client construction.
       - `embedder_factory._build_langchain_embedder` captures the
         openai/google api_key the same way.
+      - `search.client.get_search_client` captures the LanceDB
+        `lancedb_path` at construction. Not a key — but this also runs
+        on every corpus switch, where the active corpus's lancedb_path
+        changes, so the LanceDB client must rebuild too or reads +
+        writes keep hitting the previous corpus's store.
 
     Lazy imports so the function is free to call from contexts that
     don't have the heavy provider deps installed (e.g. the CLI
@@ -809,11 +814,13 @@ def reset_after_key_change() -> None:
     )
     from knowledge_agent.kg.client import get_kg_client
     from knowledge_agent.llm_factory import _build_llm
+    from knowledge_agent.search.client import get_search_client
 
     _build_llm.cache_clear()
     _build_voyage_client.cache_clear()
     _build_langchain_embedder.cache_clear()
     get_kg_client.cache_clear()
+    get_search_client.cache_clear()
 
 
 def load_test_env() -> None:

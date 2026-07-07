@@ -44,6 +44,41 @@ from knowledge_agent.kg.triples_writes import ExtractedTriple
 from knowledge_agent.search.client import LanceClient
 
 
+@pytest.fixture(autouse=True)
+def _stub_search_client():
+    """Safety net: no pipeline unit test may touch the real LanceDB.
+
+    Several `ingest_document` tests mock parse / embed / KG / extractors
+    but NOT the search client, so `pipeline.get_search_client()` fell
+    through to a real `LanceClient` — which reads the dev `.env`
+    (`LANCEDB_PATH=./lancedb`), did a `mkdir` + connect, and created a
+    real `./lancedb` folder in the working directory. That violates the
+    suite's invariant that unit tests never touch real data / the real
+    `.env`. This autouse fixture stubs `pipeline.get_search_client` with
+    an async-safe mock for every test in this module; tests that assert
+    on the client still patch it explicitly and their patch wins in scope.
+    """
+    stub = MagicMock(spec=LanceClient)
+    for _name in (
+        "ensure_schema",
+        "ensure_indexes",
+        "write_chunks",
+        "delete_chunks_by_doc_id",
+        "update_doc_metadata",
+        "drop_chunks_table",
+        "close",
+    ):
+        setattr(stub, _name, AsyncMock(return_value=None))
+    stub.get_chunks_by_doc_id = AsyncMock(return_value=[])
+    stub.list_indexed_docs = AsyncMock(return_value=[])
+    stub.retrieve = AsyncMock(return_value=[])
+    with patch(
+        "knowledge_agent.ingestion.pipeline.get_search_client",
+        return_value=stub,
+    ):
+        yield
+
+
 def _chunk(
     index: int, text: str, section: str | None = None, page: int | None = None
 ) -> ParsedChunk:

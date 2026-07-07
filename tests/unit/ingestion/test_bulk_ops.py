@@ -1091,12 +1091,14 @@ def _indexed_dict(
     doc_id: str,
     metadata_status: str = "enriched",
     title: str | None = None,
+    sub_label: str | None = "Paper",
 ) -> dict[str, Any]:
     return {
         "doc_id": doc_id,
         "source_path": f"/p/{doc_id}.pdf",
         "title": title or f"T-{doc_id}",
         "metadata_status": metadata_status,
+        "sub_label": sub_label,
         "n_chunks": 3,
     }
 
@@ -1140,6 +1142,51 @@ async def test_bulk_resolve_openalex_plan_skip_manual_false_includes_all():
     assert plan.n_skipped == 0
 
 
+async def test_bulk_resolve_openalex_plan_skips_non_paper_docs():
+    """DOI/OpenAlex enrichment is Paper-only, so non-Paper docs are never
+    targets — captured in `skipped_non_paper`, not resolved — regardless
+    of metadata_status or skip_manual (mirrors the ingest-time gate)."""
+    search_mock = MagicMock()
+    search_mock.list_indexed_docs = AsyncMock(
+        return_value=[
+            _indexed_dict("paper1", "enriched", sub_label="Paper"),
+            _indexed_dict("note1", "enriched", sub_label="Note"),
+            _indexed_dict("untyped", "pending", sub_label=None),
+        ]
+    )
+    with patch(
+        "knowledge_agent.ingestion.bulk_ops.get_search_client",
+        return_value=search_mock,
+    ):
+        plan = await bulk_resolve_openalex_plan()
+
+    # Only the Paper is a target; the Note and the untyped doc are held
+    # back as non-Paper, not silently dropped.
+    assert set(plan.target_doc_ids) == {"paper1"}
+    assert {d.doc_id for d in plan.skipped_non_paper} == {"note1", "untyped"}
+    assert plan.n_skipped == 0  # neither non-Paper doc counts as a manual skip
+
+
+async def test_bulk_resolve_openalex_plan_non_paper_skip_survives_skip_manual_false():
+    """Even with skip_manual=False (overwrite manual), a non-Paper doc is
+    still excluded — the Paper gate is not a manual-protection knob."""
+    search_mock = MagicMock()
+    search_mock.list_indexed_docs = AsyncMock(
+        return_value=[
+            _indexed_dict("paper1", "manual", sub_label="Paper"),
+            _indexed_dict("note1", "manual", sub_label="Note"),
+        ]
+    )
+    with patch(
+        "knowledge_agent.ingestion.bulk_ops.get_search_client",
+        return_value=search_mock,
+    ):
+        plan = await bulk_resolve_openalex_plan(skip_manual=False)
+
+    assert set(plan.target_doc_ids) == {"paper1"}  # manual Paper still targeted
+    assert {d.doc_id for d in plan.skipped_non_paper} == {"note1"}
+
+
 async def test_bulk_resolve_openalex_plan_raises_on_lancedb_failure():
     search_mock = MagicMock()
     search_mock.list_indexed_docs = AsyncMock(side_effect=RuntimeError("lance boom"))
@@ -1170,6 +1217,29 @@ def test_bulk_resolve_openalex_plan_summary_mentions_skipped_when_present():
     s = plan.summary
     assert "2 docs" in s
     assert "1 manual" in s
+
+
+def test_bulk_resolve_openalex_plan_summary_mentions_non_paper_skip():
+    """The dialog must tell the user why non-Paper docs won't be resolved,
+    not silently shrink the target count."""
+    plan = BulkResolveOpenAlexPlan(
+        target_doc_ids=("d1",),
+        skipped_manual=(),
+        skip_manual=True,
+        skipped_non_paper=(
+            IndexedDoc(
+                doc_id="note1",
+                stored_path=None,
+                title=None,
+                metadata_status="baseline",
+                n_chunks=1,
+            ),
+        ),
+    )
+    s = plan.summary
+    assert "1 docs" in s
+    assert "non-Paper" in s
+    assert "Paper-only" in s
 
 
 async def test_bulk_resolve_openalex_execute_counts_three_buckets():

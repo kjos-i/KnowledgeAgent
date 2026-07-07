@@ -23,12 +23,15 @@ Layer 2 (`pipeline.py`). That keeps the dependency chain
 imports.
 """
 
+import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from knowledge_agent.ingestion import parse, pipeline
 from knowledge_agent.ingestion.ids import compute_doc_id
+from knowledge_agent.ingestion.metadata import is_doi_eligible
 from knowledge_agent.ingestion.sync_diff import (
     DiskFile,
     IndexedDoc,
@@ -180,16 +183,24 @@ async def delete_doc_plan(doc_id: str) -> DeleteDocPlan:
 class BulkResolveOpenAlexPlan:
     """Plan for the bulk Resolve OpenAlex operation.
 
-    Targets every indexed doc whose `metadata_status` is NOT "manual"
-    when `skip_manual=True` (the default); the skipped manual docs are
-    captured separately for the dialog so the user sees what protection
-    they have. With `skip_manual=False` every indexed doc is a target
-    (manual edits will be overwritten).
+    DOI / OpenAlex enrichment applies only to scholarly documents, so a
+    doc is a target only when its sub-label is DOI-eligible (Paper — the
+    same `is_doi_eligible` gate the ingest pipeline uses, kept single-
+    sourced). Non-eligible docs are captured in `skipped_non_paper` for
+    the dialog rather than silently dropped.
+
+    Among the eligible docs, those whose `metadata_status` is "manual"
+    are further held back when `skip_manual=True` (the default) and
+    captured in `skipped_manual` so the user sees what protection they
+    have. With `skip_manual=False` every eligible doc is a target
+    (manual edits will be overwritten). Non-Paper docs are skipped
+    regardless of `skip_manual`.
     """
 
     target_doc_ids: tuple[str, ...]
     skipped_manual: tuple[IndexedDoc, ...]
     skip_manual: bool
+    skipped_non_paper: tuple[IndexedDoc, ...] = ()
 
     @property
     def n_targets(self) -> int:
@@ -200,10 +211,22 @@ class BulkResolveOpenAlexPlan:
         return len(self.skipped_manual)
 
     @property
+    def n_skipped_non_paper(self) -> int:
+        return len(self.skipped_non_paper)
+
+    @property
     def summary(self) -> str:
         s = f"Resolve OpenAlex for {self.n_targets} docs"
+        notes: list[str] = []
+        if self.n_skipped_non_paper:
+            notes.append(
+                f"{self.n_skipped_non_paper} non-Paper docs skipped "
+                "(DOI/OpenAlex enrichment is Paper-only)"
+            )
         if self.skip_manual and self.n_skipped:
-            s += f". {self.n_skipped} manual docs will be skipped"
+            notes.append(f"{self.n_skipped} manual docs skipped")
+        if notes:
+            s += ". " + "; ".join(notes)
         return s + "."
 
 
@@ -227,12 +250,19 @@ async def bulk_resolve_openalex_plan(
     *,
     skip_manual: bool = True,
 ) -> BulkResolveOpenAlexPlan:
-    """List all indexed docs; split into targets vs manual-skipped.
+    """List all indexed docs; split into targets vs non-Paper vs manual.
 
-    `skip_manual=True` (default) excludes docs whose `metadata_status`
-    is "manual"; flip to False to overwrite manual edits intentionally
-    (per the bulk_ops design memory - bulk Resolve protects manual by
-    default; the dialog's checkbox lets the user opt out).
+    DOI / OpenAlex enrichment is scholarly-only, so a doc is a target
+    only when `is_doi_eligible(sub_label)` — the same Paper gate the
+    ingest pipeline applies (`pipeline.ingest_document`). Non-eligible
+    docs go to `skipped_non_paper` and are never resolved regardless of
+    `skip_manual`.
+
+    `skip_manual=True` (default) additionally excludes eligible docs
+    whose `metadata_status` is "manual"; flip to False to overwrite
+    manual edits intentionally (per the bulk_ops design memory - bulk
+    Resolve protects manual by default; the dialog's checkbox lets the
+    user opt out).
     """
     search_client = get_search_client()
     # LanceDB read errors now propagate to the caller (typed-errors
@@ -241,6 +271,7 @@ async def bulk_resolve_openalex_plan(
 
     target_ids: list[str] = []
     skipped: list[IndexedDoc] = []
+    skipped_non_paper: list[IndexedDoc] = []
     for d in indexed:
         idx = IndexedDoc(
             doc_id=d["doc_id"],
@@ -249,7 +280,11 @@ async def bulk_resolve_openalex_plan(
             metadata_status=d.get("metadata_status"),
             n_chunks=d.get("n_chunks", 0),
         )
-        if skip_manual and d.get("metadata_status") == "manual":
+        # Paper gate first: a non-Paper doc is never a resolve target,
+        # even with skip_manual=False (mirrors the ingest-time gate).
+        if not is_doi_eligible(d.get("sub_label")):
+            skipped_non_paper.append(idx)
+        elif skip_manual and d.get("metadata_status") == "manual":
             skipped.append(idx)
         else:
             target_ids.append(d["doc_id"])
@@ -258,6 +293,7 @@ async def bulk_resolve_openalex_plan(
         target_doc_ids=tuple(target_ids),
         skipped_manual=tuple(skipped),
         skip_manual=skip_manual,
+        skipped_non_paper=tuple(skipped_non_paper),
     )
 
 
@@ -746,7 +782,7 @@ class IngestFolderPlan:
     @property
     def summary(self) -> str:
         size_mb = self.total_bytes / (1024 * 1024)
-        parts = [f"Ingest {self.n_files} files ({size_mb:.1f} MB)"]
+        parts = [f"Ingest {self.n_files} files ({size_mb:.1f} MB on disk)"]
         if self.n_overwrites:
             parts.append(f"will overwrite {self.n_overwrites} already in DB")
         if self.n_manual:
@@ -795,7 +831,7 @@ async def ingest_folder_plan(
     search_client = get_search_client()
     items: list[IngestFolderItem] = []
 
-    for path, doc_id, size_bytes in _walk_and_hash(folder):
+    for path, doc_id, size_bytes in await asyncio.to_thread(_walk_and_hash, folder):
         # Per-file read errors are tolerated so one corrupt row
         # doesn't kill the plan: treat the lookup as a miss and let
         # the execute path surface the real error.
@@ -863,7 +899,7 @@ class AddPlan:
     @property
     def summary(self) -> str:
         size_mb = self.total_bytes / (1024 * 1024)
-        s = f"Add {self.n_new} new files ({size_mb:.1f} MB)"
+        s = f"Add {self.n_new} new files ({size_mb:.1f} MB on disk)"
         if self.n_skipped:
             s += f". {self.n_skipped} already in DB will be skipped"
         return s + "."
@@ -903,7 +939,7 @@ async def add_plan(
     new_items: list[IngestFolderItem] = []
     n_skipped = 0
 
-    for path, doc_id, size_bytes in _walk_and_hash(folder):
+    for path, doc_id, size_bytes in await asyncio.to_thread(_walk_and_hash, folder):
         # Per-file read errors are tolerated so one corrupt row
         # doesn't kill the plan: treat the lookup as a miss.
         try:
@@ -936,18 +972,25 @@ async def add_execute(
     plan: AddPlan,
     config: CorpusConfig,
     preserve_existing_labels: bool = True,
+    *,
+    progress_cb: Callable[[int, int], None] | None = None,
 ) -> AddResult:
     """Ingest each file in `plan.new_items`. Per-file fail-soft.
 
     `preserve_existing_labels` is passed through to `ingest_document`.
     Semantically a no-op here because `add_plan` filters to new-only
     docs, but plumbed through for uniformity with sync / ingest_folder.
+
+    `progress_cb`, when given, is called `(done, total)` after each file
+    (success or failure) so a caller can drive a determinate progress
+    bar: `total` is the file count, `done` counts files processed.
     """
     n_succeeded = 0
     n_failed = 0
     failures: list[tuple[str, str]] = []
+    total = len(plan.new_items)
 
-    for item in plan.new_items:
+    for done, item in enumerate(plan.new_items, start=1):
         try:
             await pipeline.ingest_document(
                 item.path,
@@ -965,6 +1008,8 @@ async def add_execute(
             )
             failures.append((item.path.name, repr(exc)))
             n_failed += 1
+        if progress_cb is not None:
+            progress_cb(done, total)
 
     return AddResult(
         n_succeeded=n_succeeded,
@@ -1080,7 +1125,10 @@ async def sync_plan(
     except ValueError as exc:
         raise ValueError(f"sync_plan: {exc}") from exc
 
-    disk_files = [DiskFile(path=p, doc_id=did) for p, did, _ in _walk_and_hash(folder)]
+    disk_files = [
+        DiskFile(path=p, doc_id=did)
+        for p, did, _ in await asyncio.to_thread(_walk_and_hash, folder)
+    ]
 
     search_client = get_search_client()
     # LanceDB read errors propagate (typed-errors contract).
@@ -1110,6 +1158,8 @@ async def sync_execute(
     plan: SyncPlan,
     config: CorpusConfig,
     preserve_existing_labels: bool = True,
+    *,
+    progress_cb: Callable[[int, int], None] | None = None,
 ) -> SyncResult:
     """Apply changes per bucket: ingest NEW, patch MOVED, replace EDITED,
     delete ORPHAN.
@@ -1137,6 +1187,21 @@ async def sync_execute(
     n_edited_failed = 0
     n_orphans_deleted = 0
     failures: list[tuple[str, str]] = []
+    # One progress step per item across all four buckets, so a caller's
+    # determinate bar fills smoothly over the whole sync.
+    total = (
+        len(plan.buckets.new)
+        + len(plan.buckets.moved)
+        + len(plan.buckets.edited)
+        + len(plan.buckets.orphan)
+    )
+    done = 0
+
+    def _tick() -> None:
+        nonlocal done
+        done += 1
+        if progress_cb is not None:
+            progress_cb(done, total)
 
     search_client = get_search_client()
 
@@ -1160,6 +1225,7 @@ async def sync_execute(
             )
             failures.append((f"NEW {disk.path.name}", repr(exc)))
             n_new_failed += 1
+        _tick()
 
     # MOVED: just patch source_path on the existing doc.
     for disk, old in plan.buckets.moved:
@@ -1176,6 +1242,7 @@ async def sync_execute(
                 exc,
             )
             failures.append((f"MOVED {disk.path.name}", repr(exc)))
+        _tick()
 
     # EDITED: delete the old doc_id, ingest the new content.
     # The new content produces a fresh content-hash doc_id, so
@@ -1214,6 +1281,7 @@ async def sync_execute(
             )
             failures.append((f"EDITED {disk.path.name}", repr(exc)))
             n_edited_failed += 1
+        _tick()
 
     # ORPHAN: delete - dialog confirmation is the caller's responsibility.
     for orphan in plan.buckets.orphan:
@@ -1222,6 +1290,7 @@ async def sync_execute(
         else:
             label = orphan.title or orphan.stored_path or orphan.doc_id[:12]
             failures.append((f"ORPHAN {label}", "delete returned False"))
+        _tick()
 
     return SyncResult(
         n_new_ingested=n_new_ingested,
@@ -1238,6 +1307,8 @@ async def ingest_folder_execute(
     plan: IngestFolderPlan,
     config: CorpusConfig,
     preserve_existing_labels: bool = True,
+    *,
+    progress_cb: Callable[[int, int], None] | None = None,
 ) -> IngestFolderResult:
     """Iterate `plan.items`; call `pipeline.ingest_document` per file.
 
@@ -1259,8 +1330,9 @@ async def ingest_folder_execute(
     n_succeeded = 0
     n_failed = 0
     failures: list[tuple[str, str]] = []
+    total = len(plan.items)
 
-    for item in plan.items:
+    for done, item in enumerate(plan.items, start=1):
         try:
             await pipeline.ingest_document(
                 item.path,
@@ -1278,6 +1350,8 @@ async def ingest_folder_execute(
             )
             failures.append((item.path.name, repr(exc)))
             n_failed += 1
+        if progress_cb is not None:
+            progress_cb(done, total)
 
     return IngestFolderResult(
         n_succeeded=n_succeeded,

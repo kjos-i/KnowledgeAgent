@@ -72,6 +72,25 @@ _SCORE_COLUMN: dict[str, str] = {
 }
 
 
+# Sentinel `LANCEDB_PATH` the GUI sets when no corpus is active — the
+# backend requires a non-empty path (see `config.Settings.lancedb_path`),
+# so we hand it this marker rather than a real writable folder.
+# `_ensure_conn` refuses to open it, so nothing can create a phantom
+# store or read/write data with no corpus. Never a real location.
+NO_CORPUS_SENTINEL = "__no_active_corpus__"
+
+
+class NoActiveCorpusError(RuntimeError):
+    """A LanceDB op was attempted with no active corpus.
+
+    Raised by `LanceClient._ensure_conn` when `lancedb_path` is the
+    `NO_CORPUS_SENTINEL` marker. The GUI already gates its LanceDB
+    access on an active corpus; this is the backstop that makes
+    reading/writing with no corpus impossible at the one choke point
+    every op passes through.
+    """
+
+
 class LanceClient:
     """Thin sync wrapper around the LanceDB connection.
 
@@ -96,8 +115,18 @@ class LanceClient:
         op on it is `async def`. The path directory itself is created
         sync (one mkdir at first connect) — disk-only, no event-loop
         impact.
+
+        Refuses the `NO_CORPUS_SENTINEL` path — the marker the GUI sets
+        when no corpus is active — by raising `NoActiveCorpusError`
+        BEFORE any mkdir, so a corpus-less read/write can never create a
+        phantom store. As the one choke point every read and write flows
+        through, this single guard covers them all.
         """
         if self._conn is None:
+            if str(self._settings.lancedb_path) == NO_CORPUS_SENTINEL:
+                raise NoActiveCorpusError(
+                    "No active corpus — create or select one in Library before using the index."
+                )
             self._settings.lancedb_path.mkdir(parents=True, exist_ok=True)
             self._conn = await lancedb.connect_async(
                 str(self._settings.lancedb_path),
@@ -222,7 +251,13 @@ class LanceClient:
         if CHUNKS_TABLE not in await conn.table_names():
             raise RuntimeError("LanceDB: update_doc_metadata: chunks table doesn't exist")
         table = await conn.open_table(CHUNKS_TABLE)
-        await table.update(where=f"doc_id = '{doc_id}'", values=fields)
+        # lancedb 0.33 `AsyncTable.update` takes `updates=` for the literal
+        # column→value map. `values=` is the *sync* Table API's name and is
+        # rejected here with a TypeError — passing it silently broke every
+        # doc-metadata write (bulk resolve, Edit-metadata modal, sync-moved
+        # source_path patch) because the callers swallowed the error and
+        # reported false success.
+        await table.update(where=f"doc_id = '{doc_id}'", updates=fields)
 
     async def list_indexed_docs(self) -> list[dict[str, Any]]:
         """One entry per unique `doc_id` with doc-level metadata + counts.

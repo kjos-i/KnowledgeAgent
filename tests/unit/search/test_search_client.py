@@ -12,7 +12,9 @@ import pytest
 
 from knowledge_agent.config import Settings
 from knowledge_agent.search.client import (
+    NO_CORPUS_SENTINEL,
     LanceClient,
+    NoActiveCorpusError,
     _filters_to_sql,
     _sql_literal,
 )
@@ -84,8 +86,8 @@ class RecordingTable:
     raise_on_add: Exception | None = None
     deleted_filters: list[str] = field(default_factory=list)
     raise_on_delete: Exception | None = None
-    # update() calls captured as (where, values) tuples.
-    updates: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    # update() calls captured as (where, updates) tuples.
+    updates: list[tuple[str | None, dict[str, Any] | None]] = field(default_factory=list)
     raise_on_update: Exception | None = None
     # Stubbed search-builder returned by `search()` - lets tests
     # pre-load rows or force errors on `to_arrow()`.
@@ -106,10 +108,21 @@ class RecordingTable:
             raise self.raise_on_delete
         self.deleted_filters.append(where)
 
-    async def update(self, where: str, values: dict[str, Any]) -> None:
+    async def update(
+        self,
+        updates: dict[str, Any] | None = None,
+        *,
+        where: str | None = None,
+        updates_sql: dict[str, Any] | None = None,
+    ) -> None:
+        # Mirrors lancedb 0.33 `AsyncTable.update(updates, *, where,
+        # updates_sql)` exactly. Keeping the real signature is the point:
+        # a caller that reverts to the sync API's `values=` kwarg raises
+        # TypeError here (regression guard for the silent no-op bug), same
+        # as it would against a live async table.
         if self.raise_on_update is not None:
             raise self.raise_on_update
-        self.updates.append((where, values))
+        self.updates.append((where, updates))
 
     def query(self) -> _RecordingQueryBuilder:
         if self.query_builder is None:
@@ -202,6 +215,26 @@ async def test_close_resets_conn_to_none():
 async def test_close_is_safe_when_conn_never_created():
     client = LanceClient(settings=_configured_settings())
     await client.close()  # must not raise
+
+
+async def test_ensure_conn_refuses_no_corpus_sentinel():
+    """`_ensure_conn` refuses the no-active-corpus sentinel path.
+
+    The GUI sets `LANCEDB_PATH` to `NO_CORPUS_SENTINEL` when no corpus is
+    active (the backend requires *some* path, so it gets this marker
+    rather than a real folder). `_ensure_conn` — the single choke point
+    every read and write passes through — must raise `NoActiveCorpusError`
+    instead of `mkdir`-ing and connecting, so no phantom store is created
+    and no data can be read/written with no corpus.
+
+    The guard fires BEFORE any `mkdir`, so this test never touches disk
+    (crucially: it does not create a stray `__no_active_corpus__` folder).
+    """
+    client = LanceClient(settings=_configured_settings(lancedb_path=NO_CORPUS_SENTINEL))
+    with pytest.raises(NoActiveCorpusError):
+        await client._ensure_conn()
+    # Nothing was cached — a later call with a real path would still work.
+    assert client._conn is None
 
 
 # ---- ensure_schema ----
@@ -307,6 +340,27 @@ async def test_update_doc_metadata_passes_doc_id_filter_and_values():
     fields = {"title": "New Title", "year": 2026, "doi": "10.1/abc"}
     assert await client.update_doc_metadata("abc-123", fields) is None
     assert table.updates == [("doc_id = 'abc-123'", fields)]
+
+
+async def test_update_doc_metadata_uses_async_updates_kwarg_not_sync_values():
+    """Regression guard for the silent-no-op bug: `update_doc_metadata`
+    must call lancedb's async API with `updates=` (a column→value map),
+    NOT the sync Table API's `values=`. The stub mirrors the real async
+    signature, so a `values=` slip raises TypeError instead of quietly
+    "succeeding" against a permissive mock while writing nothing live."""
+    table = RecordingTable()
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    client = _client_with_conn(_configured_settings(), conn)
+
+    await client.update_doc_metadata("abc-123", {"title": "T"})
+    # Recorded as (where, updates) — the map lands in the `updates` slot.
+    where, updates = table.updates[0]
+    assert where == "doc_id = 'abc-123'"
+    assert updates == {"title": "T"}
+
+    # And prove the guard bites: the old sync kwarg is rejected outright.
+    with pytest.raises(TypeError):
+        await table.update(where="doc_id = 'x'", values={"title": "y"})
 
 
 async def test_update_doc_metadata_empty_doc_id_raises():
