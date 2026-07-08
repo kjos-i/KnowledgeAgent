@@ -48,6 +48,12 @@ FIELD_LABEL_GAP = 18
 Small on purpose — the caption hugs its text rather than reserving a wide
 column, so the value sits close to its key."""
 
+PANEL_RADIUS = 8
+"""Corner radius for column-level panel frames — the left/right columns of
+the two-column Library + Evaluation screens, matching the Search panels.
+Inner sub-boxes (config groups, case cards) stay tighter (radius 4) so the
+nesting reads as hierarchy rather than a doubled border."""
+
 
 def labeled_field(
     label: str,
@@ -116,3 +122,122 @@ def labeled_field(
         vertical_alignment=valign,
         spacing=gap,
     )
+
+
+def panel_box(
+    content: ft.Control,
+    *,
+    expand: int | None = 1,
+    width: int | None = None,
+    padding: int = 12,
+) -> ft.Container:
+    """Wrap a column's content in the app-standard framed panel: thin grey
+    border, dark fill, rounded corners.
+
+    Used for the left/right columns of every two-column screen in Library +
+    Evaluation so they separate the same way — one source for the frame,
+    like `labeled_field` is for form rows. Pass `width` for a fixed-width
+    column (then `expand` is dropped); otherwise the box flexes by `expand`.
+    """
+    return ft.Container(
+        content=content,
+        expand=None if width is not None else expand,
+        width=width,
+        padding=padding,
+        bgcolor=PANEL_BG,
+        border=ft.Border.all(1, FRAME_BORDER_COLOR),
+        border_radius=PANEL_RADIUS,
+    )
+
+
+PANEL_TITLE_SIZE = 16
+"""Size of a panel/column title — sits at the top of a `panel_box`, above a
+thin rule (`ft.Divider(height=1)`), leading the panel's sections."""
+
+SECTION_TITLE_SIZE = 14
+"""Size of a section title within a panel — bold so it outranks the 14px
+form-field captions below it; consecutive sections split by `section_divider`."""
+
+SECTION_DIVIDER_THICKNESS = 2
+"""Line thickness for a between-section divider — heavier than Flet's 1px
+default so section breaks read clearly."""
+
+SECTION_DIVIDER_COLOR = ft.Colors.GREY_500
+"""Between-section divider colour — brighter than the dim default (and the
+GREY_700 frames), so the break between sections stands out."""
+
+
+def panel_title(text: str) -> ft.Text:
+    """The title at the top of a `panel_box` / column — 16, bold."""
+    return ft.Text(text, size=PANEL_TITLE_SIZE, weight=ft.FontWeight.BOLD)
+
+
+def section_title(text: str) -> ft.Text:
+    """A section heading within a panel — 14 bold. Sits above its content;
+    consecutive sections are separated by `section_divider()`."""
+    return ft.Text(text, size=SECTION_TITLE_SIZE, weight=ft.FontWeight.BOLD)
+
+
+def section_divider() -> ft.Divider:
+    """The separator *between* a panel's sections — thicker (2) + brighter
+    (GREY_500) than Flet's dim 1px default, so section breaks stand out. For
+    a subtle rule *within* a section, use a plain `ft.Divider(height=1)`.
+    Fresh instance per call — a control can't be shared across the tree.
+    """
+    return ft.Divider(
+        thickness=SECTION_DIVIDER_THICKNESS,
+        color=SECTION_DIVIDER_COLOR,
+    )
+
+
+SUB_SECTION_TITLE_SIZE = 14
+"""Size of a sub-section title — a label *within* a section: same size as the
+14 form-field captions but non-bold and a brighter GREY_200, so it reads as a
+heading above them (and stays lighter than the 14-bold `section_title`).
+Consecutive sub-sections split by a `thin_rule()`."""
+
+
+def sub_section_title(text: str) -> ft.Text:
+    """A sub-section label within a section — 14, non-bold, GREY_200. Brighter
+    than the GREY_300 field captions it heads, lighter (non-bold) than the
+    14-bold `section_title`; separate consecutive sub-sections with a
+    `thin_rule()`."""
+    return ft.Text(text, size=SUB_SECTION_TITLE_SIZE, color=ft.Colors.GREY_200)
+
+
+def thin_rule() -> ft.Divider:
+    """A subtle rule *within* a section — 1px, GREY_600. Brighter than Flet's
+    near-invisible default, but clearly below the `section_divider` (2/GREY_500),
+    so the line hierarchy reads: section break › sub-section rule › none.
+    Used between the sub-sections of a section (fresh instance per call)."""
+    return ft.Divider(height=1, thickness=1, color=ft.Colors.GREY_600)
+
+
+def sub_section_header(text: str, *, trailing: ft.Control | None = None) -> ft.Container:
+    """A sub-section header — a `thin_rule()` then a `sub_section_title()`,
+    wrapped with vertical breathing room so the sub-section isn't cramped
+    against the content above it (or the next sub-section). Use in place of a
+    bare `thin_rule()` + `sub_section_title()` pair. Pass `trailing` (e.g. an
+    `info_icon`) to sit it next to the title."""
+    title: ft.Control = sub_section_title(text)
+    if trailing is not None:
+        title = ft.Row(
+            [title, trailing],
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+    return ft.Container(
+        padding=ft.Padding.only(top=16, bottom=6),
+        content=ft.Column(
+            spacing=6,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            controls=[thin_rule(), title],
+        ),
+    )
+
+
+def panel_title_rule() -> ft.Divider:
+    """The rule under a panel/column title — slightly thicker (3px) but dimmer
+    (GREY_600) than a `section_divider` (2px / GREY_500), so a panel header
+    reads as a header underline rather than another section break."""
+    return ft.Divider(thickness=3, color=ft.Colors.GREY_600)

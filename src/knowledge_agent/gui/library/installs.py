@@ -208,7 +208,7 @@ class InstallsTab:
 
     def _create_controls(self) -> None:
         """Widgets only. No lifecycle queries (see startup rules)."""
-        self.status = ft.Text("", size=11, color=ft.Colors.GREY_400)
+        self.status = ft.Text("", size=12, color=ft.Colors.GREY_400)
 
         # Editable ontology_downloads_dir field. Initial value populated
         # from GuiConfig on first build. Empty = fall back to Settings
@@ -228,12 +228,12 @@ class InstallsTab:
         )
         self.hf_hub_display = ft.Text(
             "(checking…)",
-            size=11,
+            size=12,
             color=ft.Colors.GREY_300,
         )
         self.ollama_models_display = ft.Text(
             "(checking…)",
-            size=11,
+            size=12,
             color=ft.Colors.GREY_300,
         )
 
@@ -243,7 +243,7 @@ class InstallsTab:
         for name in _ONTOLOGY_ORDER:
             self.ontology_status_texts[name] = ft.Text(
                 "(checking…)",
-                size=11,
+                size=12,
                 color=ft.Colors.GREY_500,
                 italic=True,
             )
@@ -261,7 +261,7 @@ class InstallsTab:
         for name in _EXTRACTOR_ORDER:
             self.extractor_status_texts[name] = ft.Text(
                 "(checking…)",
-                size=11,
+                size=12,
                 color=ft.Colors.GREY_500,
                 italic=True,
             )
@@ -287,7 +287,7 @@ class InstallsTab:
         for name in _PARSER_ORDER:
             self.parser_status_texts[name] = ft.Text(
                 "(checking…)",
-                size=11,
+                size=12,
                 color=ft.Colors.GREY_500,
                 italic=True,
             )
@@ -320,7 +320,7 @@ class InstallsTab:
                 "Where each install target keeps its files. The first "
                 "is editable — the other two are managed by their "
                 "libraries (HF Hub / Ollama) and shown for reference.",
-                size=11,
+                size=12,
                 color=ft.Colors.GREY_500,
                 italic=True,
             ),
@@ -367,7 +367,7 @@ class InstallsTab:
                     "Download the source file(s) to disk here. Neo4j term "
                     "nodes are written during ingest — not by these buttons "
                     "— so downloading is safe (no schema change).",
-                    size=11,
+                    size=12,
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),
@@ -396,7 +396,7 @@ class InstallsTab:
                     "AND their pinned model weights downloaded. No "
                     "auto-download at first inference — extraction raises "
                     "if weights are missing.",
-                    size=11,
+                    size=12,
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),
@@ -429,7 +429,7 @@ class InstallsTab:
                     "weights (~1.5 GB) are downloaded by Docling on first "
                     "ingest use — not managed here. AST-aware code parsing "
                     "ships its tree-sitter grammars inside the pip wheel.",
-                    size=11,
+                    size=12,
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),

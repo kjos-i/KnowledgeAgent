@@ -53,6 +53,8 @@ from knowledge_agent.config import reset_after_key_change
 from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     PANEL_BG,
+    PANEL_RADIUS,
+    panel_box,
 )
 from knowledge_agent.gui.config_store import (
     ConfigError,
@@ -192,7 +194,7 @@ class SelectDatasetTab:
     # ----- control construction --------------------------------------------
 
     def _create_controls(self) -> None:
-        self.status = ft.Text("", size=11, color=ft.Colors.GREY_400)
+        self.status = ft.Text("", size=12, color=ft.Colors.GREY_400)
 
         # ---- info card controls ----
         self.info_name = ft.Text(
@@ -229,7 +231,7 @@ class SelectDatasetTab:
         self.info_llm = ft.Text("", size=12, color=ft.Colors.GREY_300)
         # "Changed since last ingest" — hidden unless the corpus has an
         # unsaved config draft (edited on the Ingest tab, not yet ingested).
-        self.info_pending = ft.Text("", size=11, color=ft.Colors.AMBER_300, selectable=True)
+        self.info_pending = ft.Text("", size=12, color=ft.Colors.AMBER_300, selectable=True)
         self.info_pending_section = ft.Container(
             visible=False,
             content=ft.Column(
@@ -251,7 +253,7 @@ class SelectDatasetTab:
             padding=12,
             border=ft.Border.all(1, FRAME_BORDER_COLOR),
             bgcolor=PANEL_BG,
-            border_radius=4,
+            border_radius=PANEL_RADIUS,
             content=ft.Column(
                 spacing=6,
                 controls=[
@@ -316,20 +318,19 @@ class SelectDatasetTab:
         )
 
         # Right column: documents area (scrollable).
-        right_pane = ft.Container(
-            expand=True,
-            content=ft.Column(
+        right_pane = panel_box(
+            ft.Column(
                 expand=True,
                 scroll=ft.ScrollMode.AUTO,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                 spacing=10,
                 controls=[self.documents.build()],
-            ),
+            )
         )
 
         body = ft.Row(
             expand=True,
-            vertical_alignment=ft.CrossAxisAlignment.START,
+            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             spacing=12,
             controls=[left_pane, right_pane],
         )
@@ -670,7 +671,7 @@ class SelectDatasetTab:
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
         )
-        error_text = ft.Text("", size=11, color=ft.Colors.RED_300)
+        error_text = ft.Text("", size=12, color=ft.Colors.RED_300)
 
         def _do_rename(_ev):
             new_name = (new_name_field.value or "").strip()
@@ -964,7 +965,7 @@ def _badge(label: str, *, on: bool, tooltip: str | None = None) -> ft.Control:
         tooltip=tooltip,
         content=ft.Text(
             label,
-            size=11,
+            size=12,
             color=(ft.Colors.GREEN_200 if on else ft.Colors.GREY_500),
         ),
     )

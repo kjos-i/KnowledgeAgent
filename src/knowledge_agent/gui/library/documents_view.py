@@ -150,7 +150,7 @@ class DocumentsView:
         )
         self.coverage_text = ft.Text("", size=14, color=ft.Colors.GREY_400)
         # Transient status for per-doc ops (re-ingest).
-        self.op_status = ft.Text("", size=11, color=ft.Colors.GREY_400)
+        self.op_status = ft.Text("", size=12, color=ft.Colors.GREY_400)
         # Plain Column — the parent (select_dataset right pane) already
         # scrolls, so nesting a scroll here would fight it.
         self.doc_list = ft.Column(spacing=6)
@@ -337,7 +337,7 @@ class DocumentsView:
         meta_line = "  ·  ".join(meta_parts)
 
         status_chip = ft.Container(
-            content=ft.Text(status, size=10, color=ft.Colors.BLACK),
+            content=ft.Text(status, size=12, color=ft.Colors.BLACK),
             bgcolor=color,
             padding=ft.Padding.symmetric(horizontal=6, vertical=2),
             border_radius=8,
@@ -388,7 +388,7 @@ class DocumentsView:
                     ft.Text(meta_line, size=12, color=ft.Colors.GREY_300),
                     ft.Text(
                         source_path,
-                        size=11,
+                        size=12,
                         color=ft.Colors.GREY_500,
                         selectable=True,
                     ),
@@ -444,7 +444,7 @@ class DocumentsView:
                         "enriches the other fields afterward (status → "
                         "'enriched'). Chunk text + embeddings are never "
                         "touched.",
-                        size=10,
+                        size=12,
                         italic=True,
                         color=ft.Colors.GREY_500,
                     ),

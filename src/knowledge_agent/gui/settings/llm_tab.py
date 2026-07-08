@@ -141,7 +141,7 @@ class LlmTab:
 
     def _create_controls(self) -> None:
         cfg = self.app.gui_config
-        self.status = ft.Text("", size=11, color=ft.Colors.GREY_400)
+        self.status = ft.Text("", size=12, color=ft.Colors.GREY_400)
 
         # Active provider radio — populated on first build once we know
         # the install state.
@@ -282,7 +282,7 @@ class LlmTab:
                 ft.Text(
                     "Switching is immediate. Install / Uninstall are "
                     "separate per-provider actions below.",
-                    size=11,
+                    size=12,
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),
@@ -293,7 +293,7 @@ class LlmTab:
                 ft.Text(
                     "Install / Uninstall dialogs ship in slice 4 — the "
                     "buttons stage the action for now.",
-                    size=11,
+                    size=12,
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),
@@ -313,7 +313,7 @@ class LlmTab:
                 ),
                 ft.Text(
                     "Query-time nodes only. Ingest-time extractor models live in the Library tab.",
-                    size=11,
+                    size=12,
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),
@@ -362,7 +362,7 @@ class LlmTab:
                     "Leave blank for no limit. Useful when your "
                     "provider tier rate-limits below your "
                     "concurrent fan-out.",
-                    size=11,
+                    size=12,
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),

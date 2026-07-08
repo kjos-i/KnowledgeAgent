@@ -95,7 +95,7 @@ class RetrievalTab:
     # ----- control construction --------------------------------------------
 
     def _create_controls(self) -> None:
-        self.status = ft.Text("", size=11, color=ft.Colors.GREY_400)
+        self.status = ft.Text("", size=12, color=ft.Colors.GREY_400)
         cfg = self.app.gui_config
 
         # Mode dropdowns.
@@ -161,7 +161,7 @@ class RetrievalTab:
         # display; on_change_end persists (avoid one save per pixel).
         self.mmr_help_text = ft.Text(
             "λ = 1.0 → pure relevance; λ = 0.0 → pure diversity.",
-            size=11,
+            size=12,
             color=ft.Colors.GREY_500,
             italic=True,
         )
@@ -247,7 +247,7 @@ class RetrievalTab:
                 ft.Text(
                     "Rule: top_k ≤ window ≤ num_candidates. The form "
                     "rejects edits that break this ordering.",
-                    size=11,
+                    size=12,
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),

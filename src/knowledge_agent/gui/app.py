@@ -736,7 +736,7 @@ class GuiApp:
             controls=[
                 tab_bar,
                 ft.Container(expand=True),  # spacer → right-align the selector
-                ft.Text("Selected corpus:", size=13),
+                ft.Text("Selected corpus:", size=14, weight=ft.FontWeight.BOLD),
                 self.corpus_dropdown,
                 self.manage_button,
             ],

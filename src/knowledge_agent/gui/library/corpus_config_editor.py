@@ -60,6 +60,9 @@ from knowledge_agent.gui._styles import (
     PANEL_BG,
     centered_label,
     labeled_field,
+    section_divider,
+    section_title,
+    sub_section_header,
 )
 from knowledge_agent.gui._widgets.info_icon import info_icon
 from knowledge_agent.gui.library.create_new_dataset import _write_corpus_toml
@@ -163,7 +166,6 @@ class CorpusConfigEditor:
         self.main_label_dropdown: ft.Dropdown | None = None
         self.sub_label_dropdown: ft.Dropdown | None = None
         self.overwrite_checkbox: ft.Checkbox | None = None
-        self.sub_label_hint: ft.Text | None = None
 
         # ----- Ontologies -----
         self.ontology_checkboxes: dict[str, ft.Checkbox] = {}
@@ -252,48 +254,48 @@ class CorpusConfigEditor:
     # ----- control construction --------------------------------------------
 
     def _create_controls(self) -> None:
-        self.status = ft.Text("", size=11, color=ft.Colors.GREY_400)
+        self.status = ft.Text("", size=12, color=ft.Colors.GREY_400)
 
         # Section subtitles — Text instances so the collapsed state
         # of each ExpansionTile shows what's active.
         self.labels_subtitle = ft.Text(
             "",
-            size=11,
+            size=12,
             color=ft.Colors.GREY_400,
         )
         self.openalex_subtitle = ft.Text(
             "",
-            size=11,
+            size=12,
             color=ft.Colors.GREY_400,
         )
         self.chunks_subtitle = ft.Text(
             "",
-            size=11,
+            size=12,
             color=ft.Colors.GREY_400,
         )
         self.entities_subtitle = ft.Text(
             "",
-            size=11,
+            size=12,
             color=ft.Colors.GREY_400,
         )
         self.ontology_subtitle = ft.Text(
             "",
-            size=11,
+            size=12,
             color=ft.Colors.GREY_400,
         )
         self.triples_subtitle = ft.Text(
             "",
-            size=11,
+            size=12,
             color=ft.Colors.GREY_400,
         )
         self.cross_doc_subtitle = ft.Text(
             "",
-            size=11,
+            size=12,
             color=ft.Colors.GREY_400,
         )
         self.cross_doc_xrefs_subtitle = ft.Text(
             "",
-            size=11,
+            size=12,
             color=ft.Colors.GREY_400,
         )
 
@@ -326,27 +328,12 @@ class CorpusConfigEditor:
             ),
             on_change=self._on_overwrite_changed,
         )
-        self.sub_label_hint = ft.Text(
-            "",
-            size=11,
-            color=ft.Colors.GREY_500,
-            italic=True,
-        )
-        # Read-only display of `CorpusConfig.allowed_types` — the
-        # backend field that filters the sub-label dropdown options.
-        # Not editable in the GUI (default is all 14 sub-labels; users
-        # who want to restrict hand-edit corpus.toml).
-        self.allowed_types_display = ft.Text(
-            "",
-            size=11,
-            color=ft.Colors.GREY_400,
-        )
 
         # Dirty-state indicator + Discard button. Both hidden/disabled
         # when in-memory state matches on-disk state.
         self.dirty_indicator = ft.Text(
             "• unsaved",
-            size=11,
+            size=12,
             color=ft.Colors.AMBER_300,
             italic=True,
             visible=False,
@@ -468,7 +455,7 @@ class CorpusConfigEditor:
                         "little new coverage, especially two NERs in the "
                         "same domain. Add only if the extra recall is "
                         "worth it.",
-                        size=10,
+                        size=12,
                         color=ft.Colors.AMBER_200,
                         italic=True,
                         expand=True,
@@ -482,6 +469,7 @@ class CorpusConfigEditor:
         # `_refresh_extractor_groups`).
         self.entity_types_field = ft.TextField(
             hint_text="e.g. GENE, DISEASE, CHEMICAL",
+            text_size=14,
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
@@ -568,24 +556,10 @@ class CorpusConfigEditor:
         # 2026-07-02.)
         self.entities_llm_group = ft.Container(
             visible=False,
-            padding=ft.Padding.symmetric(vertical=6, horizontal=8),
-            border=ft.Border.all(1, ft.Colors.GREY_800),
-            border_radius=4,
             content=ft.Column(
                 spacing=6,
                 controls=[
-                    ft.Text(
-                        "LLM extractor settings",
-                        size=11,
-                        weight=ft.FontWeight.BOLD,
-                        color=ft.Colors.GREY_400,
-                    ),
-                    ft.Text(
-                        "Empty entity_types (above) = LLM categorises freely (open vocabulary).",
-                        size=10,
-                        color=ft.Colors.GREY_500,
-                        italic=True,
-                    ),
+                    sub_section_header("LLM extractor settings"),
                     # model on its own line, temperature below it.
                     labeled_field(
                         "entity_extractor_model",
@@ -601,27 +575,15 @@ class CorpusConfigEditor:
         )
         self.entities_gliner_group = ft.Container(
             visible=False,
-            padding=ft.Padding.symmetric(vertical=6, horizontal=8),
-            border=ft.Border.all(1, ft.Colors.GREY_800),
-            border_radius=4,
             content=ft.Column(
                 spacing=6,
                 controls=[
+                    sub_section_header("GLiNER extractor settings"),
                     ft.Text(
-                        "GLiNER extractor settings",
-                        size=11,
-                        weight=ft.FontWeight.BOLD,
-                        color=ft.Colors.GREY_400,
-                    ),
-                    ft.Text(
-                        "Empty 'Types to extract' = adapter uses its "
-                        "DEFAULT_LABELS. GLiNER: PERSON / ORG / LOC / "
-                        "EVENT / DATE / MISC. GLiNER-BioMed: DISEASE / "
-                        "CHEMICAL / GENE / PROTEIN / SPECIES / CELL_LINE "
-                        "/ CELL_TYPE / ANATOMY. The Replace / Add toggle "
-                        "above controls whether your typed labels replace "
-                        "those defaults or extend them.",
-                        size=10,
+                        "Empty 'Types to extract' → the adapter's default "
+                        "labels; the label sets + Replace/Add behaviour are "
+                        "described in the section (i).",
+                        size=12,
                         color=ft.Colors.GREY_500,
                         italic=True,
                     ),
@@ -630,24 +592,16 @@ class CorpusConfigEditor:
         )
         self.entities_hunflair2_group = ft.Container(
             visible=False,
-            padding=ft.Padding.symmetric(vertical=6, horizontal=8),
-            border=ft.Border.all(1, ft.Colors.GREY_800),
-            border_radius=4,
             content=ft.Column(
                 spacing=4,
                 controls=[
+                    sub_section_header("HunFlair2 extractor settings"),
                     ft.Text(
-                        "HunFlair2 extractor settings",
-                        size=11,
-                        weight=ft.FontWeight.BOLD,
-                        color=ft.Colors.GREY_400,
-                    ),
-                    ft.Text(
-                        "HunFlair2 emits a fixed 5-label set: DISEASE, "
-                        "CHEMICAL, GENE, SPECIES, CELL_LINE. "
-                        "`entity_types` has no effect here.",
-                        size=11,
-                        color=ft.Colors.GREY_300,
+                        "Fixed label set — 'Types to extract' has no effect "
+                        "(details in the section (i)).",
+                        size=12,
+                        color=ft.Colors.GREY_500,
+                        italic=True,
                     ),
                 ],
             ),
@@ -803,7 +757,7 @@ class CorpusConfigEditor:
         """
         return ft.Row(
             controls=[
-                ft.Text(label),
+                section_title(label),
                 info_icon(self.app, title=label, text=help_text),
             ],
             spacing=4,
@@ -836,22 +790,12 @@ class CorpusConfigEditor:
         # switching corpora + editing allowed_types both update it.
         self._refresh_sub_label_options()
 
-        return ft.Column(
+        col = ft.Column(
             spacing=8,
             controls=[
-                ft.Row(
-                    controls=[
-                        ft.Text(
-                            f"Ingestion settings: {active_name}",
-                            weight=ft.FontWeight.BOLD,
-                        ),
-                        self.dirty_indicator,
-                        ft.Container(expand=True),
-                        self.discard_button,
-                    ],
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    spacing=8,
-                ),
+                # The panel title ("Ingestion settings" + dirty ● / Discard)
+                # lives in the Ingest tab's fixed header above this pane, so
+                # it stays visible while the pane scrolls.
                 # ---- Ingest infrastructure (read-only, process-wide) ----
                 # HTTP + concurrency knobs that affect every ingest but
                 # aren't per-corpus tunable. Collapsed by default so the
@@ -863,9 +807,13 @@ class CorpusConfigEditor:
                         "Labels and sub-labels",
                         "Applied to every file in the next ingest. Not "
                         "persisted to corpus.toml — pick fresh each run.\n\n"
-                        "allowed_types (shown below, read-only): default = all "
-                        "14 sub-labels. Hand-edit corpus.toml to restrict this "
-                        "corpus's accepted sub-labels.",
+                        "Sub-label options come from allowed_types, filtered "
+                        "to the chosen Main label. If allowed_types is empty, "
+                        "no sub-labels are available.\n\n"
+                        "allowed_types (read-only): "
+                        f"{_format_allowed_types(list(self._corpus_config.allowed_types))}"
+                        ". Default = all 14 sub-labels; hand-edit corpus.toml "
+                        "to restrict this corpus.",
                     ),
                     subtitle=self.labels_subtitle,
                     expanded=True,
@@ -884,31 +832,7 @@ class CorpusConfigEditor:
                                 self.sub_label_dropdown,
                             ),
                         ),
-                        self.sub_label_hint,
                         self.overwrite_checkbox,
-                        # Read-only display of the persisted corpus-wide
-                        # `allowed_types` list (source of truth for
-                        # which sub-labels the dropdown offers).
-                        ft.Container(
-                            padding=ft.Padding.symmetric(
-                                vertical=6,
-                                horizontal=8,
-                            ),
-                            border=ft.Border.all(1, ft.Colors.GREY_800),
-                            border_radius=4,
-                            content=ft.Column(
-                                spacing=3,
-                                controls=[
-                                    ft.Text(
-                                        "Corpus allowed_types (read-only):",
-                                        size=11,
-                                        weight=ft.FontWeight.BOLD,
-                                        color=ft.Colors.GREY_400,
-                                    ),
-                                    self.allowed_types_display,
-                                ],
-                            ),
-                        ),
                     ],
                 ),
                 # ---- Section 2: openalex_papers (L1–L4) ----
@@ -917,16 +841,14 @@ class CorpusConfigEditor:
                         "openalex_papers (L1–L4)",
                         "L1–L4 bundle: citation + author + venue + topic graph "
                         "from a single OpenAlex API lookup per doc. Turn on for "
-                        "scientific papers.",
+                        "scientific papers.\n\n"
+                        "Global (read-only): openalex_mailto = "
+                        f"{self._read_global('openalex_mailto')}. "
+                        "Edit via .env / global Settings.",
                     ),
                     subtitle=self.openalex_subtitle,
                     controls=[
                         self.openalex_checkbox,
-                        _globals_block(
-                            [
-                                ("openalex_mailto", self._read_global("openalex_mailto")),
-                            ]
-                        ),
                     ],
                 ),
                 # ---- Section 3: Chunks (L5) ----
@@ -935,7 +857,10 @@ class CorpusConfigEditor:
                         "Chunks (L5)",
                         "Per-chunk :Chunk nodes joinable with LanceDB via "
                         "`chunk_id`. Required for retrieval — effectively "
-                        "always on.",
+                        "always on.\n\n"
+                        "min_rows_for_vector_index (shown below, read-only): "
+                        "LanceDB IVF_PQ needs ~256 rows to train; below this, "
+                        "brute-force scan is used. Not user-facing tuning.",
                     ),
                     subtitle=self.chunks_subtitle,
                     controls=[
@@ -986,11 +911,6 @@ class CorpusConfigEditor:
                                     self._read_global("min_rows_for_vector_index"),
                                 ),
                             ],
-                            note=(
-                                "LanceDB IVF_PQ needs ~256 rows to "
-                                "train; below this, brute-force scan "
-                                "is used. Not user-facing tuning."
-                            ),
                         ),
                     ],
                 ),
@@ -998,38 +918,41 @@ class CorpusConfigEditor:
                 ft.ExpansionTile(
                     title=self._section_title(
                         "Entities (L6)",
-                        "Chunk-level entity extraction. Requires the chunks layer.",
+                        "Chunk-level entity extraction. Requires the chunks "
+                        "layer.\n\n"
+                        "Extractors run in priority order — the top one owns "
+                        "overlapping spans; lower ones only add spans the "
+                        "earlier ones missed. Each extractor is a full pass "
+                        "over every chunk, so runtime (and LLM cost, if the "
+                        "LLM is included) scales with each one added; a third "
+                        "rarely adds much new coverage.\n\n"
+                        "Types to extract (shared): LLM — empty = categorises "
+                        "freely (open vocabulary). GLiNER / GLiNER-BioMed — "
+                        "empty = the adapter's default labels (GLiNER: PERSON, "
+                        "ORG, LOC, EVENT, DATE, MISC; GLiNER-BioMed: DISEASE, "
+                        "CHEMICAL, GENE, PROTEIN, SPECIES, CELL_LINE, "
+                        "CELL_TYPE, ANATOMY); Replace/Add controls whether "
+                        "typed labels replace those defaults or extend them. "
+                        "HunFlair2 — fixed 5-label set (DISEASE, CHEMICAL, "
+                        "GENE, SPECIES, CELL_LINE); entity_types has no effect.",
                     ),
                     subtitle=self.entities_subtitle,
                     controls=[
                         self.entities_checkbox,
-                        # Multi-extractor: select any subset + order them
-                        # (top = base, owns overlapping spans; later ones
-                        # add only spans the earlier ones didn't find).
-                        ft.Text(
-                            "Extractors (priority order — top owns "
-                            "overlapping entities; drag lower ones fill "
-                            "gaps):",
-                            size=11,
-                            color=ft.Colors.GREY_400,
-                        ),
+                        # --- Sub-section: Extractors (ordering explained in (i)) ---
+                        sub_section_header("Extractors"),
                         self.extractor_rows_column,
                         self.extractor_info_banner,
-                        # Shared entity_types field + Replace/Add mode.
-                        # Label/disabled reshape by set membership (see
-                        # `_refresh_extractor_groups`). Kept at section
-                        # root so each stays a single widget. Spacer Row
-                        # pins the bare field left (else the column centres it).
+                        # --- Sub-section: Types to extract ---
+                        sub_section_header("Types to extract"),
                         ft.Container(
                             padding=ft.Padding.symmetric(vertical=6),
-                            content=labeled_field("Types to extract", self.entity_types_field),
+                            content=self.entity_types_field,
                         ),
                         self.entity_types_mode_radio,
-                        # Per-extractor extras — the three groups toggle
-                        # `.visible` by set membership (a group shows if
-                        # its adapter is in the selected set; see
-                        # `_refresh_extractor_groups`). Built once in
-                        # _create_controls so state sticks.
+                        # Per-adapter settings — each group toggles `.visible`
+                        # by set membership (see `_refresh_extractor_groups`)
+                        # and carries its own thin-rule + sub-section title.
                         self.entities_llm_group,
                         self.entities_gliner_group,
                         self.entities_hunflair2_group,
@@ -1051,33 +974,24 @@ class CorpusConfigEditor:
                         # Nested collapsible sub-folder — 18 ontology
                         # rows with checkbox + matching Dropdown each.
                         ft.ExpansionTile(
-                            title=ft.Text("Enabled ontologies"),
+                            title=ft.Text("Enabled ontologies", size=14),
                             controls=[
                                 self._build_ontology_rows(),
                             ],
                         ),
-                        # Cross-ontology equivalence edges (xrefs)
-                        ft.Row(
-                            controls=[
-                                ft.Text(
-                                    "Cross-ontology equivalence edges (xrefs)",
-                                    size=12,
-                                    weight=ft.FontWeight.BOLD,
-                                    color=ft.Colors.GREY_400,
+                        # Cross-ontology equivalence edges (xrefs) sub-section.
+                        sub_section_header(
+                            "Cross-ontology equivalence edges (xrefs)",
+                            trailing=info_icon(
+                                self.app,
+                                title="Cross-ontology equivalence edges (xrefs)",
+                                text=(
+                                    "Materialise `:<X>_XREF` edges between term nodes "
+                                    "across ontologies (MeSH ↔ MONDO, MONDO ↔ ChEBI, "
+                                    "...). L10 cross-doc xrefs requires this be set to "
+                                    '"Materialize edges now".'
                                 ),
-                                info_icon(
-                                    self.app,
-                                    title="Cross-ontology equivalence edges (xrefs)",
-                                    text=(
-                                        "Materialise `:<X>_XREF` edges between term nodes "
-                                        "across ontologies (MeSH ↔ MONDO, MONDO ↔ ChEBI, "
-                                        "...). L10 cross-doc xrefs requires this be set to "
-                                        '"Materialize edges now".'
-                                    ),
-                                ),
-                            ],
-                            spacing=4,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
                         ),
                         self.xrefs_radio,
                     ],
@@ -1148,6 +1062,24 @@ class CorpusConfigEditor:
                 self.status,
             ],
         )
+        # One section_divider between consecutive dropdowns, always visible
+        # (same 2px / GREY_500 rule as the left column). ExpansionTiles also
+        # draw their OWN top/bottom divider lines when open (a Material
+        # default) — silence those with a border-less shape so a section
+        # break is our single intended line, not a stack of three.
+        laid_out: list[ft.Control] = []
+        for i, ctrl in enumerate(col.controls):
+            if isinstance(ctrl, ft.ExpansionTile):
+                ctrl.shape = ft.RoundedRectangleBorder(radius=0)
+                ctrl.collapsed_shape = ft.RoundedRectangleBorder(radius=0)
+                # Fill width + left-align (the default centres plain Text and
+                # bare fields), matching the left column's STRETCH layout.
+                ctrl.expanded_cross_axis_alignment = ft.CrossAxisAlignment.STRETCH
+                if i and isinstance(col.controls[i - 1], ft.ExpansionTile):
+                    laid_out.append(section_divider())
+            laid_out.append(ctrl)
+        col.controls = laid_out
+        return col
 
     # ----- load + populate -------------------------------------------------
 
@@ -1288,13 +1220,6 @@ class CorpusConfigEditor:
             self.triples_extractor_temperature_readout.value = _fmt_float(
                 cfg.triples_extractor_temperature,
             )
-        # allowed_types read-only display.
-        if self.allowed_types_display is not None:
-            allowed = list(cfg.allowed_types)
-            if allowed:
-                self.allowed_types_display.value = f"{', '.join(allowed)} ({len(allowed)} items)"
-            else:
-                self.allowed_types_display.value = "(empty)"
         # Entity extraction — ordered multi-extractor selection.
         self._selected_extractors = (
             list(cfg.entities.extractors) if cfg.entities is not None else ["llm"]
@@ -1590,18 +1515,6 @@ class CorpusConfigEditor:
         valid_keys = {opt.key for opt in new_options}
         if current not in valid_keys:
             self.sub_label_dropdown.value = _SUB_NONE_KEY
-        if self.sub_label_hint is not None:
-            if allowed:
-                self.sub_label_hint.value = (
-                    f"Sub-label options come from allowed_types "
-                    f"({', '.join(allowed)}), filtered to :{main}."
-                )
-            else:
-                self.sub_label_hint.value = (
-                    "allowed_types on this corpus is empty — no "
-                    "sub-labels available. Hand-edit corpus.toml to "
-                    "widen the list."
-                )
 
     def _on_main_label_changed(self, e: ft.Event) -> None:
         self._refresh_sub_label_options()
@@ -1946,13 +1859,13 @@ class CorpusConfigEditor:
                     controls=[
                         ft.Text(
                             name,
-                            size=11,
+                            size=12,
                             color=ft.Colors.GREY_400,
                             width=260,
                         ),
                         ft.Text(
                             self._read_global(name),
-                            size=11,
+                            size=12,
                             color=ft.Colors.GREY_300,
                         ),
                     ],
@@ -1971,8 +1884,6 @@ class CorpusConfigEditor:
                         vertical=6,
                         horizontal=8,
                     ),
-                    border=ft.Border.all(1, ft.Colors.GREY_800),
-                    border_radius=4,
                     content=ft.Column(
                         spacing=3,
                         controls=list(rows),
@@ -2511,52 +2422,60 @@ def _fmt_bool(v: bool) -> str:
     return "on" if v else "off"
 
 
+def _format_allowed_types(allowed: list[str]) -> str:
+    """Format the corpus-wide allowed_types list for the Labels (i) dialog —
+    the same "X, Y, Z (N items)" style that used to show inline."""
+    if allowed:
+        return f"{', '.join(allowed)} ({len(allowed)} items)"
+    return "(empty)"
+
+
 def _globals_block(
     pairs: list[tuple[str, str]],
     *,
     note: str | None = None,
 ) -> ft.Control:
-    """A compact read-only block showing `field: value` rows for global
-    settings that affect a layer. Editing them belongs elsewhere
-    (Settings tab / .env / env vars); shown here so users know what
-    defaults are in effect."""
-    rows: list[ft.Control] = [
-        ft.Text(
-            "Global (read-only):",
-            size=11,
-            weight=ft.FontWeight.BOLD,
-            color=ft.Colors.GREY_400,
-        ),
-    ]
+    """A read-only sub-section — thin rule + sub-section title + a compact
+    `field: value` block — for global settings that affect a layer. Editing
+    them belongs elsewhere (Settings tab / .env / env vars); shown here so
+    users know what defaults are in effect. Wrapped with vertical padding so
+    the block gets breathing room top + bottom (not cramped against the
+    control above or the section divider below)."""
+    value_rows: list[ft.Control] = []
     for name, value in pairs:
-        rows.append(
+        value_rows.append(
             ft.Row(
                 spacing=6,
                 controls=[
                     ft.Text(
                         name,
-                        size=11,
+                        size=12,
                         color=ft.Colors.GREY_400,
                         width=220,
                     ),
-                    ft.Text(value, size=11, color=ft.Colors.GREY_300),
+                    ft.Text(value, size=12, color=ft.Colors.GREY_300),
                 ],
             ),
         )
     if note is not None:
-        rows.append(
+        value_rows.append(
             ft.Text(
                 note,
-                size=10,
+                size=12,
                 color=ft.Colors.GREY_500,
                 italic=True,
             ),
         )
     return ft.Container(
-        padding=ft.Padding.symmetric(vertical=6, horizontal=8),
-        border=ft.Border.all(1, ft.Colors.GREY_800),
-        border_radius=4,
-        content=ft.Column(spacing=3, controls=rows),
+        padding=ft.Padding.only(bottom=12),
+        content=ft.Column(
+            spacing=6,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            controls=[
+                sub_section_header("Global (read-only)"),
+                ft.Column(spacing=3, controls=value_rows),
+            ],
+        ),
     )
 
 

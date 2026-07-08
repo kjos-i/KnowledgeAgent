@@ -43,7 +43,14 @@ from knowledge_agent.gui._styles import (
     PANEL_BG,
     centered_label,
     labeled_field,
+    panel_box,
+    panel_title,
+    section_divider,
+    section_title,
+    sub_section_title,
+    thin_rule,
 )
+from knowledge_agent.gui._widgets.info_icon import info_icon
 from knowledge_agent.gui.library.config_diff import config_diff
 from knowledge_agent.gui.library.corpus_config_editor import (
     _ONTOLOGY_DISPLAY,
@@ -72,7 +79,6 @@ class IngestTab:
         self.app = app
         self.config_editor = CorpusConfigEditor(app)
         self.status: ft.Text | None = None
-        self.active_corpus_label: ft.Text | None = None
 
         # Shared folder picker (used by Ingest / Re-ingest / Sync).
         self.folder_field: ft.TextField | None = None
@@ -111,7 +117,7 @@ class IngestTab:
         # status via `_write_status` (which clears the placeholder styling).
         self.status = ft.Text(
             "Empty",
-            size=11,
+            size=12,
             italic=True,
             color=ft.Colors.GREY_500,
         )
@@ -127,11 +133,6 @@ class IngestTab:
             value=True,
             tooltip="When resolving all, leave docs with status 'manual' "
             "untouched (protects your hand-edits).",
-        )
-        self.active_corpus_label = ft.Text(
-            "",
-            size=13,
-            weight=ft.FontWeight.BOLD,
         )
 
         # ---- Folder picker + 3 folder-action buttons ----
@@ -198,9 +199,6 @@ class IngestTab:
                 ],
             )
 
-        assert self.active_corpus_label is not None
-        self.active_corpus_label.value = f"Corpus: {active_name}"
-
         # Config editor owns the Labels-section sub-label dropdown, which
         # reads `allowed_types` off the loaded config. Force a load here
         # so first render has state ready.
@@ -211,27 +209,19 @@ class IngestTab:
         # never clobbers a path the user is mid-way through typing.
         self._restore_session_paths(active_name)
 
-        left_pane = ft.Container(
-            expand=1,  # 50/50 with the config editor
-            padding=12,
-            border=ft.Border.all(1, FRAME_BORDER_COLOR),
-            bgcolor=PANEL_BG,
-            border_radius=4,
-            content=ft.Column(
+        left_pane = panel_box(
+            ft.Column(
                 expand=True,
                 scroll=ft.ScrollMode.AUTO,
                 spacing=10,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                 controls=[
-                    self.active_corpus_label,
-                    ft.Text(
-                        "Every setting lives in the config on the right. "
-                        "Pick a folder or file below and hit an action.",
-                        size=11,
-                        color=ft.Colors.GREY_400,
-                    ),
-                    ft.Divider(),
-                    # Folder picker + 3 folder actions.
+                    # (Panel title "Corpus ingestion" lives in the tab's fixed
+                    # header above this pane, so it stays put while scrolling.)
+                    # ============ Section: File selection ============
+                    section_title("File selection"),
+                    # ---- Sub-section: a folder ----
+                    sub_section_title("Select a folder"),
                     labeled_field(
                         "Folder",
                         self.folder_field,
@@ -246,8 +236,10 @@ class IngestTab:
                         spacing=8,
                         wrap=True,
                     ),
-                    ft.Divider(),
-                    # File picker + single-file ingest.
+                    # Thin rule between the two sub-sections.
+                    thin_rule(),
+                    # ---- Sub-section: a single file ----
+                    sub_section_title("…or a single file"),
                     labeled_field(
                         "File",
                         self.file_field,
@@ -257,49 +249,83 @@ class IngestTab:
                         controls=[self.ingest_file_button],
                         spacing=8,
                     ),
-                    ft.Divider(),
-                    ft.Text("Progress", size=13, weight=ft.FontWeight.BOLD),
+                    section_divider(),
+                    # ============ Section: Progress ============
+                    section_title("Progress"),
                     ft.Row(
                         controls=[self.progress_ring, self.status],
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     self.progress_bar,
-                    ft.Divider(),
+                    section_divider(),
+                    # ============ Section: Ingestion summary (flat, no box) ============
+                    section_title("Ingestion summary"),
                     self._build_diff_card(),
-                    ft.Divider(),
-                    ft.Text(
-                        "Bulk operations",
-                        size=13,
-                        weight=ft.FontWeight.BOLD,
-                    ),
-                    ft.Text(
-                        "Retroactive per-layer refreshes for the "
-                        "already-ingested corpus — re-run one layer "
-                        "without re-ingesting the files.",
-                        size=11,
-                        color=ft.Colors.GREY_500,
-                        italic=True,
+                    # Discard reverts the pending config changes shown above.
+                    ft.Row(controls=[self.config_editor.discard_button]),
+                    section_divider(),
+                    # ============ Section: Bulk operations ============
+                    ft.Row(
+                        controls=[
+                            section_title("Bulk operations"),
+                            info_icon(
+                                self.app,
+                                title="Bulk operations",
+                                text=(
+                                    "Retroactive per-layer refreshes for the "
+                                    "already-ingested corpus — re-run one layer "
+                                    "without re-ingesting the files."
+                                ),
+                            ),
+                        ],
+                        spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     self._build_bulk_ops_panel(),
                 ],
-            ),
+            )
         )
 
-        right_pane = ft.Container(
-            expand=1,  # 50/50 with the left action pane
-            content=ft.Column(
+        right_pane = panel_box(
+            ft.Column(
                 expand=True,
                 scroll=ft.ScrollMode.AUTO,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                 spacing=8,
                 controls=[self.config_editor.build()],
-            ),
+            )
         )
 
+        # Column titles sit in a fixed header above the panes (aligned 50/50
+        # over them), so each stays visible while its box scrolls. The right
+        # title carries the config editor's unsaved-● + Discard button.
+        header = ft.Row(
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=12,
+            controls=[
+                ft.Container(
+                    expand=1,
+                    padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                    content=panel_title("Corpus ingestion"),
+                ),
+                ft.Container(
+                    expand=1,
+                    padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                    content=ft.Row(
+                        controls=[
+                            panel_title("Ingestion settings"),
+                            self.config_editor.dirty_indicator,
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=8,
+                    ),
+                ),
+            ],
+        )
         body = ft.Row(
             expand=True,
-            vertical_alignment=ft.CrossAxisAlignment.START,
+            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             spacing=12,
             controls=[left_pane, right_pane],
         )
@@ -307,7 +333,7 @@ class IngestTab:
             expand=True,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             spacing=8,
-            controls=[view_header("Ingest"), body],
+            controls=[header, body],
         )
 
     # ----- Diff card ------------------------------------------------------
@@ -327,63 +353,52 @@ class IngestTab:
 
         diffs = config_diff(baseline, inmem)
 
-        header = ft.Text(
-            "Ingestion summary",
-            size=13,
-            weight=ft.FontWeight.BOLD,
-        )
+        # Flat body only — the "Ingestion summary" section title + the
+        # section dividers around it now provide the framing (no inner box).
         if not diffs:
-            body: ft.Control = ft.Text(
+            return ft.Text(
                 "No pending changes — new ingest = previous.",
-                size=11,
+                size=12,
                 color=ft.Colors.GREY_500,
                 italic=True,
             )
-        else:
-            rows: list[ft.Control] = [
-                ft.Text(
-                    f"{len(diffs)} pending change{'s' if len(diffs) != 1 else ''}:",
-                    size=11,
-                    color=ft.Colors.GREY_400,
+        rows: list[ft.Control] = [
+            ft.Text(
+                f"{len(diffs)} pending change{'s' if len(diffs) != 1 else ''}:",
+                size=12,
+                color=ft.Colors.GREY_400,
+            ),
+        ]
+        for name, cur, new in diffs:
+            rows.append(
+                ft.Row(
+                    spacing=6,
+                    controls=[
+                        ft.Text(
+                            name,
+                            size=12,
+                            color=ft.Colors.GREY_300,
+                            width=180,
+                        ),
+                        ft.Text(
+                            cur,
+                            size=12,
+                            color=ft.Colors.GREY_400,
+                        ),
+                        ft.Text(
+                            "→",
+                            size=12,
+                            color=ft.Colors.GREY_500,
+                        ),
+                        ft.Text(
+                            new,
+                            size=12,
+                            color=ft.Colors.AMBER_300,
+                        ),
+                    ],
                 ),
-            ]
-            for name, cur, new in diffs:
-                rows.append(
-                    ft.Row(
-                        spacing=6,
-                        controls=[
-                            ft.Text(
-                                name,
-                                size=11,
-                                color=ft.Colors.GREY_300,
-                                width=180,
-                            ),
-                            ft.Text(
-                                cur,
-                                size=11,
-                                color=ft.Colors.GREY_400,
-                            ),
-                            ft.Text(
-                                "→",
-                                size=11,
-                                color=ft.Colors.GREY_500,
-                            ),
-                            ft.Text(
-                                new,
-                                size=11,
-                                color=ft.Colors.AMBER_300,
-                            ),
-                        ],
-                    ),
-                )
-            body = ft.Column(spacing=4, controls=rows)
-
-        return ft.Container(
-            padding=10,
-            border=ft.Border.all(1, FRAME_BORDER_COLOR),
-            border_radius=4,
-            content=ft.Column(spacing=6, controls=[header, body]),
-        )
+            )
+        return ft.Column(spacing=4, controls=rows)
 
     # ----- Bulk operations panel ------------------------------------------
 
@@ -401,11 +416,7 @@ class IngestTab:
 
         def layer_group(title: str, ops: list[str]) -> list[ft.Control]:
             return [
-                ft.Text(
-                    title,
-                    size=12,
-                    color=ft.Colors.GREY_300,
-                ),
+                sub_section_title(title),
                 ft.Row(
                     wrap=True,
                     spacing=8,
@@ -413,62 +424,38 @@ class IngestTab:
                 ),
             ]
 
-        controls: list[ft.Control] = []
         # openalex: the resolve button and its "Skip manually edited" toggle
         # share ONE line — the toggle governs what the button does, so they
         # read as a pair.
         openalex_row: list[ft.Control] = [op_button("bulk_resolve_openalex")]
         if self.skip_manual_checkbox is not None:
             openalex_row.append(self.skip_manual_checkbox)
-        controls.append(ft.Text("openalex_papers (L1–L4)", size=12, color=ft.Colors.GREY_300))
-        controls.append(
-            ft.Row(
-                wrap=True,
-                spacing=12,
-                controls=openalex_row,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            )
-        )
-        controls.extend(
-            layer_group(
-                "Chunks (L5)",
-                ["bulk_backfill_chunks", "bulk_re_embed"],
-            )
-        )
-        controls.extend(
-            layer_group(
-                "Entities (L6)",
-                ["bulk_backfill_entities"],
-            )
-        )
-        controls.extend(
+
+        # One entry per layer sub-section — joined below with a thin rule.
+        groups: list[list[ft.Control]] = [
+            [
+                sub_section_title("openalex_papers (L1–L4)"),
+                ft.Row(
+                    spacing=12,
+                    controls=openalex_row,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+            ],
+            layer_group("Chunks (L5)", ["bulk_backfill_chunks", "bulk_re_embed"]),
+            layer_group("Entities (L6)", ["bulk_backfill_entities"]),
             layer_group(
                 "Ontology linking (L7)",
-                [
-                    "bulk_backfill_ontology",
-                    "backfill_xrefs",
-                    "clear_xref_edges",
-                ],
-            )
-        )
-        controls.extend(
-            layer_group(
-                "Triples (L8)",
-                ["bulk_backfill_triples"],
-            )
-        )
-        controls.extend(
-            layer_group(
-                "Cross-doc (L9)",
-                ["bulk_backfill_cross_doc"],
-            )
-        )
-        controls.extend(
-            layer_group(
-                "Cross-doc xrefs (L10)",
-                ["recompute_cross_doc_xrefs"],
-            )
-        )
+                ["bulk_backfill_ontology", "backfill_xrefs", "clear_xref_edges"],
+            ),
+            layer_group("Triples (L8)", ["bulk_backfill_triples"]),
+            layer_group("Cross-doc (L9)", ["bulk_backfill_cross_doc"]),
+            layer_group("Cross-doc xrefs (L10)", ["recompute_cross_doc_xrefs"]),
+        ]
+        controls: list[ft.Control] = []
+        for i, group in enumerate(groups):
+            if i:  # thin rule between sub-sections (none before the first)
+                controls.append(thin_rule())
+            controls.extend(group)
         return ft.Column(spacing=8, controls=controls)
 
     def _on_bulk_op_clicked(self, op_name: str) -> None:
@@ -1172,7 +1159,7 @@ class IngestTab:
                         "Add it in Settings → Keys, then try again. The GUI "
                         "reads keys from the OS keyring there, not from a "
                         ".env file.",
-                        size=11,
+                        size=12,
                         italic=True,
                         color=ft.Colors.GREY_400,
                     ),
@@ -1204,7 +1191,7 @@ class IngestTab:
                     ft.Text(message, size=12, selectable=True),
                     ft.Text(
                         "Fix it in the config editor on the right, then try again.",
-                        size=11,
+                        size=12,
                         italic=True,
                         color=ft.Colors.GREY_400,
                     ),

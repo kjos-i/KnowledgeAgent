@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
-from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, centered_label, labeled_field
+from knowledge_agent.gui._styles import centered_label, labeled_field, panel_box
 from knowledge_agent.gui.evaluation._case_view import render_case_cards
 from knowledge_agent.gui.views._frame import view_header
 
@@ -104,7 +104,7 @@ class DatasetTab:
         self.gen_button = ft.TextButton(
             "Generate (LLM)", icon=ft.Icons.AUTO_AWESOME, on_click=self._on_generate_llm
         )
-        self.status = ft.Text("", size=11, color=ft.Colors.GREY_500)
+        self.status = ft.Text("", size=12, color=ft.Colors.GREY_500)
 
         self.case_list = ft.Column(
             controls=[ft.Text("Load a dataset to browse + edit its cases.", italic=True)],
@@ -181,9 +181,8 @@ class DatasetTab:
         )
 
         # LEFT: dataset file selection + metadata + the case-edit form.
-        left = ft.Container(
-            expand=1,
-            content=ft.Column(
+        left = panel_box(
+            ft.Column(
                 [
                     labeled_field("Dataset", self.dataset_dropdown, trailing=browse_button),
                     labeled_field("Status", self.status_dropdown),
@@ -205,16 +204,12 @@ class DatasetTab:
                 expand=True,
                 spacing=8,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-            ),
+            )
         )
         # RIGHT: the case list (click a card or Edit to load it left; Delete
         # removes it). Same card renderer the Run tab uses read-only.
-        right = ft.Container(
-            expand=1,
-            border=ft.Border.all(1, FRAME_BORDER_COLOR),
-            border_radius=6,
-            padding=12,
-            content=ft.Column(
+        right = panel_box(
+            ft.Column(
                 [
                     ft.Text("Cases", weight=ft.FontWeight.BOLD, size=13),
                     ft.Divider(height=1),
@@ -223,9 +218,14 @@ class DatasetTab:
                 expand=True,
                 spacing=8,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-            ),
+            )
         )
-        body = ft.Row([left, right], expand=True, spacing=12)
+        body = ft.Row(
+            [left, right],
+            expand=True,
+            spacing=12,
+            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+        )
         return ft.Column([view_header("Dataset"), body], expand=True, spacing=8)
 
     def _group(self, title: str, keys: list[str]) -> list[ft.Control]:

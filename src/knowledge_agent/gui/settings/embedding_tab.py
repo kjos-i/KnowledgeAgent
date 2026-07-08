@@ -132,7 +132,7 @@ class EmbeddingTab:
 
     def _create_controls(self) -> None:
         cfg = self.app.gui_config
-        self.status = ft.Text("", size=11, color=ft.Colors.GREY_400)
+        self.status = ft.Text("", size=12, color=ft.Colors.GREY_400)
 
         self.active_provider_container = ft.Container(
             content=ft.Text(
@@ -211,7 +211,7 @@ class EmbeddingTab:
                     "Switching is immediate. The dimension guard "
                     "(slice 4) will block a switch when the new "
                     "provider's dim doesn't match the LanceDB schema.",
-                    size=11,
+                    size=12,
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),
@@ -222,7 +222,7 @@ class EmbeddingTab:
                 ft.Text(
                     "Install / Uninstall each provider's packages via pip "
                     "(confirm dialog; a restart is needed after).",
-                    size=11,
+                    size=12,
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),
@@ -234,7 +234,7 @@ class EmbeddingTab:
                     "Pick from the menu or type a custom name. The "
                     "model + its dimension must match the chunks "
                     "already in your LanceDB corpus.",
-                    size=11,
+                    size=12,
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),
@@ -246,7 +246,7 @@ class EmbeddingTab:
                     "Voyage uses its native client (not LangChain), so "
                     "its rate limit lives here separately from the LLM "
                     "tab's per-provider rates.",
-                    size=11,
+                    size=12,
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),

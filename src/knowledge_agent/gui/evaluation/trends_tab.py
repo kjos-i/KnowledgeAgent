@@ -86,7 +86,7 @@ def _line_chart(
         cv.Line(_ML, _MT, _ML, _MT + plot_h, _paint(ft.Colors.GREY_500, 1.0)),
         cv.Line(_ML, _MT + plot_h, _ML + plot_w, _MT + plot_h, _paint(ft.Colors.GREY_500, 1.0)),
     ]
-    label_style = ft.TextStyle(size=10, color=ft.Colors.GREY_500)
+    label_style = ft.TextStyle(size=12, color=ft.Colors.GREY_500)
     for frac in (0.0, 0.5, 1.0):
         y = py(y_max * frac)
         shapes.append(cv.Line(_ML, y, _ML + plot_w, y, _paint(ft.Colors.GREY_800, 1.0)))
@@ -114,7 +114,7 @@ def _line_chart(
             ft.Row(
                 [
                     ft.Container(width=12, height=12, bgcolor=color, border_radius=2),
-                    ft.Text(label, size=11),
+                    ft.Text(label, size=12),
                 ],
                 spacing=3,
             )

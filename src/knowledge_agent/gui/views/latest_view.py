@@ -135,7 +135,7 @@ class LatestView:
                     thumb,
                     ft.Text(
                         caption,
-                        size=10,
+                        size=12,
                         color=ft.Colors.GREY_400,
                         no_wrap=False,
                         text_align=ft.TextAlign.CENTER,
@@ -165,21 +165,21 @@ class LatestView:
         # Metadata rows shown alongside the image. Compact — full path
         # is selectable so the user can copy it.
         metadata_rows: list[ft.Control] = [
-            ft.Text(f"doc_id: {cs.doc_id}", size=11, selectable=True),
-            ft.Text(f"chunk_id: {cs.chunk_id}", size=11, selectable=True),
+            ft.Text(f"doc_id: {cs.doc_id}", size=12, selectable=True),
+            ft.Text(f"chunk_id: {cs.chunk_id}", size=12, selectable=True),
             ft.Text(
                 f"image_ref: {cs.image_ref}",
-                size=11,
+                size=12,
                 selectable=True,
             ),
         ]
         if cs.page:
-            metadata_rows.append(ft.Text(f"page: {cs.page}", size=11))
+            metadata_rows.append(ft.Text(f"page: {cs.page}", size=12))
         if cs.quote:
             metadata_rows.append(
                 ft.Text(
                     f"caption: {cs.quote}",
-                    size=11,
+                    size=12,
                     selectable=True,
                     italic=True,
                 )

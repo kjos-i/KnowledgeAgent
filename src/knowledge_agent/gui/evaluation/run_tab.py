@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
-from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, centered_label, labeled_field
+from knowledge_agent.gui._styles import centered_label, labeled_field, panel_box
 from knowledge_agent.gui.config_store import (
     ConfigError,
     apply_keys_to_env,
@@ -296,12 +296,8 @@ class RunTab:
             expand=True,
             spacing=6,
         )
-        right = ft.Container(
-            expand=1,
-            border=ft.Border.all(1, FRAME_BORDER_COLOR),
-            border_radius=6,
-            padding=12,
-            content=ft.Column(
+        right = panel_box(
+            ft.Column(
                 [
                     ft.Text(
                         "Test cases — read-only (Max cases runs the first N, top-down)",
@@ -314,12 +310,13 @@ class RunTab:
                 expand=True,
                 spacing=8,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-            ),
+            )
         )
         body = ft.Row(
-            [ft.Container(expand=1, content=form), right],
+            [panel_box(form), right],
             expand=True,
             spacing=12,
+            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
         )
         return ft.Column(controls=[view_header("Run Evaluation"), body], expand=True, spacing=8)
 
@@ -462,7 +459,7 @@ class RunTab:
                     ft.Text(
                         "Stored in your OS keyring (same as Settings → Keys), "
                         "never on disk. Used only to upload traced runs.",
-                        size=11,
+                        size=12,
                         color=ft.Colors.GREY_500,
                         italic=True,
                     ),

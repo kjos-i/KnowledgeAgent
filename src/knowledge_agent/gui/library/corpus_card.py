@@ -71,7 +71,7 @@ def build_corpus_card(app: GuiApp) -> ft.Control:
         rows.append(
             ft.Text(
                 "corpus.toml could not be read — showing connection only.",
-                size=11,
+                size=12,
                 italic=True,
                 color=ft.Colors.AMBER_300,
             )

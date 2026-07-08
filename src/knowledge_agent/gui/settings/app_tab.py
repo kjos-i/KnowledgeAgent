@@ -113,7 +113,7 @@ class AppTab:
     def _create_controls(self) -> None:
         # All three blocks share one status line at the bottom — RA pattern.
         # Mirrors `settings_status` in the sibling app.
-        self.status = ft.Text("", size=11, color=ft.Colors.GREY_400)
+        self.status = ft.Text("", size=12, color=ft.Colors.GREY_400)
 
         # Block 0: Save results & chat (formats + default folder).
         self.save_format_checkboxes = {
@@ -176,7 +176,7 @@ class AppTab:
                 ft.Text(
                     "(running...)",
                     italic=True,
-                    size=11,
+                    size=12,
                     color=ft.Colors.GREY_500,
                 ),
             ],
@@ -261,7 +261,7 @@ class AppTab:
                 view_header("App"),
                 # ---- Block 0: Save results & chat ----------------------
                 ft.Text("Save results & chat", weight=ft.FontWeight.BOLD),
-                ft.Text(_SAVE_BLURB, size=11, color=ft.Colors.GREY_500, italic=True),
+                ft.Text(_SAVE_BLURB, size=12, color=ft.Colors.GREY_500, italic=True),
                 ft.Row(
                     controls=[self.save_format_checkboxes[f] for f in ANSWER_FORMATS],
                     wrap=True,
@@ -282,7 +282,7 @@ class AppTab:
                 ft.Text("Diagnostics", weight=ft.FontWeight.BOLD),
                 ft.Text(
                     _DEBUG_BLURB,
-                    size=11,
+                    size=12,
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),
@@ -290,7 +290,7 @@ class AppTab:
                 ft.Container(height=8),
                 ft.Text(
                     "System health — Neo4j, LanceDB, active provider keys:",
-                    size=11,
+                    size=12,
                     color=ft.Colors.GREY_400,
                 ),
                 self.chips_row,
@@ -303,7 +303,7 @@ class AppTab:
                 ),
                 ft.Text(
                     _CONNECTION_BLURB,
-                    size=11,
+                    size=12,
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),
@@ -650,7 +650,7 @@ def _status_chip(name: str, ok: bool, detail: str) -> ft.Control:
     return ft.Container(
         content=ft.Text(
             f"{name}: {'OK' if ok else 'FAIL'}",
-            size=11,
+            size=12,
             color=ft.Colors.WHITE,
             weight=ft.FontWeight.BOLD,
         ),

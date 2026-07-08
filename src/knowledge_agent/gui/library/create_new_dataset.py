@@ -56,6 +56,7 @@ from knowledge_agent.gui._styles import (
     PANEL_BG,
     centered_label,
     labeled_field,
+    panel_box,
 )
 from knowledge_agent.gui.config_store import (
     ConfigError,
@@ -163,7 +164,7 @@ class CreateNewDatasetTab:
     # ----- control construction --------------------------------------------
 
     def _create_controls(self) -> None:
-        self.status = ft.Text("", size=11, color=ft.Colors.GREY_400)
+        self.status = ft.Text("", size=12, color=ft.Colors.GREY_400)
 
         self.name_field = ft.TextField(
             hint_text="e.g. my-papers-2026",
@@ -225,7 +226,7 @@ class CreateNewDatasetTab:
         )
         self._structure_tree = ft.Text(
             _STRUCTURE_TREE[_MODE_CREATE],
-            size=11,
+            size=12,
             font_family="Consolas",
             color=ft.Colors.GREY_300,
         )
@@ -251,9 +252,8 @@ class CreateNewDatasetTab:
     # ----- public API -------------------------------------------------------
 
     def build(self) -> ft.Control:
-        left_pane = ft.Container(
-            expand=_LEFT_FLEX,
-            content=ft.Column(
+        left_pane = panel_box(
+            ft.Column(
                 scroll=ft.ScrollMode.AUTO,
                 expand=True,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
@@ -263,7 +263,7 @@ class CreateNewDatasetTab:
                         "One Neo4j instance + one LanceDB path per "
                         "corpus. Set the Neo4j DBMS up in Neo4j Desktop "
                         "first, then enter its connection details below.",
-                        size=11,
+                        size=12,
                         color=ft.Colors.GREY_500,
                         italic=True,
                     ),
@@ -285,14 +285,10 @@ class CreateNewDatasetTab:
                     self.status,
                 ],
             ),
+            expand=_LEFT_FLEX,
         )
-        right_pane = ft.Container(
-            expand=_RIGHT_FLEX,
-            padding=12,
-            border=ft.Border.all(1, FRAME_BORDER_COLOR),
-            bgcolor=PANEL_BG,
-            border_radius=4,
-            content=ft.Column(
+        right_pane = panel_box(
+            ft.Column(
                 scroll=ft.ScrollMode.AUTO,
                 spacing=8,
                 controls=[
@@ -307,7 +303,7 @@ class CreateNewDatasetTab:
                         "The Neo4j DBMS lives outside — Neo4j Desktop "
                         "manages its data directory itself. Only the "
                         "connection URI is stored per corpus.",
-                        size=11,
+                        size=12,
                         color=ft.Colors.GREY_400,
                     ),
                     ft.Divider(),
@@ -320,15 +316,16 @@ class CreateNewDatasetTab:
                         "Open Ingest to configure the corpus "
                         "(ontologies, layer flags, extractor, "
                         "thresholds) and run your first ingest.",
-                        size=11,
+                        size=12,
                         color=ft.Colors.GREY_400,
                     ),
                 ],
             ),
+            expand=_RIGHT_FLEX,
         )
         body = ft.Row(
             expand=True,
-            vertical_alignment=ft.CrossAxisAlignment.START,
+            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             spacing=12,
             controls=[left_pane, right_pane],
         )

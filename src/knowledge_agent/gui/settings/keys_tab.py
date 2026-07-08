@@ -92,7 +92,7 @@ class KeysTab:
                 ),
                 on_blur=lambda e, n=name: self.on_key_blur(n),
             )
-        self.status = ft.Text("", size=11, color=ft.Colors.GREY_400)
+        self.status = ft.Text("", size=12, color=ft.Colors.GREY_400)
 
     # ----- public API -------------------------------------------------------
 
@@ -124,7 +124,7 @@ class KeysTab:
                     "optional — only for tracing evaluation runs "
                     "(Evaluation → Run); leave it blank if you don't "
                     "trace.",
-                    size=11,
+                    size=12,
                     color=ft.Colors.GREY_500,
                 ),
                 *key_rows,

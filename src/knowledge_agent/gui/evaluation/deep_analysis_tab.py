@@ -192,9 +192,9 @@ class DeepAnalysisTab:
         rows = [
             ft.Row(
                 [
-                    ft.Text(f"{i / 10:.1f}–{(i + 1) / 10:.1f}", width=70, size=11),
+                    ft.Text(f"{i / 10:.1f}–{(i + 1) / 10:.1f}", width=70, size=12),
                     _hbar(count, top, ft.Colors.BLUE),
-                    ft.Text(str(count), size=11),
+                    ft.Text(str(count), size=12),
                 ],
                 spacing=8,
             )
@@ -223,11 +223,11 @@ class DeepAnalysisTab:
             )
 
         header = [ft.DataColumn(ft.Text(""))] + [
-            ft.DataColumn(ft.Text(lbl, size=11)) for _, lbl in varying
+            ft.DataColumn(ft.Text(lbl, size=12)) for _, lbl in varying
         ]
         rows: list[ft.DataRow] = []
         for key_r, label_r in varying:
-            cells = [ft.DataCell(ft.Text(label_r, size=11, weight=ft.FontWeight.BOLD))]
+            cells = [ft.DataCell(ft.Text(label_r, size=12, weight=ft.FontWeight.BOLD))]
             for key_c, _ in varying:
                 cells.append(ft.DataCell(self._corr_cell(key_r, key_c)))
             rows.append(ft.DataRow(cells=cells))
@@ -247,13 +247,13 @@ class DeepAnalysisTab:
                 xs.append(float(a))
                 ys.append(float(b))
         if len(xs) < 2:
-            return ft.Text("—", size=11, color=ft.Colors.GREY_500)
+            return ft.Text("—", size=12, color=ft.Colors.GREY_500)
         try:
             r = statistics.correlation(xs, ys)
         except statistics.StatisticsError:
-            return ft.Text("—", size=11, color=ft.Colors.GREY_500)
+            return ft.Text("—", size=12, color=ft.Colors.GREY_500)
         color = ft.Colors.BLUE if r >= 0.5 else ft.Colors.RED if r <= -0.5 else ft.Colors.GREY_400
-        return ft.Text(f"{r:.2f}", size=11, color=color)
+        return ft.Text(f"{r:.2f}", size=12, color=color)
 
     # ---- handlers ---------------------------------------------------------
 

@@ -70,8 +70,8 @@ def _kv_line(caption: str, value: str) -> ft.Control:
     """A `caption: value` detail line (caption column + wrapping value)."""
     return ft.Row(
         controls=[
-            ft.Text(f"{caption}:", size=10, color=ft.Colors.GREY_500, width=160),
-            ft.Text(value, size=11, color=ft.Colors.GREY_300, expand=True, selectable=True),
+            ft.Text(f"{caption}:", size=12, color=ft.Colors.GREY_500, width=160),
+            ft.Text(value, size=12, color=ft.Colors.GREY_300, expand=True, selectable=True),
         ],
         vertical_alignment=ft.CrossAxisAlignment.START,
     )
@@ -91,7 +91,7 @@ def case_card(
     editable = on_edit is not None or on_delete is not None
     question = ft.Text(
         case.question,
-        size=11,
+        size=12,
         color=ft.Colors.GREY_400,
         selectable=detailed,
         # Detailed cards show the whole question; compact cards clip it.
@@ -102,11 +102,11 @@ def case_card(
         ft.Row(
             controls=[
                 ft.Text(case.id, weight=ft.FontWeight.BOLD, size=12, expand=True),
-                ft.Text(getattr(case, "origin", ""), size=10, color=ft.Colors.GREY_500),
+                ft.Text(getattr(case, "origin", ""), size=12, color=ft.Colors.GREY_500),
             ],
         ),
         question,
-        ft.Text(_retrieval_summary(case), size=10, color=ft.Colors.GREY_600),
+        ft.Text(_retrieval_summary(case), size=12, color=ft.Colors.GREY_600),
     ]
     if detailed:
         for attr, caption in _DETAIL_FIELDS:

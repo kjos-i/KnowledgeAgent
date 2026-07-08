@@ -212,7 +212,7 @@ class ChatPanel:
                     ft.Text(
                         "assistant",
                         color=ft.Colors.GREEN_200,
-                        size=11,
+                        size=12,
                         weight=ft.FontWeight.BOLD,
                     ),
                     body_text,
@@ -265,7 +265,7 @@ class ChatPanel:
                     ft.Text(
                         "you",
                         color=ft.Colors.BLUE_200,
-                        size=11,
+                        size=12,
                         weight=ft.FontWeight.BOLD,
                     ),
                     ft.Text(text, size=13, selectable=True),
@@ -283,7 +283,7 @@ class ChatPanel:
                     ft.Text(
                         "assistant",
                         color=ft.Colors.GREEN_200,
-                        size=11,
+                        size=12,
                         weight=ft.FontWeight.BOLD,
                     ),
                     ft.Text(text, size=13, selectable=True),
@@ -298,7 +298,7 @@ class ChatPanel:
         return ft.Container(
             content=ft.Text(
                 text,
-                size=11,
+                size=12,
                 italic=True,
                 color=ft.Colors.GREY_500,
                 selectable=True,

@@ -247,7 +247,7 @@ class RunSummaryTab:
             border_radius=8,
             content=ft.Column(
                 [
-                    ft.Text(label, size=11, color=ft.Colors.GREY_600),
+                    ft.Text(label, size=12, color=ft.Colors.GREY_600),
                     ft.Text(value, size=18, weight=ft.FontWeight.BOLD, color=color),
                 ],
                 spacing=2,

@@ -64,7 +64,7 @@ def _tier_icon(app: GuiApp, tier: str, *, title: str, text: str) -> ft.IconButto
                     tight=True,
                     spacing=6,
                     controls=[
-                        ft.Text(spec.label, size=11, italic=True, color=spec.color),
+                        ft.Text(spec.label, size=12, italic=True, color=spec.color),
                         ft.Text(text, size=13, selectable=True),
                     ],
                 ),
