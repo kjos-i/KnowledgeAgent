@@ -89,6 +89,7 @@ from knowledge_agent.ingestion.parser_lifecycle import (
     uninstall_parser_extra_plan,
 )
 from knowledge_agent.kg.ontology_lifecycle import (
+    _safe_downloads_dir,
     delete_ontology_download_execute,
     delete_ontology_download_plan,
     download_ontology_download_execute,
@@ -123,6 +124,20 @@ def _fmt_bytes(n: int) -> str:
             return f"{n:.0f} {unit}"
         n //= 1024
     return f"{n} PB"
+
+
+def _source_link_button(url: str) -> ft.IconButton:
+    """Small open-in-new icon linking to an install target's source /
+    homepage page. Declarative `url=` (same mechanism as the LangSmith
+    links) — the OS browser opens it; no async handler needed."""
+    return ft.IconButton(
+        icon=ft.Icons.OPEN_IN_NEW,
+        icon_size=16,
+        icon_color=ft.Colors.BLUE_300,
+        width=40,
+        url=url,
+        tooltip=f"Open source page — {url}",
+    )
 
 
 def _resolve_hf_hub_cache_dir() -> Path | None:
@@ -198,6 +213,10 @@ class InstallsTab:
         # save_config; env bridge via apply_ontology_downloads_dir_to_env).
         # Blank = fall back to backend Settings default.
         self.downloads_dir_field: ft.TextField | None = None
+        # Effective ontology downloads dir — read-only echo of where files
+        # ACTUALLY land (the override when set, the backend default when the
+        # field is blank), so a blank field isn't an invisible location.
+        self.effective_downloads_display: ft.Text | None = None
         # HF hub + Ollama models dirs — read-only. Third-party libraries
         # own these locations; GUI just displays.
         self.hf_hub_display: ft.Text | None = None
@@ -227,6 +246,11 @@ class InstallsTab:
         self.downloads_dir_browse_button = ft.Button(
             content=centered_label("Browse"),
             on_click=self._on_downloads_dir_browse_clicked,
+        )
+        self.effective_downloads_display = ft.Text(
+            "(checking…)",
+            size=12,
+            color=ft.Colors.GREY_300,
         )
         self.hf_hub_display = ft.Text(
             "(checking…)",
@@ -330,6 +354,20 @@ class InstallsTab:
                 self.downloads_dir_field,
                 trailing=self.downloads_dir_browse_button,
             ),
+            # Effective ontology location — read-only echo (shows the backend
+            # default when the field above is blank).
+            ft.Row(
+                spacing=6,
+                controls=[
+                    ft.Text(
+                        "Effective location:",
+                        size=12,
+                        color=ft.Colors.GREY_400,
+                        width=280,
+                    ),
+                    self.effective_downloads_display,
+                ],
+            ),
             # HF hub cache dir — read-only display
             ft.Row(
                 spacing=6,
@@ -370,6 +408,7 @@ class InstallsTab:
             )
         )
         for name in _ONTOLOGY_ORDER:
+            ont_prov = ONTOLOGY_REGISTRY.get(name, {}).get("provenance")
             controls.append(
                 self._simple_row(
                     _ONTOLOGY_DISPLAY[name],
@@ -378,6 +417,7 @@ class InstallsTab:
                         self.ontology_download_buttons[name],
                         self.ontology_delete_buttons[name],
                     ),
+                    source_url=ont_prov.source_url if ont_prov else None,
                 )
             )
         controls.append(section_divider())
@@ -395,6 +435,7 @@ class InstallsTab:
         )
         for name in _EXTRACTOR_ORDER:
             display = EXTRACTOR_REGISTRY[name]["display_name"]
+            ext_prov = EXTRACTOR_REGISTRY[name].get("provenance")
             controls.append(
                 self._simple_row(
                     display,
@@ -405,6 +446,7 @@ class InstallsTab:
                         self.extractor_download_buttons[name],
                         self.extractor_delete_buttons[name],
                     ),
+                    source_url=ext_prov.source_url if ext_prov else None,
                 )
             )
         controls.append(section_divider())
@@ -423,6 +465,11 @@ class InstallsTab:
         )
         for name in _PARSER_ORDER:
             display = PARSER_LIFECYCLE_REGISTRY[name]["display_name"]
+            # Parsers install via pip, so the download source IS the PyPI
+            # project of the extra's primary package — derived from the
+            # registry's `library_packages`, no separate URL to maintain.
+            pkgs = PARSER_LIFECYCLE_REGISTRY[name].get("library_packages") or ()
+            parser_source_url = f"https://pypi.org/project/{pkgs[0]}/" if pkgs else None
             controls.append(
                 self._simple_row(
                     display,
@@ -431,6 +478,7 @@ class InstallsTab:
                         self.parser_install_buttons[name],
                         self.parser_uninstall_buttons[name],
                     ),
+                    source_url=parser_source_url,
                 )
             )
         controls.append(self.status)
@@ -455,14 +503,23 @@ class InstallsTab:
         display_name: str,
         status_text: ft.Text,
         buttons: tuple[ft.Button, ...],
+        *,
+        source_url: str | None = None,
     ) -> ft.Control:
-        """One install row: name + status + N buttons (flipped by visibility)."""
+        """One install row: name + status + optional source-link icon + N
+        buttons (flipped by visibility). When `source_url` is None a fixed
+        spacer holds the icon's slot so the action buttons stay aligned
+        across rows that do and don't have a link."""
+        link_slot: ft.Control = (
+            _source_link_button(source_url) if source_url else ft.Container(width=40)
+        )
         return ft.Row(
             spacing=8,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 ft.Text(display_name, size=12, width=280),
                 ft.Container(content=status_text, expand=True),
+                link_slot,
                 *buttons,
             ],
         )
@@ -478,6 +535,11 @@ class InstallsTab:
         below reflect where those libraries put files regardless of our
         settings.
         """
+        if self.effective_downloads_display is not None:
+            effective = _safe_downloads_dir()
+            self.effective_downloads_display.value = (
+                str(effective) if effective is not None else "(could not resolve)"
+            )
         if self.hf_hub_display is not None:
             hf = _resolve_hf_hub_cache_dir()
             if hf is None:
@@ -560,7 +622,8 @@ class InstallsTab:
         else:
             self._set_status(f"Saved ontology_downloads_dir: {new_value}")
         # Re-run the ontology disk probes against the new path so the
-        # rows update immediately.
+        # rows update immediately, and refresh the effective-location echo.
+        self._sync_downloads_dir()
         self._sync_ontology_state()
         self._safe_update()
 

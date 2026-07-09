@@ -49,6 +49,7 @@ def _patch_http_stream(*, chunks: list[bytes] | None = None, raise_mid: bool = F
 from typing import TYPE_CHECKING
 
 from knowledge_agent.kg.ontology_helpers import (
+    OntologyNotDownloadedError,
     OntologyTerm,
     _validate_xrefs_mode,
     _xref_rel_from_term_label,
@@ -58,6 +59,7 @@ from knowledge_agent.kg.ontology_helpers import (
     extract_terms_skos,
     get_downloads_dir,
     read_rdf,
+    require_cached,
     write_ontology_terms,
 )
 
@@ -131,6 +133,35 @@ def test_get_downloads_dir_creates_directory(tmp_path: Path):
         downloads = get_downloads_dir()
     assert downloads == target
     assert target.is_dir()
+
+
+def test_require_cached_returns_path_when_present(tmp_path: Path):
+    """The read-only ingest-path resolver returns the cached file — never
+    downloads."""
+    target = tmp_path / "ontology-cache"
+    target.mkdir()
+    (target / "mesh.nt").write_bytes(b"cached")
+
+    with patch("knowledge_agent.kg.ontology_helpers.get_settings") as mock_settings:
+        mock_settings.return_value.ontology_downloads_dir = target
+        result = require_cached("mesh.nt", "MeSH")
+
+    assert result == target / "mesh.nt"
+
+
+def test_require_cached_raises_when_missing(tmp_path: Path):
+    """A missing cache file raises OntologyNotDownloadedError (with the
+    ontology name + install hint) instead of auto-downloading."""
+    target = tmp_path / "ontology-cache"
+    target.mkdir()
+
+    with patch("knowledge_agent.kg.ontology_helpers.get_settings") as mock_settings:
+        mock_settings.return_value.ontology_downloads_dir = target
+        with pytest.raises(OntologyNotDownloadedError) as excinfo:
+            require_cached("mesh.nt", "MeSH")
+
+    assert excinfo.value.ontology_name == "MeSH"
+    assert "Installs" in str(excinfo.value)
 
 
 async def test_ensure_cached_returns_existing_file(tmp_path: Path):

@@ -97,6 +97,11 @@ class IngestTab:
         # Determinate per-file bar shown during the execute phase (the
         # ring covers the indeterminate scan phase before the dialog).
         self.progress_bar: ft.ProgressBar | None = None
+        # Cancel button + flag — cooperative cancel of a running folder
+        # ingest. The flag is polled in bulk_ops' execute loops (should_cancel),
+        # so the stop lands at a clean document boundary.
+        self.cancel_button: ft.Button | None = None
+        self._cancel_requested = False
         self._busy = False
         self._bg_tasks: set[asyncio.Task] = set()
         # Bulk-ops: Skip-manually-edited toggle for bulk_resolve_openalex
@@ -128,6 +133,13 @@ class IngestTab:
             visible=False,
         )
         self.progress_bar = ft.ProgressBar(value=0, visible=False)
+        # Cancel button — hidden until a folder ingest is executing. Stops at
+        # the next document boundary (the current file finishes first).
+        self.cancel_button = ft.Button(
+            content=centered_label("Cancel"),
+            visible=False,
+            on_click=self._on_cancel_clicked,
+        )
         self.skip_manual_checkbox = ft.Checkbox(
             label="Skip manually edited",
             value=True,
@@ -253,7 +265,7 @@ class IngestTab:
                     # ============ Section: Progress ============
                     section_title("Progress"),
                     ft.Row(
-                        controls=[self.progress_ring, self.status],
+                        controls=[self.progress_ring, self.status, self.cancel_button],
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
@@ -848,19 +860,37 @@ class IngestTab:
 
     async def _run_action(self, action: str) -> None:
         """Load the saved config, build the plan for `action`, and show a
-        confirm dialog whose OK button kicks off the execute."""
-        from knowledge_agent.ingestion import bulk_ops
-        from knowledge_agent.kg.corpus_config import load_corpus_config
+        confirm dialog whose OK button kicks off the execute.
+
+        The spinner is turned on FIRST and the (potentially cold, 30-60s on
+        the first ingest of a session) ingestion-backend import runs off the
+        event loop, so the ring both paints and animates instead of the UI
+        freezing on the idle 'Empty' status while docling / torch load.
+        """
+
+        def _import_ingest_backend():
+            from knowledge_agent.ingestion import bulk_ops
+            from knowledge_agent.kg.corpus_config import load_corpus_config
+
+            return bulk_ops, load_corpus_config
+
+        self._set_busy(True, f"{action}: preparing…")
+        await asyncio.sleep(0.05)  # let Flet paint the spinner before the import blocks
+        try:
+            bulk_ops, load_corpus_config = await asyncio.to_thread(_import_ingest_backend)
+        except Exception as exc:
+            self._set_busy(False, f"{action}: could not load ingestion backend — {exc}")
+            return
 
         main, sub, overwrite = self.config_editor.get_ingest_args()
         cfg_path = self.app.gui_config.corpus_config_path
         if cfg_path is None:
-            self._set_status("No active corpus.")
+            self._set_busy(False, "No active corpus.")
             return
         try:
             config = load_corpus_config(cfg_path)
         except Exception as exc:
-            self._set_status(f"could not load corpus.toml: {exc}")
+            self._set_busy(False, f"could not load corpus.toml: {exc}")
             return
 
         # Pre-flight: ingestion embeds every chunk (and may extract with an
@@ -869,10 +899,12 @@ class IngestTab:
         # that actually persisted nothing.
         missing_key = self._missing_ingest_key(config)
         if missing_key is not None:
+            self._set_busy(False)
             self._show_missing_key_dialog(action, missing_key)
             return
 
         if action == "Ingest single file":
+            self._set_busy(False)
             self._plan_single_file(config, main, sub, overwrite)
             return
 
@@ -980,16 +1012,26 @@ class IngestTab:
 
         preserve = not overwrite
         total = self._ingest_progress_total(action, plan)
+        # Arm the Cancel button for this run (cooperative cancel between files).
+        self._cancel_requested = False
+        if self.cancel_button is not None:
+            self.cancel_button.visible = True
+            self.cancel_button.disabled = False
         self._set_busy(True, f"{action}: working…")
         self._begin_progress(total)
 
         def progress(done: int, tot: int) -> None:
             self._on_ingest_progress(action, done, tot)
 
+        def _should_cancel() -> bool:
+            return self._cancel_requested
+
         cb = progress if total > 0 else None
         try:
             if action == "Ingest folder":
-                result = await bulk_ops.add_execute(plan, config, preserve, progress_cb=cb)
+                result = await bulk_ops.add_execute(
+                    plan, config, preserve, progress_cb=cb, should_cancel=_should_cancel
+                )
                 msg = self._fmt_ingest_result(action, result)
             elif action == "Re-ingest":
                 result = await bulk_ops.ingest_folder_execute(
@@ -997,18 +1039,41 @@ class IngestTab:
                     config,
                     preserve,
                     progress_cb=cb,
+                    should_cancel=_should_cancel,
                 )
                 msg = self._fmt_ingest_result(action, result)
             else:  # Sync
-                result = await bulk_ops.sync_execute(plan, config, preserve, progress_cb=cb)
+                result = await bulk_ops.sync_execute(
+                    plan, config, preserve, progress_cb=cb, should_cancel=_should_cancel
+                )
                 msg = self._fmt_sync_result(result)
         except Exception as exc:
+            self._hide_cancel_button()
             self._end_progress()
             self._set_busy(False, f"{action} failed: {exc}")
             return
+        if self._cancel_requested:
+            msg = f"Cancelled — {msg}"
+        self._hide_cancel_button()
         self._end_progress()
         self._set_busy(False, msg)
         self._notify_ingest_complete()
+
+    def _on_cancel_clicked(self, e: ft.Event) -> None:
+        """Request a cooperative cancel: the running ingest stops at the next
+        document boundary (the file currently parsing finishes first)."""
+        if not self._busy:
+            return
+        self._cancel_requested = True
+        if self.cancel_button is not None:
+            self.cancel_button.disabled = True  # one press; no double-cancel
+        self._write_status("Cancelling — will stop after the current file…")
+        self.app.page.update()
+
+    def _hide_cancel_button(self) -> None:
+        if self.cancel_button is not None:
+            self.cancel_button.visible = False
+            self.cancel_button.disabled = False
 
     # ----- progress bar (execute phase) -----------------------------------
 

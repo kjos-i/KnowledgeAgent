@@ -200,7 +200,7 @@ async def test_import_short_circuits_when_already_imported():
     driver = RecordingDriver(
         canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
     )
-    with patch("knowledge_agent.kg.ontology_writes.ensure_cached") as mc:
+    with patch("knowledge_agent.kg.ontology_writes.require_cached") as mc:
         assert (
             await ontology_efo_writes.import_efo(_client_with_driver(driver), force=False) is False
         )
@@ -210,7 +210,7 @@ async def test_import_short_circuits_when_already_imported():
 async def test_import_force_drops_then_reimports():
     driver = RecordingDriver()
     with (
-        patch("knowledge_agent.kg.ontology_writes.ensure_cached", return_value="/fake/efo.owl"),
+        patch("knowledge_agent.kg.ontology_writes.require_cached", return_value="/fake/efo.owl"),
         patch(
             "knowledge_agent.kg.ontology_efo_writes._read_and_extract",
             return_value=[_term("EFO:0000001", "experimental factor")],
@@ -228,7 +228,7 @@ async def test_import_aborts_on_zero_terms():
         canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]]
     )
     with (
-        patch("knowledge_agent.kg.ontology_writes.ensure_cached", return_value="/fake/efo.owl"),
+        patch("knowledge_agent.kg.ontology_writes.require_cached", return_value="/fake/efo.owl"),
         patch("knowledge_agent.kg.ontology_efo_writes._read_and_extract", return_value=[]),
     ):
         with pytest.raises(RuntimeError, match="extracted 0 terms"):
@@ -241,7 +241,7 @@ async def test_import_propagates_download_exception():
     )
     with (
         patch(
-            "knowledge_agent.kg.ontology_writes.ensure_cached",
+            "knowledge_agent.kg.ontology_writes.require_cached",
             side_effect=RuntimeError("network down"),
         ),
         pytest.raises(RuntimeError, match="network down"),
@@ -304,6 +304,6 @@ async def test_client_import_delegates_to_module():
         canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
     )
     client = _client_with_driver(driver)
-    with patch("knowledge_agent.kg.ontology_writes.ensure_cached") as mc:
+    with patch("knowledge_agent.kg.ontology_writes.require_cached") as mc:
         assert await client.import_efo(force=False) is False
     mc.assert_not_called()

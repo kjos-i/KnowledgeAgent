@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING, Any
 
 from knowledge_agent.kg.ontology_helpers import (
     OntologyTerm,
-    ensure_cached,
+    require_cached,
     write_ontology_terms,
 )
 from knowledge_agent.kg.ontology_provenance import OntologyProvenance
@@ -199,8 +199,11 @@ async def import_mesh(
         logger.info("MeSH: force=True - dropping existing data before re-import")
         await delete_imported(client)
 
-    logger.info("MeSH: downloading %s", MESH_DOWNLOAD_URL)
-    path = await ensure_cached(MESH_DOWNLOAD_URL, MESH_CACHE_FILENAME)
+    # Ingest never auto-downloads — require the file already on disk
+    # (downloaded via Library → Installs); raises OntologyNotDownloadedError
+    # otherwise, caught per-ontology by ensure_ontology_imported.
+    logger.info("MeSH: loading cached source %s", MESH_CACHE_FILENAME)
+    path = require_cached(MESH_CACHE_FILENAME, "MeSH")
     terms = _read_and_extract(path)
 
     if not terms:

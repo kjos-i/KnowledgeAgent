@@ -55,6 +55,7 @@ from knowledge_agent.kg.ontology_helpers import (
     extract_terms_owl,
     get_downloads_dir,
     is_ontology_imported,
+    require_cached,
     write_ontology_terms,
 )
 from knowledge_agent.kg.ontology_provenance import OntologyProvenance
@@ -179,7 +180,10 @@ async def import_fibo(
         )
         await delete_imported(client)
 
-    cache_dir = await _walk_and_cache_fibo()
+    # Ingest never auto-downloads — require FIBO's cached subdir already on
+    # disk (downloaded via Library → Installs, which runs _walk_and_cache_fibo);
+    # raises OntologyNotDownloadedError otherwise, caught per-ontology upstream.
+    cache_dir = require_cached(FIBO_CACHE_SUBDIR, "FIBO")
     terms = _read_and_extract(cache_dir)
 
     if not terms:

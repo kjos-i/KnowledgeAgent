@@ -2256,6 +2256,21 @@ class CorpusConfigEditor:
         if self.discard_button is not None:
             self.discard_button.disabled = not dirty
 
+    def _ontology_downloaded(self, key: str) -> bool:
+        """Disk probe: is this ontology's source file downloaded?
+
+        Un-downloaded ontologies can't be enabled — ingest never auto-
+        downloads (the file must be fetched via Library → Installs). Local
+        import keeps the view's startup light; defaults to True on any probe
+        error so a transient failure doesn't wrongly block the whole list
+        (the ingest path hard-guards regardless)."""
+        try:
+            from knowledge_agent.kg.ontology_lifecycle import is_ontology_downloaded
+
+            return bool(is_ontology_downloaded(key))
+        except Exception:
+            return True
+
     def _refresh_availability(self) -> None:
         """Grey out controls that can't currently apply. Two kinds:
 
@@ -2304,8 +2319,21 @@ class CorpusConfigEditor:
             entities_on,
             "Requires the entities layer",
         )
-        for cb in self.ontology_checkboxes.values():
-            _grey(cb, entities_on, "Requires the entities layer")
+        # Ontologies also HARD-require their source file to be downloaded —
+        # ingest never auto-downloads, so an un-downloaded ontology can't be
+        # enabled here at all (disabled, not just greyed). Download happens
+        # only via Library → Installs.
+        for key, cb in self.ontology_checkboxes.items():
+            if not self._ontology_downloaded(key):
+                cb.disabled = True
+                cb.label_style = ft.TextStyle(color=ft.Colors.GREY_600)
+                cb.tooltip = (
+                    f"{_ONTOLOGY_DISPLAY[key]} is not downloaded — download it in "
+                    f"Library → Installs to enable it here."
+                )
+            else:
+                cb.disabled = False
+                _grey(cb, entities_on, "Requires the entities layer")
         if self.cross_doc_xrefs_checkbox is not None:
             ok = entities_on and xrefs_use
             if not entities_on:

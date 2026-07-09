@@ -1298,17 +1298,22 @@ async def ingest_document(
     if kg_entities_ok:
         do_l9 = config.layers.cross_doc
         do_l10 = config.layers.cross_doc_xrefs
+        # Collect COROUTINES (do NOT await here) so asyncio.gather can run L9
+        # and L10 concurrently. Awaiting inside tasks.append() would put the
+        # resolved int results into `tasks`, and gather() on non-awaitables
+        # raises TypeError("An asyncio.Future, a coroutine or an awaitable is
+        # required") — which aborted every ingest before this fix.
         tasks: list = []
         if do_l9:
             tasks.append(
-                await kg_client.recompute_cross_doc_edges(
+                kg_client.recompute_cross_doc_edges(
                     doc_id,
                     config.cross_doc.threshold,
                 )
             )
         if do_l10:
             tasks.append(
-                await kg_client.recompute_cross_doc_xrefs_edges(
+                kg_client.recompute_cross_doc_xrefs_edges(
                     doc_id,
                     config.cross_doc_xrefs.threshold,
                 )

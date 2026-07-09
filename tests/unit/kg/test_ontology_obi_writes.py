@@ -202,7 +202,7 @@ async def test_import_obi_short_circuits_when_already_imported():
     driver = RecordingDriver(
         canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
     )
-    with patch("knowledge_agent.kg.ontology_writes.ensure_cached") as mc:
+    with patch("knowledge_agent.kg.ontology_writes.require_cached") as mc:
         assert (
             await ontology_obi_writes.import_obi(_client_with_driver(driver), force=False) is False
         )
@@ -212,7 +212,7 @@ async def test_import_obi_short_circuits_when_already_imported():
 async def test_import_obi_force_drops_then_reimports():
     driver = RecordingDriver()
     with (
-        patch("knowledge_agent.kg.ontology_writes.ensure_cached", return_value="/fake/obi.owl"),
+        patch("knowledge_agent.kg.ontology_writes.require_cached", return_value="/fake/obi.owl"),
         patch(
             "knowledge_agent.kg.ontology_obi_writes._read_and_extract",
             return_value=[_term("OBI:0000123", "process A")],
@@ -230,7 +230,7 @@ async def test_import_obi_aborts_on_zero_terms():
         canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]]
     )
     with (
-        patch("knowledge_agent.kg.ontology_writes.ensure_cached", return_value="/fake/obi.owl"),
+        patch("knowledge_agent.kg.ontology_writes.require_cached", return_value="/fake/obi.owl"),
         patch("knowledge_agent.kg.ontology_obi_writes._read_and_extract", return_value=[]),
     ):
         with pytest.raises(RuntimeError, match="extracted 0 terms"):
@@ -243,7 +243,7 @@ async def test_import_obi_propagates_download_exception():
     )
     with (
         patch(
-            "knowledge_agent.kg.ontology_writes.ensure_cached",
+            "knowledge_agent.kg.ontology_writes.require_cached",
             side_effect=RuntimeError("network down"),
         ),
         pytest.raises(RuntimeError, match="network down"),
@@ -307,6 +307,6 @@ async def test_client_import_obi_delegates_to_module():
         canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
     )
     client = _client_with_driver(driver)
-    with patch("knowledge_agent.kg.ontology_writes.ensure_cached") as mc:
+    with patch("knowledge_agent.kg.ontology_writes.require_cached") as mc:
         assert await client.import_obi(force=False) is False
     mc.assert_not_called()

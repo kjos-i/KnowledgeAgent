@@ -974,6 +974,7 @@ async def add_execute(
     preserve_existing_labels: bool = True,
     *,
     progress_cb: Callable[[int, int], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> AddResult:
     """Ingest each file in `plan.new_items`. Per-file fail-soft.
 
@@ -991,6 +992,11 @@ async def add_execute(
     total = len(plan.new_items)
 
     for done, item in enumerate(plan.new_items, start=1):
+        # Cooperative cancel: stop at a clean document boundary. Files already
+        # ingested stay written; the rest are simply not started.
+        if should_cancel is not None and should_cancel():
+            logger.info("add_execute: cancelled by user after %d file(s)", done - 1)
+            break
         try:
             await pipeline.ingest_document(
                 item.path,
@@ -1160,6 +1166,7 @@ async def sync_execute(
     preserve_existing_labels: bool = True,
     *,
     progress_cb: Callable[[int, int], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> SyncResult:
     """Apply changes per bucket: ingest NEW, patch MOVED, replace EDITED,
     delete ORPHAN.
@@ -1203,11 +1210,18 @@ async def sync_execute(
         if progress_cb is not None:
             progress_cb(done, total)
 
+    def _cancelled() -> bool:
+        # Cooperative cancel: checked at the top of every bucket item so a
+        # stop lands at a clean boundary. Items already applied stay applied.
+        return should_cancel is not None and should_cancel()
+
     search_client = get_search_client()
 
     # NEW: full ingest via Layer 2. New doc_ids never have prior
     # labels, so `preserve_existing_labels` is a semantic no-op here.
     for disk in plan.buckets.new:
+        if _cancelled():
+            break
         try:
             await pipeline.ingest_document(
                 disk.path,
@@ -1229,6 +1243,8 @@ async def sync_execute(
 
     # MOVED: just patch source_path on the existing doc.
     for disk, old in plan.buckets.moved:
+        if _cancelled():
+            break
         try:
             await search_client.update_doc_metadata(
                 old.doc_id,
@@ -1254,6 +1270,8 @@ async def sync_execute(
         get_kg_client() if (preserve_existing_labels and plan.buckets.edited) else None
     )
     for disk, old in plan.buckets.edited:
+        if _cancelled():
+            break
         try:
             if kg_client_for_edited is not None:
                 old_main, old_sub = await kg_client_for_edited.get_focal_labels_by_doc_id(
@@ -1285,6 +1303,8 @@ async def sync_execute(
 
     # ORPHAN: delete - dialog confirmation is the caller's responsibility.
     for orphan in plan.buckets.orphan:
+        if _cancelled():
+            break
         if await pipeline.delete_doc(orphan.doc_id):
             n_orphans_deleted += 1
         else:
@@ -1309,6 +1329,7 @@ async def ingest_folder_execute(
     preserve_existing_labels: bool = True,
     *,
     progress_cb: Callable[[int, int], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> IngestFolderResult:
     """Iterate `plan.items`; call `pipeline.ingest_document` per file.
 
@@ -1333,6 +1354,10 @@ async def ingest_folder_execute(
     total = len(plan.items)
 
     for done, item in enumerate(plan.items, start=1):
+        # Cooperative cancel: stop at a clean document boundary.
+        if should_cancel is not None and should_cancel():
+            logger.info("ingest_folder_execute: cancelled by user after %d file(s)", done - 1)
+            break
         try:
             await pipeline.ingest_document(
                 item.path,

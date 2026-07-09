@@ -37,7 +37,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from knowledge_agent.kg.ontology_helpers import OntologyTerm, ensure_cached
+from knowledge_agent.kg.ontology_helpers import OntologyTerm, require_cached
 
 logger = logging.getLogger(__name__)
 
@@ -314,13 +314,14 @@ async def import_ontology_data(
             ontology_name=ontology_name,
         )
 
-    logger.info("%s: downloading %s", ontology_name, url)
-    # External boundary catches stay where they are domain-aware (per-
-    # ontology resilience lives in the OUTER caller — see
-    # `ensure_ontology_imported`); here we let download / parse failures
-    # propagate so the caller can distinguish "network down" from
-    # "Cypher problem" from "empty extraction" via the exception type.
-    path = await ensure_cached(url, cache_filename)
+    logger.info("%s: loading cached source %s", ontology_name, cache_filename)
+    # Ingest NEVER auto-downloads — the source file must already be on disk
+    # (downloaded via Library → Installs). `require_cached` raises
+    # OntologyNotDownloadedError if it isn't; the OUTER caller
+    # (`ensure_ontology_imported`) catches per-ontology and skips it. Parse /
+    # write failures still propagate so the caller can tell them apart. `url`
+    # is unused now (kept in the signature for the download op's provenance).
+    path = require_cached(cache_filename, ontology_name)
     terms = read_and_extract(path)
 
     if not terms:

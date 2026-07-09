@@ -904,6 +904,41 @@ async def test_sync_execute_returns_result_dataclass():
     assert isinstance(result, SyncResult)
 
 
+async def test_add_execute_stops_on_cancel_at_file_boundary():
+    """`should_cancel` returning True stops the loop at a clean document
+    boundary — files already ingested stay done, the rest are never started."""
+    plan = AddPlan(
+        folder=Path("/tmp"),
+        main_label="Document",
+        sub_label=None,
+        new_items=(
+            _ifi("/tmp/a.pdf", "d1"),
+            _ifi("/tmp/b.pdf", "d2"),
+            _ifi("/tmp/c.pdf", "d3"),
+        ),
+        n_skipped=0,
+    )
+    ingested = {"n": 0}
+
+    async def _fake_ingest(*_a, **_k):
+        ingested["n"] += 1
+
+    def _cancel() -> bool:
+        # Checked at the TOP of each iteration: allow the first file through,
+        # then request cancel so the loop breaks before the second.
+        return ingested["n"] >= 1
+
+    with patch(
+        "knowledge_agent.ingestion.bulk_ops.pipeline.ingest_document",
+        side_effect=_fake_ingest,
+    ):
+        result = await add_execute(plan, _config(), should_cancel=_cancel)
+
+    assert ingested["n"] == 1  # only the first file processed
+    assert result.n_succeeded == 1
+    assert result.n_failed == 0
+
+
 # ---- AddPlan dataclass + summary string ----
 
 

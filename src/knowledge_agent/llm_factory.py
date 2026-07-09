@@ -72,6 +72,36 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Anthropic model IDs that REMOVED the sampling parameters (temperature /
+# top_p / top_k). Sending `temperature` to any of these returns a hard
+# HTTP 400 ("`temperature` is deprecated for this model"), so the factory
+# omits it for them. Older Claude models (Opus 4.6, Sonnet 4.6, Sonnet 4.5,
+# Haiku 4.5, …) still accept temperature and are NOT listed here.
+# Single source of truth — extend this when a new sampling-free model ships.
+_ANTHROPIC_NO_SAMPLING_MODELS: frozenset[str] = frozenset(
+    {
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-sonnet-5",
+        "claude-fable-5",
+        "claude-mythos-5",
+    }
+)
+
+
+def _supports_temperature(provider: str, model: str) -> bool:
+    """Whether `temperature` may be sent to (provider, model).
+
+    False only for the newest Anthropic models, which reject the sampling
+    parameters with a 400. Every other provider/model accepts temperature.
+    Match is case-insensitive on the bare model id (an accidental date
+    suffix, if one is ever passed, still matches via prefix)."""
+    if provider != "anthropic":
+        return True
+    m = model.strip().lower()
+    return not any(m == name or m.startswith(f"{name}-") for name in _ANTHROPIC_NO_SAMPLING_MODELS)
+
+
 class ConfigError(RuntimeError):
     """Raised when the active provider is mis-configured.
 
@@ -183,8 +213,18 @@ def _build_llm(provider: str, model: str, temperature: float) -> BaseChatModel:
     kwargs: dict[str, object] = {
         "model": model,
         "model_provider": provider,
-        "temperature": temperature,
     }
+    # `temperature` is REMOVED on the newest Anthropic models (Opus 4.8/4.7,
+    # Sonnet 5, Fable 5) — sending it 400s. Only forward it where accepted;
+    # GUI temperature knobs still apply to every model that supports them.
+    if _supports_temperature(provider, model):
+        kwargs["temperature"] = temperature
+    else:
+        logger.debug(
+            "llm_factory: omitting temperature for %s/%s (model rejects sampling params)",
+            provider,
+            model,
+        )
     # Provider-specific kwargs. `init_chat_model` accepts arbitrary
     # provider-specific keyword arguments and forwards them; the
     # mapping below mirrors each provider's LangChain integration

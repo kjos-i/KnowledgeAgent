@@ -641,6 +641,11 @@ class CreateNewDatasetTab:
         # reflect the new corpus without waiting for the user to click
         # Refresh manually. Reach via `app.library_tab.view.select_tab`
         # — the LibraryView coordinator holds the sibling instance.
+        # Rebuild the top-bar corpus dropdown so the new corpus appears in
+        # its option list (it's already the active corpus, but the dropdown
+        # only rebuilds its options here — otherwise the list stays stale and
+        # the new corpus is selectable everywhere EXCEPT the dropdown).
+        self.app._sync_corpus_selector()
         try:
             view = self.app.library_tab.view
             view.select_tab.on_refresh_clicked(None)

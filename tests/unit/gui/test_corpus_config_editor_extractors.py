@@ -17,6 +17,8 @@ Covers:
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from knowledge_agent.gui.library.corpus_config_editor import CorpusConfigEditor
 from knowledge_agent.kg.corpus_config import (
     CorpusConfig,
@@ -45,6 +47,21 @@ def _load(ed, extractors, entity_types=None, mode="replace"):
     ed._baseline_config = cfg.model_copy(deep=True)
     ed._populate_controls()
     return ed
+
+
+def test_ontology_checkbox_hard_disabled_when_not_downloaded(fake_app):
+    """An un-downloaded ontology can't be enabled — its checkbox is
+    `disabled` (a hard block, not just greyed) with an Installs hint, while
+    a downloaded one stays enabled. Ingest never auto-downloads."""
+    ed = _editor(fake_app)
+    with patch(
+        "knowledge_agent.kg.ontology_lifecycle.is_ontology_downloaded",
+        side_effect=lambda key: key == "go",  # only GO is on disk
+    ):
+        _load(ed, extractors=["llm"])  # entities layer on
+    assert ed.ontology_checkboxes["go"].disabled is False
+    assert ed.ontology_checkboxes["mesh"].disabled is True
+    assert "Installs" in (ed.ontology_checkboxes["mesh"].tooltip or "")
 
 
 def test_populate_sets_selected_extractors_in_order(fake_app):

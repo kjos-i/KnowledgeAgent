@@ -221,11 +221,7 @@ async def test_import_fibo_short_circuits_when_already_imported():
         canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
     )
     with (
-        patch.object(
-            ontology_fibo_writes,
-            "_walk_and_cache_fibo",
-            new_callable=AsyncMock,
-        ) as mock_walk,
+        patch.object(ontology_fibo_writes, "require_cached") as mock_walk,
         patch.object(ontology_fibo_writes, "_read_and_extract") as mock_extract,
     ):
         result = await ontology_fibo_writes.import_fibo(_client_with_driver(driver), force=False)
@@ -240,8 +236,7 @@ async def test_import_fibo_force_drops_then_reimports():
     with (
         patch.object(
             ontology_fibo_writes,
-            "_walk_and_cache_fibo",
-            new_callable=AsyncMock,
+            "require_cached",
             return_value=Path("/fake/cache/fibo"),
         ),
         patch.object(ontology_fibo_writes, "_read_and_extract", return_value=fake_terms),
@@ -262,8 +257,7 @@ async def test_import_fibo_aborts_on_zero_terms():
     with (
         patch.object(
             ontology_fibo_writes,
-            "_walk_and_cache_fibo",
-            new_callable=AsyncMock,
+            "require_cached",
             return_value=Path("/fake/cache/fibo"),
         ),
         patch.object(ontology_fibo_writes, "_read_and_extract", return_value=[]),
@@ -281,8 +275,7 @@ async def test_import_fibo_propagates_walker_exception():
     with (
         patch.object(
             ontology_fibo_writes,
-            "_walk_and_cache_fibo",
-            new_callable=AsyncMock,
+            "require_cached",
             side_effect=RuntimeError("network down"),
         ),
         pytest.raises(RuntimeError, match="network down"),
@@ -295,11 +288,7 @@ async def test_import_fibo_propagates_when_force_delete_fails():
     reached because the delete raises first."""
     driver = RecordingDriver(raise_on_run=RuntimeError("delete boom"))
     with (
-        patch.object(
-            ontology_fibo_writes,
-            "_walk_and_cache_fibo",
-            new_callable=AsyncMock,
-        ) as mock_walk,
+        patch.object(ontology_fibo_writes, "require_cached") as mock_walk,
         pytest.raises(RuntimeError, match="delete boom"),
     ):
         await ontology_fibo_writes.import_fibo(_client_with_driver(driver), force=True)
@@ -566,11 +555,7 @@ async def test_client_import_fibo_delegates_to_module():
     )
     client = _client_with_driver(driver)
     with (
-        patch.object(
-            ontology_fibo_writes,
-            "_walk_and_cache_fibo",
-            new_callable=AsyncMock,
-        ) as mock_walk,
+        patch.object(ontology_fibo_writes, "require_cached") as mock_walk,
     ):
         assert await client.import_fibo(force=False) is False
     mock_walk.assert_not_called()

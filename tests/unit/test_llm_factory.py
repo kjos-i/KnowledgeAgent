@@ -131,6 +131,47 @@ def test_get_llm_dispatches_anthropic_with_api_key():
     assert kwargs["temperature"] == 0.0
 
 
+def test_get_llm_omits_temperature_for_sampling_free_anthropic_model():
+    """The newest Anthropic models (Opus 4.8/4.7, Sonnet 5, Fable 5) reject
+    `temperature` with a 400 — the factory must NOT forward it for them,
+    while other kwargs still flow through."""
+    settings = _FakeSettings(llm_provider="anthropic", anthropic_api_key="sk-anthropic")
+    with (
+        patch("knowledge_agent.llm_factory.get_settings", return_value=settings),
+        patch(_INIT_PATCH) as mock_init,
+    ):
+        get_llm("claude-opus-4-8", 0.3)
+    _args, kwargs = mock_init.call_args
+    assert "temperature" not in kwargs
+    assert kwargs["model"] == "claude-opus-4-8"
+    assert kwargs["api_key"] == "sk-anthropic"
+
+
+def test_get_llm_keeps_temperature_for_older_anthropic_model():
+    """Older Claude models still accept temperature — it must be forwarded."""
+    settings = _FakeSettings(llm_provider="anthropic", anthropic_api_key="sk-anthropic")
+    with (
+        patch("knowledge_agent.llm_factory.get_settings", return_value=settings),
+        patch(_INIT_PATCH) as mock_init,
+    ):
+        get_llm("claude-haiku-4-5", 0.5)
+    _args, kwargs = mock_init.call_args
+    assert kwargs["temperature"] == 0.5
+
+
+def test_get_llm_keeps_temperature_for_non_anthropic_provider():
+    """The sampling-free rule is Anthropic-only — OpenAI/Ollama/etc. keep
+    temperature even for identically-named models."""
+    settings = _FakeSettings(llm_provider="openai", openai_api_key="sk-openai")
+    with (
+        patch("knowledge_agent.llm_factory.get_settings", return_value=settings),
+        patch(_INIT_PATCH) as mock_init,
+    ):
+        get_llm("gpt-5", 0.2)
+    _args, kwargs = mock_init.call_args
+    assert kwargs["temperature"] == 0.2
+
+
 def test_get_llm_dispatches_openai_with_api_key():
     settings = _FakeSettings(
         llm_provider="openai",

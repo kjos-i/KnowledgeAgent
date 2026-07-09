@@ -1132,12 +1132,34 @@ class DownloadOntologyDownloadPlan:
             return f"{self.ontology_name} already downloaded ({mb:.1f} MB on disk)."
         if self.provenance is None:
             return f"Download {self.ontology_name} source file (~{self.download_size_mb} MB)."
+        # Rich provenance block at parity with the import dialog's
+        # `ImportOntologyPlan._base_summary` — publisher / license /
+        # source / estimated terms / tags / description, and (crucially)
+        # `heavy_warning` BEFORE the user confirms rather than only in the
+        # post-confirm status line. The pairs-well-with cross-link clause
+        # stays import-only (it's about graph writes, not the disk fetch).
         p = self.provenance
-        return (
+        lines = [
             f"Download {p.full_name} ({p.ontology_name}) — "
-            f"{p.download_size_mb} MB {p.file_format} from "
-            f"{p.publisher} under {p.license}."
+            f"{p.download_size_mb} MB {p.file_format}.",
+            f"  Publisher: {p.publisher}",
+            f"  License: {p.license}",
+            f"  Source: {p.source_url}",
+            f"  Estimated terms: ~{p.estimated_terms:,}",
+        ]
+        if p.domain_tags:
+            lines.append(f"  Domain tags: {', '.join(p.domain_tags)}")
+        if p.covers_labels:
+            lines.append(f"  Covers entity labels: {', '.join(p.covers_labels)}")
+        lines.append(f"  {p.description}")
+        if p.heavy_warning:
+            lines.append(f"  WARNING: {p.heavy_warning}")
+        lines.append("")
+        lines.append(
+            "Downloads the source file(s) to disk only — Neo4j term nodes are "
+            "written later, during ingest."
         )
+        return "\n".join(lines)
 
 
 @dataclass(frozen=True)

@@ -271,7 +271,7 @@ async def test_import_chebi_short_circuits_when_already_imported():
         canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
     )
     client = _client_with_driver(driver)
-    with patch("knowledge_agent.kg.ontology_writes.ensure_cached") as mock_cache:
+    with patch("knowledge_agent.kg.ontology_writes.require_cached") as mock_cache:
         result = await ontology_chebi_writes.import_chebi(client, force=False)
 
     assert result is False  # no-op: typed-errors contract
@@ -284,7 +284,7 @@ async def test_import_chebi_force_drops_then_reimports():
     fake_terms = [_term("CHEBI:24431", "chemical entity")]
     with (
         patch(
-            "knowledge_agent.kg.ontology_writes.ensure_cached",
+            "knowledge_agent.kg.ontology_writes.require_cached",
             return_value="/fake/chebi_lite.obo",
         ),
         patch(
@@ -308,7 +308,7 @@ async def test_import_chebi_aborts_on_zero_terms():
     client = _client_with_driver(driver)
     with (
         patch(
-            "knowledge_agent.kg.ontology_writes.ensure_cached",
+            "knowledge_agent.kg.ontology_writes.require_cached",
             return_value="/fake/chebi_lite.obo",
         ),
         patch(
@@ -327,7 +327,7 @@ async def test_import_chebi_propagates_download_exception():
     client = _client_with_driver(driver)
     with (
         patch(
-            "knowledge_agent.kg.ontology_writes.ensure_cached",
+            "knowledge_agent.kg.ontology_writes.require_cached",
             side_effect=RuntimeError("network down"),
         ),
         pytest.raises(RuntimeError, match="network down"),
@@ -380,6 +380,6 @@ async def test_client_import_chebi_delegates_to_module():
         canned_results_per_session=[[_RecordingResult(rows=[{"present": True}])]]
     )
     client = _client_with_driver(driver)
-    with patch("knowledge_agent.kg.ontology_writes.ensure_cached") as mock_cache:
+    with patch("knowledge_agent.kg.ontology_writes.require_cached") as mock_cache:
         assert await client.import_chebi(force=False) is False
     mock_cache.assert_not_called()

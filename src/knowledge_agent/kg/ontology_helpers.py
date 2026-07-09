@@ -158,6 +158,41 @@ async def ensure_cached(url: str, filename: str, *, force: bool = False) -> Path
     return dest
 
 
+class OntologyNotDownloadedError(RuntimeError):
+    """Ingest refuses to auto-download an ontology's source file.
+
+    Raised by `require_cached` on the import/ingest path when the cached
+    file (or FIBO's subdir) isn't present. Ontologies are downloaded ONLY
+    by the explicit Library → Installs "Download" button — never silently
+    during ingest. L7's per-ontology try/except catches this and skips the
+    ontology, surfacing the message, so one un-downloaded ontology doesn't
+    abort the whole ingest.
+    """
+
+    def __init__(self, ontology_name: str, cache_filename: str) -> None:
+        self.ontology_name = ontology_name
+        self.cache_filename = cache_filename
+        super().__init__(
+            f"{ontology_name} is not downloaded — download it in Library → Installs "
+            f"(missing '{cache_filename}' in the ontology downloads dir). "
+            f"Ingest does not auto-download ontologies."
+        )
+
+
+def require_cached(cache_filename: str, ontology_name: str) -> Path:
+    """Return the cached ontology file/dir path WITHOUT downloading.
+
+    The read-only counterpart to `ensure_cached`, used on the ingest/import
+    path which must never fetch. Raises `OntologyNotDownloadedError` when
+    the file (single-file ontologies) or subdir (FIBO) is absent. Synchronous
+    — it only probes the filesystem.
+    """
+    dest = get_downloads_dir() / cache_filename
+    if not dest.exists():
+        raise OntologyNotDownloadedError(ontology_name, cache_filename)
+    return dest
+
+
 # ---------------------------------------------------------------------------
 # Backward-compatibility re-exports.
 #
