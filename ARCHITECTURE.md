@@ -224,7 +224,7 @@ Both default providers (Anthropic LLM, Voyage embeddings) are **opt-in extras** 
 
 ## Settings + persistence
 
-[config.py](src/knowledge_agent/config.py) is the single source of truth for runtime knobs. Loaded from `.env` (or `.env.test` via `load_test_env()`). Pydantic Settings validates types + ranges + cross-field invariants (e.g. `top_k ≤ rrf_rank_window_size ≤ num_candidates`).
+[config.py](src/knowledge_agent/config.py) is the single source of truth for runtime knobs. Loaded from `.env` (or `.env.test` via `load_test_env()`). Pydantic Settings validates types + ranges + cross-field invariants (e.g. `top_k ≤ num_candidates`).
 
 Two `.env` files supported by design:
 - `.env` — real corpus, real Neo4j instance

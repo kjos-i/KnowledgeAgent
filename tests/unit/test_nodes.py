@@ -592,6 +592,9 @@ def test_retriever_prefers_rewritten_search_query():
         top_k=5,
         mode=None,
         use_mmr=False,
+        num_candidates=None,
+        rrf_k=None,
+        mmr_lambda=None,
         filters=None,
     )
     assert result == {"retrieved_chunks": hits}
@@ -616,6 +619,9 @@ def test_retriever_falls_back_to_raw_query_when_no_search_query():
         top_k=5,
         mode=None,
         use_mmr=False,
+        num_candidates=None,
+        rrf_k=None,
+        mmr_lambda=None,
         filters=None,
     )
 

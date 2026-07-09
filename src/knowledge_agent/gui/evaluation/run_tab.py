@@ -21,7 +21,16 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
-from knowledge_agent.gui._styles import centered_label, labeled_field, panel_box
+from knowledge_agent.gui._styles import (
+    centered_label,
+    labeled_field,
+    panel_box,
+    panel_title,
+    section_divider,
+    section_title,
+    sub_section_header,
+)
+from knowledge_agent.gui._widgets.info_icon import info_icon
 from knowledge_agent.gui.config_store import (
     ConfigError,
     apply_keys_to_env,
@@ -30,7 +39,6 @@ from knowledge_agent.gui.config_store import (
 )
 from knowledge_agent.gui.evaluation._case_view import render_case_cards
 from knowledge_agent.gui.settings.llm_tab import LLM_AVAILABLE_MODELS
-from knowledge_agent.gui.views._frame import view_header
 
 if TYPE_CHECKING:
     from knowledge_agent.evaluation.config import EvalConfig
@@ -52,7 +60,7 @@ class RunTab:
         self.coordinator = coordinator
         self._bg_tasks: set[asyncio.Task] = set()
         self._busy = False
-        self.dataset_dropdown: ft.Dropdown | None = None
+        self.dataset_field: ft.TextField | None = None
         self.group_checks: dict[str, ft.Checkbox] = {}
         self.judge_panel: ft.Column | None = None
         self.judge_dropdown: ft.Dropdown | None = None  # the single model picker
@@ -114,20 +122,18 @@ class RunTab:
         )
         from knowledge_agent.gui.evaluation._common import active_output_dir
 
-        datasets_dir = DEFAULT_DATASET_PATH.parent
-        options = [
-            ft.DropdownOption(key=str(p), text=p.name) for p in sorted(datasets_dir.glob("*.json"))
-        ]
-        self.dataset_dropdown = ft.Dropdown(
-            editable=True,  # editable = pick a packaged set OR type/paste a path
-            options=options,
+        # Dataset file: a read-only path display + Browse (opens in the active
+        # corpus's folder). No packaged-set dropdown — Browse is the single,
+        # unambiguous way in; the right column previews whatever's chosen.
+        self.dataset_field = ft.TextField(
+            read_only=True,
             value=str(DEFAULT_DATASET_PATH),
-            # Refresh the right-column case preview when the dataset changes.
-            on_select=self._on_dataset_changed,
+            hint_text="Browse for a gold-dataset JSON",
+            expand=True,
         )
         browse_button = ft.Button(
             content=centered_label("Browse"),
-            tooltip="Browse for a gold-dataset JSON",
+            tooltip="Browse for a gold-dataset JSON (starts in the corpus folder)",
             on_click=self._on_browse_clicked,
         )
 
@@ -183,10 +189,19 @@ class RunTab:
             disabled=not judge_on,
             content=ft.Column(
                 [
-                    ft.Text(
-                        "Judge models — LLM judges, cost money:",
-                        size=12,
-                        color=ft.Colors.GREY_500,
+                    sub_section_header(
+                        "Judge models",
+                        trailing=info_icon(
+                            self.app,
+                            title="Judge models",
+                            text=(
+                                "LLM judges — they call your provider and cost "
+                                "money, which is why the judge metric is OFF by "
+                                "default. Each model you add scores every case; the "
+                                "panel's mean is the judge score. Add none and one "
+                                "default judge from your active provider is used."
+                            ),
+                        ),
                     ),
                     ft.Row(
                         [
@@ -259,14 +274,39 @@ class RunTab:
 
         form = ft.Column(
             controls=[
+                # Read-only context: which corpus this run evaluates + where its
+                # ledger/reports land. Both refresh on an app-wide corpus switch.
                 self.corpus_line,
                 self.output_line,
-                labeled_field("Dataset", self.dataset_dropdown, trailing=browse_button),
-                ft.Text("Metric groups", weight=ft.FontWeight.BOLD),
+                section_divider(),
+                # ============ Section: Dataset ============
+                section_title("Dataset"),
+                labeled_field("Dataset", self.dataset_field, trailing=browse_button),
+                section_divider(),
+                # ============ Section: Metric groups ============
+                section_title("Metric groups"),
                 ft.Row([self.group_checks[g] for g in _GROUP_DEFAULTS], wrap=True),
                 self.judge_section,
+                section_divider(),
+                # ============ Section: Run options ============
+                section_title("Run options"),
                 labeled_field("Max cases (blank = all)", self.max_cases_field),
-                ft.Text("Tracing (optional)", weight=ft.FontWeight.BOLD),
+                # ---- Sub-section: Tracing (opt-in LangSmith) ----
+                sub_section_header(
+                    "Tracing (optional)",
+                    trailing=info_icon(
+                        self.app,
+                        title="Tracing (optional)",
+                        text=(
+                            "Opt-in per run, OFF by default. When on, this run's "
+                            "data — your queries, the retrieved chunk text, and the "
+                            "answers — is uploaded to LangSmith's cloud. Enable ONLY "
+                            "for a non-sensitive corpus (e.g. the test corpus), never "
+                            "for private documents. The key is stored in your OS "
+                            "keyring (same as Settings → Keys)."
+                        ),
+                    ),
+                ),
                 ft.Row(
                     [self.trace_check, self.set_langsmith_key_button],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -274,6 +314,9 @@ class RunTab:
                 self.trace_key_hint,
                 self.trace_warning,
                 self._project_row,
+                section_divider(),
+                # ============ Section: Run ============
+                section_title("Run"),
                 ft.Row(
                     [self.run_button, self.progress],
                     spacing=12,
@@ -296,36 +339,69 @@ class RunTab:
             expand=True,
             spacing=6,
         )
-        right = panel_box(
+        left_pane = panel_box(form)
+        right_pane = panel_box(
             ft.Column(
-                [
-                    ft.Text(
-                        "Test cases — read-only (Max cases runs the first N, top-down)",
-                        weight=ft.FontWeight.BOLD,
-                        size=13,
-                    ),
-                    ft.Divider(height=1),
-                    self.case_list,
-                ],
+                [self.case_list],
                 expand=True,
                 spacing=8,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             )
         )
+        # Column titles sit in a fixed header above the panes (aligned 50/50
+        # over them) so each stays visible while its box scrolls — the same
+        # sticky-header idiom as the Ingest tab. The right title's (i) carries
+        # the read-only preview note the old inline title spelled out.
+        header = ft.Row(
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=12,
+            controls=[
+                ft.Container(
+                    expand=1,
+                    padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                    content=panel_title("Run configuration"),
+                ),
+                ft.Container(
+                    expand=1,
+                    padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                    content=ft.Row(
+                        controls=[
+                            panel_title("Test cases"),
+                            info_icon(
+                                self.app,
+                                title="Test cases",
+                                text=(
+                                    "Read-only preview of the selected dataset's "
+                                    "cases — exactly what will run. Max cases runs "
+                                    "the first N, top-down; leave it blank to run all."
+                                ),
+                            ),
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=8,
+                    ),
+                ),
+            ],
+        )
         body = ft.Row(
-            [panel_box(form), right],
+            [left_pane, right_pane],
             expand=True,
             spacing=12,
             vertical_alignment=ft.CrossAxisAlignment.STRETCH,
         )
-        return ft.Column(controls=[view_header("Run Evaluation"), body], expand=True, spacing=8)
+        return ft.Column(
+            controls=[header, body],
+            expand=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            spacing=8,
+        )
 
     # ---- dataset case preview (right column) ------------------------------
 
     def _case_controls(self) -> list[ft.Control]:
         """Load the selected dataset's cases as read-only cards (or a hint /
         error). Best-effort — a bad path shows a message, never raises."""
-        path_str = (self.dataset_dropdown.value or "").strip() if self.dataset_dropdown else ""
+        path_str = (self.dataset_field.value or "").strip() if self.dataset_field else ""
         if not path_str:
             return [
                 ft.Text(
@@ -350,9 +426,6 @@ class RunTab:
             return
         self.case_list.controls = self._case_controls()
         self.app.page.update()
-
-    def _on_dataset_changed(self, _e: ft.Event) -> None:
-        self._refresh_case_view()
 
     # ---- judge panel ------------------------------------------------------
 
@@ -501,16 +574,21 @@ class RunTab:
         self._spawn(self._pick_dataset())
 
     async def _pick_dataset(self) -> None:
+        from knowledge_agent.gui.evaluation._common import active_corpus_dir
+
+        corpus_dir = active_corpus_dir(self.app)
+        initial = str(corpus_dir) if corpus_dir and corpus_dir.is_dir() else None
         try:
             files = await self.app.file_picker.pick_files(
                 dialog_title="Pick a gold-dataset JSON",
                 allowed_extensions=["json"],
+                initial_directory=initial,
             )
         except Exception as exc:  # broad: surface any picker failure in the status line
             self._set_status(f"file picker error: {exc}")
             return
-        if files and files[0].path and self.dataset_dropdown is not None:
-            self.dataset_dropdown.value = files[0].path
+        if files and files[0].path and self.dataset_field is not None:
+            self.dataset_field.value = files[0].path
             self._refresh_case_view()
             self.app.page.update()
 
@@ -520,7 +598,7 @@ class RunTab:
         if not any(cb.value for cb in self.group_checks.values()):
             self._set_status("Select at least one metric group.")
             return
-        if not (self.dataset_dropdown and self.dataset_dropdown.value):
+        if not (self.dataset_field and self.dataset_field.value):
             self._set_status("Select a dataset.")
             return
         if self.trace_check and self.trace_check.value and not get_api_key("langsmith"):
@@ -567,7 +645,7 @@ class RunTab:
         groups = frozenset(g for g, cb in self.group_checks.items() if cb.value)
         judge_models = tuple(self.judge_models)
         overrides: dict = {
-            "dataset_path": Path(self.dataset_dropdown.value),  # type: ignore[union-attr]
+            "dataset_path": Path(self.dataset_field.value),  # type: ignore[union-attr]
             "enabled_groups": groups,
             "judge_models": judge_models,
         }

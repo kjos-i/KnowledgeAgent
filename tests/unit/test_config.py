@@ -7,8 +7,7 @@ consults. These tests pin:
     four DB credentials). Catching this here prevents the failure
     mode where a forgotten config silently falls back to a default
     pointing at the wrong instance.
-  - The retrieval-window invariant
-    (`top_k <= rrf_rank_window_size <= num_candidates`) catches
+  - The retrieval-window invariant (`top_k <= num_candidates`) catches
     misconfiguration before LanceDB sees a broken combination.
   - `disable_env_file()` is one-way and clears the `get_settings`
     cache (so a future GUI can refuse to inherit dev keys).
@@ -181,7 +180,6 @@ def test_settings_defaults_for_optional_fields() -> None:
     assert s.lancedb_search_mode == "hybrid"
     assert s.num_candidates == 100
     assert s.rrf_rank_constant == 60
-    assert s.rrf_rank_window_size == 50
 
     # LLM nodes.
     assert s.mode_classifier_model.startswith("claude-haiku")
@@ -201,38 +199,47 @@ def test_settings_defaults_for_optional_fields() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Retrieval-window invariant: top_k <= rrf_rank_window_size <= num_candidates.
+# Retrieval-window invariant: top_k <= num_candidates.
+#
+# `num_candidates` is the pre-truncation candidate pool the LanceDB
+# retriever fetches; a pool smaller than the final `top_k` can't fill
+# the requested results. The old `rrf_rank_window_size` middle knob was
+# removed (LanceDB's RRF has no window param) and the rule simplified.
 # ---------------------------------------------------------------------------
 
 
 def test_validate_retrieval_windows_happy_path_passes() -> None:
-    """top_k=5 <= rrf_window=50 <= num_candidates=100 — defaults."""
+    """top_k=5 <= num_candidates=100 — defaults."""
     s = Settings(**_minimal_required())  # type: ignore[arg-type]
-    assert s.top_k <= s.rrf_rank_window_size <= s.num_candidates
+    assert s.top_k <= s.num_candidates
 
 
-def test_validate_retrieval_windows_top_k_larger_than_window_fails() -> None:
-    """top_k=60 > rrf_window=50 violates the invariant."""
-    with pytest.raises(ValidationError, match="rrf_rank_window_size"):
-        Settings(  # type: ignore[arg-type]
-            **_minimal_required(top_k=10, rrf_rank_window_size=5)
-        )
-
-
-def test_validate_retrieval_windows_num_candidates_smaller_than_window_fails() -> None:
-    """num_candidates=40 < rrf_window=50 violates the invariant."""
+def test_validate_retrieval_windows_num_candidates_smaller_than_top_k_fails() -> None:
+    """num_candidates=3 < top_k=10 violates the invariant."""
     with pytest.raises(ValidationError, match="num_candidates"):
         Settings(  # type: ignore[arg-type]
-            **_minimal_required(num_candidates=40, rrf_rank_window_size=50)
+            **_minimal_required(top_k=10, num_candidates=3)
         )
 
 
 def test_validate_retrieval_windows_at_boundary_succeeds() -> None:
-    """top_k == rrf_window == num_candidates is valid (equality OK)."""
+    """top_k == num_candidates is valid (equality OK)."""
     s = Settings(  # type: ignore[arg-type]
-        **_minimal_required(top_k=20, rrf_rank_window_size=20, num_candidates=20)
+        **_minimal_required(top_k=20, num_candidates=20)
     )
-    assert s.top_k == s.rrf_rank_window_size == s.num_candidates == 20
+    assert s.top_k == s.num_candidates == 20
+
+
+def test_check_window_ordering_helper_returns_message_on_violation() -> None:
+    """The shared helper (used by Settings + GUI + eval resolver) returns a
+    human-readable message when num_candidates < top_k, else None."""
+    from knowledge_agent.config import check_window_ordering
+
+    assert check_window_ordering(10, 3) is not None
+    assert "num_candidates" in check_window_ordering(10, 3)
+    # Boundary + slack cases pass (return None).
+    assert check_window_ordering(5, 5) is None
+    assert check_window_ordering(5, 100) is None
 
 
 # ---------------------------------------------------------------------------

@@ -1,15 +1,14 @@
 """Settings → Retrieval sub-tab — search-side defaults.
 
-11 fields total, grouped into 5 visual sections:
+Grouped into visual sections:
 
   1. Mode — `retrieval_mode` (6 agent-level topologies) +
      `lancedb_search_mode` (LanceDB-internal mode).
   2. Result size — `top_k` (final result count).
-  3. Hybrid fusion (RRF) — `num_candidates`, `rrf_rank_constant`,
-     `rrf_rank_window_size`. Ordering rule:
-     `top_k <= rrf_rank_window_size <= num_candidates` (mirrors
-     `Settings._validate_retrieval_windows`).
-  4. Diversity (MMR) — `mmr_lambda` (slider), `mmr_candidate_multiplier`.
+  3. Hybrid fusion (RRF) — `num_candidates` (pre-truncation candidate
+     pool), `rrf_rank_constant`. Ordering rule: `top_k <= num_candidates`
+     (mirrors `Settings._validate_retrieval_windows`).
+  4. Diversity (MMR) — `mmr_lambda` (slider).
   5. KG — `kg_max_rows`.
   6. Input mode + synthesis — `input_mode` radio (Conversational /
      Direct query / Direct Cypher) + `direct_retrieve` (synthesizer
@@ -35,6 +34,14 @@ import flet as ft
 from knowledge_agent.config import reset_after_key_change
 from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, PANEL_BG, labeled_field
 from knowledge_agent.gui._widgets.info_icon import info_icon
+from knowledge_agent.gui._widgets.retrieval_form import (
+    LANCE_MODES,
+    RetrievalControls,
+    apply_gray_out,
+    build_mmr_slider,
+    build_search_mode_radios,
+    mmr_help_text,
+)
 from knowledge_agent.gui.config_store import (
     ConfigError,
     apply_retrieval_to_env,
@@ -61,15 +68,9 @@ _MODE_LABELS: list[tuple[str, str]] = [
     ("parallel_fused", "Parallel fused (both at once, RRF-fused)"),
 ]
 
-_LANCEDB_MODE_LABELS: list[tuple[str, str]] = [
-    ("hybrid", "Hybrid (BM25 + vector, RRF-fused)"),
-    ("fts", "FTS (BM25 only)"),
-    ("vector", "Vector (kNN cosine only)"),
-]
-
 
 class RetrievalTab:
-    """Retrieval defaults — 11 fields with auto-save + RRF ordering check."""
+    """Retrieval defaults — auto-save fields with an RRF ordering check."""
 
     def __init__(self, app: GuiApp) -> None:
         self.app = app
@@ -77,20 +78,20 @@ class RetrievalTab:
         self.top_k_field: ft.TextField | None = None
         self.mode_dropdown: ft.Dropdown | None = None
         self.lancedb_mode_radio: ft.RadioGroup | None = None
+        self._lancedb_radios: list[ft.Radio] = []
+        self._lancedb_mode_box: ft.Container | None = None
         self.num_candidates_field: ft.TextField | None = None
         self.rrf_constant_field: ft.TextField | None = None
-        self.rrf_window_field: ft.TextField | None = None
         self.mmr_help_text: ft.Text | None = None
         self.use_mmr_checkbox: ft.Checkbox | None = None
         self.mmr_lambda_slider: ft.Slider | None = None
         self.mmr_lambda_value_text: ft.Text | None = None
-        self.mmr_multiplier_field: ft.TextField | None = None
         self.kg_max_rows_field: ft.TextField | None = None
         self.input_mode_radio: ft.RadioGroup | None = None
         self.direct_retrieve_checkbox: ft.Checkbox | None = None
         self._create_controls()
-        # Initial MMR enable/disable based on the loaded lancedb mode.
-        self._sync_mmr_enabled_state()
+        # Initial gray-out based on the loaded mode + lancedb mode + MMR state.
+        self._sync_enabled_state()
 
     # ----- control construction --------------------------------------------
 
@@ -112,15 +113,10 @@ class RetrievalTab:
             bgcolor=PANEL_BG,
             on_select=self.on_mode_changed,
         )
-        self.lancedb_mode_radio = ft.RadioGroup(
-            value=cfg.lancedb_search_mode,
-            on_change=self.on_lancedb_mode_changed,
-            content=ft.Row(
-                controls=[
-                    ft.Radio(value=k, label=lbl.split(" (")[0]) for k, lbl in _LANCEDB_MODE_LABELS
-                ],
-                spacing=16,
-            ),
+        # Radios + slider come from the shared builders, so the eval Dataset
+        # form renders the identical widgets (single source, no look-alikes).
+        self._lancedb_radios, self.lancedb_mode_radio, self._lancedb_mode_box = (
+            build_search_mode_radios(cfg.lancedb_search_mode, self.on_lancedb_mode_changed)
         )
 
         # Integer fields.
@@ -135,14 +131,6 @@ class RetrievalTab:
         self.rrf_constant_field = _int_field(
             cfg.rrf_rank_constant,
             self.on_rrf_constant_blur,
-        )
-        self.rrf_window_field = _int_field(
-            cfg.rrf_rank_window_size,
-            self.on_rrf_window_blur,
-        )
-        self.mmr_multiplier_field = _int_field(
-            cfg.mmr_candidate_multiplier,
-            self.on_mmr_multiplier_blur,
         )
         self.kg_max_rows_field = _int_field(
             cfg.kg_max_rows,
@@ -165,17 +153,8 @@ class RetrievalTab:
             color=ft.Colors.GREY_500,
             italic=True,
         )
-        self.mmr_lambda_value_text = ft.Text(
-            _fmt_float(cfg.mmr_lambda),
-            size=12,
-            color=ft.Colors.WHITE,
-            width=42,
-        )
-        self.mmr_lambda_slider = ft.Slider(
-            value=cfg.mmr_lambda,
-            min=0.0,
-            max=1.0,
-            divisions=20,
+        self.mmr_lambda_slider, self.mmr_lambda_value_text = build_mmr_slider(
+            cfg.mmr_lambda,
             on_change=self._on_mmr_lambda_slide,
             on_change_end=self.on_mmr_lambda_committed,
         )
@@ -228,12 +207,7 @@ class RetrievalTab:
                 # ---- Mode ----------------------------------------------
                 ft.Text("Mode", weight=ft.FontWeight.BOLD),
                 labeled_field("Retrieval mode (agent-level)", self.mode_dropdown),
-                ft.Text(
-                    "LanceDB search mode (within-store):",
-                    size=12,
-                    color=ft.Colors.GREY_400,
-                ),
-                self.lancedb_mode_radio,
+                self._lancedb_mode_box,
                 ft.Divider(),
                 # ---- Result size ---------------------------------------
                 ft.Text("Result size", weight=ft.FontWeight.BOLD),
@@ -245,14 +219,16 @@ class RetrievalTab:
                     weight=ft.FontWeight.BOLD,
                 ),
                 ft.Text(
-                    "Rule: top_k ≤ window ≤ num_candidates. The form "
-                    "rejects edits that break this ordering.",
+                    "Rule: top_k ≤ num_candidates. The form rejects edits "
+                    "that break this ordering.",
                     size=12,
                     color=ft.Colors.GREY_500,
                     italic=True,
                 ),
-                labeled_field("num_candidates (vector kNN pool size)", self.num_candidates_field),
-                labeled_field("RRF rank window size", self.rrf_window_field),
+                labeled_field(
+                    "num_candidates (candidate pool before top_k)",
+                    self.num_candidates_field,
+                ),
                 labeled_field("RRF rank constant k (1/(k+rank))", self.rrf_constant_field),
                 ft.Divider(),
                 # ---- Diversity (MMR) -----------------------------------
@@ -264,7 +240,6 @@ class RetrievalTab:
                     self.mmr_lambda_slider,
                     self.mmr_lambda_value_text,
                 ),
-                labeled_field("MMR candidate multiplier", self.mmr_multiplier_field),
                 ft.Divider(),
                 # ---- Knowledge graph -----------------------------------
                 ft.Text("Knowledge graph", weight=ft.FontWeight.BOLD),
@@ -359,7 +334,9 @@ class RetrievalTab:
         if not self._commit(f"retrieval mode: {new_value}"):
             self.app.gui_config.retrieval_mode = previous
             self.mode_dropdown.value = previous
-            self.app.page.update()
+        # Mode change flips which legs run → re-gray the LanceDB / KG blocks.
+        self._sync_enabled_state()
+        self.app.page.update()
 
     def on_lancedb_mode_changed(self, e: ft.Event) -> None:
         if self.lancedb_mode_radio is None:
@@ -374,43 +351,35 @@ class RetrievalTab:
             self.lancedb_mode_radio.value = previous
         # MMR enable/disable state depends on the LanceDB mode (FTS has
         # no vectors → MMR doesn't apply). Sync after every mode change.
-        self._sync_mmr_enabled_state()
+        self._sync_enabled_state()
         self.app.page.update()
 
-    def _sync_mmr_enabled_state(self) -> None:
-        """Sync MMR control gray-out state — three combined cases.
-
-        - LanceDB mode == FTS → checkbox + slider + multiplier all
-          grayed (MMR can't apply to FTS).
-        - LanceDB mode is hybrid/vector AND use_mmr=False → checkbox
-          enabled (user can flip it on); slider + multiplier grayed
-          (MMR is off, its parameters are irrelevant).
-        - LanceDB mode is hybrid/vector AND use_mmr=True → all
-          controls enabled.
-
-        Help text reflects the active state.
-        """
-        is_fts = self.app.gui_config.lancedb_search_mode == "fts"
-        use_mmr = self.app.gui_config.use_mmr
-        params_disabled = is_fts or not use_mmr
-
-        if self.use_mmr_checkbox is not None:
-            self.use_mmr_checkbox.disabled = is_fts
-            # Force the visible value off when FTS, regardless of stored
-            # `use_mmr` — the user shouldn't see a checked box that has
-            # no effect.
-            self.use_mmr_checkbox.value = use_mmr and not is_fts
-        if self.mmr_lambda_slider is not None:
-            self.mmr_lambda_slider.disabled = params_disabled
-        if self.mmr_multiplier_field is not None:
-            self.mmr_multiplier_field.disabled = params_disabled
+    def _sync_enabled_state(self) -> None:
+        """Gray out every control the current mode/toggles can't use, via the
+        shared `apply_gray_out` (the single source both this tab and the eval
+        form use), then refresh the MMR help line."""
+        cfg = self.app.gui_config
+        apply_gray_out(
+            RetrievalControls(
+                lancedb_mode_box=self._lancedb_mode_box,
+                lancedb_radios=self._lancedb_radios,
+                lancedb_mode_control=self.lancedb_mode_radio,
+                num_candidates_field=self.num_candidates_field,
+                rrf_constant_field=self.rrf_constant_field,
+                use_mmr_checkbox=self.use_mmr_checkbox,
+                mmr_lambda_control=self.mmr_lambda_slider,
+                kg_max_rows_field=self.kg_max_rows_field,
+            ),
+            retrieval_mode=cfg.retrieval_mode,
+            lancedb_search_mode=cfg.lancedb_search_mode,
+            use_mmr=cfg.use_mmr,
+        )
         if self.mmr_help_text is not None:
-            if is_fts:
-                self.mmr_help_text.value = "Disabled — FTS has no vectors to diversify."
-            elif not use_mmr:
-                self.mmr_help_text.value = "MMR off — enable to diversify the result pool."
-            else:
-                self.mmr_help_text.value = "λ = 1.0 → pure relevance; λ = 0.0 → pure diversity."
+            self.mmr_help_text.value = mmr_help_text(
+                lance_on=cfg.retrieval_mode in LANCE_MODES,
+                is_fts=cfg.lancedb_search_mode == "fts",
+                use_mmr=cfg.use_mmr,
+            )
 
     def on_use_mmr_changed(self, e: ft.Event) -> None:
         """Persist use_mmr; re-sync slider/multiplier gray-out."""
@@ -421,7 +390,7 @@ class RetrievalTab:
         if not self._commit("MMR on" if self.app.gui_config.use_mmr else "MMR off"):
             self.app.gui_config.use_mmr = previous
             self.use_mmr_checkbox.value = previous
-        self._sync_mmr_enabled_state()
+        self._sync_enabled_state()
         self.app.page.update()
 
     # ----- Integer TextField handlers --------------------------------------
@@ -455,34 +424,6 @@ class RetrievalTab:
             apply=lambda v: setattr(
                 self.app.gui_config,
                 "rrf_rank_constant",
-                v,
-            ),
-            validate=None,
-        )
-
-    def on_rrf_window_blur(self, e: ft.Event) -> None:
-        self._handle_int(
-            field=self.rrf_window_field,
-            new_value_parser=lambda raw: max(1, int(raw)),
-            current=self.app.gui_config.rrf_rank_window_size,
-            label="RRF rank window size",
-            apply=lambda v: setattr(
-                self.app.gui_config,
-                "rrf_rank_window_size",
-                v,
-            ),
-            validate=self._validate_window_ordering,
-        )
-
-    def on_mmr_multiplier_blur(self, e: ft.Event) -> None:
-        self._handle_int(
-            field=self.mmr_multiplier_field,
-            new_value_parser=lambda raw: max(1, int(raw)),
-            current=self.app.gui_config.mmr_candidate_multiplier,
-            label="MMR candidate multiplier",
-            apply=lambda v: setattr(
-                self.app.gui_config,
-                "mmr_candidate_multiplier",
                 v,
             ),
             validate=None,
@@ -548,28 +489,22 @@ class RetrievalTab:
         self.app.page.update()
 
     def _validate_window_ordering(self) -> str | None:
-        """Enforce top_k <= rrf_window <= num_candidates after a change."""
+        """Enforce top_k <= num_candidates after a change.
+
+        Self-contained — the GUI owns its own copy of the rule and never
+        imports backend internals. The per-layer drift-guard tests keep this
+        in sync with the `Settings` validator without coupling the two.
+        """
         cfg = self.app.gui_config
-        if cfg.rrf_rank_window_size < cfg.top_k:
-            return (
-                f"rrf_rank_window_size ({cfg.rrf_rank_window_size}) must be >= top_k ({cfg.top_k})"
-            )
-        if cfg.num_candidates < cfg.rrf_rank_window_size:
-            return (
-                f"num_candidates ({cfg.num_candidates}) must be >= "
-                f"rrf_rank_window_size ({cfg.rrf_rank_window_size})"
-            )
+        if cfg.num_candidates < cfg.top_k:
+            return f"num_candidates ({cfg.num_candidates}) must be >= top_k ({cfg.top_k})"
         return None
 
     # ----- Slider handlers --------------------------------------------------
 
     def _on_mmr_lambda_slide(self, e: ft.Event) -> None:
-        """Drag-in-progress: update the inline value display only."""
-        if self.mmr_lambda_slider is None or self.mmr_lambda_value_text is None:
-            return
-        self.mmr_lambda_value_text.value = _fmt_float(
-            self.mmr_lambda_slider.value,
-        )
+        """Drag-in-progress: the shared builder already synced the value text, so
+        just flush it to the page."""
         self.app.page.update()
 
     def on_mmr_lambda_committed(self, e: ft.Event) -> None:

@@ -10,7 +10,7 @@
       "ESCRT-III polymerizes into filaments that constrict and remodel membranes.",
       "It drives membrane scission from the cytoplasmic side of the neck."
     ],
-    "retrieval": { "retrieval_mode": "lancedb_only", "lancedb_search_mode": "hybrid", "top_k": 5 },
+    "retrieval": { "retrieval_mode": "lancedb_only", "lancedb_search_mode": "hybrid", "top_k": 5, "num_candidates": 100, "rrf_rank_constant": 60 },
     "category": "Mechanism",
     "notes": "PLACEHOLDER. Pathway: lancedb_only + query_builder + synthesizer (the default full text path). expected_sources (doc_ids) TBD by curator."
   },
@@ -25,9 +25,9 @@
       "ESCRT machinery is recruited to the membrane neck and narrows it.",
       "Scission occurs from within the neck (reverse-topology)."
     ],
-    "retrieval": { "retrieval_mode": "lancedb_only", "lancedb_search_mode": "fts", "top_k": 5 },
+    "retrieval": { "retrieval_mode": "lancedb_only", "lancedb_search_mode": "fts", "top_k": 5, "num_candidates": 100 },
     "category": "Mechanism",
-    "notes": "PLACEHOLDER. Pathway: lancedb_only under FTS (lexical) search mode — demonstrates per-case lancedb_search_mode. expected_sources TBD."
+    "notes": "PLACEHOLDER. Pathway: lancedb_only under FTS (lexical) search mode — demonstrates per-case lancedb_search_mode. rrf_rank_constant is not needed (FTS has no RRF fusion). expected_sources TBD."
   },
   {
     "id": "escrt_cellular_roles_vector",
@@ -40,9 +40,9 @@
       "Multivesicular body biogenesis and receptor sorting.",
       "Cytokinetic abscission, viral budding, and membrane repair."
     ],
-    "retrieval": { "retrieval_mode": "lancedb_only", "lancedb_search_mode": "vector", "top_k": 5 },
+    "retrieval": { "retrieval_mode": "lancedb_only", "lancedb_search_mode": "vector", "top_k": 5, "num_candidates": 100 },
     "category": "Overview",
-    "notes": "PLACEHOLDER. Pathway: lancedb_only under vector (semantic) search mode. expected_sources TBD."
+    "notes": "PLACEHOLDER. Pathway: lancedb_only under vector (semantic) search mode. rrf_rank_constant is not needed (vector has no RRF fusion). expected_sources TBD."
   },
   {
     "id": "escrt_raw_query_no_rewrite",
@@ -58,6 +58,8 @@
       "retrieval_mode": "lancedb_only",
       "lancedb_search_mode": "hybrid",
       "top_k": 5,
+      "num_candidates": 100,
+      "rrf_rank_constant": 60,
       "skip_query_builder": true
     },
     "category": "Mechanism",
@@ -75,6 +77,8 @@
       "retrieval_mode": "lancedb_only",
       "lancedb_search_mode": "hybrid",
       "top_k": 5,
+      "num_candidates": 100,
+      "rrf_rank_constant": 60,
       "direct_retrieval": true
     },
     "category": "Retrieval-only",
@@ -91,7 +95,7 @@
       "CHMP4B is a core ESCRT-III subunit that polymerizes on membranes."
     ],
     "expected_entities": ["CHMP4B"],
-    "retrieval": { "retrieval_mode": "neo4j_only", "top_k": 5 },
+    "retrieval": { "retrieval_mode": "neo4j_only", "top_k": 5, "kg_max_rows": 50 },
     "category": "KG",
     "notes": "PLACEHOLDER. Pathway: neo4j_only with LLM-generated Cypher + synthesizer. Requires a populated KG for the corpus (else kg_hits empty). expected_entities TBD by curator."
   },
@@ -105,7 +109,7 @@
     "expected_answer_points": [],
     "expected_entities": ["ESCRT"],
     "user_cypher": "MATCH (e:Entity) WHERE e.key CONTAINS 'escrt' RETURN e.key, e.entity_type LIMIT 10",
-    "retrieval": { "retrieval_mode": "neo4j_only", "top_k": 5 },
+    "retrieval": { "retrieval_mode": "neo4j_only", "top_k": 5, "kg_max_rows": 50 },
     "category": "KG",
     "notes": "PLACEHOLDER. Pathway: user_cypher — raw read-only Cypher runs verbatim, bypassing cypher_builder. The :Entity {key, entity_type} schema is FIXED across KA corpora (key = lowercased entity text); only requires the corpus KG to be populated (L6 entity extraction run). For real questions, change the search term + expected_entities. Read-only rails still enforced at execution."
   },
@@ -121,9 +125,9 @@
       "It polymerizes to constrict and sever the membrane neck."
     ],
     "expected_entities": ["ESCRT-III"],
-    "retrieval": { "retrieval_mode": "parallel_fused", "lancedb_search_mode": "hybrid", "top_k": 5 },
+    "retrieval": { "retrieval_mode": "parallel_fused", "lancedb_search_mode": "hybrid", "top_k": 5, "num_candidates": 100, "rrf_rank_constant": 60, "kg_max_rows": 50 },
     "category": "Mechanism",
-    "notes": "PLACEHOLDER. Pathway: parallel_fused — LanceDB + Neo4j legs run in parallel and the synthesizer fuses both. expected_sources/expected_entities TBD."
+    "notes": "PLACEHOLDER. Pathway: parallel_fused — LanceDB + Neo4j legs run in parallel and the synthesizer fuses both, so both legs' knobs are pinned. expected_sources/expected_entities TBD."
   },
   {
     "id": "escrt_auto_routes_to_text",
@@ -136,8 +140,8 @@
       "ESCRT (Endosomal Sorting Complex Required for Transport) proteins mediate membrane remodeling and scission."
     ],
     "expected_mode": "lancedb_only",
-    "retrieval": { "retrieval_mode": "auto", "lancedb_search_mode": "hybrid", "top_k": 5 },
+    "retrieval": { "retrieval_mode": "auto", "lancedb_search_mode": "hybrid", "top_k": 5, "num_candidates": 100, "rrf_rank_constant": 60, "kg_max_rows": 50 },
     "category": "Overview",
-    "notes": "PLACEHOLDER. Pathway: auto — the mode_classifier routes; expected_mode asserts it should pick lancedb_only for this descriptive question. TBD by curator."
+    "notes": "PLACEHOLDER. Pathway: auto — the mode_classifier routes; expected_mode asserts it should pick lancedb_only for this descriptive question. auto may route to either leg, so both legs' knobs are pinned. TBD by curator."
   }
 ]

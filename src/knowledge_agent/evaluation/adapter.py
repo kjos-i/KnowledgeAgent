@@ -133,8 +133,9 @@ async def run_case(
     """Invoke the KA graph for one case and normalize the typed result.
 
     Injects the state-supported per-case overrides (query, retrieval_mode,
-    lancedb_search_mode, top_k, skip_query_builder, direct_retrieval,
-    user_cypher, corpus_config) + a usage callback. A graph error is captured
+    lancedb_search_mode, top_k, num_candidates, rrf_rank_constant, mmr_lambda,
+    use_mmr, kg_max_rows, skip_query_builder, direct_retrieval, user_cypher,
+    corpus_config) + a usage callback. A graph error is captured
     as a string on the returned `CaseRun` (empty answer / empty retrieval) so
     one bad case can't sink the whole run. `graph` is injectable for tests;
     None lazy-imports the real compiled graph.
@@ -150,6 +151,11 @@ async def run_case(
         "retrieval_mode": case.retrieval.retrieval_mode,
         "lancedb_search_mode": case.retrieval.lancedb_search_mode,
         "top_k": case.retrieval.top_k,
+        "num_candidates": case.retrieval.num_candidates,
+        "rrf_rank_constant": case.retrieval.rrf_rank_constant,
+        "mmr_lambda": case.retrieval.mmr_lambda,
+        "use_mmr": case.retrieval.use_mmr,
+        "kg_max_rows": case.retrieval.kg_max_rows,
         "skip_query_builder": case.retrieval.skip_query_builder,
         "direct_retrieval": case.retrieval.direct_retrieval,
         "user_cypher": case.user_cypher,

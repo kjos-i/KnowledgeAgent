@@ -9,6 +9,7 @@ from typing import Any
 
 import pyarrow as pa
 import pytest
+from lancedb.rerankers import RRFReranker
 
 from knowledge_agent.config import Settings
 from knowledge_agent.search.client import (
@@ -41,8 +42,8 @@ class _RecordingArrowTable:
 @dataclass
 class _RecordingQueryBuilder:
     """Stand-in for lancedb's search builder. Captures filter / select /
-    limit / vector / text on the fluent chain, then materialises to a
-    stub Arrow table on `to_arrow()`."""
+    limit / vector / text / reranker on the fluent chain, then
+    materialises to a stub row list on `to_list()`."""
 
     rows_to_return: list[dict[str, Any]] = field(default_factory=list)
     last_filter: str | None = None
@@ -50,6 +51,7 @@ class _RecordingQueryBuilder:
     last_limit: int | None = None
     last_vector: list[float] | None = None
     last_text: str | None = None
+    last_reranker: Any = None
     raise_on_to_arrow: Exception | None = None
 
     def where(self, filter_sql: str) -> "_RecordingQueryBuilder":
@@ -70,6 +72,13 @@ class _RecordingQueryBuilder:
 
     def nearest_to_text(self, t: str) -> "_RecordingQueryBuilder":
         self.last_text = t
+        return self
+
+    def rerank(self, reranker: Any) -> "_RecordingQueryBuilder":
+        # Mirrors AsyncHybridQuery.rerank — records the reranker instance
+        # so hybrid_search tests can assert the RRFReranker's K equals the
+        # configured `rrf_rank_constant` (the dead-knob wiring fix).
+        self.last_reranker = reranker
         return self
 
     async def to_list(self) -> list[dict[str, Any]]:
@@ -784,6 +793,119 @@ async def test_hybrid_search_returns_chunks_on_success(monkeypatch):
     assert qb.last_text == "alpha query"
 
 
+async def test_hybrid_search_wires_rrf_reranker_and_num_candidates(monkeypatch):
+    """The dead-knob fix: hybrid_search must attach an explicit
+    `RRFReranker(K=settings.rrf_rank_constant)` to the query chain AND
+    set the candidate-pool `.limit()` to `settings.num_candidates`.
+
+    Before the fix, neither knob reached LanceDB — `rrf_rank_constant`
+    was masked by LanceDB's default `RRFReranker(K=60)` and the pool was
+    just `top_k`. These assertions pin that both settings now flow
+    through the builder.
+    """
+
+    async def _fake_embed(_text: str) -> list[float]:
+        return [0.5] * 1024
+
+    monkeypatch.setattr("knowledge_agent.search.client._embed_query", _fake_embed)
+    settings = _configured_settings(rrf_rank_constant=17, num_candidates=42, top_k=5)
+    qb = _RecordingQueryBuilder(rows_to_return=[])
+    table = RecordingTable(query_builder=qb)
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    client = _client_with_conn(settings, conn)
+
+    await client.hybrid_search("alpha query", top_k=5)
+
+    # An explicit RRFReranker with K == the configured rrf_rank_constant.
+    assert isinstance(qb.last_reranker, RRFReranker)
+    assert qb.last_reranker.K == 17
+    # Candidate pool = num_candidates (NOT top_k).
+    assert qb.last_limit == 42
+
+
+async def test_hybrid_search_uses_settings_when_params_omitted(monkeypatch):
+    """When the caller omits num_candidates / rrf_k, the None-check
+    fallback resolves them from settings (not a silent 0/top_k)."""
+
+    async def _fake_embed(_text: str) -> list[float]:
+        return [0.5] * 1024
+
+    monkeypatch.setattr("knowledge_agent.search.client._embed_query", _fake_embed)
+    settings = _configured_settings(rrf_rank_constant=99, num_candidates=88, top_k=5)
+    qb = _RecordingQueryBuilder(rows_to_return=[])
+    table = RecordingTable(query_builder=qb)
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    client = _client_with_conn(settings, conn)
+
+    # No num_candidates / rrf_k passed → settings supply both.
+    await client.hybrid_search("q")
+
+    assert qb.last_reranker.K == 99
+    assert qb.last_limit == 88
+
+
+async def test_hybrid_search_explicit_params_override_settings(monkeypatch):
+    """Explicit num_candidates / rrf_k win over settings (per-invoke
+    override path the eval case will use)."""
+
+    async def _fake_embed(_text: str) -> list[float]:
+        return [0.5] * 1024
+
+    monkeypatch.setattr("knowledge_agent.search.client._embed_query", _fake_embed)
+    settings = _configured_settings(rrf_rank_constant=60, num_candidates=100, top_k=5)
+    qb = _RecordingQueryBuilder(rows_to_return=[])
+    table = RecordingTable(query_builder=qb)
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    client = _client_with_conn(settings, conn)
+
+    await client.hybrid_search("q", top_k=5, num_candidates=7, rrf_k=3)
+
+    assert qb.last_reranker.K == 3
+    assert qb.last_limit == 7
+
+
+async def test_hybrid_search_truncates_non_mmr_pool_to_top_k(monkeypatch):
+    """Non-MMR hybrid returns AT MOST top_k even though the pool
+    (`num_candidates`) is larger. The fused pool is sliced `[:top_k]`."""
+
+    async def _fake_embed(_text: str) -> list[float]:
+        return [0.5] * 1024
+
+    monkeypatch.setattr("knowledge_agent.search.client._embed_query", _fake_embed)
+    # 8 candidate rows come back; top_k=3 must cap the result at 3.
+    rows = [{**_chunk_row(f"c{i}", f"t{i}"), "_relevance_score": 1.0 - i / 10} for i in range(8)]
+    qb = _RecordingQueryBuilder(rows_to_return=rows)
+    table = RecordingTable(query_builder=qb)
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    client = _client_with_conn(_configured_settings(num_candidates=50), conn)
+
+    hits = await client.hybrid_search("q", top_k=3)
+
+    assert len(hits) == 3
+    assert [h.chunk_id for h in hits] == ["c0", "c1", "c2"]
+
+
+async def test_vector_search_uses_num_candidates_pool_and_truncates(monkeypatch):
+    """vector_search sets `.limit(num_candidates)` and truncates the
+    non-MMR result to top_k (no RRF reranker on the vector-only path)."""
+
+    async def _fake_embed(_text: str) -> list[float]:
+        return [0.5] * 1024
+
+    monkeypatch.setattr("knowledge_agent.search.client._embed_query", _fake_embed)
+    rows = [{**_chunk_row(f"c{i}", f"t{i}"), "_distance": i / 10} for i in range(6)]
+    qb = _RecordingQueryBuilder(rows_to_return=rows)
+    table = RecordingTable(query_builder=qb)
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    client = _client_with_conn(_configured_settings(num_candidates=30, top_k=2), conn)
+
+    hits = await client.vector_search("q", top_k=2)
+
+    assert qb.last_limit == 30
+    assert qb.last_reranker is None  # vector-only path: no RRF fusion
+    assert len(hits) == 2
+
+
 async def test_retrieve_dispatches_to_mode_specific_method(monkeypatch):
     """`retrieve(mode=...)` is a pure dispatcher: each mode value
     routes to the matching `*_search` method. Patch the three and
@@ -816,6 +938,68 @@ async def test_retrieve_dispatches_to_mode_specific_method(monkeypatch):
     await client.retrieve("q", mode="bogus")  # type: ignore[arg-type]
 
     assert calls == ["hybrid", "fts", "vector", "hybrid"]
+
+
+async def test_retrieve_forwards_tuning_knobs_per_mode(monkeypatch):
+    """`retrieve()` forwards the per-invoke tuning knobs to the chosen
+    method: num_candidates/rrf_k/mmr_lambda → hybrid; num_candidates/
+    mmr_lambda (NO rrf_k) → vector. This is the node→client hop the eval
+    case rides through."""
+    seen: dict[str, dict[str, Any]] = {}
+
+    async def fake_hybrid(self, query, top_k=None, **kw):
+        seen["hybrid"] = kw
+        return []
+
+    async def fake_vector(self, query, top_k=None, **kw):
+        seen["vector"] = kw
+        return []
+
+    monkeypatch.setattr(LanceClient, "hybrid_search", fake_hybrid)
+    monkeypatch.setattr(LanceClient, "vector_search", fake_vector)
+    client = LanceClient(settings=_configured_settings())
+
+    await client.retrieve("q", mode="hybrid", num_candidates=11, rrf_k=7, mmr_lambda=0.3)
+    assert seen["hybrid"]["num_candidates"] == 11
+    assert seen["hybrid"]["rrf_k"] == 7
+    assert seen["hybrid"]["mmr_lambda"] == 0.3
+
+    await client.retrieve("q", mode="vector", num_candidates=9, mmr_lambda=0.4)
+    assert seen["vector"]["num_candidates"] == 9
+    assert seen["vector"]["mmr_lambda"] == 0.4
+    assert "rrf_k" not in seen["vector"]  # vector-only path has no RRF fusion
+
+
+@pytest.mark.parametrize("method", ["hybrid_search", "vector_search"])
+async def test_mmr_lambda_reaches_reranker_override_then_settings(monkeypatch, method):
+    """With use_mmr=True, an explicit mmr_lambda wins; when omitted it
+    falls back to settings.mmr_lambda (None-check, not a silent default).
+    Covers both MMR-capable methods."""
+
+    async def _fake_embed(_text: str) -> list[float]:
+        return [0.5] * 1024
+
+    monkeypatch.setattr("knowledge_agent.search.client._embed_query", _fake_embed)
+
+    captured: dict[str, float] = {}
+
+    def _fake_mmr(rows, query_vector, top_k, mmr_lambda, mode):
+        captured["lambda"] = mmr_lambda
+        return []
+
+    monkeypatch.setattr("knowledge_agent.search.client._mmr_rerank_rows", _fake_mmr)
+
+    settings = _configured_settings(mmr_lambda=0.6, num_candidates=50, top_k=5)
+    qb = _RecordingQueryBuilder(rows_to_return=[{**_chunk_row("c1", "a"), "_relevance_score": 1.0}])
+    conn = RecordingConnection(tables={CHUNKS_TABLE: RecordingTable(query_builder=qb)})
+    client = _client_with_conn(settings, conn)
+    search = getattr(client, method)
+
+    await search("q", top_k=5, use_mmr=True, mmr_lambda=0.2)
+    assert captured["lambda"] == 0.2  # explicit override
+
+    await search("q", top_k=5, use_mmr=True)
+    assert captured["lambda"] == 0.6  # settings fallback
 
 
 # ---- schema ----

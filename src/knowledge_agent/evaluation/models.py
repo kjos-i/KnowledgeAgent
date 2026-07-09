@@ -24,6 +24,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from knowledge_agent.config import check_window_ordering
+
 RetrievalMode = Literal[
     "auto",
     "lancedb_only",
@@ -63,6 +65,56 @@ class RetrievalSettings(BaseModel):
             "with no synthesized answer. Maps to state['direct_retrieval']. "
             "A direct_retrieval case is scored on retrieval only (the judge "
             "and answer-keyword gates don't apply — there's no prose)."
+        ),
+    )
+    # ---- tuning knobs (nullable: pinned per case, or blank → global) ----
+    # These four default to None ("not pinned"). At run time a None knob
+    # falls back to the live global Settings value — which can shift — so a
+    # reproducible case must pin every knob its config actually reads. The
+    # Dataset form enforces that (required when the consuming leg runs) and
+    # the runner refuses a dataset that leaves one blank; see `required_knobs`
+    # / `validate_case`. use_mmr is a plain bool (never blank), so it isn't
+    # in that required set.
+    num_candidates: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "LanceDB candidate pool fetched before truncation to top_k. "
+            "Required when the LanceDB leg runs; None → global num_candidates. "
+            "Maps to state['num_candidates']."
+        ),
+    )
+    rrf_rank_constant: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "RRF fusion constant K for hybrid search. Required when the "
+            "LanceDB leg runs in hybrid mode; None → global rrf_rank_constant. "
+            "Maps to state['rrf_rank_constant']."
+        ),
+    )
+    mmr_lambda: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "MMR relevance/diversity tradeoff (1.0 = pure relevance). Required "
+            "when the LanceDB leg runs with use_mmr=True; None → global "
+            "mmr_lambda. Maps to state['mmr_lambda']."
+        ),
+    )
+    use_mmr: bool = Field(
+        default=False,
+        description=(
+            "Apply MMR re-ranking to the LanceDB candidate pool. Maps to state['use_mmr']."
+        ),
+    )
+    kg_max_rows: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Row cap for the Neo4j Cypher leg. Required when the Neo4j leg "
+            "runs; None → global kg_max_rows. Maps to state['kg_max_rows']."
         ),
     )
 
@@ -127,6 +179,72 @@ class EvalCase(BaseModel):
             "filtering by origin; ignored by metrics."
         ),
     )
+
+
+# Modes that exercise each retrieval leg. `auto` is classified at run time,
+# so treat it as exercising BOTH legs (require the union of their knobs) —
+# whichever way it routes, the value is already pinned.
+LANCE_MODES: frozenset[str] = frozenset(
+    {"auto", "lancedb_only", "lancedb_then_neo4j", "neo4j_then_lancedb", "parallel_fused"}
+)
+NEO4J_MODES: frozenset[str] = frozenset(
+    {"auto", "neo4j_only", "lancedb_then_neo4j", "neo4j_then_lancedb", "parallel_fused"}
+)
+
+
+def required_knobs(retrieval: RetrievalSettings) -> set[str]:
+    """The nullable tuning knobs this case's config actually reads at search
+    time — the ones that must be pinned for the case to be reproducible.
+
+    Conditional on the case's own settings: a knob is only required when the
+    leg (and sub-mode) that consumes it runs. A blank required knob would
+    fall back to the shifting global setting, so `validate_case` flags it.
+    """
+    req: set[str] = set()
+    if retrieval.retrieval_mode in LANCE_MODES:
+        req.add("num_candidates")
+        if retrieval.lancedb_search_mode == "hybrid":
+            req.add("rrf_rank_constant")
+        # MMR needs vectors, so it never runs under FTS even if use_mmr is set.
+        if retrieval.use_mmr and retrieval.lancedb_search_mode != "fts":
+            req.add("mmr_lambda")
+    if retrieval.retrieval_mode in NEO4J_MODES:
+        req.add("kg_max_rows")
+    return req
+
+
+def validate_case(case: EvalCase) -> list[str]:
+    """Return the reasons `case` can't be run reproducibly, or [] when it's
+    complete + coherent.
+
+    Two checks: (1) every knob `required_knobs` names is pinned (not None),
+    and (2) num_candidates >= top_k when the pool is pinned. Kept OUT of the
+    pydantic model so `load_dataset` still loads an incomplete case (the GUI
+    can show + fix it, and hand-edited / imported datasets still load) —
+    enforcement happens at Run, where `runner.run` refuses a dataset with any
+    invalid case before spending tokens.
+    """
+    rs = case.retrieval
+    problems: list[str] = []
+    for knob in sorted(required_knobs(rs)):
+        if getattr(rs, knob) is None:
+            problems.append(f"{knob} is required for retrieval_mode={rs.retrieval_mode!r}")
+    if rs.num_candidates is not None:
+        message = check_window_ordering(rs.top_k, rs.num_candidates)
+        if message is not None:
+            problems.append(message)
+    return problems
+
+
+def validate_dataset(cases: list[EvalCase]) -> dict[str, list[str]]:
+    """Map each invalid case's id → its problems ({} when every case is
+    runnable). The runner calls this before spending any tokens."""
+    invalid: dict[str, list[str]] = {}
+    for case in cases:
+        problems = validate_case(case)
+        if problems:
+            invalid[case.id] = problems
+    return invalid
 
 
 class EvalDataset(BaseModel):

@@ -96,6 +96,11 @@ def test_run_case_injects_all_pathway_knobs():
             "retrieval_mode": "neo4j_only",
             "lancedb_search_mode": "fts",
             "top_k": 7,
+            "num_candidates": 40,
+            "rrf_rank_constant": 33,
+            "mmr_lambda": 0.7,
+            "use_mmr": True,
+            "kg_max_rows": 25,
             "skip_query_builder": True,
             "direct_retrieval": True,
         },
@@ -109,6 +114,25 @@ def test_run_case_injects_all_pathway_knobs():
     assert state["user_cypher"] == "MATCH (n) RETURN n LIMIT 5"
     assert state["top_k"] == 7
     assert state["retrieval_mode"] == "neo4j_only"
+    assert state["num_candidates"] == 40
+    assert state["rrf_rank_constant"] == 33
+    assert state["mmr_lambda"] == 0.7
+    assert state["use_mmr"] is True
+    assert state["kg_max_rows"] == 25
+
+
+def test_run_case_threads_every_retrieval_field():
+    """Drift guard (backend, layer-pure): every RetrievalSettings field must
+    be injected into the graph invoke-state, so a newly-added per-case knob
+    can't be silently left unthreaded — the original dead-knob bug class."""
+    from knowledge_agent.evaluation.models import RetrievalSettings
+
+    case = EvalCase(id="x", question="q?")
+    fake_graph = SimpleNamespace(ainvoke=AsyncMock(return_value=_final_state()))
+    asyncio.run(A.run_case(case, corpus_config=None, graph=fake_graph))
+    state = fake_graph.ainvoke.call_args.args[0]
+    for field_name in RetrievalSettings.model_fields:
+        assert field_name in state, f"{field_name} not threaded into invoke_state"
 
 
 def test_run_case_captures_graph_error():

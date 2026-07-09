@@ -85,10 +85,13 @@ def case_card(
     detailed: bool = False,
     on_edit: Callable[[int], None] | None = None,
     on_delete: Callable[[int], None] | None = None,
+    on_cancel: Callable[[int], None] | None = None,
 ) -> ft.Control:
     """One case rendered as a card. `detailed` expands every non-empty gold
-    field; editable (on_edit/on_delete) adds a click-to-edit body + buttons."""
-    editable = on_edit is not None or on_delete is not None
+    field; the buttons (Edit / Cancel / Delete) drive interaction — the card
+    body itself is NOT clickable. `on_cancel` only shows its Cancel button on
+    the selected card (the one being edited)."""
+    editable = on_edit is not None or on_delete is not None or on_cancel is not None
     question = ft.Text(
         case.question,
         size=12,
@@ -123,6 +126,16 @@ def case_card(
                     on_click=lambda _e, i=idx: on_edit(i),
                 )
             )
+        # Cancel only on the card currently being edited — it discards the edit
+        # (blank the form) and deselects.
+        if on_cancel is not None and selected == idx:
+            buttons.append(
+                ft.TextButton(
+                    "Cancel",
+                    icon=ft.Icons.CLOSE,
+                    on_click=lambda _e, i=idx: on_cancel(i),
+                )
+            )
         if on_delete is not None:
             buttons.append(
                 ft.TextButton(
@@ -137,9 +150,8 @@ def case_card(
         border_radius=4,
         border=ft.Border.all(1, ft.Colors.GREY_800),
         bgcolor=ft.Colors.BLUE_GREY_900 if selected == idx else None,
-        # Click the card body to edit it (Dataset tab); read-only cards don't
-        # react to clicks.
-        on_click=(lambda _e, i=idx: on_edit(i)) if on_edit is not None else None,
+        # Body is NOT clickable — selecting/editing happens only via the Edit
+        # button, so a stray card click can't hijack the form.
         content=ft.Column(body, spacing=2),
     )
 
@@ -151,6 +163,7 @@ def render_case_cards(
     detailed: bool = False,
     on_edit: Callable[[int], None] | None = None,
     on_delete: Callable[[int], None] | None = None,
+    on_cancel: Callable[[int], None] | None = None,
     empty_hint: str = "No cases.",
 ) -> list[ft.Control]:
     """Render a list of cases as cards (or a single empty-state hint)."""
@@ -164,6 +177,7 @@ def render_case_cards(
             detailed=detailed,
             on_edit=on_edit,
             on_delete=on_delete,
+            on_cancel=on_cancel,
         )
         for i, c in enumerate(cases)
     ]

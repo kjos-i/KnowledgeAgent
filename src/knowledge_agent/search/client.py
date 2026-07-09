@@ -41,6 +41,7 @@ from typing import Any, Literal
 
 import lancedb
 from lancedb import AsyncConnection
+from lancedb.rerankers import RRFReranker
 
 from knowledge_agent.config import Settings, get_settings
 from knowledge_agent.ingestion.embed import embed_texts
@@ -448,20 +449,29 @@ class LanceClient:
         *,
         mode: Literal["hybrid", "fts", "vector"] | None = None,
         use_mmr: bool = False,
+        num_candidates: int | None = None,
+        rrf_k: int | None = None,
+        mmr_lambda: float | None = None,
         filters: dict[str, Any] | None = None,
     ) -> list[RetrievedChunk]:
         """Single dispatch entry point. Picks one of the three search
         methods based on `mode`.
 
-        `mode=None` falls back to `settings.lancedb_search_mode`. `use_mmr`
-        is silently ignored for `fts` mode (no vectors to compare); a
-        warning is logged in that case.
+        `mode=None` falls back to `settings.lancedb_search_mode`. The tuning
+        knobs (`num_candidates`, `rrf_k`, `mmr_lambda`) are forwarded to the
+        chosen method, each falling back to its `settings.*` value there when
+        None; `rrf_k` applies to hybrid only, `mmr_lambda` only when MMR runs.
+        `use_mmr` is silently ignored for `fts` mode (no vectors to compare);
+        a warning is logged in that case.
         """
         mode = mode or self._settings.lancedb_search_mode
         if mode == "hybrid":
             return await self.hybrid_search(
                 query,
                 top_k,
+                num_candidates=num_candidates,
+                rrf_k=rrf_k,
+                mmr_lambda=mmr_lambda,
                 filters=filters,
                 use_mmr=use_mmr,
             )
@@ -473,6 +483,8 @@ class LanceClient:
             return await self.vector_search(
                 query,
                 top_k,
+                num_candidates=num_candidates,
+                mmr_lambda=mmr_lambda,
                 filters=filters,
                 use_mmr=use_mmr,
             )
@@ -480,6 +492,9 @@ class LanceClient:
         return await self.hybrid_search(
             query,
             top_k,
+            num_candidates=num_candidates,
+            rrf_k=rrf_k,
+            mmr_lambda=mmr_lambda,
             filters=filters,
             use_mmr=use_mmr,
         )
@@ -489,15 +504,26 @@ class LanceClient:
         query: str,
         top_k: int | None = None,
         *,
+        num_candidates: int | None = None,
+        rrf_k: int | None = None,
+        mmr_lambda: float | None = None,
         filters: dict[str, Any] | None = None,
         use_mmr: bool = False,
     ) -> list[RetrievedChunk]:
         """Hybrid BM25 + vector search, fused via LanceDB's native RRF.
 
-        With `use_mmr=True`, the search fetches `top_k *
-        mmr_candidate_multiplier` candidates (LanceDB returns each row's
-        embedding so MMR can run), then Python-side MMR re-ranks down to
-        top_k.
+        The BM25 + vector legs each retrieve `num_candidates` rows, which
+        `RRFReranker(K=rrf_k)` fuses (score `1/(rrf_k + rank)`) into one
+        ranked candidate pool. `num_candidates`/`rrf_k` fall back to
+        `settings.num_candidates`/`settings.rrf_rank_constant` when the
+        caller doesn't pass them (None-check, not `or`, so a per-invoke
+        override can never be silently dropped).
+
+        With `use_mmr=True`, the `num_candidates` pool (LanceDB returns
+        each row's embedding so MMR can run) is Python-side MMR-reranked
+        down to `top_k`. Without MMR, the fused pool is truncated to the
+        first `top_k` (`num_candidates >= top_k` is enforced by
+        `Settings._validate_retrieval_windows`).
 
         Returns an empty list when Voyage produces no query vector (e.g.
         empty input). LanceDB / Voyage failures propagate to the caller
@@ -506,14 +532,22 @@ class LanceClient:
         `AgentState.lancedb_retrieval_error`.
         """
         settings = self._settings
-        top_k = top_k or settings.top_k
+        top_k = top_k if top_k is not None else settings.top_k
+        num_candidates = num_candidates if num_candidates is not None else settings.num_candidates
+        rrf_k = rrf_k if rrf_k is not None else settings.rrf_rank_constant
+        mmr_lambda = mmr_lambda if mmr_lambda is not None else settings.mmr_lambda
         query_vector = await _embed_query(query)
         if query_vector is None:
             return []
         conn = await self._ensure_conn()
         table = await conn.open_table(CHUNKS_TABLE)
-        pool_size = top_k * settings.mmr_candidate_multiplier if use_mmr else top_k
-        search = table.query().nearest_to(query_vector).nearest_to_text(query).limit(pool_size)
+        search = (
+            table.query()
+            .nearest_to(query_vector)
+            .nearest_to_text(query)
+            .rerank(RRFReranker(K=rrf_k))
+            .limit(num_candidates)
+        )
         if filters:
             where = _filters_to_sql(filters)
             if where:
@@ -524,10 +558,10 @@ class LanceClient:
                 rows,
                 query_vector,
                 top_k,
-                settings.mmr_lambda,
+                mmr_lambda,
                 "hybrid",
             )
-        return [_row_to_chunk(r, "hybrid") for r in rows]
+        return [_row_to_chunk(r, "hybrid") for r in rows[:top_k]]
 
     async def fts_search(
         self,
@@ -560,25 +594,32 @@ class LanceClient:
         query: str,
         top_k: int | None = None,
         *,
+        num_candidates: int | None = None,
+        mmr_lambda: float | None = None,
         filters: dict[str, Any] | None = None,
         use_mmr: bool = False,
     ) -> list[RetrievedChunk]:
         """Dense-vector kNN search (cosine).
 
-        Useful for conceptual queries where lexical overlap is weak.
-        With `use_mmr=True`, fetches a candidate pool and Python-side
-        re-ranks for diversity. LanceDB / Voyage failures propagate
-        (typed-errors contract).
+        Useful for conceptual queries where lexical overlap is weak. The
+        kNN retrieves `num_candidates` rows (falling back to
+        `settings.num_candidates` via a None-check when the caller doesn't
+        pass one). With `use_mmr=True`, that pool is Python-side MMR-reranked
+        down to `top_k`; without MMR it is truncated to the first `top_k`
+        (`num_candidates >= top_k` is enforced by
+        `Settings._validate_retrieval_windows`). LanceDB / Voyage failures
+        propagate (typed-errors contract).
         """
         settings = self._settings
-        top_k = top_k or settings.top_k
+        top_k = top_k if top_k is not None else settings.top_k
+        num_candidates = num_candidates if num_candidates is not None else settings.num_candidates
+        mmr_lambda = mmr_lambda if mmr_lambda is not None else settings.mmr_lambda
         query_vector = await _embed_query(query)
         if query_vector is None:
             return []
         conn = await self._ensure_conn()
         table = await conn.open_table(CHUNKS_TABLE)
-        pool_size = top_k * settings.mmr_candidate_multiplier if use_mmr else top_k
-        search = table.query().nearest_to(query_vector).limit(pool_size)
+        search = table.query().nearest_to(query_vector).limit(num_candidates)
         if filters:
             where = _filters_to_sql(filters)
             if where:
@@ -589,10 +630,10 @@ class LanceClient:
                 rows,
                 query_vector,
                 top_k,
-                settings.mmr_lambda,
+                mmr_lambda,
                 "vector",
             )
-        return [_row_to_chunk(r, "vector") for r in rows]
+        return [_row_to_chunk(r, "vector") for r in rows[:top_k]]
 
 
 @lru_cache(maxsize=1)

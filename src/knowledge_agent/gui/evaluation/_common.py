@@ -28,6 +28,15 @@ def active_corpus_config_path(app: GuiApp) -> Path | None:
     return Path(raw) if raw else None
 
 
+def active_corpus_dir(app: GuiApp) -> Path | None:
+    """The active corpus's home folder (parent of its `corpus.toml`), or None
+    when no corpus is set. Used to open the dataset file pickers in the corpus's
+    own folder and to place a newly-created dataset beside it.
+    """
+    cfg = active_corpus_config_path(app)
+    return cfg.parent if cfg else None
+
+
 def active_eval_ledger(app: GuiApp) -> EvalLedger:
     """The `EvalLedger` for the active corpus's `eval_output/` (CWD fallback
     when no corpus is set). Backs the three read tabs so they see exactly the

@@ -22,7 +22,11 @@ def _dataset_file(tmp_path) -> object:
             "id": "c1",
             "question": "What drives membrane scission?",
             "required_keywords": ["ESCRT-III", "scission"],
-            "retrieval": {"retrieval_mode": "neo4j_only", "direct_retrieval": True},
+            "retrieval": {
+                "retrieval_mode": "neo4j_only",
+                "direct_retrieval": True,
+                "kg_max_rows": 50,
+            },
             "user_cypher": "MATCH (e:Entity) RETURN e.key LIMIT 5",
             "origin": "llm",
         },
@@ -33,9 +37,17 @@ def _dataset_file(tmp_path) -> object:
     return p
 
 
-def _tab(fake_app) -> DatasetTab:
+def _tab(fake_app, path=None) -> DatasetTab:
     tab = DatasetTab(fake_app, coordinator=MagicMock())
     tab.build()
+    # build() auto-loads the packaged default dataset (50a); reset to a clean
+    # slate so each test controls its own dataset context and never writes the
+    # shipped default. Pass `path` to target a specific (tmp) file.
+    tab._dataset = None
+    tab._cases = []
+    tab._path = None
+    tab._selected = None
+    tab.dataset_field.value = str(path) if path else ""
     return tab
 
 
@@ -67,13 +79,12 @@ def test_load_bad_dataset_surfaces_error(fake_app, tmp_path):
 
 def test_new_case_saves_to_file(fake_app, tmp_path):
     p = tmp_path / "new.json"
-    tab = _tab(fake_app)
-    tab.dataset_dropdown.value = str(p)
-    tab._on_new(MagicMock())
+    tab = _tab(fake_app, p)
+    tab._on_new(MagicMock())  # knobs pre-fill with the standard defaults
     tab.f["id"].value = "brandnew"
     tab.f["question"].value = "a new question?"
     tab.f["required_keywords"].value = "alpha\nbeta"
-    tab.status_dropdown.value = "final"
+    tab.status_group.value = "final"
     tab._on_save_case(MagicMock())
 
     assert p.exists()
@@ -108,8 +119,7 @@ def test_delete_case_persists(fake_app, tmp_path):
 
 def test_save_invalid_case_surfaces_error(fake_app, tmp_path):
     p = tmp_path / "x.json"
-    tab = _tab(fake_app)
-    tab.dataset_dropdown.value = str(p)
+    tab = _tab(fake_app, p)
     tab._on_new(MagicMock())
     tab.f["id"].value = ""  # id is required → ValidationError
     tab.f["question"].value = "q?"
@@ -144,13 +154,12 @@ def test_capture_from_search_no_result(fake_app):
     assert "No search result" in tab.status.value
 
 
-async def test_generate_llm_appends_candidates_and_saves(fake_app, tmp_path):
-    """Generate (LLM) drafts candidates via the backend, appends them
+async def test_generate_multiple_appends_candidates_and_saves(fake_app, tmp_path):
+    """Generate multiple drafts candidates via the backend, appends them
     (origin=llm) to the dataset, and saves to the path."""
     p = tmp_path / "gen.json"
-    tab = _tab(fake_app)
-    tab.dataset_dropdown.value = str(p)
-    tab.gen_count.value = "2"
+    tab = _tab(fake_app, p)
+    tab.gen_model_dropdown.value = "some-model"  # chosen generation model
     fake_cases = [
         EvalCase(id="gen-00-a", question="A?", origin="llm", expected_sources=["d1"]),
         EvalCase(id="gen-01-b", question="B?", origin="llm", expected_sources=["d2"]),
@@ -159,17 +168,195 @@ async def test_generate_llm_appends_candidates_and_saves(fake_app, tmp_path):
         "knowledge_agent.evaluation.generator.generate_from_corpus",
         new_callable=AsyncMock,
         return_value=fake_cases,
-    ):
-        await tab._on_generate_llm(MagicMock())
+    ) as gen_mock:
+        await tab._run_generate_multiple(2, p)
 
+    gen_mock.assert_awaited_once_with(
+        2, model="some-model", temperature=0.3
+    )  # picker threads through
     ds = load_dataset(p)
     assert [c.id for c in ds.cases] == ["gen-00-a", "gen-01-b"]
     assert all(c.origin == "llm" for c in ds.cases)
     assert "generated 2" in tab.status.value
 
 
-async def test_generate_llm_requires_dataset_path(fake_app):
+def test_generate_multiple_requires_dataset_path(fake_app):
+    tab = _tab(fake_app)  # no path → cleared dataset field
+    tab._on_generate_multiple(MagicMock())
+    assert "choose a dataset" in tab.status.value.lower()
+
+
+def test_generate_multiple_confirms_before_running(fake_app, tmp_path):
+    """Generate multiple asks first — it opens a confirm dialog rather than
+    generating immediately (nothing written until you confirm)."""
+    p = tmp_path / "gen.json"
+    tab = _tab(fake_app, p)
+    tab.gen_count.value = "3"
+    tab._on_generate_multiple(MagicMock())
+    fake_app.page.show_dialog.assert_called_once()
+    assert not p.exists()  # nothing generated or written yet
+
+
+async def test_generate_one_fills_form_without_saving(fake_app, tmp_path):
+    """Generate one drafts a single candidate into the form for review — it
+    fills the form (origin=llm) and writes nothing until Add case."""
+    p = tmp_path / "one.json"
+    tab = _tab(fake_app, p)
+    candidate = EvalCase(id="draft-1", question="Q?", origin="llm", required_keywords=["k"])
+    with patch(
+        "knowledge_agent.evaluation.generator.generate_from_corpus",
+        new_callable=AsyncMock,
+        return_value=[candidate],
+    ):
+        await tab._on_generate_one(MagicMock())
+    assert tab.f["id"].value == "draft-1"
+    assert tab.f["origin"].value == "llm"
+    assert tab._selected is None  # new case → commits via Add
+    assert not p.exists()  # nothing written until Add case
+
+
+def test_build_autoloads_default_dataset(fake_app):
+    """The tab auto-loads the dataset shown in the field on open (50a), so the
+    case list isn't empty until the user re-picks (mirrors the Run preview)."""
+    tab = DatasetTab(fake_app, coordinator=MagicMock())
+    tab.build()
+    assert tab.dataset_field.value.endswith("escrt_bootstrap.json")
+    assert tab._dataset is not None  # loaded, not just displayed
+    assert tab._path is not None
+
+
+def test_commit_buttons_enable_by_mode(fake_app, tmp_path):
+    """Two commit buttons: Add is live (Update grey) for a new case; loading an
+    existing case from the list flips it — Update live, Add grey."""
     tab = _tab(fake_app)
-    tab.dataset_dropdown.value = None
-    await tab._on_generate_llm(MagicMock())
-    assert "path" in tab.status.value.lower()
+    tab._on_new(MagicMock())
+    assert tab.add_button.disabled is False
+    assert tab.update_button.disabled is True
+    tab._load(_dataset_file(tmp_path))
+    tab._select(0)
+    assert tab.add_button.disabled is True
+    assert tab.update_button.disabled is False
+
+
+def test_cancel_edit_clears_form_and_deselects(fake_app, tmp_path):
+    """The card's Cancel button blanks the form and deselects — back to new
+    mode (Add live, Update grey)."""
+    tab = _tab(fake_app)
+    tab._load(_dataset_file(tmp_path))
+    tab._select(0)
+    assert tab._selected == 0
+    assert tab.f["id"].value == "c1"
+    tab._on_cancel_edit()
+    assert tab._selected is None
+    assert tab.f["id"].value == ""
+    assert tab.add_button.disabled is False
+    assert tab.update_button.disabled is True
+
+
+def test_new_dataset_creates_empty_file(fake_app, tmp_path):
+    """New dataset writes an empty but valid JSON immediately (Create = create)
+    and makes it the current dataset."""
+    p = tmp_path / "fresh.json"
+    tab = _tab(fake_app)
+    tab._start_new_dataset(p)
+    assert p.exists()
+    assert load_dataset(p).cases == []
+    assert tab._path == p
+    assert tab.dataset_field.value == str(p)
+
+
+def test_shipped_dataset_is_read_only(fake_app, tmp_path):
+    """Packaged/shipped gold datasets are read-only in the GUI — a save to a
+    path under the package datasets dir is refused, so live editing can never
+    overwrite the shipped file (the escrt_bootstrap regression)."""
+    from knowledge_agent.evaluation.config import DEFAULT_DATASET_PATH
+
+    shipped = DEFAULT_DATASET_PATH.parent / "definitely_not_real.json"
+    tab = _tab(fake_app)
+    assert tab._is_shipped_dataset(shipped) is True
+    assert tab._is_shipped_dataset(tmp_path / "mine.json") is False
+    tab.dataset_field.value = str(shipped)
+    tab._on_save_case(MagicMock())
+    assert "read-only" in tab.status.value.lower()
+    assert not shipped.exists()  # refused before any write
+
+
+def test_gray_out_reflects_mode(fake_app):
+    """The retrieval knobs the chosen mode can't use are grayed out (disabled),
+    same rule as Settings → Retrieval: neo4j_only disables the LanceDB block;
+    lancedb_only disables kg_max_rows."""
+    tab = _tab(fake_app)
+    tab.f["retrieval_mode"].value = "neo4j_only"
+    tab._sync_retrieval_gray_out()
+    # Same shared radios as Settings: each radio disabled + the block faded.
+    assert all(r.disabled for r in tab._lancedb_radios)
+    assert tab._lancedb_mode_box.opacity == 0.4
+    assert tab.f["num_candidates"].disabled is True
+    assert tab.f["rrf_rank_constant"].disabled is True
+    assert tab.f["kg_max_rows"].disabled is False  # the Neo4j leg runs
+
+    tab.f["retrieval_mode"].value = "lancedb_only"
+    tab.f["lancedb_search_mode"].value = "hybrid"
+    tab._sync_retrieval_gray_out()
+    assert not any(r.disabled for r in tab._lancedb_radios)
+    assert tab._lancedb_mode_box.opacity == 1.0
+    assert tab.f["num_candidates"].disabled is False
+    assert tab.f["rrf_rank_constant"].disabled is False
+    assert tab.f["kg_max_rows"].disabled is True  # no Neo4j leg
+
+
+def test_input_mode_maps_to_case_fields(fake_app, tmp_path):
+    """The Input-mode radio maps to the case's skip_query_builder / user_cypher:
+    Direct query → skip_query_builder; Direct Cypher → user_cypher; Refined →
+    neither (the intuitive radio replacing the scattered checkbox/field)."""
+    p = tmp_path / "im.json"
+    tab = _tab(fake_app, p)
+    tab._on_new(MagicMock())
+    tab.f["id"].value = "dq"
+    tab.f["question"].value = "q?"
+    tab.f["input_mode"].value = "direct_query"
+    tab._on_save_case(MagicMock())
+    c = load_dataset(p).cases[-1]
+    assert c.retrieval.skip_query_builder is True
+    assert c.user_cypher is None
+
+    tab._on_new(MagicMock())
+    tab.f["id"].value = "dc"
+    tab.f["question"].value = "q?"
+    tab.f["input_mode"].value = "direct_cypher"
+    tab.f["user_cypher"].value = "MATCH (n) RETURN n LIMIT 5"
+    tab._on_save_case(MagicMock())
+    c = load_dataset(p).cases[-1]
+    assert c.user_cypher == "MATCH (n) RETURN n LIMIT 5"
+    assert c.retrieval.skip_query_builder is False
+
+
+def test_input_mode_derived_on_load(fake_app, tmp_path):
+    """Loading a case sets the radio: user_cypher → Direct Cypher, else a plain
+    case → Refined query."""
+    tab = _tab(fake_app)
+    tab._load(_dataset_file(tmp_path))
+    tab._select(0)  # c1 carries user_cypher
+    assert tab.f["input_mode"].value == "direct_cypher"
+    tab._select(1)  # c2 is a plain case
+    assert tab.f["input_mode"].value == "refined"
+
+
+def test_new_knobs_round_trip(fake_app, tmp_path):
+    """The new per-case knobs are read from the form and persisted on the case."""
+    p = tmp_path / "k.json"
+    tab = _tab(fake_app, p)
+    tab._on_new(MagicMock())
+    tab.f["id"].value = "k1"
+    tab.f["question"].value = "q?"
+    tab.f["num_candidates"].value = "80"
+    tab.f["rrf_rank_constant"].value = "45"
+    tab.f["use_mmr"].value = True
+    tab.f["mmr_lambda"].value = 0.7  # mmr_lambda is a slider → float
+    tab._on_save_case(MagicMock())
+
+    rs = load_dataset(p).cases[0].retrieval
+    assert rs.num_candidates == 80
+    assert rs.rrf_rank_constant == 45
+    assert rs.use_mmr is True
+    assert rs.mmr_lambda == 0.7

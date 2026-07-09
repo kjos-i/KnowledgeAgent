@@ -375,7 +375,11 @@ async def neo4j_retriever_node(state: AgentState) -> dict[str, Any]:
         return {"kg_hits": []}
 
     settings = get_settings()
-    wrapped = wrap_with_limit(cypher, settings.kg_max_rows)
+    # Per-invocation override wins; None falls back to the global setting.
+    kg_max_rows = state.get("kg_max_rows")
+    if kg_max_rows is None:
+        kg_max_rows = settings.kg_max_rows
+    wrapped = wrap_with_limit(cypher, kg_max_rows)
 
     try:
         client = get_kg_client()
@@ -466,6 +470,11 @@ async def lancedb_retriever_node(state: AgentState) -> dict[str, Any]:
             top_k=top_k,
             mode=search_mode,
             use_mmr=use_mmr,
+            # Per-invocation tuning knobs; None lets the client fall back to
+            # the corresponding settings.* value (single resolution point).
+            num_candidates=state.get("num_candidates"),
+            rrf_k=state.get("rrf_rank_constant"),
+            mmr_lambda=state.get("mmr_lambda"),
             filters=filters,
         )
     except Exception as exc:

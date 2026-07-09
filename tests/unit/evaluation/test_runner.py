@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sqlite3
+
+import pytest
 
 from knowledge_agent.evaluation import engine as E
 from knowledge_agent.evaluation import report as RP
@@ -73,6 +76,33 @@ def test_end_to_end_with_stubbed_graph(tmp_path, monkeypatch):
     assert n_runs == 1
     assert n_cases == 9
     assert stored_hash == report["dataset_hash"]  # persisted to the ledger
+
+
+def test_run_refuses_dataset_with_missing_required_knob(tmp_path, monkeypatch):
+    """run() validates up-front: a case leaving a required retrieval knob blank
+    aborts with a clear, case-named error BEFORE any case runs — the guard for
+    datasets imported / hand-edited outside the GUI form."""
+
+    async def must_not_run(case, corpus_config):
+        raise AssertionError("no case should run when the dataset is invalid")
+
+    monkeypatch.setattr(E, "run_case", must_not_run)
+
+    bad = tmp_path / "bad.json"
+    # lancedb_only + hybrid (defaults) but num_candidates / rrf_rank_constant blank.
+    bad.write_text(
+        json.dumps(
+            [{"id": "leaky", "question": "q?", "retrieval": {"retrieval_mode": "lancedb_only"}}]
+        ),
+        encoding="utf-8",
+    )
+    cfg = load_eval_config(dataset_path=bad, output_dir=tmp_path / "out")
+
+    with pytest.raises(ValueError) as exc:
+        asyncio.run(RN.run(cfg))
+    msg = str(exc.value)
+    assert "leaky" in msg
+    assert "num_candidates" in msg and "rrf_rank_constant" in msg
 
 
 def test_overrides_from_args_maps_fields(tmp_path):

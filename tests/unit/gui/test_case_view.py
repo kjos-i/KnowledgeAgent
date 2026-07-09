@@ -53,7 +53,8 @@ def test_readonly_card_has_no_buttons_or_click() -> None:
 
 
 def test_editable_card_has_edit_and_delete() -> None:
-    """Dataset tab: passing callbacks adds Edit + Delete + click-to-edit."""
+    """Dataset tab: passing callbacks adds Edit + Delete, but the body is NOT
+    clickable — selecting/editing happens via the Edit button only."""
     edited: list[int] = []
     deleted: list[int] = []
     card = case_card(
@@ -63,7 +64,29 @@ def test_editable_card_has_edit_and_delete() -> None:
         on_delete=deleted.append,
     )
     assert set(_buttons(card)) == {"Edit", "Delete"}
-    assert card.on_click is not None
+    assert card.on_click is None
+
+
+def test_cancel_button_only_on_selected_card() -> None:
+    """Cancel shows only on the selected card (the one being edited)."""
+    selected_card = case_card(
+        _case(),
+        1,
+        selected=1,
+        on_edit=lambda _i: None,
+        on_delete=lambda _i: None,
+        on_cancel=lambda _i: None,
+    )
+    assert set(_buttons(selected_card)) == {"Edit", "Cancel", "Delete"}
+    other_card = case_card(
+        _case(),
+        0,
+        selected=1,
+        on_edit=lambda _i: None,
+        on_delete=lambda _i: None,
+        on_cancel=lambda _i: None,
+    )
+    assert "Cancel" not in _buttons(other_card)
 
 
 def _all_text(card: ft.Control) -> str:

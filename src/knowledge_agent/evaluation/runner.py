@@ -89,9 +89,25 @@ async def run(
     from knowledge_agent.evaluation import report as report_mod
     from knowledge_agent.evaluation.engine import evaluate_cases
     from knowledge_agent.evaluation.ledger import EvalLedger
-    from knowledge_agent.evaluation.models import compute_dataset_hash, load_cases
+    from knowledge_agent.evaluation.models import (
+        compute_dataset_hash,
+        load_cases,
+        validate_dataset,
+    )
 
     cases = load_cases(cfg.dataset_path)
+    # Refuse up-front (before spending tokens) if any case leaves a required
+    # retrieval knob blank — otherwise it would silently fall back to the
+    # shifting global setting and the run wouldn't be reproducible. Catches
+    # datasets hand-edited or imported from elsewhere; the GUI form prevents
+    # it for cases authored in-app.
+    invalid = validate_dataset(cases)
+    if invalid:
+        detail = "\n".join(f"  - {cid}: {'; '.join(problems)}" for cid, problems in invalid.items())
+        raise ValueError(
+            "Cannot run: the dataset has case(s) with missing or invalid "
+            "retrieval settings — fix them before running:\n" + detail
+        )
     # Hash the FULL dataset (before max_cases truncation / any filter) — the
     # fingerprint is the dataset's identity, independent of how many ran.
     dataset_hash = compute_dataset_hash(cases)

@@ -177,10 +177,9 @@ class GuiConfig(BaseModel):
     )
 
     # ---- retrieval knobs (mirror backend Settings; bridged to env) -----
-    # All seven default to the same value as the backend `Settings`
-    # field of the same name. Bridged at startup so backend
-    # `pydantic-settings` picks them up; the user edits them through
-    # Settings → Retrieval.
+    # Each defaults to the same value as the backend `Settings` field of
+    # the same name. Bridged at startup so backend `pydantic-settings`
+    # picks them up; the user edits them through Settings → Retrieval.
     lancedb_search_mode: Literal["hybrid", "fts", "vector"] = Field(
         default="hybrid",
         description=(
@@ -192,7 +191,7 @@ class GuiConfig(BaseModel):
         default=100,
         ge=1,
         description=(
-            "Vector-search breadth (kNN candidate pool size). Must be >= rrf_rank_window_size."
+            "Candidate-pool size fetched before truncating/re-ranking to top_k. Must be >= top_k."
         ),
     )
     rrf_rank_constant: int = Field(
@@ -202,15 +201,6 @@ class GuiConfig(BaseModel):
             "RRF rank constant `k` in 1/(k + rank). Lower = top-ranked "
             "hits dominate more; higher = flattens contribution across "
             "ranks."
-        ),
-    )
-    rrf_rank_window_size: int = Field(
-        default=50,
-        ge=1,
-        description=(
-            "How deep into each sub-retriever's list RRF fuses before "
-            "truncating to top_k. Must satisfy "
-            "top_k <= this <= num_candidates."
         ),
     )
     use_mmr: bool = Field(
@@ -228,14 +218,6 @@ class GuiConfig(BaseModel):
         le=1.0,
         description=(
             "MMR relevance/diversity tradeoff. 1.0 = pure relevance, 0.0 = pure diversity."
-        ),
-    )
-    mmr_candidate_multiplier: int = Field(
-        default=4,
-        ge=1,
-        description=(
-            "Candidate-pool multiplier for MMR: underlying retriever "
-            "is asked for top_k * this many candidates before re-rank."
         ),
     )
     kg_max_rows: int = Field(
@@ -692,10 +674,8 @@ def apply_retrieval_to_env(cfg: GuiConfig) -> None:
     os.environ["LANCEDB_SEARCH_MODE"] = cfg.lancedb_search_mode
     os.environ["NUM_CANDIDATES"] = str(cfg.num_candidates)
     os.environ["RRF_RANK_CONSTANT"] = str(cfg.rrf_rank_constant)
-    os.environ["RRF_RANK_WINDOW_SIZE"] = str(cfg.rrf_rank_window_size)
     os.environ["DEFAULT_USE_MMR"] = str(cfg.use_mmr).lower()
     os.environ["MMR_LAMBDA"] = str(cfg.mmr_lambda)
-    os.environ["MMR_CANDIDATE_MULTIPLIER"] = str(cfg.mmr_candidate_multiplier)
     os.environ["KG_MAX_ROWS"] = str(cfg.kg_max_rows)
     os.environ["DIRECT_RETRIEVAL"] = str(cfg.direct_retrieve).lower()
 

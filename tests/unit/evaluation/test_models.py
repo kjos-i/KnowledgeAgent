@@ -10,11 +10,15 @@ from pydantic import ValidationError
 from knowledge_agent.evaluation.models import (
     EvalCase,
     EvalDataset,
+    RetrievalSettings,
     append_case,
     compute_dataset_hash,
     load_cases,
     load_dataset,
+    required_knobs,
     save_dataset,
+    validate_case,
+    validate_dataset,
 )
 
 
@@ -154,3 +158,102 @@ def test_dataset_hash_is_content_addressed():
     # content-sensitive: editing a case changes the hash
     a2 = EvalCase(id="a", question="q1?", required_keywords=["y"])
     assert compute_dataset_hash([a2, b]) != h
+
+
+# ---- per-case tuning knobs: defaults + conditional-required validation ----
+
+
+def test_tuning_knob_defaults_are_blank():
+    """The nullable tuning knobs default to None ('not pinned'); use_mmr is a
+    plain bool default False."""
+    rs = EvalCase(id="x", question="q?").retrieval
+    assert rs.num_candidates is None
+    assert rs.rrf_rank_constant is None
+    assert rs.mmr_lambda is None
+    assert rs.kg_max_rows is None
+    assert rs.use_mmr is False
+
+
+def test_required_knobs_lancedb_hybrid_default():
+    # Default case (lancedb_only + hybrid, no MMR): pool + RRF constant.
+    assert required_knobs(RetrievalSettings()) == {"num_candidates", "rrf_rank_constant"}
+
+
+def test_required_knobs_fts_and_vector_drop_rrf():
+    assert required_knobs(RetrievalSettings(lancedb_search_mode="fts")) == {"num_candidates"}
+    assert required_knobs(RetrievalSettings(lancedb_search_mode="vector")) == {"num_candidates"}
+
+
+def test_required_knobs_mmr_adds_lambda():
+    assert required_knobs(RetrievalSettings(use_mmr=True)) == {
+        "num_candidates",
+        "rrf_rank_constant",
+        "mmr_lambda",
+    }
+
+
+def test_required_knobs_fts_never_requires_mmr_lambda():
+    # MMR needs vectors → never runs under FTS, so mmr_lambda isn't required
+    # even with use_mmr set. (rrf also drops — FTS isn't hybrid.)
+    assert required_knobs(RetrievalSettings(lancedb_search_mode="fts", use_mmr=True)) == {
+        "num_candidates"
+    }
+
+
+def test_required_knobs_neo4j_only_is_kg_max_rows_only():
+    assert required_knobs(RetrievalSettings(retrieval_mode="neo4j_only")) == {"kg_max_rows"}
+
+
+@pytest.mark.parametrize("mode", ["auto", "parallel_fused", "lancedb_then_neo4j"])
+def test_required_knobs_both_legs_modes(mode):
+    # Modes that run BOTH legs (auto is conservative) require both legs' knobs.
+    assert required_knobs(RetrievalSettings(retrieval_mode=mode)) == {
+        "num_candidates",
+        "rrf_rank_constant",
+        "kg_max_rows",
+    }
+
+
+def test_validate_case_flags_blank_required_knobs():
+    problems = validate_case(EvalCase(id="x", question="q?"))
+    assert any("num_candidates" in p for p in problems)
+    assert any("rrf_rank_constant" in p for p in problems)
+
+
+def test_validate_case_ok_when_required_pinned():
+    case = EvalCase(
+        id="x",
+        question="q?",
+        retrieval={"num_candidates": 50, "rrf_rank_constant": 60},
+    )
+    assert validate_case(case) == []
+
+
+def test_validate_case_ignores_inert_knobs():
+    # neo4j_only: LanceDB knobs are inert (never read), so leaving them blank
+    # is fine — only kg_max_rows is required.
+    case = EvalCase(
+        id="x",
+        question="q?",
+        retrieval={"retrieval_mode": "neo4j_only", "kg_max_rows": 25},
+    )
+    assert validate_case(case) == []
+
+
+def test_validate_case_flags_pool_smaller_than_top_k():
+    case = EvalCase(
+        id="x",
+        question="q?",
+        retrieval={"top_k": 10, "num_candidates": 5, "rrf_rank_constant": 60},
+    )
+    problems = validate_case(case)
+    assert any("num_candidates" in p and "top_k" in p for p in problems)
+
+
+def test_validate_dataset_maps_only_invalid_ids():
+    good = EvalCase(
+        id="good", question="q?", retrieval={"num_candidates": 50, "rrf_rank_constant": 60}
+    )
+    bad = EvalCase(id="bad", question="q?")  # blank required knobs
+    result = validate_dataset([good, bad])
+    assert "good" not in result and "bad" in result

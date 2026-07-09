@@ -35,6 +35,23 @@ _ENV_TEST_FILE = Path(r"C:\Users\kjosi\dotenv\.env.test")
 _env_file_disabled: bool = False
 
 
+def check_window_ordering(top_k: int, num_candidates: int) -> str | None:
+    """Validate the retrieval candidate-pool ordering rule.
+
+    `num_candidates` is the pre-truncation pool the LanceDB retriever
+    fetches; it must be at least as large as `top_k` (the final result
+    count), or the pool can't fill the requested results. Returns a
+    human-readable error message when the rule is violated, else None.
+
+    Single source of truth for this rule — the `Settings` validator, the
+    GUI's Retrieval tab, and the eval-case resolver all call this so the
+    check can never drift between layers.
+    """
+    if num_candidates < top_k:
+        return f"num_candidates ({num_candidates}) must be >= top_k ({top_k})"
+    return None
+
+
 class Settings(BaseSettings):
     """Runtime configuration for the research literature agent.
 
@@ -321,9 +338,12 @@ class Settings(BaseSettings):
         default=100,
         ge=1,
         description=(
-            "Vector-search breadth (kNN candidate pool size). Higher = "
-            "closer to exact nearest-neighbours, slower. Must be "
-            ">= rrf_rank_window_size."
+            "Candidate-pool size the LanceDB retriever fetches BEFORE "
+            "truncating/re-ranking to top_k. In hybrid mode the BM25 + "
+            "vector legs each retrieve this many rows, RRF fuses them, and "
+            "the result is cut to top_k (or MMR-reranked to top_k). Higher "
+            "= closer to exact nearest-neighbours + better fusion recall, "
+            "slower. Must be >= top_k."
         ),
     )
     rrf_rank_constant: int = Field(
@@ -332,17 +352,8 @@ class Settings(BaseSettings):
         description=(
             "RRF rank constant `k` in the fusion score 1/(k + rank). Lower = "
             "top-ranked hits dominate more; higher = flattens the contribution "
-            "across ranks. Applies to LanceDB's native hybrid RRF and to our "
-            "cross-store fusion (mode 5 later)."
-        ),
-    )
-    rrf_rank_window_size: int = Field(
-        default=50,
-        ge=1,
-        description=(
-            "How deep into each sub-retriever's ranked list RRF fuses before "
-            "truncating to top_k. Larger = better recall of items only one "
-            "leg ranked high. Must satisfy top_k <= this <= num_candidates."
+            "across ranks. Applied to LanceDB's native hybrid RRF via "
+            "`RRFReranker(K=...)`."
         ),
     )
     mmr_lambda: float = Field(
@@ -365,16 +376,6 @@ class Settings(BaseSettings):
             "boost diversity. Silently ignored for `fts` mode (no "
             "vectors). Per-invocation override lives on the graph "
             "state's `use_mmr` field."
-        ),
-    )
-    mmr_candidate_multiplier: int = Field(
-        default=4,
-        ge=1,
-        description=(
-            "Candidate-pool multiplier for MMR: the underlying retriever is "
-            "asked for top_k * this many candidates with their vectors, "
-            "which MMR re-ranks down to top_k. Larger = more diversity "
-            "headroom, more vectors to ship."
         ),
     )
     optimize_indexes_per_ingest: bool = Field(
@@ -418,22 +419,17 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_retrieval_windows(self) -> "Settings":
-        """Enforce window ordering: top_k <= rrf_window <= num_candidates.
+        """Enforce the candidate-pool ordering: top_k <= num_candidates.
 
-        The two boundary failures are noisy at search time (LanceDB rejects
-        them in different ways depending on mode), so catch the
-        misconfiguration up front with a clear message.
+        `num_candidates` is the pool the retriever fetches before cutting
+        to `top_k`, so a pool smaller than the final result count is a
+        misconfiguration. LanceDB would surface it inconsistently at
+        search time, so catch it up front with a clear message. Shares the
+        rule with the GUI + eval-case resolvers via `check_window_ordering`.
         """
-        if self.rrf_rank_window_size < self.top_k:
-            raise ValueError(
-                f"rrf_rank_window_size ({self.rrf_rank_window_size}) must be "
-                f">= top_k ({self.top_k})"
-            )
-        if self.num_candidates < self.rrf_rank_window_size:
-            raise ValueError(
-                f"num_candidates ({self.num_candidates}) must be "
-                f">= rrf_rank_window_size ({self.rrf_rank_window_size})"
-            )
+        message = check_window_ordering(self.top_k, self.num_candidates)
+        if message is not None:
+            raise ValueError(message)
         return self
 
     # ----- LLM nodes (mode classifier + query builders + synthesizer).

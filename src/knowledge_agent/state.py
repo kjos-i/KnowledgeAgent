@@ -80,6 +80,30 @@ class AgentState(TypedDict, total=False):
     is skipped - the agent returns retrieved chunks without a synthesised
     answer."""
 
+    use_mmr: bool | None
+    """Per-invocation override for MMR re-ranking of the LanceDB candidate
+    pool. None falls back to `settings.default_use_mmr`. Read by
+    `lancedb_retriever_node`."""
+
+    num_candidates: int | None
+    """Per-invocation override for the LanceDB candidate-pool size (rows
+    fetched before truncation to top_k). None falls back to
+    `settings.num_candidates`. Read by `lancedb_retriever_node`."""
+
+    rrf_rank_constant: int | None
+    """Per-invocation override for the RRF fusion constant K used by hybrid
+    search. None falls back to `settings.rrf_rank_constant`. Read by
+    `lancedb_retriever_node`."""
+
+    mmr_lambda: float | None
+    """Per-invocation override for the MMR relevance/diversity tradeoff. None
+    falls back to `settings.mmr_lambda`. Read by `lancedb_retriever_node`
+    (only consulted when use_mmr resolves True)."""
+
+    kg_max_rows: int | None
+    """Per-invocation override for the Neo4j Cypher row cap. None falls back
+    to `settings.kg_max_rows`. Read by `neo4j_retriever_node`."""
+
     user_cypher: str | None
     """Per-invocation raw Cypher supplied by the user (Direct-Cypher input
     mode). When set, `cypher_builder` passes it through verbatim instead of
