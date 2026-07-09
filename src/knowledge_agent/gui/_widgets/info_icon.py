@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import flet as ft
 
+from knowledge_agent.gui._styles import section_title
+
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
 
@@ -106,3 +108,27 @@ def info_icon(
         _tier_icon(app, tier, title=title, text=body) for tier, body in tier_text.items() if body
     ]
     return ft.Row(icons, spacing=2, tight=True)
+
+
+def section_header(
+    app: GuiApp,
+    title: str,
+    text: str | None = None,
+    *,
+    technical: str | None = None,
+) -> ft.Control:
+    """A bold `section_title` beside its (i) help icon(s) — the app-wide
+    prose → (i) pattern for section headings. `text` is the standard note,
+    `technical` the power-user tier. With neither, it's just the title."""
+    controls: list[ft.Control] = [section_title(title)]
+    if text is not None or technical is not None:
+        controls.append(info_icon(app, title=title, text=text, technical=technical))
+    return ft.Row(controls, spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+
+
+def tier_icon_sample(tier: str, *, size: int = 16) -> ft.Icon:
+    """A static (non-pressable) sample of a tier's (i) icon — a legend chip
+    shown beside the Settings toggles so users can see what each tier looks
+    like (task 51)."""
+    spec = _TIERS[tier]
+    return ft.Icon(spec.icon, color=spec.color, size=size)

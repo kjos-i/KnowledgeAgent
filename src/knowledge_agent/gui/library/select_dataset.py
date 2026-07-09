@@ -52,9 +52,11 @@ from pydantic import ValidationError
 from knowledge_agent.config import reset_after_key_change
 from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
+    LEFT_COLUMN_WIDTH,
     PANEL_BG,
     PANEL_RADIUS,
     panel_box,
+    panel_title,
 )
 from knowledge_agent.gui.config_store import (
     ConfigError,
@@ -66,7 +68,6 @@ from knowledge_agent.gui.config_store import (
 from knowledge_agent.gui.library.config_diff import config_diff
 from knowledge_agent.gui.library.documents_view import DocumentsView
 from knowledge_agent.gui.library.session_state import load_session
-from knowledge_agent.gui.views._frame import view_header
 from knowledge_agent.kg.corpus_config import CorpusConfig, load_corpus_config
 from knowledge_agent.search.client import get_search_client
 
@@ -76,12 +77,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-# Fixed card-column width; the Documents table (right) expands to fill the
-# rest. A touch wider than needed today so it stays uncrowded if the app
-# font size grows.
-_LEFT_COLUMN_WIDTH = 500
 
 
 # Sentinel `field` for the L7 pill: ontology linking is a bundle of 18
@@ -155,6 +150,8 @@ class SelectDatasetTab:
         # The `on_{rename,relocate,remove,refresh}_clicked` handlers below
         # stay — the Manage dialog reaches across to them.
         self.status: ft.Text | None = None
+        # Sticky left-column title ("Selected dataset: <name>").
+        self.selected_title: ft.Text | None = None
 
         # Right column — read-only info card. Every field is a Text
         # control we repopulate on switch / refresh; the container
@@ -195,6 +192,9 @@ class SelectDatasetTab:
 
     def _create_controls(self) -> None:
         self.status = ft.Text("", size=12, color=ft.Colors.GREY_400)
+        # Sticky left-column title — set in `_populate_info_card` /
+        # `_info_empty_state` to the active corpus name.
+        self.selected_title = panel_title("Selected dataset: —")
 
         # ---- info card controls ----
         self.info_name = ft.Text(
@@ -304,7 +304,7 @@ class SelectDatasetTab:
         # selection + management moved to the global top-bar `Corpus ▾`
         # dropdown + `⚙ Manage` dialog.
         left_pane = ft.Container(
-            width=_LEFT_COLUMN_WIDTH,
+            width=LEFT_COLUMN_WIDTH,
             content=ft.Column(
                 expand=True,
                 scroll=ft.ScrollMode.AUTO,
@@ -335,11 +335,36 @@ class SelectDatasetTab:
             controls=[left_pane, right_pane],
         )
 
+        # Two column titles in a fixed header above the panes (the Ingest
+        # idiom): left = the selected corpus, right = "Documents (N)" — the
+        # count rides in from DocumentsView, which no longer draws its own
+        # header. Left container is pinned to the card column's width so the
+        # titles sit squarely over their panes.
+        header = ft.Row(
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=12,
+            controls=[
+                ft.Container(
+                    width=LEFT_COLUMN_WIDTH,
+                    padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                    content=self.selected_title,
+                ),
+                ft.Container(
+                    expand=1,
+                    padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                    content=ft.Row(
+                        controls=[panel_title("Documents"), self.documents.coverage_text],
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                ),
+            ],
+        )
         return ft.Column(
             expand=True,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             spacing=8,
-            controls=[view_header("Select Dataset"), body],
+            controls=[header, body],
         )
 
     # ----- info card population -------------------------------------------
@@ -364,6 +389,8 @@ class SelectDatasetTab:
         assert self.info_lancedb is not None
         assert self.info_toml is not None
         self.info_name.value = entry.name
+        if self.selected_title is not None:
+            self.selected_title.value = f'Selected dataset: "{entry.name}"'
         self.info_uri.value = entry.neo4j_uri
         self.info_user.value = entry.neo4j_user
         self.info_lancedb.value = str(entry.lancedb_path)
@@ -443,6 +470,8 @@ class SelectDatasetTab:
     def _info_empty_state(self) -> None:
         """When there's no active corpus, blank out all the fields."""
         self._active_cfg = None
+        if self.selected_title is not None:
+            self.selected_title.value = "Selected dataset: none"
         for text in (
             self.info_name,
             self.info_uri,

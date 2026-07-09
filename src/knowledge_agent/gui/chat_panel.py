@@ -102,6 +102,7 @@ class ChatPanel:
             min_lines=3,
             max_lines=10,
             shift_enter=True,
+            text_size=14,
             on_submit=self.app.on_send,
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
@@ -205,7 +206,7 @@ class ChatPanel:
         identical to a regular assistant message — it just grows in
         place as text arrives.
         """
-        body_text = ft.Text("", size=13, selectable=True)
+        body_text = ft.Text("", size=14, selectable=True)
         container = ft.Container(
             content=ft.Column(
                 controls=[
@@ -268,7 +269,7 @@ class ChatPanel:
                         size=12,
                         weight=ft.FontWeight.BOLD,
                     ),
-                    ft.Text(text, size=13, selectable=True),
+                    ft.Text(text, size=14, selectable=True),
                 ],
                 spacing=2,
             ),
@@ -286,7 +287,7 @@ class ChatPanel:
                         size=12,
                         weight=ft.FontWeight.BOLD,
                     ),
-                    ft.Text(text, size=13, selectable=True),
+                    ft.Text(text, size=14, selectable=True),
                 ],
                 spacing=2,
             ),

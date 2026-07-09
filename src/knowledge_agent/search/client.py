@@ -272,9 +272,9 @@ class LanceClient:
         `sub_label` (doc type), `main_label`, `metadata_status`,
         `ingested_at`, the editable metadata-cache columns (`doi`,
         `year`, `authors_display`, `venue`, `source_url`, `language` -
-        consumed by the Documents browser's Edit modal), plus
-        `n_chunks` (total chunk rows) and `n_figures` (rows with
-        `content_type = 'figure'`). Aggregated in
+        consumed by the Documents browser's Edit modal), the read-only
+        `openalex_id`, plus `n_chunks` (total chunk rows) and `n_figures`
+        (rows with `content_type = 'figure'`). Aggregated in
         Python after the projection - keeps the first chunk row's
         metadata + counts. At moderate corpus scale (10K-100K chunks
         across 100s-1000s of docs) this is fast; a native groupby is
@@ -301,6 +301,7 @@ class LanceClient:
                     "ingested_at",
                     "content_type",
                     "doi",
+                    "openalex_id",
                     "year",
                     "authors_display",
                     "venue",
@@ -327,6 +328,7 @@ class LanceClient:
                     "metadata_status": r.get("metadata_status"),
                     "ingested_at": r.get("ingested_at"),
                     "doi": r.get("doi"),
+                    "openalex_id": r.get("openalex_id"),
                     "year": r.get("year"),
                     "authors_display": r.get("authors_display"),
                     "venue": r.get("venue"),

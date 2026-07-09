@@ -38,6 +38,7 @@ import flet as ft
 
 from knowledge_agent.config import reset_after_key_change
 from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, PANEL_BG, labeled_field
+from knowledge_agent.gui._widgets.info_icon import info_icon
 from knowledge_agent.gui.config_store import (
     API_KEY_NAMES,
     SECRET_DISPLAY_LABELS,
@@ -53,6 +54,11 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+# Fixed caption width for the key rows so every input's LEFT edge lines up —
+# captions vary in width ("Anthropic API key (not set)" vs "OpenAI API key
+# (saved)"). Wide enough for the longest label + " (not set):".
+_KEY_LABEL_WIDTH = 240
 
 
 class KeysTab:
@@ -81,7 +87,7 @@ class KeysTab:
                 bgcolor=PANEL_BG,
                 suffix=ft.IconButton(
                     icon=ft.Icons.VISIBILITY_OFF,
-                    icon_size=18,
+                    icon_size=16,
                     # Constrain the reveal button so it doesn't inflate the
                     # field height above the plain fields on other tabs.
                     width=28,
@@ -103,7 +109,9 @@ class KeysTab:
         # instantly after a save (without a full re-render).
         key_rows: list[ft.Control] = []
         for name in API_KEY_NAMES:
-            row = labeled_field(self._key_label(name), self.key_fields[name])
+            row = labeled_field(
+                self._key_label(name), self.key_fields[name], label_width=_KEY_LABEL_WIDTH
+            )
             self.key_captions[name] = row.controls[0]
             key_rows.append(row)
         return ft.Column(
@@ -112,20 +120,24 @@ class KeysTab:
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             spacing=10,
             controls=[
-                view_header("Keys"),
-                ft.Text(
-                    "Provider API keys. Stored in your OS keyring "
-                    "(Windows Credential Manager / macOS Keychain / "
-                    "Linux Secret Service), never written to disk in "
-                    "plain text. Fill only what the providers you use "
-                    "need. Leave blank to keep the existing value. "
-                    "Neo4j passwords are per-corpus — set them via "
-                    "Library → Create New Dataset. LangSmith is "
-                    "optional — only for tracing evaluation runs "
-                    "(Evaluation → Run); leave it blank if you don't "
-                    "trace.",
-                    size=12,
-                    color=ft.Colors.GREY_500,
+                view_header(
+                    "Keys",
+                    trailing=info_icon(
+                        self.app,
+                        title="Keys",
+                        text=(
+                            "Provider API keys. Stored in your OS keyring "
+                            "(Windows Credential Manager / macOS Keychain / "
+                            "Linux Secret Service), never written to disk in "
+                            "plain text. Fill only what the providers you use "
+                            "need. Leave blank to keep the existing value. "
+                            "Neo4j passwords are per-corpus — set them via "
+                            "Library → Create New Dataset. LangSmith is "
+                            "optional — only for tracing evaluation runs "
+                            "(Evaluation → Run); leave it blank if you don't "
+                            "trace."
+                        ),
+                    ),
                 ),
                 *key_rows,
                 self.status,

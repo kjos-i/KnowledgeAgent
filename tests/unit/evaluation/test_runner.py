@@ -44,9 +44,28 @@ def test_end_to_end_with_stubbed_graph(tmp_path, monkeypatch):
         RP, "capture_provenance", lambda: {"git_commit": None, "model_config": {}, "prompts": {}}
     )
 
-    # dataset defaults to the shipped escrt_bootstrap.json (9 cases, one per
-    # pathway).
-    cfg = load_eval_config(output_dir=tmp_path / "out")
+    # Build a tiny valid dataset (the harness has no baked-in default now).
+    dataset = tmp_path / "gold.json"
+    dataset.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "c1",
+                    "question": "How does ESCRT-III remodel the membrane?",
+                    "expected_chunks": ["ESCRT-III", "membrane"],
+                    "retrieval": {"num_candidates": 100, "rrf_rank_constant": 60},
+                },
+                {
+                    "id": "c2",
+                    "question": "How do ESCRTs drive scission?",
+                    "expected_chunks": ["scission"],
+                    "retrieval": {"num_candidates": 100, "rrf_rank_constant": 60},
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    cfg = load_eval_config(dataset_path=dataset, output_dir=tmp_path / "out")
     result = asyncio.run(RN.run(cfg))
 
     # ---- run() is presentation-free: returns a RunResult, prints nothing ----
@@ -55,7 +74,7 @@ def test_end_to_end_with_stubbed_graph(tmp_path, monkeypatch):
     report = result.report
 
     # ---- report shape ----
-    assert report["summary"]["case_count"] == 9
+    assert report["summary"]["case_count"] == 2
     # dataset hash computed from the cases + carried on the report
     assert isinstance(report["dataset_hash"], str) and len(report["dataset_hash"]) == 64
     assert report["summary"]["avg_chunk_hit_at_k"] == 1.0  # every answer chunk matched
@@ -74,8 +93,16 @@ def test_end_to_end_with_stubbed_graph(tmp_path, monkeypatch):
         n_cases = conn.execute("SELECT COUNT(*) FROM eval_cases").fetchone()[0]
         stored_hash = conn.execute("SELECT dataset_hash FROM eval_runs").fetchone()[0]
     assert n_runs == 1
-    assert n_cases == 9
+    assert n_cases == 2
     assert stored_hash == report["dataset_hash"]  # persisted to the ledger
+
+
+def test_run_refuses_when_no_dataset_selected(tmp_path):
+    """No dataset set (the harness has no baked-in default) → run aborts with a
+    clear error before anything runs."""
+    cfg = load_eval_config(output_dir=tmp_path / "out")  # dataset_path stays None
+    with pytest.raises(ValueError, match="[Nn]o dataset"):
+        asyncio.run(RN.run(cfg))
 
 
 def test_run_refuses_dataset_with_missing_required_knob(tmp_path, monkeypatch):
@@ -333,7 +360,20 @@ def test_run_wraps_evaluate_in_langsmith_when_trace(tmp_path, monkeypatch):
 
     monkeypatch.setattr(lcc, "tracing_v2_enabled", fake_tracing)
 
-    cfg = load_eval_config(output_dir=tmp_path / "out", max_cases=1)
+    dataset = tmp_path / "gold.json"
+    dataset.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "c1",
+                    "question": "q?",
+                    "retrieval": {"num_candidates": 100, "rrf_rank_constant": 60},
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    cfg = load_eval_config(dataset_path=dataset, output_dir=tmp_path / "out", max_cases=1)
     result = asyncio.run(RN.run(cfg, trace=True, langsmith_project="custom-proj"))
     assert result.run_id == 1
     assert entered["project"] == "custom-proj"

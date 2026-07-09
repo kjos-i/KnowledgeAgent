@@ -454,6 +454,7 @@ async def test_list_indexed_docs_projects_only_doc_level_columns():
         "ingested_at",
         "content_type",
         "doi",
+        "openalex_id",
         "year",
         "authors_display",
         "venue",

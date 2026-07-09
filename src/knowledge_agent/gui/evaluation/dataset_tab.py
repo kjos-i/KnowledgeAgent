@@ -37,12 +37,15 @@ from typing import TYPE_CHECKING
 import flet as ft
 
 from knowledge_agent.gui._styles import (
+    FRAME_BORDER_COLOR,
+    LEFT_COLUMN_WIDTH,
     centered_label,
     labeled_field,
     panel_box,
     panel_title,
     section_divider,
     section_title,
+    sub_section_header,
     sub_section_title,
 )
 from knowledge_agent.gui._widgets.retrieval_form import (
@@ -107,7 +110,6 @@ class DatasetTab:
     # ---- build ------------------------------------------------------------
 
     def build(self) -> ft.Control:
-        from knowledge_agent.evaluation.config import DEFAULT_DATASET_PATH
         from knowledge_agent.evaluation.models import (
             CaseOrigin,
             DatasetStatus,
@@ -123,7 +125,7 @@ class DatasetTab:
         # field). Browse opens an existing file; New dataset starts an empty one.
         self.dataset_field = ft.TextField(
             read_only=True,
-            value=str(DEFAULT_DATASET_PATH) if DEFAULT_DATASET_PATH.exists() else "",
+            value="",
             hint_text="Browse or New dataset to choose a file",
             expand=True,
         )
@@ -142,15 +144,15 @@ class DatasetTab:
             value="draft",
             content=ft.Row([ft.Radio(value=s, label=s) for s in statuses], spacing=12),
         )
-        new_case_button = ft.TextButton("New case", icon=ft.Icons.ADD, on_click=self._on_new)
+        new_case_button = ft.TextButton("Case form", icon=ft.Icons.ADD, on_click=self._on_new)
         capture_button = ft.TextButton(
             "From last search", icon=ft.Icons.SEARCH, on_click=self._on_capture_from_search
         )
         self.gen_one_button = ft.TextButton(
-            "Generate one", icon=ft.Icons.AUTO_AWESOME, on_click=self._on_generate_one
+            "LLM", icon=ft.Icons.AUTO_AWESOME, on_click=self._on_generate_one
         )
         self.gen_multi_button = ft.TextButton(
-            "Generate multiple",
+            "LLM (multiple)",
             icon=ft.Icons.AUTO_AWESOME_MOTION,
             on_click=self._on_generate_multiple,
         )
@@ -159,11 +161,11 @@ class DatasetTab:
         self.gen_multi_spinner = ft.ProgressRing(visible=False, width=16, height=16, stroke_width=2)
         provider = getattr(self.app.gui_config, "llm_provider", "")
         self.gen_model_dropdown = ft.Dropdown(
-            editable=True,  # pick a known model OR type one; blank = backend default
+            editable=True,  # pick a known model OR type one; required for LLM generation
             options=[
                 ft.DropdownOption(key=m, text=m) for m in LLM_AVAILABLE_MODELS.get(provider, ())
             ],
-            hint_text="default (cheap mode-classifier model)",
+            hint_text="required — pick a model for LLM case generation",
             expand=True,
         )
         # Temperature as a slider (0–1, 20 steps) — matches the LLM-tab temp
@@ -177,7 +179,7 @@ class DatasetTab:
         # No own scroll / expand — the right column scrolls the preview + list
         # together (avoids a nested-scroll region).
         self.case_list = ft.Column(
-            controls=[ft.Text("No cases yet — New case to add one.", italic=True)],
+            controls=[ft.Text("No cases yet — add one to get started.", italic=True)],
             spacing=2,
         )
 
@@ -283,7 +285,11 @@ class DatasetTab:
 
         self.form = ft.Column(
             controls=[
-                *self._group("Identity", ["id", "question", "origin", "category", "notes"]),
+                *self._group(
+                    "Identity",
+                    ["id", "question", "origin", "category", "notes"],
+                    first=True,
+                ),
                 *self._retrieval_group(),
                 *self._group("Retrieval / chunk gold", ["expected_sources", "expected_chunks"]),
                 *self._group("Keyword checks", ["required_keywords", "disallowed_keywords"]),
@@ -302,8 +308,8 @@ class DatasetTab:
         self.update_button = ft.Button(
             "Update case", icon=ft.Icons.SAVE, on_click=self._on_save_case
         )
-        refresh_button = ft.IconButton(
-            icon=ft.Icons.REFRESH,
+        refresh_button = ft.Button(
+            "Refresh",
             tooltip="Refresh the preview from the form",
             on_click=self._on_refresh_preview,
         )
@@ -312,8 +318,8 @@ class DatasetTab:
         left_pane = panel_box(
             ft.Column(
                 [
-                    # ============ Section: Dataset file ============
-                    section_title("Dataset file"),
+                    # ============ Section: Evaluation cases ============
+                    section_title("Evaluation cases"),
                     labeled_field(
                         "Dataset",
                         self.dataset_field,
@@ -327,8 +333,8 @@ class DatasetTab:
                     section_divider(),
                     # ============ Section: Add cases ============
                     section_title("Add cases"),
-                    # Sub-section titles here carry no rule — the "Add cases"
-                    # section title already separates them.
+                    # Three sub-sections: seed a single case, bulk-generate many,
+                    # and the shared LLM model/temperature both generators use.
                     sub_section_title("Generate new case by"),
                     ft.Row(
                         [
@@ -340,32 +346,52 @@ class DatasetTab:
                         wrap=True,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
+                    sub_section_header("Generate multiple cases at once"),
                     ft.Row(
                         [
                             self.gen_multi_button,
-                            ft.Text("count:", size=14, color=ft.Colors.GREY_300),
+                            ft.Text("nr of cases:", size=14, color=ft.Colors.GREY_300),
                             self.gen_count,
                             self.gen_multi_spinner,
                         ],
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-                    labeled_field("Generate with model", self.gen_model_dropdown),
+                    sub_section_header("LLM model for case generation"),
+                    labeled_field("Model", self.gen_model_dropdown),
                     labeled_field(
                         "Temperature", self.gen_temp_slider, trailing=self.gen_temp_value_text
                     ),
-                    # "Per case form" title only — no divider rule, per request.
+                    section_divider(),
+                    # ============ Section: Per case form ============
+                    # Bespoke treatment (by request): a centered, panel-size (16)
+                    # "--- Per case form ---" title + bold sub-section titles,
+                    # all wrapped in a thin bordered box.
                     ft.Container(
-                        padding=ft.Padding.only(top=16, bottom=6),
-                        content=sub_section_title("Per case form"),
+                        border=ft.Border.all(1, FRAME_BORDER_COLOR),
+                        border_radius=4,
+                        padding=12,
+                        content=ft.Column(
+                            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                            spacing=8,
+                            controls=[
+                                ft.Text(
+                                    "--- Per case form ---",
+                                    size=16,
+                                    weight=ft.FontWeight.BOLD,
+                                    text_align=ft.TextAlign.CENTER,
+                                ),
+                                self.form,
+                            ],
+                        ),
                     ),
-                    self.form,
                 ],
                 scroll=ft.ScrollMode.AUTO,
                 expand=True,
                 spacing=8,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-            )
+            ),
+            width=LEFT_COLUMN_WIDTH,
         )
         # RIGHT: live preview + commit on top, the full case list below. The
         # whole column scrolls so the preview leads and the list follows.
@@ -395,7 +421,7 @@ class DatasetTab:
             spacing=12,
             controls=[
                 ft.Container(
-                    expand=1,
+                    width=LEFT_COLUMN_WIDTH,
                     padding=ft.Padding.symmetric(horizontal=12, vertical=10),
                     content=panel_title("Dataset editor"),
                 ),
@@ -435,10 +461,7 @@ class DatasetTab:
         standard defaults, which the curator can override per case."""
         f = self.f
         rows: list[ft.Control] = [
-            ft.Container(
-                padding=ft.Padding.only(top=12, bottom=4),
-                content=sub_section_title("Retrieval settings"),
-            ),
+            sub_section_header("Retrieval settings", bold=True),
             labeled_field("retrieval_mode", f["retrieval_mode"], label_width=_FORM_LABEL_WIDTH),
             self._lancedb_mode_box,  # shared radios (carry their own caption)
             labeled_field("top_k", f["top_k"], label_width=_FORM_LABEL_WIDTH),
@@ -454,10 +477,7 @@ class DatasetTab:
                 trailing=self._mmr_value_text,
             ),
             labeled_field("kg_max_rows", f["kg_max_rows"], label_width=_FORM_LABEL_WIDTH),
-            ft.Container(
-                padding=ft.Padding.only(top=12, bottom=4),
-                content=sub_section_title("Input mode"),
-            ),
+            sub_section_header("Input mode", bold=True),
             f["input_mode"],
             labeled_field("user_cypher", f["user_cypher"], label_width=_FORM_LABEL_WIDTH),
             f["direct_retrieval"],
@@ -488,17 +508,21 @@ class DatasetTab:
         # The Cypher box is only the input for Direct Cypher mode.
         f["user_cypher"].disabled = f["input_mode"].value != "direct_cypher"
 
-    def _group(self, title: str, keys: list[str]) -> list[ft.Control]:
-        # Each field group is a padded title (NO rule — consistent with the
-        # other sub-section titles here) followed by its fields. Each field gets
-        # its key as a caption via labeled_field (multiline boxes top-align their
+    def _group(self, title: str, keys: list[str], *, first: bool = False) -> list[ft.Control]:
+        # Each field group is headed by a sub-section header (thin rule + title)
+        # so the groups read as distinct sub-sections. The first group hugs the
+        # section title instead (no rule directly under it). Each field gets its
+        # key as a caption via labeled_field (multiline boxes top-align their
         # caption); checkboxes keep their own built-in label.
-        rows: list[ft.Control] = [
+        header: ft.Control = (
             ft.Container(
                 padding=ft.Padding.only(top=12, bottom=4),
-                content=sub_section_title(title),
+                content=sub_section_title(title, bold=True),
             )
-        ]
+            if first
+            else sub_section_header(title, bold=True)
+        )
+        rows: list[ft.Control] = [header]
         for k in keys:
             control = self.f[k]
             if isinstance(control, ft.Checkbox):
@@ -589,10 +613,9 @@ class DatasetTab:
         """Name a NEW dataset and create it (an empty but valid JSON file) in
         the active corpus's folder, ready to fill with cases. Refuses to
         overwrite an existing file — that's what Browse is for."""
-        from knowledge_agent.evaluation.config import DEFAULT_DATASET_PATH
         from knowledge_agent.gui.evaluation._common import active_corpus_dir
 
-        folder = active_corpus_dir(self.app) or DEFAULT_DATASET_PATH.parent
+        folder = active_corpus_dir(self.app) or Path.cwd()
         name_field = ft.TextField(label="Dataset file name", hint_text="e.g. my_gold_set")
         location = ft.Text(f"Created in {folder}", size=12, color=ft.Colors.GREY_500, italic=True)
         error = ft.Text("", size=12, color=ft.Colors.RED_300, visible=False)
@@ -643,10 +666,6 @@ class DatasetTab:
         form, empty list). Raises on I/O failure — the caller surfaces it."""
         from knowledge_agent.evaluation.models import EvalDataset, save_dataset
 
-        if self._is_shipped_dataset(path):
-            raise ValueError(
-                "cannot create a dataset in the packaged datasets folder — select a corpus first"
-            )
         ds = EvalDataset()
         path.parent.mkdir(parents=True, exist_ok=True)
         save_dataset(ds, path)
@@ -704,7 +723,7 @@ class DatasetTab:
             on_edit=self._select,
             on_delete=self._delete_case,
             on_cancel=self._on_cancel_edit,
-            empty_hint="No cases yet — New case to add one.",
+            empty_hint="No cases yet — add one to get started.",
         )
 
     def _select(self, idx: int) -> None:
@@ -915,6 +934,30 @@ class DatasetTab:
         """The generation temperature from the slider (0–1)."""
         return float(self.gen_temp_slider.value) if self.gen_temp_slider is not None else 0.3
 
+    def _require_gen_model(self) -> bool:
+        """True when an LLM model for case generation is chosen. When blank,
+        pop an info dialog (LLM case generation must not silently fall back to a
+        default model) and return False so the caller aborts."""
+        if self._selected_gen_model() is not None:
+            return True
+
+        def _close(_ev: ft.Event) -> None:
+            self.app.page.pop_dialog()
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Pick a model first"),
+            content=ft.Text(
+                "Choose an LLM model under “LLM model for case generation” before "
+                "generating cases — LLM generation has no default model.",
+                size=12,
+            ),
+            actions=[ft.TextButton("OK", on_click=_close)],
+        )
+        self.app.page.show_dialog(dialog)
+        self.app.page.update()
+        return False
+
     def _on_temp_slide(self, _e: ft.Event | None = None) -> None:
         """Update the inline temperature value display as the slider drags."""
         if self.gen_temp_slider is not None and self.gen_temp_value_text is not None:
@@ -925,6 +968,8 @@ class DatasetTab:
         """Draft ONE LLM candidate straight into the form for review — nothing
         is written until you Add case (unlike Generate multiple, which bulk-adds
         unreviewed). The candidate is flagged `origin=llm`."""
+        if not self._require_gen_model():
+            return
         from knowledge_agent.evaluation.generator import generate_from_corpus
 
         self._set_busy(self.gen_one_button, self.gen_one_spinner, True)
@@ -951,6 +996,8 @@ class DatasetTab:
     def _on_generate_multiple(self, _e: ft.Event) -> None:
         """Validate the count, then CONFIRM before bulk-drafting: these cost LLM
         calls and land straight in the dataset unreviewed, so ask first."""
+        if not self._require_gen_model():
+            return
         path = self._current_path()
         if path is None:
             self._set_status("Choose a dataset (Browse or New dataset) first.")
@@ -997,11 +1044,6 @@ class DatasetTab:
         from knowledge_agent.evaluation.generator import generate_from_corpus
         from knowledge_agent.evaluation.models import EvalDataset, save_dataset
 
-        if self._is_shipped_dataset(path):
-            self._set_status(
-                "Packaged read-only dataset — use New dataset to make an editable copy."
-            )
-            return
         self._set_busy(self.gen_multi_button, self.gen_multi_spinner, True)
         self._set_status(f"generating {n} candidate case(s) from the active corpus…")
         try:
@@ -1037,18 +1079,6 @@ class DatasetTab:
             f"generated {len(cases)} LLM candidate(s) — review each (origin=llm), keep/edit/delete"
         )
 
-    def _is_shipped_dataset(self, path: Path) -> bool:
-        """True if `path` is a packaged/shipped gold dataset (lives under the
-        package datasets dir). Those are read-only in the GUI so editing the
-        auto-loaded default can't silently overwrite the shipped file."""
-        from knowledge_agent.evaluation.config import DEFAULT_DATASET_PATH
-
-        try:
-            path.resolve().relative_to(DEFAULT_DATASET_PATH.parent.resolve())
-            return True
-        except ValueError:
-            return False
-
     def _on_save_case(self, _e: ft.Event) -> None:
         """Commit the form: append a new case (Add) or overwrite the selected
         one (Update), then persist. Wired to the right-column commit button."""
@@ -1057,11 +1087,6 @@ class DatasetTab:
         path = self._current_path()
         if path is None:
             self._set_status("Choose a dataset (Browse or New dataset) first.")
-            return
-        if self._is_shipped_dataset(path):
-            self._set_status(
-                "Packaged read-only dataset — use New dataset to make an editable copy."
-            )
             return
         try:
             case = self._read_form()
@@ -1102,11 +1127,6 @@ class DatasetTab:
         path = self._current_path()
         if path is None:
             self._set_status("No dataset path to save to.")
-            return
-        if self._is_shipped_dataset(path):
-            self._set_status(
-                "Packaged read-only dataset — use New dataset to make an editable copy."
-            )
             return
         del self._dataset.cases[idx]
         try:

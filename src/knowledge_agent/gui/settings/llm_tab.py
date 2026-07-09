@@ -38,8 +38,9 @@ from knowledge_agent.gui._styles import (
     PANEL_BG,
     centered_label,
     labeled_field,
+    section_divider,
 )
-from knowledge_agent.gui._widgets.info_icon import info_icon
+from knowledge_agent.gui._widgets.info_icon import info_icon, section_header
 from knowledge_agent.gui.config_store import (
     ConfigError,
     apply_llm_to_env,
@@ -278,44 +279,35 @@ class LlmTab:
             controls=[
                 view_header("LLM"),
                 # ---- Active provider -----------------------------------
-                ft.Text("Active provider", weight=ft.FontWeight.BOLD),
-                ft.Text(
-                    "Switching is immediate. Install / Uninstall are "
-                    "separate per-provider actions below.",
-                    size=12,
-                    color=ft.Colors.GREY_500,
-                    italic=True,
+                section_header(
+                    self.app,
+                    "Active provider",
+                    "Switching is immediate. Install / Uninstall are separate "
+                    "per-provider actions below.",
                 ),
                 self.active_provider_container,
-                ft.Divider(),
+                section_divider(),
                 # ---- Providers list ------------------------------------
-                ft.Text("Providers", weight=ft.FontWeight.BOLD),
-                ft.Text(
-                    "Install / Uninstall dialogs ship in slice 4 — the "
-                    "buttons stage the action for now.",
-                    size=12,
-                    color=ft.Colors.GREY_500,
-                    italic=True,
+                section_header(
+                    self.app,
+                    "Providers",
+                    "Install / Uninstall each provider's adapter via pip "
+                    "(confirm dialog; a restart is needed after).",
                 ),
                 *[self._render_provider_row(p) for p in _PROVIDER_ORDER],
-                ft.Divider(),
+                section_divider(),
                 # ---- Ollama base URL -----------------------------------
-                ft.Text("Ollama", weight=ft.FontWeight.BOLD),
+                section_header(self.app, "Ollama"),
                 labeled_field(
                     "Ollama base URL (used when Ollama is active)",
                     self.ollama_url_field,
                 ),
-                ft.Divider(),
+                section_divider(),
                 # ---- Per-node models + temperatures --------------------
-                ft.Text(
+                section_header(
+                    self.app,
                     "Per-node models + temperatures",
-                    weight=ft.FontWeight.BOLD,
-                ),
-                ft.Text(
                     "Query-time nodes only. Ingest-time extractor models live in the Library tab.",
-                    size=12,
-                    color=ft.Colors.GREY_500,
-                    italic=True,
                 ),
                 *[
                     self._render_node_block(n)
@@ -326,7 +318,7 @@ class LlmTab:
                         "synthesizer",
                     )
                 ],
-                ft.Divider(),
+                section_divider(),
                 # ---- Chat router (GUI-only conversational layer) -------
                 ft.Row(
                     controls=[
@@ -352,19 +344,13 @@ class LlmTab:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 self._render_node_block("chat_router"),
-                ft.Divider(),
+                section_divider(),
                 # ---- Rate limits + retries -----------------------------
-                ft.Text(
+                section_header(
+                    self.app,
                     "Per-provider rate limits + retries",
-                    weight=ft.FontWeight.BOLD,
-                ),
-                ft.Text(
-                    "Leave blank for no limit. Useful when your "
-                    "provider tier rate-limits below your "
-                    "concurrent fan-out.",
-                    size=12,
-                    color=ft.Colors.GREY_500,
-                    italic=True,
+                    "Leave blank for no limit. Useful when your provider tier "
+                    "rate-limits below your concurrent fan-out.",
                 ),
                 *[
                     labeled_field(f"{p} requests/sec", self.rate_limit_fields[p])

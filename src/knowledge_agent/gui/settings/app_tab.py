@@ -44,7 +44,8 @@ from pydantic import ValidationError
 
 from knowledge_agent.artifacts import ANSWER_FORMATS, FORMAT_LABELS
 from knowledge_agent.config import get_settings
-from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, centered_label
+from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, centered_label, section_divider
+from knowledge_agent.gui._widgets.info_icon import info_icon, section_header, tier_icon_sample
 from knowledge_agent.gui.config_store import ConfigError, save_config
 from knowledge_agent.gui.views._frame import view_header
 from knowledge_agent.health import system_status
@@ -260,8 +261,7 @@ class AppTab:
             controls=[
                 view_header("App"),
                 # ---- Block 0: Save results & chat ----------------------
-                ft.Text("Save results & chat", weight=ft.FontWeight.BOLD),
-                ft.Text(_SAVE_BLURB, size=12, color=ft.Colors.GREY_500, italic=True),
+                section_header(self.app, "Save results & chat", _SAVE_BLURB),
                 ft.Row(
                     controls=[self.save_format_checkboxes[f] for f in ANSWER_FORMATS],
                     wrap=True,
@@ -269,24 +269,44 @@ class AppTab:
                 ),
                 _kv_row("Default folder", self.results_dir_text),
                 ft.Row(controls=[self.browse_folder_button]),
-                ft.Divider(),
+                section_divider(),
                 # ---- Block 1: App behaviour ----------------------------
-                ft.Text("App behaviour", weight=ft.FontWeight.BOLD),
+                section_header(self.app, "App behaviour"),
                 self.restore_last_corpus_checkbox,
                 self.keep_loaded_checkbox,
-                self.show_info_icons_checkbox,
-                self.show_beginner_info_checkbox,
-                self.show_technical_info_checkbox,
-                ft.Divider(),
-                # ---- Block 2: Diagnostics ------------------------------
-                ft.Text("Diagnostics", weight=ft.FontWeight.BOLD),
-                ft.Text(
-                    _DEBUG_BLURB,
-                    size=12,
-                    color=ft.Colors.GREY_500,
-                    italic=True,
+                # Each info-tier toggle shows a live sample of the icon it
+                # controls, so the user sees what "standard / beginner /
+                # technical" help icons look like (task 51).
+                ft.Row(
+                    [self.show_info_icons_checkbox, tier_icon_sample("standard")],
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=4,
                 ),
-                self.debug_mode_checkbox,
+                ft.Row(
+                    [self.show_beginner_info_checkbox, tier_icon_sample("beginner")],
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=4,
+                ),
+                ft.Row(
+                    [self.show_technical_info_checkbox, tier_icon_sample("technical")],
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=4,
+                ),
+                section_divider(),
+                # ---- Block 2: Diagnostics ------------------------------
+                section_header(self.app, "Diagnostics"),
+                ft.Row(
+                    [
+                        self.debug_mode_checkbox,
+                        info_icon(
+                            self.app,
+                            title="Show diagnostic info in chat",
+                            text=_DEBUG_BLURB,
+                        ),
+                    ],
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=4,
+                ),
                 ft.Container(height=8),
                 ft.Text(
                     "System health — Neo4j, LanceDB, active provider keys:",
@@ -295,18 +315,9 @@ class AppTab:
                 ),
                 self.chips_row,
                 ft.Row(controls=[self.rerun_button]),
-                ft.Divider(),
+                section_divider(),
                 # ---- Block 3: DB connection (read-only display) --------
-                ft.Text(
-                    "Database connection",
-                    weight=ft.FontWeight.BOLD,
-                ),
-                ft.Text(
-                    _CONNECTION_BLURB,
-                    size=12,
-                    color=ft.Colors.GREY_500,
-                    italic=True,
-                ),
+                section_header(self.app, "Database connection", _CONNECTION_BLURB),
                 _kv_row("Active corpus", self.active_corpus_text),
                 _kv_row("Neo4j URI", self.neo4j_uri_text),
                 _kv_row("Neo4j user", self.neo4j_user_text),

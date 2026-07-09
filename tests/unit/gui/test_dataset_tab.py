@@ -182,6 +182,7 @@ async def test_generate_multiple_appends_candidates_and_saves(fake_app, tmp_path
 
 def test_generate_multiple_requires_dataset_path(fake_app):
     tab = _tab(fake_app)  # no path → cleared dataset field
+    tab.gen_model_dropdown.value = "some-model"  # past the required-model guard
     tab._on_generate_multiple(MagicMock())
     assert "choose a dataset" in tab.status.value.lower()
 
@@ -191,6 +192,7 @@ def test_generate_multiple_confirms_before_running(fake_app, tmp_path):
     generating immediately (nothing written until you confirm)."""
     p = tmp_path / "gen.json"
     tab = _tab(fake_app, p)
+    tab.gen_model_dropdown.value = "some-model"  # past the required-model guard
     tab.gen_count.value = "3"
     tab._on_generate_multiple(MagicMock())
     fake_app.page.show_dialog.assert_called_once()
@@ -202,6 +204,7 @@ async def test_generate_one_fills_form_without_saving(fake_app, tmp_path):
     fills the form (origin=llm) and writes nothing until Add case."""
     p = tmp_path / "one.json"
     tab = _tab(fake_app, p)
+    tab.gen_model_dropdown.value = "some-model"  # past the required-model guard
     candidate = EvalCase(id="draft-1", question="Q?", origin="llm", required_keywords=["k"])
     with patch(
         "knowledge_agent.evaluation.generator.generate_from_corpus",
@@ -215,14 +218,14 @@ async def test_generate_one_fills_form_without_saving(fake_app, tmp_path):
     assert not p.exists()  # nothing written until Add case
 
 
-def test_build_autoloads_default_dataset(fake_app):
-    """The tab auto-loads the dataset shown in the field on open (50a), so the
-    case list isn't empty until the user re-picks (mirrors the Run preview)."""
+def test_build_opens_empty(fake_app):
+    """No baked-in default any more: the tab opens with an empty dataset field
+    and nothing loaded — the user Browses / New dataset in the corpus folder."""
     tab = DatasetTab(fake_app, coordinator=MagicMock())
     tab.build()
-    assert tab.dataset_field.value.endswith("escrt_bootstrap.json")
-    assert tab._dataset is not None  # loaded, not just displayed
-    assert tab._path is not None
+    assert tab.dataset_field.value == ""
+    assert tab._dataset is None
+    assert tab._path is None
 
 
 def test_commit_buttons_enable_by_mode(fake_app, tmp_path):
@@ -263,22 +266,6 @@ def test_new_dataset_creates_empty_file(fake_app, tmp_path):
     assert load_dataset(p).cases == []
     assert tab._path == p
     assert tab.dataset_field.value == str(p)
-
-
-def test_shipped_dataset_is_read_only(fake_app, tmp_path):
-    """Packaged/shipped gold datasets are read-only in the GUI — a save to a
-    path under the package datasets dir is refused, so live editing can never
-    overwrite the shipped file (the escrt_bootstrap regression)."""
-    from knowledge_agent.evaluation.config import DEFAULT_DATASET_PATH
-
-    shipped = DEFAULT_DATASET_PATH.parent / "definitely_not_real.json"
-    tab = _tab(fake_app)
-    assert tab._is_shipped_dataset(shipped) is True
-    assert tab._is_shipped_dataset(tmp_path / "mine.json") is False
-    tab.dataset_field.value = str(shipped)
-    tab._on_save_case(MagicMock())
-    assert "read-only" in tab.status.value.lower()
-    assert not shipped.exists()  # refused before any write
 
 
 def test_gray_out_reflects_mode(fake_app):

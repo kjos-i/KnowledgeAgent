@@ -13,7 +13,7 @@ from knowledge_agent.evaluation.config import (
 
 def test_defaults():
     cfg = EvalConfig()
-    assert cfg.dataset_path.name == "escrt_bootstrap.json"
+    assert cfg.dataset_path is None  # no baked-in default; the caller supplies it
     assert cfg.enabled_groups == DEFAULT_ENABLED_GROUPS
     assert cfg.max_cases is None
 

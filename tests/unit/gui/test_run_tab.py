@@ -34,21 +34,23 @@ def test_run_tab_shows_output_path(fake_app: MagicMock):
     assert tab.output_line.selectable is True
 
 
-def test_refresh_active_corpus_updates_echo_live(fake_app: MagicMock):
-    """An app-wide corpus switch updates the read-only 'Active corpus' echo
-    without a rebuild (the Run tab is built once + kept mounted)."""
-    tab, _ = _run_tab(fake_app)  # built with active_corpus_name="test_corpus"
-    assert "test_corpus" in tab.corpus_line.value
+def test_refresh_active_corpus_updates_output_echo(fake_app: MagicMock):
+    """An app-wide corpus switch refreshes the read-only 'Results save to'
+    output-path echo without a rebuild. (The corpus-name echo itself was
+    dropped — it lives in the main-window header now.)"""
+    tab, _ = _run_tab(fake_app)
     fake_app.gui_config.active_corpus_name = "other_corpus"
     tab.refresh_active_corpus()
-    assert "other_corpus" in tab.corpus_line.value
+    assert tab.output_line.value.startswith("Results save to:")
 
 
-def test_refresh_active_corpus_none_shows_hint(fake_app: MagicMock):
+def test_refresh_active_corpus_none_does_not_crash(fake_app: MagicMock):
+    """With no active corpus, the output echo still resolves (falls back to the
+    CWD eval_output) rather than erroring."""
     tab, _ = _run_tab(fake_app)
     fake_app.gui_config.active_corpus_name = None
     tab.refresh_active_corpus()
-    assert "none" in tab.corpus_line.value.lower()
+    assert tab.output_line.value.startswith("Results save to:")
 
 
 def test_judge_section_grays_until_judge_group_on(fake_app: MagicMock):
@@ -91,6 +93,7 @@ def test_judge_fallback_hint_toggles_with_list(fake_app: MagicMock):
 
 def test_build_config_maps_form(fake_app: MagicMock):
     tab, _ = _run_tab(fake_app)
+    tab.dataset_field.value = "/tmp/eval/my_gold.json"  # user Browsed to a dataset
     tab.group_checks["chunk"].value = False
     tab.group_checks["kg"].value = False
     tab.group_checks["judge"].value = True
@@ -102,7 +105,7 @@ def test_build_config_maps_form(fake_app: MagicMock):
     assert cfg.enabled_groups == frozenset({"source", "judge"})
     assert cfg.judge_models == ("claude-haiku-4-5-20251001",)
     assert cfg.max_cases == 3
-    assert cfg.dataset_path.name == "escrt_bootstrap.json"
+    assert cfg.dataset_path.name == "my_gold.json"
 
 
 def test_execute_run_invokes_runner_and_notifies_coordinator(fake_app: MagicMock):
@@ -132,21 +135,18 @@ def test_run_click_blocks_when_no_group_selected(fake_app: MagicMock):
     spawn.assert_not_called()  # validation stops the run
 
 
-def test_trace_toggle_reveals_warning_and_project(fake_app: MagicMock):
-    """The data-safety warning + project field are hidden until the user
-    opts into tracing — so the warning surfaces exactly at opt-in.
-
-    The project field lives in a labeled_field row (`_project_row`); the
-    caption hides WITH the field, so the toggle flips the row's visibility.
-    """
+def test_trace_toggle_reveals_warning_and_enables_project(fake_app: MagicMock):
+    """The data-safety warning is hidden until the user opts into tracing — so
+    it surfaces exactly at opt-in. The project field stays visible throughout,
+    just disabled (greyed) until tracing is ticked."""
     tab, _ = _run_tab(fake_app)
     assert tab.trace_check.value is False  # off by default
     assert tab.trace_warning.visible is False
-    assert tab._project_row.visible is False
+    assert tab._project_row.disabled is True
     tab.trace_check.value = True
     tab._on_trace_toggle(MagicMock())
     assert tab.trace_warning.visible is True
-    assert tab._project_row.visible is True
+    assert tab._project_row.disabled is False
 
 
 def test_trace_toggle_warns_when_no_langsmith_key(fake_app: MagicMock):
@@ -165,22 +165,6 @@ def test_trace_toggle_no_hint_when_key_set(fake_app: MagicMock):
     tab.trace_check.value = True
     with patch("knowledge_agent.gui.evaluation.run_tab.get_api_key", return_value="sk-x"):
         tab._on_trace_toggle(MagicMock())
-    assert tab.trace_key_hint.visible is False
-
-
-def test_set_langsmith_key_saves_and_clears_hint(fake_app: MagicMock):
-    """The inline 'Set LangSmith key' dialog saves to the keyring (via
-    set_api_key) and drops the missing-key hint."""
-    tab, _ = _run_tab(fake_app)
-    tab.trace_check.value = True
-    with (
-        patch("knowledge_agent.gui.evaluation.run_tab.set_api_key") as set_key,
-        patch("knowledge_agent.gui.evaluation.run_tab.apply_keys_to_env"),
-        patch("knowledge_agent.gui.evaluation.run_tab.get_api_key", return_value="sk-x"),
-        patch("knowledge_agent.config.reset_after_key_change"),
-    ):
-        tab._save_langsmith_key("sk-x")
-    set_key.assert_called_once_with("langsmith", "sk-x")
     assert tab.trace_key_hint.visible is False
 
 
@@ -204,7 +188,8 @@ def test_run_click_blocks_when_trace_without_key(fake_app: MagicMock):
     """Checking Trace with no LangSmith key stored stops the run with a
     pointer to Settings → Keys — no silent no-op trace."""
     tab, _ = _run_tab(fake_app)
-    tab.trace_check.value = True  # groups + dataset are valid by default
+    tab.dataset_field.value = "/tmp/gold.json"  # get past the "select a dataset" guard
+    tab.trace_check.value = True
     with (
         patch.object(tab, "_loop_running", return_value=True),
         patch("knowledge_agent.gui.evaluation.run_tab.get_api_key", return_value=None),

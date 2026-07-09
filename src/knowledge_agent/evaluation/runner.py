@@ -95,6 +95,11 @@ async def run(
         validate_dataset,
     )
 
+    if cfg.dataset_path is None:
+        raise ValueError(
+            "No dataset selected — choose a gold dataset first "
+            "(GUI: Browse in the corpus folder; CLI: --dataset / KA_EVAL_DATASET)."
+        )
     cases = load_cases(cfg.dataset_path)
     # Refuse up-front (before spending tokens) if any case leaves a required
     # retrieval knob blank — otherwise it would silently fall back to the

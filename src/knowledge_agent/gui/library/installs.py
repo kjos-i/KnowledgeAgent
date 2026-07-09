@@ -71,7 +71,9 @@ from knowledge_agent.gui._styles import (
     PANEL_BG,
     centered_label,
     labeled_field,
+    section_divider,
 )
+from knowledge_agent.gui._widgets.info_icon import section_header
 from knowledge_agent.gui.config_store import (
     ConfigError,
     apply_ontology_downloads_dir_to_env,
@@ -315,14 +317,12 @@ class InstallsTab:
 
         controls: list[ft.Control] = [
             # ---- Global paths --------------------------------------
-            ft.Text("Global download locations", weight=ft.FontWeight.BOLD),
-            ft.Text(
-                "Where each install target keeps its files. The first "
-                "is editable — the other two are managed by their "
-                "libraries (HF Hub / Ollama) and shown for reference.",
-                size=12,
-                color=ft.Colors.GREY_500,
-                italic=True,
+            section_header(
+                self.app,
+                "Global download locations",
+                "Where each install target keeps its files. The first is "
+                "editable — the other two are managed by their libraries "
+                "(HF Hub / Ollama) and shown for reference.",
             ),
             # ontology_downloads_dir — editable + Browse
             labeled_field(
@@ -356,22 +356,18 @@ class InstallsTab:
                     self.ollama_models_display,
                 ],
             ),
-            ft.Divider(),
+            section_divider(),
         ]
 
         # ---- Ontologies (18) ---------------------------------------
-        controls.extend(
-            [
-                ft.Text("Ontologies (18)", weight=ft.FontWeight.BOLD),
-                ft.Text(
-                    "Download the source file(s) to disk here. Neo4j term "
-                    "nodes are written during ingest — not by these buttons "
-                    "— so downloading is safe (no schema change).",
-                    size=12,
-                    color=ft.Colors.GREY_500,
-                    italic=True,
-                ),
-            ]
+        controls.append(
+            section_header(
+                self.app,
+                "Ontologies (18)",
+                "Download the source file(s) to disk here. Neo4j term nodes "
+                "are written during ingest — not by these buttons — so "
+                "downloading is safe (no schema change).",
+            )
         )
         for name in _ONTOLOGY_ORDER:
             controls.append(
@@ -384,23 +380,18 @@ class InstallsTab:
                     ),
                 )
             )
-        controls.append(ft.Divider())
+        controls.append(section_divider())
 
         # ---- Entity extractors (4) ---------------------------------
-        controls.extend(
-            [
-                ft.Text("Entity extractors (4)", weight=ft.FontWeight.BOLD),
-                ft.Text(
-                    "L6 adapters. LLM is bundled. GLiNER / GLiNER-BioMed / "
-                    "HunFlair2 need BOTH the pip extras (adapter library) "
-                    "AND their pinned model weights downloaded. No "
-                    "auto-download at first inference — extraction raises "
-                    "if weights are missing.",
-                    size=12,
-                    color=ft.Colors.GREY_500,
-                    italic=True,
-                ),
-            ]
+        controls.append(
+            section_header(
+                self.app,
+                "Entity extractors (4)",
+                "L6 adapters. LLM is bundled. GLiNER / GLiNER-BioMed / HunFlair2 "
+                "need BOTH the pip extras (adapter library) AND their pinned "
+                "model weights downloaded. No auto-download at first inference — "
+                "extraction raises if weights are missing.",
+            )
         )
         for name in _EXTRACTOR_ORDER:
             display = EXTRACTOR_REGISTRY[name]["display_name"]
@@ -416,24 +407,19 @@ class InstallsTab:
                     ),
                 )
             )
-        controls.append(ft.Divider())
+        controls.append(section_divider())
 
         # ---- Parsers (2) -------------------------------------------
-        controls.extend(
-            [
-                ft.Text("Parsers (2)", weight=ft.FontWeight.BOLD),
-                ft.Text(
-                    "Optional docling extras. ASR (audio + video "
-                    "transcription): pip install of the extra pulls "
-                    "openai-whisper + bundled ffmpeg. Whisper model "
-                    "weights (~1.5 GB) are downloaded by Docling on first "
-                    "ingest use — not managed here. AST-aware code parsing "
-                    "ships its tree-sitter grammars inside the pip wheel.",
-                    size=12,
-                    color=ft.Colors.GREY_500,
-                    italic=True,
-                ),
-            ]
+        controls.append(
+            section_header(
+                self.app,
+                "Parsers (2)",
+                "Optional docling extras. ASR (audio + video transcription): pip "
+                "install of the extra pulls openai-whisper + bundled ffmpeg. "
+                "Whisper model weights (~1.5 GB) are downloaded by Docling on "
+                "first ingest use — not managed here. AST-aware code parsing "
+                "ships its tree-sitter grammars inside the pip wheel.",
+            )
         )
         for name in _PARSER_ORDER:
             display = PARSER_LIFECYCLE_REGISTRY[name]["display_name"]

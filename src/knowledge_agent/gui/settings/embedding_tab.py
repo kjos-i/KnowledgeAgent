@@ -45,7 +45,9 @@ from knowledge_agent.gui._styles import (
     PANEL_BG,
     centered_label,
     labeled_field,
+    section_divider,
 )
+from knowledge_agent.gui._widgets.info_icon import section_header
 from knowledge_agent.gui.config_store import (
     ConfigError,
     apply_embedding_to_env,
@@ -206,49 +208,41 @@ class EmbeddingTab:
             controls=[
                 view_header("Embedding"),
                 # ---- Active provider -----------------------------------
-                ft.Text("Active provider", weight=ft.FontWeight.BOLD),
-                ft.Text(
-                    "Switching is immediate. The dimension guard "
-                    "(slice 4) will block a switch when the new "
-                    "provider's dim doesn't match the LanceDB schema.",
-                    size=12,
-                    color=ft.Colors.GREY_500,
-                    italic=True,
+                section_header(
+                    self.app,
+                    "Active provider",
+                    "Switching is immediate. The dimension guard blocks a switch "
+                    "when the new provider's dimension doesn't match the chunks "
+                    "already in your LanceDB corpus.",
                 ),
                 self.active_provider_container,
-                ft.Divider(),
+                section_divider(),
                 # ---- Providers list ------------------------------------
-                ft.Text("Providers", weight=ft.FontWeight.BOLD),
-                ft.Text(
+                section_header(
+                    self.app,
+                    "Providers",
                     "Install / Uninstall each provider's packages via pip "
                     "(confirm dialog; a restart is needed after).",
-                    size=12,
-                    color=ft.Colors.GREY_500,
-                    italic=True,
                 ),
                 *[self._render_provider_row(p) for p in _PROVIDER_ORDER],
-                ft.Divider(),
+                section_divider(),
                 # ---- Model ---------------------------------------------
-                ft.Text("Model", weight=ft.FontWeight.BOLD),
-                ft.Text(
-                    "Pick from the menu or type a custom name. The "
-                    "model + its dimension must match the chunks "
-                    "already in your LanceDB corpus.",
-                    size=12,
-                    color=ft.Colors.GREY_500,
-                    italic=True,
+                section_header(
+                    self.app,
+                    "Model",
+                    "Pick from the menu or type a custom name. The model + its "
+                    "dimension must match the chunks already in your LanceDB "
+                    "corpus.",
                 ),
                 labeled_field("Embedding model", self.model_field),
-                ft.Divider(),
+                section_divider(),
                 # ---- Rate limit ----------------------------------------
-                ft.Text("Rate limit", weight=ft.FontWeight.BOLD),
-                ft.Text(
-                    "Voyage uses its native client (not LangChain), so "
-                    "its rate limit lives here separately from the LLM "
-                    "tab's per-provider rates.",
-                    size=12,
-                    color=ft.Colors.GREY_500,
-                    italic=True,
+                section_header(
+                    self.app,
+                    "Rate limit",
+                    "Voyage uses its native client (not LangChain), so its rate "
+                    "limit lives here separately from the LLM tab's per-provider "
+                    "rates.",
                 ),
                 labeled_field("Voyage requests/sec", self.voyage_rate_field),
                 # ---- Shared status text --------------------------------

@@ -7,13 +7,20 @@ consistent.
 import flet as ft
 
 
-def view_header(title: str) -> ft.Control:
-    """The view-level title block: bold text + divider underneath."""
+def view_header(title: str, *, trailing: ft.Control | None = None) -> ft.Control:
+    """The view-level title block: bold text + divider underneath. Pass
+    `trailing` (e.g. an info_icon) to sit it next to the title."""
+    # 16 (not 18) to match the design-system `panel_title` used by the
+    # two-column screens, so every view/panel title reads at one size.
+    title_ctl: ft.Control = ft.Text(title, weight=ft.FontWeight.BOLD, size=16)
+    if trailing is not None:
+        title_ctl = ft.Row(
+            [title_ctl, trailing],
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
     return ft.Column(
-        controls=[
-            ft.Text(title, weight=ft.FontWeight.BOLD, size=18),
-            ft.Divider(),
-        ],
+        controls=[title_ctl, ft.Divider()],
         spacing=4,
     )
 

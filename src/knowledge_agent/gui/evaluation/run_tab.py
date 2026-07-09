@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 import flet as ft
 
 from knowledge_agent.gui._styles import (
+    LEFT_COLUMN_WIDTH,
     centered_label,
     labeled_field,
     panel_box,
@@ -31,12 +32,7 @@ from knowledge_agent.gui._styles import (
     sub_section_header,
 )
 from knowledge_agent.gui._widgets.info_icon import info_icon
-from knowledge_agent.gui.config_store import (
-    ConfigError,
-    apply_keys_to_env,
-    get_api_key,
-    set_api_key,
-)
+from knowledge_agent.gui.config_store import get_api_key
 from knowledge_agent.gui.evaluation._case_view import render_case_cards
 from knowledge_agent.gui.settings.llm_tab import LLM_AVAILABLE_MODELS
 
@@ -78,56 +74,46 @@ class RunTab:
         self.trace_warning: ft.Text | None = None
         # Shown when tracing is ticked but no LangSmith key is set yet.
         self.trace_key_hint: ft.Text | None = None
-        # Button next to the trace checkbox → inline "set LangSmith key" dialog.
-        self.set_langsmith_key_button: ft.TextButton | None = None
+        # Link next to the trace checkbox → opens LangSmith in the browser.
+        # The key itself is set in Settings → Keys, not here.
+        self.open_langsmith_button: ft.TextButton | None = None
+        # Resolves this run's project (name + key → URL) and opens its traces.
+        self.open_project_button: ft.TextButton | None = None
         self.run_button: ft.Button | None = None
         self.progress: ft.ProgressBar | None = None
         self.status: ft.Text | None = None
         # Read-only echoes derived from the ACTIVE corpus — refreshed live on
         # an app-wide corpus switch (see `refresh_active_corpus`).
-        self.corpus_line: ft.Text | None = None
         self.output_line: ft.Text | None = None
         # Right column: read-only preview of the selected dataset's cases.
         self.case_list: ft.Column | None = None
 
     def refresh_active_corpus(self) -> None:
-        """Update the read-only 'Active corpus' + output-path echoes from the
-        current active corpus.
+        """Update the read-only output-path echo from the current active corpus.
 
         Called on an app-wide corpus switch (via
         `GuiApp.refresh_after_corpus_change`) so the Run tab — built once and
-        kept mounted in the TabBarView — doesn't show a stale corpus. No
+        kept mounted in the TabBarView — doesn't show a stale output path. No
         `page.update()` here; the app broadcast issues one.
         """
         from knowledge_agent.gui.evaluation._common import active_output_dir
 
-        active = getattr(self.app.gui_config, "active_corpus_name", None)
-        if self.corpus_line is not None:
-            self.corpus_line.value = (
-                f"Active corpus: {active}"
-                if active
-                else "Active corpus: none — select one in Library"
-            )
-            self.corpus_line.italic = not active
-            self.corpus_line.color = None if active else ft.Colors.ORANGE
         if self.output_line is not None:
             self.output_line.value = f"Results save to: {active_output_dir(self.app)}"
 
     # ---- build ------------------------------------------------------------
 
     def build(self) -> ft.Control:
-        from knowledge_agent.evaluation.config import (
-            DEFAULT_DATASET_PATH,
-            DEFAULT_LANGSMITH_PROJECT,
-        )
+        from knowledge_agent.evaluation.config import DEFAULT_LANGSMITH_PROJECT
         from knowledge_agent.gui.evaluation._common import active_output_dir
 
         # Dataset file: a read-only path display + Browse (opens in the active
-        # corpus's folder). No packaged-set dropdown — Browse is the single,
-        # unambiguous way in; the right column previews whatever's chosen.
+        # corpus's folder). Starts empty — there's no baked-in default; the
+        # user Browses to a gold JSON in the corpus folder. The right column
+        # previews whatever's chosen.
         self.dataset_field = ft.TextField(
             read_only=True,
-            value=str(DEFAULT_DATASET_PATH),
+            value="",
             hint_text="Browse for a gold-dataset JSON",
             expand=True,
         )
@@ -137,12 +123,6 @@ class RunTab:
             on_click=self._on_browse_clicked,
         )
 
-        active = getattr(self.app.gui_config, "active_corpus_name", None)
-        self.corpus_line = ft.Text(
-            f"Active corpus: {active}" if active else "Active corpus: none — select one in Library",
-            italic=not active,
-            color=None if active else ft.Colors.ORANGE,
-        )
         # Read-only: where this run's ledger + JSON/CSV reports will land —
         # derived from the active corpus, exactly as `_build_config` resolves
         # it. Selectable so the path can be copied; it is NOT an input (override
@@ -190,10 +170,10 @@ class RunTab:
             content=ft.Column(
                 [
                     sub_section_header(
-                        "Judge models",
+                        "Judge panel",
                         trailing=info_icon(
                             self.app,
-                            title="Judge models",
+                            title="Judge panel",
                             text=(
                                 "LLM judges — they call your provider and cost "
                                 "money, which is why the judge metric is OFF by "
@@ -233,11 +213,23 @@ class RunTab:
             value=False,
             on_change=self._on_trace_toggle,
         )
-        self.set_langsmith_key_button = ft.TextButton(
-            "Set LangSmith key",
-            icon=ft.Icons.KEY,
-            tooltip="Enter your LangSmith API key (stored in the OS keyring)",
-            on_click=self._on_set_langsmith_key_clicked,
+        self.open_langsmith_button = ft.TextButton(
+            "Open LangSmith",
+            icon=ft.Icons.OPEN_IN_NEW,
+            url="https://smith.langchain.com",
+            tooltip=(
+                "Open LangSmith in your browser — sign in to view traces or copy "
+                "your API key (set the key in Settings → Keys)"
+            ),
+        )
+        self.open_project_button = ft.TextButton(
+            "Open project in LangSmith",
+            icon=ft.Icons.OPEN_IN_NEW,
+            tooltip=(
+                "Open this run's LangSmith project traces — resolved from the "
+                "project name + your key. The project exists only after a traced run."
+            ),
+            on_click=self._on_open_project_clicked,
         )
         self.trace_warning = ft.Text(
             "⚠ Tracing uploads this run's data — your queries, the retrieved "
@@ -259,10 +251,10 @@ class RunTab:
             value=DEFAULT_LANGSMITH_PROJECT,
             width=300,
         )
-        # Wrapped in a labeled_field row so the caption hides WITH the field
-        # when tracing is off (toggled in `_on_trace_toggle`).
+        # Wrapped in a labeled_field row. Always visible; the field greys out
+        # (disabled) until tracing is ticked (toggled in `_on_trace_toggle`).
         self._project_row = labeled_field("LangSmith project", self.project_field)
-        self._project_row.visible = False
+        self._project_row.disabled = True
 
         self.run_button = ft.Button(
             "Run evaluation",
@@ -274,17 +266,12 @@ class RunTab:
 
         form = ft.Column(
             controls=[
-                # Read-only context: which corpus this run evaluates + where its
-                # ledger/reports land. Both refresh on an app-wide corpus switch.
-                self.corpus_line,
-                self.output_line,
-                section_divider(),
-                # ============ Section: Dataset ============
-                section_title("Dataset"),
+                # ============ Section: Evaluation cases ============
+                section_title("Evaluation cases"),
                 labeled_field("Dataset", self.dataset_field, trailing=browse_button),
                 section_divider(),
-                # ============ Section: Metric groups ============
-                section_title("Metric groups"),
+                # ============ Section: Metrics ============
+                section_title("Metrics"),
                 ft.Row([self.group_checks[g] for g in _GROUP_DEFAULTS], wrap=True),
                 self.judge_section,
                 section_divider(),
@@ -308,8 +295,13 @@ class RunTab:
                     ),
                 ),
                 ft.Row(
-                    [self.trace_check, self.set_langsmith_key_button],
+                    [
+                        self.trace_check,
+                        self.open_langsmith_button,
+                        self.open_project_button,
+                    ],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    wrap=True,
                 ),
                 self.trace_key_hint,
                 self.trace_warning,
@@ -322,6 +314,9 @@ class RunTab:
                     spacing=12,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
+                # Where this run's ledger + reports land — sits under the Run
+                # button as a caption (derived from the active corpus).
+                self.output_line,
                 self.status,
             ],
             scroll=ft.ScrollMode.AUTO,
@@ -339,7 +334,7 @@ class RunTab:
             expand=True,
             spacing=6,
         )
-        left_pane = panel_box(form)
+        left_pane = panel_box(form, width=LEFT_COLUMN_WIDTH)
         right_pane = panel_box(
             ft.Column(
                 [self.case_list],
@@ -357,7 +352,7 @@ class RunTab:
             spacing=12,
             controls=[
                 ft.Container(
-                    expand=1,
+                    width=LEFT_COLUMN_WIDTH,
                     padding=ft.Padding.symmetric(horizontal=12, vertical=10),
                     content=panel_title("Run configuration"),
                 ),
@@ -441,11 +436,15 @@ class RunTab:
             self.judge_fallback_hint.visible = not self.judge_models
 
     def _judge_list_row(self, name: str) -> ft.Control:
-        """One added-judge list item: bullet + model name + remove button."""
+        """One added-judge list item: bullet + model name + a fixed 'temp 0'
+        badge + remove button. The temperature is shown (read-only) because
+        judges always run deterministically at temperature 0 — surfacing it
+        just tells the curator what setting each judge runs at."""
         return ft.Row(
             [
                 ft.Icon(ft.Icons.CIRCLE, size=6, color=ft.Colors.GREY_500),
                 ft.Text(name, size=12, color=ft.Colors.GREY_200, expand=True),
+                ft.Text("temp 0", size=12, color=ft.Colors.GREY_500, italic=True),
                 ft.IconButton(
                     icon=ft.Icons.CLOSE,
                     icon_size=16,
@@ -492,8 +491,9 @@ class RunTab:
             self.trace_key_hint.visible = on and not get_api_key("langsmith")
 
     def _on_trace_toggle(self, _e: ft.Event) -> None:
-        """Reveal the data-safety warning + project field only when tracing
-        is enabled — so the warning is impossible to miss at opt-in time."""
+        """Reveal the data-safety warning when tracing is enabled — so it's
+        impossible to miss at opt-in time. The project field stays visible
+        throughout, just greyed out (disabled) until tracing is ticked."""
         on = bool(self.trace_check and self.trace_check.value)
         if self.trace_warning is not None:
             self.trace_warning.visible = on
@@ -501,70 +501,48 @@ class RunTab:
         # only when the run is blocked later.
         self._refresh_trace_key_hint()
         if self._project_row is not None:
-            self._project_row.visible = on
+            self._project_row.disabled = not on
         self.app.page.update()
 
-    def _on_set_langsmith_key_clicked(self, _e: ft.Event) -> None:
-        """Inline dialog to set the LangSmith API key — saved to the OS keyring
-        (the same store as Settings → Keys), so it's set right where it's
-        needed without leaving the Run screen."""
-        field = ft.TextField(
-            label="LangSmith API key",
-            password=True,
-            can_reveal_password=True,
-            value=get_api_key("langsmith") or "",
-            width=380,
-        )
-
-        def _cancel(_ev: ft.Event) -> None:
-            self.app.page.pop_dialog()
-
-        def _save(_ev: ft.Event) -> None:
-            self.app.page.pop_dialog()
-            self._save_langsmith_key((field.value or "").strip())
-
-        dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Text("LangSmith API key"),
-            content=ft.Column(
-                [
-                    field,
-                    ft.Text(
-                        "Stored in your OS keyring (same as Settings → Keys), "
-                        "never on disk. Used only to upload traced runs.",
-                        size=12,
-                        color=ft.Colors.GREY_500,
-                        italic=True,
-                    ),
-                ],
-                tight=True,
-                width=400,
-            ),
-            actions=[
-                ft.TextButton("Cancel", on_click=_cancel),
-                ft.Button(content="Save", on_click=_save),
-            ],
-        )
-        self.app.page.show_dialog(dialog)
-
-    def _save_langsmith_key(self, value: str) -> None:
-        if not value:
+    def _on_open_project_clicked(self, _e: ft.Event) -> None:
+        """Open this run's LangSmith project traces. Needs a key (Settings →
+        Keys) + a project name; the project only exists after a traced run."""
+        if not self._loop_running():
             return
-        from knowledge_agent.config import reset_after_key_change
-
-        try:
-            set_api_key("langsmith", value)
-        except ConfigError as exc:
-            self._set_status(f"could not save LangSmith key: {exc}")
+        key = get_api_key("langsmith")
+        if not key:
+            self._set_status("Set a LangSmith API key in Settings → Keys to open the project.")
             return
-        apply_keys_to_env()
+        project = (self.project_field.value or "").strip() if self.project_field else ""
+        if not project:
+            self._set_status("Enter a LangSmith project name first.")
+            return
+        self._spawn(self._open_project(key, project))
+
+    async def _open_project(self, key: str, project: str) -> None:
+        """Resolve the project's URL (name + key → URL via the LangSmith SDK)
+        and open it in the browser. Best-effort — a missing project / network
+        error surfaces in the status line."""
         try:
-            reset_after_key_change()
-        except Exception as exc:  # cache-clear failure is non-fatal
-            logger.warning("reset_after_key_change failed: %r", exc)
-        self._refresh_trace_key_hint()
-        self._set_status("LangSmith key saved.")
-        self.app.page.update()
+            from langsmith import Client
+        except ImportError:
+            self._set_status("LangSmith isn't installed — install the tracing extra first.")
+            return
+        self._set_status(f"Opening LangSmith project {project!r}…")
+        try:
+            session = await asyncio.to_thread(
+                lambda: Client(api_key=key).read_project(project_name=project)
+            )
+        except Exception as exc:  # broad: not-found / network / auth → status line
+            self._set_status(
+                f"Couldn't open project {project!r}: {exc} (it exists only after a traced run)."
+            )
+            return
+        url = session.url
+        if not url:
+            self._set_status(f"LangSmith returned no URL for {project!r}.")
+            return
+        await self.app.page.launch_url(url)
 
     # ---- run --------------------------------------------------------------
 
@@ -645,10 +623,11 @@ class RunTab:
         groups = frozenset(g for g, cb in self.group_checks.items() if cb.value)
         judge_models = tuple(self.judge_models)
         overrides: dict = {
-            "dataset_path": Path(self.dataset_field.value),  # type: ignore[union-attr]
             "enabled_groups": groups,
             "judge_models": judge_models,
         }
+        if self.dataset_field and self.dataset_field.value:
+            overrides["dataset_path"] = Path(self.dataset_field.value)
         corpus_path = active_corpus_config_path(self.app)
         if corpus_path:
             overrides["corpus_config_path"] = corpus_path

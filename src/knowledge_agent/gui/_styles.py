@@ -55,6 +55,12 @@ Inner sub-boxes (config groups, case cards) stay tighter (radius 4) so the
 nesting reads as hierarchy rather than a doubled border."""
 
 
+LEFT_COLUMN_WIDTH = 500
+"""Fixed width for the left column of the Select + Evaluation (Run / Dataset)
+two-column screens; the right column expands to fill the rest. One source so
+those tabs line up at the same left-column width."""
+
+
 def labeled_field(
     label: str,
     control: ft.Control,
@@ -197,12 +203,18 @@ heading above them (and stays lighter than the 14-bold `section_title`).
 Consecutive sub-sections split by a `thin_rule()`."""
 
 
-def sub_section_title(text: str) -> ft.Text:
+def sub_section_title(text: str, *, bold: bool = False) -> ft.Text:
     """A sub-section label within a section — 14, non-bold, GREY_200. Brighter
     than the GREY_300 field captions it heads, lighter (non-bold) than the
     14-bold `section_title`; separate consecutive sub-sections with a
-    `thin_rule()`."""
-    return ft.Text(text, size=SUB_SECTION_TITLE_SIZE, color=ft.Colors.GREY_200)
+    `thin_rule()`. Pass `bold=True` where a section wants its sub-headings to
+    stand out (an opt-in exception, off everywhere by default)."""
+    return ft.Text(
+        text,
+        size=SUB_SECTION_TITLE_SIZE,
+        color=ft.Colors.GREY_200,
+        weight=ft.FontWeight.BOLD if bold else None,
+    )
 
 
 def thin_rule() -> ft.Divider:
@@ -213,13 +225,15 @@ def thin_rule() -> ft.Divider:
     return ft.Divider(height=1, thickness=1, color=ft.Colors.GREY_600)
 
 
-def sub_section_header(text: str, *, trailing: ft.Control | None = None) -> ft.Container:
+def sub_section_header(
+    text: str, *, trailing: ft.Control | None = None, bold: bool = False
+) -> ft.Container:
     """A sub-section header — a `thin_rule()` then a `sub_section_title()`,
     wrapped with vertical breathing room so the sub-section isn't cramped
     against the content above it (or the next sub-section). Use in place of a
     bare `thin_rule()` + `sub_section_title()` pair. Pass `trailing` (e.g. an
-    `info_icon`) to sit it next to the title."""
-    title: ft.Control = sub_section_title(text)
+    `info_icon`) to sit it next to the title; `bold=True` for a heavier title."""
+    title: ft.Control = sub_section_title(text, bold=bold)
     if trailing is not None:
         title = ft.Row(
             [title, trailing],

@@ -96,26 +96,40 @@ class ResizableSplit:
     # ----- divider builders + drag handlers --------------------------------
 
     def _build_horizontal_divider(self) -> ft.Control:
+        bar = ft.Container(
+            width=self._divider_thickness,
+            bgcolor=FRAME_BORDER_COLOR,
+            alignment=ft.Alignment(0, 0),
+            content=_grip(vertical=True),
+        )
+        bar.on_hover = lambda e: self._hover_divider(bar, e)
         return ft.GestureDetector(
-            content=ft.Container(
-                width=self._divider_thickness,
-                bgcolor=FRAME_BORDER_COLOR,
-            ),
+            content=bar,
             drag_interval=10,
             on_horizontal_drag_update=self._on_horizontal_drag,
             mouse_cursor=ft.MouseCursor.RESIZE_LEFT_RIGHT,
         )
 
     def _build_vertical_divider(self) -> ft.Control:
+        bar = ft.Container(
+            height=self._divider_thickness,
+            bgcolor=FRAME_BORDER_COLOR,
+            alignment=ft.Alignment(0, 0),
+            content=_grip(vertical=False),
+        )
+        bar.on_hover = lambda e: self._hover_divider(bar, e)
         return ft.GestureDetector(
-            content=ft.Container(
-                height=self._divider_thickness,
-                bgcolor=FRAME_BORDER_COLOR,
-            ),
+            content=bar,
             drag_interval=10,
             on_vertical_drag_update=self._on_vertical_drag,
             mouse_cursor=ft.MouseCursor.RESIZE_UP_DOWN,
         )
+
+    def _hover_divider(self, bar: ft.Container, e: ft.Event) -> None:
+        """Brighten the divider while the pointer is over it, so it reads as an
+        interactive handle rather than a static border."""
+        bar.bgcolor = ft.Colors.BLUE_GREY_600 if e.data == "true" else FRAME_BORDER_COLOR
+        self.page.update()
 
     def _on_horizontal_drag(self, e: ft.DragUpdateEvent) -> None:
         delta = e.primary_delta or 0
@@ -142,6 +156,21 @@ class ResizableSplit:
         self._current_size = new_size
         self._first_container.height = new_size
         self.page.update()
+
+
+def _grip(*, vertical: bool) -> ft.Control:
+    """A small 3-dot drag grip centered on the divider. `vertical=True` stacks
+    the dots (the vertical bar between left/right panes); False rows them (a
+    horizontal bar between top/bottom panes)."""
+    dots = [
+        ft.Container(width=3, height=3, bgcolor=ft.Colors.GREY_500, border_radius=2)
+        for _ in range(3)
+    ]
+    if vertical:
+        return ft.Column(
+            dots, spacing=3, tight=True, horizontal_alignment=ft.CrossAxisAlignment.CENTER
+        )
+    return ft.Row(dots, spacing=3, tight=True, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
 
 def _clamp(value: int, lo: int, hi: int) -> int:

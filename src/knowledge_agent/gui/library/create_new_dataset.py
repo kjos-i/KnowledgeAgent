@@ -184,12 +184,24 @@ class CreateNewDatasetTab:
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
         )
+        # Custom eye toggle (not Flet's can_reveal_password, which doesn't
+        # render reliably under InputBorder.OUTLINE — same choice as the Keys
+        # tab). `_password_revealed` tracks the mask state.
+        self._password_revealed = False
         self.password_field = ft.TextField(
             password=True,
-            can_reveal_password=True,
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
+            suffix=ft.IconButton(
+                icon=ft.Icons.VISIBILITY_OFF,
+                icon_size=16,
+                width=28,
+                height=28,
+                padding=0,
+                tooltip="Show / hide password",
+                on_click=self._toggle_password_reveal,
+            ),
         )
         self.folder_field = ft.TextField(
             hint_text=_FOLDER_HINT[_MODE_CREATE],
@@ -473,6 +485,19 @@ class CreateNewDatasetTab:
                 f"{lancedb_path} exists and is non-empty — pick a different name or folder",
             )
         return True, ""
+
+    def _toggle_password_reveal(self, _e: ft.Event) -> None:
+        """Flip the Neo4j password mask + eye icon (custom toggle — mirrors the
+        Keys tab; Flet's built-in can_reveal_password doesn't render reliably
+        under the OUTLINE border)."""
+        if self.password_field is None:
+            return
+        self._password_revealed = not self._password_revealed
+        self.password_field.password = not self._password_revealed
+        self.password_field.suffix.icon = (
+            ft.Icons.VISIBILITY if self._password_revealed else ft.Icons.VISIBILITY_OFF
+        )
+        self.app.page.update()
 
     async def _ping_neo4j(self, uri: str, user: str, password: str) -> str | None:
         """Try `RETURN 1` against the URI. Returns None on success, an

@@ -20,15 +20,8 @@ Override the derivation via the constructor (tests pass `tmp_path`),
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-
-_PKG_DIR = Path(__file__).resolve().parent
-
-# The bootstrap gold set shipped with the harness (3 ESCRT PDFs). A
-# placeholder to make the harness runnable; real datasets are curated
-# separately and pointed at via `KA_EVAL_DATASET` / the constructor.
-DEFAULT_DATASET_PATH: Path = _PKG_DIR / "datasets" / "escrt_bootstrap.json"
 
 # Toggleable metric groups. Deterministic groups run from Phase 1; "kg"
 # arrives in Phase 2 and "judge" (DeepEval) in Phase 3. A metric with no
@@ -52,8 +45,10 @@ class EvalConfig:
     """Immutable run configuration. Build with defaults, override per field."""
 
     # ---- what to evaluate ------------------------------------------------
-    dataset_path: Path = field(default_factory=lambda: DEFAULT_DATASET_PATH)
-    """Gold queryset (JSON list of EvalCase)."""
+    dataset_path: Path | None = None
+    """Gold queryset (JSON list of EvalCase). No baked-in default — the caller
+    supplies it: the GUI from the active corpus's folder, the CLI via
+    `--dataset` / `KA_EVAL_DATASET`. `runner.run` errors clearly if it's None."""
 
     corpus_config_path: Path | None = None
     """`corpus.toml` of the corpus to evaluate against. None → the graph

@@ -80,13 +80,17 @@ _STATUS_COLORS: dict[str, str] = {
 #   - `sub_label` (type): would need a Neo4j label sync.
 _EDIT_FIELD_SPEC: tuple[tuple[str, str, str], ...] = (
     ("title", "Title", ""),
-    ("authors_display", "Authors (semicolon-separated)", "e.g. Jane Doe; John Smith"),
+    ("authors_display", "Authors", "e.g. Jane Doe; John Smith"),
     ("year", "Year", "e.g. 2020"),
     ("venue", "Venue", ""),
     ("doi", "DOI", "e.g. 10.1126/science.aaz5357"),
     ("source_url", "Source URL", "e.g. https://doi.org/…"),
     ("language", "Language", "e.g. en"),
 )
+
+# Fixed caption column for the Edit-metadata modal so every input's left edge
+# lines up (the app-standard `labeled_field` layout).
+_EDIT_LABEL_WIDTH = 110
 
 # String columns written on every Save (full "set" semantics — a
 # blanked field clears to ""). `year` is handled separately (int32).
@@ -160,38 +164,19 @@ class DocumentsView:
     def build(self) -> ft.Control:
         # Lazy: fetch when the active corpus changed since the last load.
         self._schedule_reload(force=False)
-        # Header: bold "Documents" + the count inline (smaller, non-bold),
-        # e.g. "Documents (3 documents)". `coverage_text` is updated in
-        # `_render_rows`; here it just sits beside the title.
-        header = ft.Column(
-            spacing=4,
-            controls=[
-                ft.Row(
-                    controls=[
-                        ft.Text("Documents", weight=ft.FontWeight.BOLD, size=18),
-                        self.coverage_text,
-                    ],
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                ft.Divider(),
-            ],
-        )
-        body = ft.Column(
+        # No own "Documents" header here — the Select tab draws the sticky
+        # column title ("Documents (N)") above the pane and shows
+        # `coverage_text` there, so this view is just the filter + list.
+        return ft.Column(
             spacing=8,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            expand=True,
             controls=[
                 labeled_field("Filter", self.search_field, trailing=self.refresh_button),
                 self.op_status,
                 ft.Divider(),
                 self.doc_list,
             ],
-        )
-        return ft.Column(
-            controls=[header, body],
-            expand=True,
-            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-            spacing=8,
         )
 
     # ----- fetch ---------------------------------------------------------
@@ -402,12 +387,17 @@ class DocumentsView:
         doc_id = row.get("doc_id") or ""
         fields = {
             key: ft.TextField(
-                label=label,
                 hint_text=hint or None,
                 value=self._field_value(row, key),
             )
-            for key, label, hint in _EDIT_FIELD_SPEC
+            for key, _label, hint in _EDIT_FIELD_SPEC
         }
+        # App-standard "caption: [input]" rows — field name to the left, inputs
+        # aligned down a fixed column.
+        field_rows = [
+            labeled_field(label, fields[key], label_width=_EDIT_LABEL_WIDTH)
+            for key, label, _hint in _EDIT_FIELD_SPEC
+        ]
         lookup_checkbox = ft.Checkbox(label="Look up DOI online", value=False)
         # Stash so tests + the save handler can read current values.
         self._active_edit = {
@@ -429,14 +419,26 @@ class DocumentsView:
 
         dialog = ft.AlertDialog(
             modal=True,
-            title=ft.Text(f"Edit metadata — {heading}"),
+            title=ft.Text(f"Edit metadata — {heading}", size=14, weight=ft.FontWeight.BOLD),
             content=ft.Column(
                 spacing=8,
                 tight=True,
                 width=480,
                 scroll=ft.ScrollMode.AUTO,
                 controls=[
-                    *fields.values(),
+                    *field_rows,
+                    # Read-only — the OpenAlex work ID (set when a DOI resolves);
+                    # shown for reference, not editable.
+                    labeled_field(
+                        "OpenAlex ID",
+                        ft.Text(
+                            (row.get("openalex_id") or "").strip() or "—",
+                            size=14,
+                            selectable=True,
+                            color=ft.Colors.GREY_300,
+                        ),
+                        label_width=_EDIT_LABEL_WIDTH,
+                    ),
                     lookup_checkbox,
                     ft.Text(
                         "Save stamps status = 'manual'. With 'Look up DOI "
@@ -445,7 +447,6 @@ class DocumentsView:
                         "'enriched'). Chunk text + embeddings are never "
                         "touched.",
                         size=12,
-                        italic=True,
                         color=ft.Colors.GREY_500,
                     ),
                 ],

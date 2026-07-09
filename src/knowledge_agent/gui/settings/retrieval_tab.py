@@ -32,8 +32,13 @@ from typing import TYPE_CHECKING
 import flet as ft
 
 from knowledge_agent.config import reset_after_key_change
-from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, PANEL_BG, labeled_field
-from knowledge_agent.gui._widgets.info_icon import info_icon
+from knowledge_agent.gui._styles import (
+    FRAME_BORDER_COLOR,
+    PANEL_BG,
+    labeled_field,
+    section_divider,
+)
+from knowledge_agent.gui._widgets.info_icon import info_icon, section_header
 from knowledge_agent.gui._widgets.retrieval_form import (
     LANCE_MODES,
     RetrievalControls,
@@ -205,34 +210,29 @@ class RetrievalTab:
             controls=[
                 view_header("Retrieval"),
                 # ---- Mode ----------------------------------------------
-                ft.Text("Mode", weight=ft.FontWeight.BOLD),
+                section_header(self.app, "Mode"),
                 labeled_field("Retrieval mode (agent-level)", self.mode_dropdown),
                 self._lancedb_mode_box,
-                ft.Divider(),
+                section_divider(),
                 # ---- Result size ---------------------------------------
-                ft.Text("Result size", weight=ft.FontWeight.BOLD),
+                section_header(self.app, "Result size"),
                 labeled_field("top_k (final result count, 1–50)", self.top_k_field),
-                ft.Divider(),
+                section_divider(),
                 # ---- Hybrid fusion (RRF) -------------------------------
-                ft.Text(
+                section_header(
+                    self.app,
                     "Hybrid fusion (RRF)",
-                    weight=ft.FontWeight.BOLD,
-                ),
-                ft.Text(
-                    "Rule: top_k ≤ num_candidates. The form rejects edits "
-                    "that break this ordering.",
-                    size=12,
-                    color=ft.Colors.GREY_500,
-                    italic=True,
+                    "Rule: top_k ≤ num_candidates. The form rejects edits that "
+                    "break this ordering.",
                 ),
                 labeled_field(
                     "num_candidates (candidate pool before top_k)",
                     self.num_candidates_field,
                 ),
                 labeled_field("RRF rank constant k (1/(k+rank))", self.rrf_constant_field),
-                ft.Divider(),
+                section_divider(),
                 # ---- Diversity (MMR) -----------------------------------
-                ft.Text("Diversity (MMR)", weight=ft.FontWeight.BOLD),
+                section_header(self.app, "Diversity (MMR)"),
                 self.mmr_help_text,
                 self.use_mmr_checkbox,
                 _slider_row(
@@ -240,11 +240,11 @@ class RetrievalTab:
                     self.mmr_lambda_slider,
                     self.mmr_lambda_value_text,
                 ),
-                ft.Divider(),
+                section_divider(),
                 # ---- Knowledge graph -----------------------------------
-                ft.Text("Knowledge graph", weight=ft.FontWeight.BOLD),
+                section_header(self.app, "Knowledge graph"),
                 labeled_field("kg_max_rows (cap on Neo4j rows per query)", self.kg_max_rows_field),
-                ft.Divider(),
+                section_divider(),
                 # ---- Input mode + synthesis ----------------------------
                 ft.Row(
                     controls=[
