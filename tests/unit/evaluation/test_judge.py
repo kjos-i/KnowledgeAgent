@@ -1,9 +1,9 @@
 """Tests for the LLM-judge track (Phase 3).
 
-deepeval is NOT installed in this environment; these tests never touch
-it. `judge.py` imports without it (lazy import + base-class fallback),
-and the panel aggregation is tested by stubbing the per-model scorer —
-so no real judge LLM is called.
+deepeval is a base dependency now, but these tests never touch it: the
+deepeval import is lazy (only inside `_build_metrics`, which these tests
+don't call), and the panel aggregation is tested by stubbing the
+per-model scorer — so no real judge LLM (and no deepeval) is invoked.
 """
 
 from __future__ import annotations

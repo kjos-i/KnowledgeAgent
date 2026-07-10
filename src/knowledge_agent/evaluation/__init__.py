@@ -24,3 +24,16 @@ source of truth in `registry.py`.
 """
 
 from __future__ import annotations
+
+import os
+
+# DeepEval (the LLM-judge metric backend) sends anonymous usage stats to
+# PostHog and crash reports to Sentry BY DEFAULT. We opt out on the user's
+# behalf here — the eval package root, which is imported before any submodule
+# (incl. `judge.py`) can import deepeval — so nothing is ever sent off-machine.
+# `setdefault` means a user who genuinely wants to contribute telemetry can
+# still opt back in by exporting these before launch; the default is off.
+# (deepeval reads these as truthy/falsy: OPT_OUT truthy => telemetry off;
+# ERROR_REPORTING falsy => Sentry off. Verified against deepeval 4.0.8.)
+os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "YES")
+os.environ.setdefault("ERROR_REPORTING", "NO")

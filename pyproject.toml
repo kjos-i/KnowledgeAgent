@@ -38,6 +38,27 @@ dependencies = [
     # Word (.docx) export of saved answers / chats (knowledge_agent/artifacts.py).
     # Pure-Python, tiny; used by both the GUI Save dialog and `ka query --output`.
     "python-docx>=1.1,<2",
+    # LLM-as-judge evaluation metrics (faithfulness / relevancy / correctness /
+    # hallucination / G-Eval) via DeepEval. Core to the evaluation harness — the
+    # judge is a first-class metric track, not an add-on — so it's a base dep,
+    # not an optional extra (~12 MB of wheels; grpcio ships a prebuilt wheel, so
+    # nothing compiles).
+    #
+    # TELEMETRY: DeepEval sends anonymous usage stats (PostHog) + crash reports
+    # (Sentry) by default. We opt out on the user's behalf BEFORE it's ever
+    # imported (evaluation/__init__.py sets DEEPEVAL_TELEMETRY_OPT_OUT +
+    # ERROR_REPORTING; the pytest plugin is disabled in addopts), so nothing is
+    # sent off-machine.
+    #
+    # KNOWN BENIGN click CONFLICT: deepeval pins click>=8.0,<8.4, but
+    # huggingface-hub (pulled in transitively by docling) wants click>=8.4. No
+    # single click satisfies both, so pip installs 8.3.3 and `pip check` reports
+    # one huggingface-hub/click mismatch. It is COSMETIC: HF's click>=8.4 need
+    # is only for its `hf` command-line tool, which we never call — docling uses
+    # the HF Python API, and our own `ka` CLI is argparse-based (no click at
+    # all). Verified 2026-07-10 that docling + the HF Python API import fine on
+    # click 8.3.3. The only real fix is deepeval relaxing its pin (upstream).
+    "deepeval>=1.0",
 ]
 # LLM and embedder provider adapters are intentionally NOT in base
 # dependencies. The first-launch GUI wizard asks the user which
@@ -71,12 +92,6 @@ dev = [
     "ruff>=0.7.0",
     "pre-commit>=4,<5",
     "hypothesis>=6.100,<7",
-]
-# Evaluation harness LLM-judge track (Phase 3). DeepEval supplies the
-# faithfulness / relevancy / correctness metrics. Only needed to run the
-# "judge" group — the deterministic metrics work without it.
-eval = [
-    "deepeval>=1.0",
 ]
 # L6 entity extractor backends. Only install what your corpus uses.
 # The `llm` adapter has no extra deps (langchain-anthropic is a base
@@ -209,6 +224,10 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "--import-mode=importlib",
+    # Don't auto-load deepeval's pytest plugin. We don't use its markers, and
+    # letting pytest import it at startup would pull in deepeval (and fire its
+    # telemetry) before our opt-out in evaluation/__init__.py can run.
+    "-p", "no:deepeval",
     "-m", "not integration and not e2e",
 ]
 # `auto` mode means pytest-asyncio treats every `async def test_*` as an
