@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Any
 
 import flet as ft
 
+from knowledge_agent.evaluation.models import EvalCase, validate_case
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -111,6 +113,24 @@ def case_card(
         question,
         ft.Text(_retrieval_summary(case), size=12, color=ft.Colors.GREY_600),
     ]
+    # Warn on any case that can't be run reproducibly (e.g. an LLM-generated or
+    # imported case with a required retrieval knob left blank) so it's visible
+    # here, not only when Run refuses the whole dataset. Guarded to real
+    # EvalCase objects — the renderer's signature is `Any`.
+    problems = validate_case(case) if isinstance(case, EvalCase) else []
+    if problems:
+        detail = problems[0]
+        if len(problems) > 1:
+            detail += f"  (+{len(problems) - 1} more)"
+        body.append(
+            ft.Text(
+                f"⚠ not runnable — {detail}",
+                size=12,
+                color=ft.Colors.AMBER_400,
+                weight=ft.FontWeight.BOLD,
+                selectable=True,
+            )
+        )
     if detailed:
         for attr, caption in _DETAIL_FIELDS:
             value = _field_value(case, attr)

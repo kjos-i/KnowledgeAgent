@@ -42,8 +42,15 @@ test_documents/
 # regenerable lancedb/ + figures/ plus possibly large/licensed docs).
 # When ready to SHIP a benchmark, replace this blanket rule with
 # selective ones: keep corpus.toml + documents/ + gold.json, ignore
-# only benchmarks/*/lancedb/ and benchmarks/*/figures/.
+# only benchmarks/*/lancedb/ and benchmarks/*/figures/ (.ka_session.json is
+# already covered by the global rule below).
 benchmarks/
+
+# Per-corpus GUI session-resume sidecar written next to corpus.toml
+# (<corpus>/.ka_session.json) — transient per-user UI state (last ingest-draft
+# config + selections). Never commit it, not even with a shipped/gold corpus,
+# so ignore it everywhere.
+.ka_session.json
 
 # IDE
 .vscode/

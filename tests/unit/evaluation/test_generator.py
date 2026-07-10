@@ -10,27 +10,46 @@ tested with a fake search client. `generate_from_corpus` is live glue
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.runnables import RunnableLambda
 
 from knowledge_agent.evaluation.generator import (
+    EvalGenerationConnectionError,
     GeneratedCase,
     Passage,
     generate_cases,
     sample_passages,
+)
+from knowledge_agent.evaluation.models import validate_case
+
+# A valid, fully-pinned global retrieval config the generator reads to stamp
+# each case. Isolated from the real Settings / user .env.
+_FAKE_SETTINGS = SimpleNamespace(
+    mode_classifier_model="fake-model",
+    default_retrieval_mode="lancedb_only",
+    lancedb_search_mode="hybrid",
+    top_k=5,
+    num_candidates=40,
+    rrf_rank_constant=60,
+    mmr_lambda=0.5,
+    default_use_mmr=False,
+    kg_max_rows=50,
 )
 
 
 @pytest.fixture(autouse=True)
 def _identity_with_retry(monkeypatch):
     """Make `with_retry` a pass-through so the fake runnable runs directly
-    (no backoff loop, no `get_settings`) — keeps these unit tests fast +
-    isolated from real Settings."""
+    (no backoff loop) and stub `get_settings` so the generator pins retrieval
+    from a fake config — keeps these unit tests fast + isolated from the real
+    Settings / user .env."""
     import knowledge_agent.evaluation.generator as gen_mod
 
     monkeypatch.setattr(gen_mod, "with_retry", lambda r: r)
+    monkeypatch.setattr("knowledge_agent.config.get_settings", lambda: _FAKE_SETTINGS)
 
 
 def _fake_llm(structured_result):
@@ -88,6 +107,32 @@ async def test_generate_cases_skips_passage_on_llm_error():
 
     cases = await generate_cases([Passage("d1", "x" * 300)], llm=_fake_llm(_boom))
     assert cases == []
+
+
+async def test_generated_cases_are_runnable_with_pinned_retrieval():
+    """Each case pins every retrieval knob from the global defaults, so it
+    passes `validate_case` (the runner requires pinned knobs). Regression for
+    the bug where generated cases left num_candidates/rrf_rank_constant None
+    and the runner refused the whole dataset."""
+    llm = _fake_llm(GeneratedCase(question="Q?", answer_points=[], keywords=[]))
+    cases = await generate_cases([Passage("d1", "x" * 300)], llm=llm)
+    assert cases
+    r = cases[0].retrieval
+    assert r.retrieval_mode == _FAKE_SETTINGS.default_retrieval_mode
+    assert r.num_candidates == _FAKE_SETTINGS.num_candidates
+    assert r.rrf_rank_constant == _FAKE_SETTINGS.rrf_rank_constant
+    assert validate_case(cases[0]) == []  # runnable out of the box
+
+
+async def test_generate_cases_aborts_on_connection_error():
+    """A connection/network failure aborts the batch with a clear, retryable
+    error — NOT a silent per-passage skip (which shrank the batch mysteriously)."""
+
+    def _conn_boom(_messages):
+        raise ConnectionError("Connection error.")
+
+    with pytest.raises(EvalGenerationConnectionError, match="network"):
+        await generate_cases([Passage("d1", "x" * 300)], llm=_fake_llm(_conn_boom))
 
 
 # ---- sample_passages ----

@@ -33,9 +33,67 @@ from knowledge_agent.llm_factory import get_llm, with_retry
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
+    from knowledge_agent.config import Settings
     from knowledge_agent.search.client import LanceClient
 
 logger = logging.getLogger(__name__)
+
+
+class EvalGenerationConnectionError(RuntimeError):
+    """Raised when case generation can't reach the LLM API.
+
+    A network/connection failure is NOT passage-specific — every call would
+    fail identically until the connection is back — so the batch aborts with
+    one clear, actionable message instead of grinding through N identical
+    failures and reporting "0 cases". The message is user-facing (the GUI
+    shows it as-is), so it names the problem and says to retry."""
+
+
+def _is_connection_error(exc: BaseException) -> bool:
+    """Best-effort, provider-agnostic check for a transport/network failure.
+
+    Walks the exception's cause/context chain and matches on class name so we
+    don't have to import each provider SDK — anthropic/openai `APIConnectionError`
+    and `APITimeoutError`, httpx `ConnectError` / `TimeoutException`, and the
+    builtin `ConnectionError` family all qualify. Rate-limit / auth / bad-request
+    errors (which name the real problem) deliberately do NOT match."""
+    seen: list[BaseException] = []
+    cur: BaseException | None = exc
+    while cur is not None and len(seen) < 6:
+        seen.append(cur)
+        cur = cur.__cause__ or cur.__context__
+    for e in seen:
+        for cls in type(e).__mro__:
+            name = cls.__name__
+            if (
+                "APIConnectionError" in name
+                or "APITimeoutError" in name
+                or "ConnectError" in name
+                or "ConnectionError" in name
+                or "TimeoutException" in name
+            ):
+                return True
+    return False
+
+
+def _pinned_retrieval(settings: Settings) -> dict[str, object]:
+    """A fully-pinned per-case retrieval config from the active GLOBAL defaults.
+
+    Generated cases must pin every knob (not leave it None) or the runner
+    rejects them as non-reproducible (see `models.validate_case`). We read the
+    same global Settings the manual Dataset form seeds its defaults from, so
+    generated and hand-authored cases share one source of truth and both run
+    out of the box."""
+    return {
+        "retrieval_mode": settings.default_retrieval_mode,
+        "lancedb_search_mode": settings.lancedb_search_mode,
+        "top_k": settings.top_k,
+        "num_candidates": settings.num_candidates,
+        "rrf_rank_constant": settings.rrf_rank_constant,
+        "mmr_lambda": settings.mmr_lambda,
+        "use_mmr": settings.default_use_mmr,
+        "kg_max_rows": settings.kg_max_rows,
+    }
 
 
 @dataclass
@@ -93,12 +151,16 @@ async def generate_cases(
     fails (rate limit, malformed structured output, …) is skipped
     best-effort — one bad passage doesn't abort the batch.
     """
-    if llm is None:
-        from knowledge_agent.config import get_settings
+    from knowledge_agent.config import get_settings
 
-        model = model or get_settings().mode_classifier_model
+    settings = get_settings()
+    if llm is None:
+        model = model or settings.mode_classifier_model
         llm = get_llm(model, temperature)
     structured = with_retry(llm.with_structured_output(GeneratedCase))
+    # Pin every retrieval knob from the active global defaults so each
+    # generated case is runnable + reproducible out of the box.
+    retrieval = _pinned_retrieval(settings)
 
     cases: list[EvalCase] = []
     for i, passage in enumerate(passages):
@@ -107,8 +169,17 @@ async def generate_cases(
                 [SystemMessage(content=_GEN_SYSTEM), HumanMessage(content=passage.text)]
             )
         except Exception as exc:
+            if _is_connection_error(exc):
+                # Not this passage's fault — the LLM API is unreachable, so
+                # every remaining call would fail the same way. Abort the whole
+                # batch with one clear, retryable message instead of N skips.
+                raise EvalGenerationConnectionError(
+                    "Couldn't reach the LLM API — this looks like a network / "
+                    "connection problem, not your corpus. Check your internet "
+                    "connection (and VPN / proxy / firewall), then try again."
+                ) from exc
             # Best-effort: skip a passage the LLM couldn't turn into a case
-            # rather than aborting the whole batch.
+            # (e.g. malformed structured output) rather than aborting the batch.
             logger.warning(
                 "generate_cases: skipping passage %d (doc %s): %r", i, passage.doc_id, exc
             )
@@ -126,6 +197,7 @@ async def generate_cases(
                 origin="llm",
                 category="generated",
                 notes="LLM-generated candidate — review before trusting.",
+                retrieval=retrieval,
             )
         )
     return cases

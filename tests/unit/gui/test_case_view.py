@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import flet as ft
 
+from knowledge_agent.evaluation.models import EvalCase
 from knowledge_agent.gui.evaluation._case_view import case_card, render_case_cards
 
 
@@ -129,3 +130,23 @@ def test_render_case_cards_selected_highlights() -> None:
     # The selected card (index 1) is tinted; the other is not.
     assert cards[1].bgcolor is not None
     assert cards[0].bgcolor is None
+
+
+def test_card_warns_on_unrunnable_case() -> None:
+    """A real EvalCase with a required retrieval knob left blank shows a
+    'not runnable' warning on its card; a fully-pinned one does not."""
+    invalid = EvalCase(id="bad", question="Q?")  # defaults: lancedb_only + None knobs
+    assert "not runnable" in _all_text(case_card(invalid, 0))
+
+    valid = EvalCase(
+        id="good",
+        question="Q?",
+        retrieval={
+            "retrieval_mode": "lancedb_only",
+            "lancedb_search_mode": "hybrid",
+            "top_k": 5,
+            "num_candidates": 40,
+            "rrf_rank_constant": 60,
+        },
+    )
+    assert "not runnable" not in _all_text(case_card(valid, 0))

@@ -994,7 +994,10 @@ class DatasetTab:
         unreviewed). The candidate is flagged `origin=llm`."""
         if not self._require_gen_model():
             return
-        from knowledge_agent.evaluation.generator import generate_from_corpus
+        from knowledge_agent.evaluation.generator import (
+            EvalGenerationConnectionError,
+            generate_from_corpus,
+        )
 
         self._set_busy(self.gen_one_button, self.gen_one_spinner, True)
         self._set_status("drafting one candidate from the active corpus…")
@@ -1002,6 +1005,11 @@ class DatasetTab:
             cases = await generate_from_corpus(
                 1, model=self._selected_gen_model(), temperature=self._selected_gen_temp()
             )
+        except EvalGenerationConnectionError as exc:
+            # Network/connection failure — show the clear, retryable message.
+            self._set_busy(self.gen_one_button, self.gen_one_spinner, False)
+            self._set_status(str(exc))
+            return
         except Exception as exc:  # broad: provider / corpus / LLM errors → status
             self._set_busy(self.gen_one_button, self.gen_one_spinner, False)
             self._set_status(f"generation failed: {exc}")
@@ -1065,7 +1073,10 @@ class DatasetTab:
         `generator.generate_from_corpus` samples one passage per corpus doc and
         drafts a question + answer points + keywords via the active provider's
         model."""
-        from knowledge_agent.evaluation.generator import generate_from_corpus
+        from knowledge_agent.evaluation.generator import (
+            EvalGenerationConnectionError,
+            generate_from_corpus,
+        )
         from knowledge_agent.evaluation.models import EvalDataset, save_dataset
 
         self._set_busy(self.gen_multi_button, self.gen_multi_spinner, True)
@@ -1074,6 +1085,11 @@ class DatasetTab:
             cases = await generate_from_corpus(
                 n, model=self._selected_gen_model(), temperature=self._selected_gen_temp()
             )
+        except EvalGenerationConnectionError as exc:
+            # Network/connection failure — show the clear, retryable message.
+            self._set_busy(self.gen_multi_button, self.gen_multi_spinner, False)
+            self._set_status(str(exc))
+            return
         except Exception as exc:  # broad: provider / corpus / LLM errors → status
             self._set_busy(self.gen_multi_button, self.gen_multi_spinner, False)
             self._set_status(f"generation failed: {exc}")
@@ -1099,8 +1115,17 @@ class DatasetTab:
         self._selected = None
         self._render_list()
         self._render_preview()
+        # When fewer than requested came back, say why — the generator drafts
+        # one case per document, so the count is capped by the corpus size.
+        shortfall = ""
+        if len(cases) < n:
+            shortfall = (
+                f" of {n} requested (one case per document — the corpus has "
+                "fewer usable docs, or a passage was skipped)"
+            )
         self._set_status(
-            f"generated {len(cases)} LLM candidate(s) — review each (origin=llm), keep/edit/delete"
+            f"generated {len(cases)} LLM candidate(s){shortfall} — "
+            "review each (origin=llm), keep/edit/delete"
         )
 
     def _on_save_case(self, _e: ft.Event) -> None:
