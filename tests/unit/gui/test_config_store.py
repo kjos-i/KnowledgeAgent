@@ -46,7 +46,7 @@ def test_default_config_router_and_info_icon_fields():
     """GUI-only additions: the chat router's curated default model + the
     global info-icon toggle default (on = teaching-program-friendly)."""
     cfg = GuiConfig()
-    assert cfg.chat_router_model == "claude-haiku-4-5-20251001"
+    assert cfg.chat_router_model == "claude-haiku-4-5"
     assert cfg.show_info_icons is True
 
 

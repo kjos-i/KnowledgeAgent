@@ -31,6 +31,7 @@ from typing import Any, Literal
 import tomlkit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from knowledge_agent.config import PROVIDER_NODE_DEFAULTS
 from knowledge_agent.kg.schema import ALL_SUB_LABELS
 
 
@@ -706,7 +707,7 @@ class CorpusConfig(BaseModel):
         ),
     )
     entity_extractor_model: str = Field(
-        default="claude-haiku-4-5-20251001",
+        default=PROVIDER_NODE_DEFAULTS["anthropic"]["entity_extractor"],
         description=(
             "Model used by the LLM entity-extractor adapter (L6). "
             "Haiku is cheap + fast — one call per chunk, short input, "
@@ -729,7 +730,7 @@ class CorpusConfig(BaseModel):
         ),
     )
     triples_extractor_model: str = Field(
-        default="claude-haiku-4-5-20251001",
+        default=PROVIDER_NODE_DEFAULTS["anthropic"]["triples_extractor"],
         description=(
             "Model used by the L8 LLM triples-extractor. Haiku by "
             "default (~$0.05 per 200-chunk paper). Bumping to a "

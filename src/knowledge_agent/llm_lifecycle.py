@@ -341,18 +341,6 @@ LLM_PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
         "is_installed_fn": _anthropic_is_installed,
         "library_packages": ("langchain-anthropic",),
         "provenance": _ANTHROPIC_PROVENANCE,
-        # Default model names for each call site. The lifecycle's
-        # switch-provider step copies these into the matching
-        # Settings fields. Tier mapping: classifier/builder=cheap,
-        # cypher/synthesizer/extractor=smart.
-        "default_models": {
-            "mode_classifier": "claude-haiku-4-5-20251001",
-            "query_builder": "claude-haiku-4-5-20251001",
-            "cypher_builder": "claude-sonnet-4-6",
-            "synthesizer": "claude-sonnet-4-6",
-            "entity_extractor": "claude-haiku-4-5-20251001",
-            "triples_extractor": "claude-haiku-4-5-20251001",
-        },
     },
     "openai": {
         "display_name": "OpenAI GPT",
@@ -360,14 +348,6 @@ LLM_PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
         "is_installed_fn": _openai_is_installed,
         "library_packages": ("langchain-openai",),
         "provenance": _OPENAI_PROVENANCE,
-        "default_models": {
-            "mode_classifier": "gpt-4o-mini",
-            "query_builder": "gpt-4o-mini",
-            "cypher_builder": "gpt-4o",
-            "synthesizer": "gpt-4o",
-            "entity_extractor": "gpt-4o-mini",
-            "triples_extractor": "gpt-4o-mini",
-        },
     },
     "google": {
         "display_name": "Google Gemini",
@@ -375,14 +355,6 @@ LLM_PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
         "is_installed_fn": _google_is_installed,
         "library_packages": ("langchain-google-genai",),
         "provenance": _GOOGLE_PROVENANCE,
-        "default_models": {
-            "mode_classifier": "gemini-1.5-flash",
-            "query_builder": "gemini-1.5-flash",
-            "cypher_builder": "gemini-1.5-pro",
-            "synthesizer": "gemini-1.5-pro",
-            "entity_extractor": "gemini-1.5-flash",
-            "triples_extractor": "gemini-1.5-flash",
-        },
     },
     "ollama": {
         "display_name": "Ollama (local)",
@@ -390,19 +362,6 @@ LLM_PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
         "is_installed_fn": _ollama_adapter_is_installed,
         "library_packages": ("langchain-ollama",),
         "provenance": _OLLAMA_PROVENANCE,
-        # Every call site uses the same Ollama model — local models
-        # don't have a cheap/smart tier split the way cloud providers
-        # do. Users override via Settings if they want to mix sizes.
-        # Default to the mid-GPU tier (most laptops with a GPU); the
-        # lifecycle's pull-model step lets users pick a different one.
-        "default_models": {
-            "mode_classifier": "qwen2.5:7b",
-            "query_builder": "qwen2.5:7b",
-            "cypher_builder": "qwen2.5:7b",
-            "synthesizer": "qwen2.5:7b",
-            "entity_extractor": "qwen2.5:7b",
-            "triples_extractor": "qwen2.5:7b",
-        },
     },
 }
 

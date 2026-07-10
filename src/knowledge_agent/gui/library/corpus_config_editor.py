@@ -50,7 +50,7 @@ from typing import TYPE_CHECKING
 import flet as ft
 from pydantic import ValidationError
 
-from knowledge_agent.config import Settings, get_settings
+from knowledge_agent.config import PROVIDER_NODE_DEFAULTS, Settings, get_settings
 from knowledge_agent.entity_extractors.extractor_lifecycle import (
     EXTRACTOR_REGISTRY,
     is_extractor_ready,
@@ -501,7 +501,7 @@ class CorpusConfigEditor:
             for m in LLM_AVAILABLE_MODELS.get(self.app.gui_config.llm_provider, ())
         ]
         self.entity_extractor_model_field = ft.Dropdown(
-            value="claude-haiku-4-5-20251001",
+            value=PROVIDER_NODE_DEFAULTS["anthropic"]["entity_extractor"],
             options=list(provider_options),
             editable=True,
             enable_filter=True,
@@ -527,7 +527,7 @@ class CorpusConfigEditor:
 
         # ----- Triples (L8) LLM adapter — model + temperature -----
         self.triples_extractor_model_field = ft.Dropdown(
-            value="claude-haiku-4-5-20251001",
+            value=PROVIDER_NODE_DEFAULTS["anthropic"]["triples_extractor"],
             options=list(provider_options),
             editable=True,
             enable_filter=True,

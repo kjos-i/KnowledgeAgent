@@ -31,6 +31,7 @@ def _fake_http_get(*, status_code: int | None = None, exc: Exception | None = No
 
 _HTTP_PATCH = "knowledge_agent._http_client.request"
 
+from knowledge_agent.config import PROVIDER_NODE_DEFAULTS
 from knowledge_agent.llm_lifecycle import (
     LLM_PROVIDER_REGISTRY,
     OLLAMA_MODELS,
@@ -91,8 +92,10 @@ def test_ollama_provenance_flags_daemon_requirement():
 def test_each_provider_has_six_default_model_entries():
     """One model per call site (mode_classifier / query_builder /
     cypher_builder / synthesizer / entity_extractor /
-    triples_extractor) keeps the lifecycle switch step able to
-    rewrite all six Settings fields in one go."""
+    triples_extractor) keeps the provider-switch step able to rewrite all
+    six model fields in one go. The default map now lives in `config`
+    (single source); the lifecycle registry no longer carries it, but the
+    two must stay in sync on providers, so we assert against both."""
     expected_sites = {
         "mode_classifier",
         "query_builder",
@@ -101,8 +104,9 @@ def test_each_provider_has_six_default_model_entries():
         "entity_extractor",
         "triples_extractor",
     }
-    for name, entry in LLM_PROVIDER_REGISTRY.items():
-        assert set(entry["default_models"]) == expected_sites, name
+    assert set(PROVIDER_NODE_DEFAULTS) == set(LLM_PROVIDER_REGISTRY)
+    for name, sites in PROVIDER_NODE_DEFAULTS.items():
+        assert set(sites) == expected_sites, name
 
 
 def test_ollama_curated_menu_locked_to_four_entries():

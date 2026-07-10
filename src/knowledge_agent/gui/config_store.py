@@ -38,7 +38,13 @@ import keyring.errors
 from platformdirs import user_config_dir
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from knowledge_agent.config import PROVIDER_NODE_DEFAULTS
+
 logger = logging.getLogger(__name__)
+
+# GuiConfig node defaults track the active provider; the fresh-config
+# fallback uses the Anthropic column (the app's default provider).
+_ANTHROPIC_NODE_DEFAULTS = PROVIDER_NODE_DEFAULTS["anthropic"]
 
 
 # Single source for the keyring service + config-dir name. Distinct from
@@ -163,7 +169,7 @@ class GuiConfig(BaseModel):
 
     # ---- chat router --------------------------------------------------
     chat_router_model: str = Field(
-        default="claude-haiku-4-5-20251001",
+        default=_ANTHROPIC_NODE_DEFAULTS["mode_classifier"],
         description="Model used by the GUI chat-router (supervisor stand-in).",
     )
     chat_router_temperature: float = Field(
@@ -252,7 +258,7 @@ class GuiConfig(BaseModel):
         ),
     )
     mode_classifier_model: str = Field(
-        default="claude-haiku-4-5-20251001",
+        default=_ANTHROPIC_NODE_DEFAULTS["mode_classifier"],
         description="Model used by the mode-classifier node.",
     )
     mode_classifier_temperature: float = Field(
@@ -262,7 +268,7 @@ class GuiConfig(BaseModel):
         description="Temperature for the mode-classifier LLM.",
     )
     query_builder_model: str = Field(
-        default="claude-haiku-4-5-20251001",
+        default=_ANTHROPIC_NODE_DEFAULTS["query_builder"],
         description="Model used by the query-builder node.",
     )
     query_builder_temperature: float = Field(
@@ -272,7 +278,7 @@ class GuiConfig(BaseModel):
         description="Temperature for the query-builder LLM.",
     )
     cypher_builder_model: str = Field(
-        default="claude-sonnet-4-6",
+        default=_ANTHROPIC_NODE_DEFAULTS["cypher_builder"],
         description="Model used by the cypher-builder node.",
     )
     cypher_builder_temperature: float = Field(
@@ -282,7 +288,7 @@ class GuiConfig(BaseModel):
         description="Temperature for the cypher-builder LLM.",
     )
     synthesizer_model: str = Field(
-        default="claude-sonnet-4-6",
+        default=_ANTHROPIC_NODE_DEFAULTS["synthesizer"],
         description="Model used by the synthesizer node.",
     )
     synthesizer_temperature: float = Field(

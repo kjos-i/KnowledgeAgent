@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 import flet as ft
 
-from knowledge_agent.config import reset_after_key_change
+from knowledge_agent.config import PROVIDER_NODE_DEFAULTS, reset_after_key_change
 from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     PANEL_BG,
@@ -535,11 +535,10 @@ class LlmTab:
         """Switch the active provider AND refresh the 4 model dropdowns.
 
         Per-provider model defaults come from
-        `LLM_PROVIDER_REGISTRY[provider]["default_models"]` — backend's
-        canonical source for "which model the lifecycle picks for this
-        provider's call sites." We copy them into GuiConfig + the
-        dropdown values + repopulate the dropdown options to the new
-        provider's curated menu.
+        `config.PROVIDER_NODE_DEFAULTS[provider]` — the single source for
+        "which model each call site uses for this provider." We copy them
+        into GuiConfig + the dropdown values + repopulate the dropdown
+        options to the new provider's curated menu.
 
         Without this refresh, switching from Anthropic → OpenAI would
         leave `cypher_builder_model="claude-sonnet-4-6"` (nonsense to
@@ -556,15 +555,16 @@ class LlmTab:
         previous_models = {n: getattr(self.app.gui_config, f"{n}_model") for n in _QUERY_NODES}
         self.app.gui_config.llm_provider = new_value  # type: ignore[assignment]
         # Copy the new provider's default models into GuiConfig.
-        defaults = LLM_PROVIDER_REGISTRY[new_value]["default_models"]
+        defaults = PROVIDER_NODE_DEFAULTS[new_value]
         for node in _QUERY_NODES:
             setattr(self.app.gui_config, f"{node}_model", defaults[node])
-        # Chat router is GUI-only (no backend registry entry) — reset it to
-        # the new provider's cheapest curated model, GUI-side.
-        router_models = LLM_AVAILABLE_MODELS.get(new_value, ())
+        # Chat router is GUI-only (not one of the six backend call sites), but
+        # it's the same cheap routing tier as mode_classifier — so it borrows
+        # that node's default from the single source (config), rather than
+        # owning a second copy or reading the menu's first item.
+        router_default = PROVIDER_NODE_DEFAULTS[new_value]["mode_classifier"]
         previous_router_model = self.app.gui_config.chat_router_model
-        if router_models:
-            self.app.gui_config.chat_router_model = router_models[0]
+        self.app.gui_config.chat_router_model = router_default
         if not self._commit(f"active LLM provider: {new_value}"):
             # Rollback both the provider AND the model fields.
             self.app.gui_config.llm_provider = previous_provider
@@ -588,8 +588,7 @@ class LlmTab:
         router_dropdown = self.node_model_fields.get("chat_router")
         if router_dropdown is not None:
             router_dropdown.options = list(new_options)
-            if router_models:
-                router_dropdown.value = router_models[0]
+            router_dropdown.value = router_default
         # New provider/model per node → re-evaluate temp-slider greying.
         for node_name in self.node_temp_sliders:
             self._sync_temp_enabled(node_name)

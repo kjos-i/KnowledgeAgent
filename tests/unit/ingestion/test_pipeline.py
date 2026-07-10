@@ -1527,7 +1527,7 @@ async def test_backfill_triples_happy_path_extracts_and_writes():
     mock_extract.assert_called_once_with(
         "BRCA1 inhibits TP53.",
         [("brca1", "GENE"), ("tp53", "GENE")],
-        model="claude-haiku-4-5-20251001",
+        model=config.triples_extractor_model,
         temperature=0.0,
     )
 
@@ -2688,7 +2688,7 @@ async def test_ingest_document_runs_l6_when_entities_layer_on(
         ["GENE"],
         entity_types_mode="replace",
         llm_kwargs={
-            "model": "claude-haiku-4-5-20251001",
+            "model": config.entity_extractor_model,
             "temperature": 0.0,
         },
     )

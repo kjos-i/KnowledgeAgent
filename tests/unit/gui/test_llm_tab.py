@@ -11,8 +11,9 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from knowledge_agent.config import PROVIDER_NODE_DEFAULTS
 from knowledge_agent.gui.config_store import GuiConfig
-from knowledge_agent.gui.settings.llm_tab import LLM_AVAILABLE_MODELS, LlmTab
+from knowledge_agent.gui.settings.llm_tab import LlmTab
 
 
 def _tab() -> LlmTab:
@@ -41,9 +42,12 @@ def test_provider_switch_resets_router_model_gui_side():
         patch("knowledge_agent.gui.settings.llm_tab.apply_llm_to_env"),
     ):
         tab.on_active_provider_changed(MagicMock())
-    assert tab.app.gui_config.chat_router_model == LLM_AVAILABLE_MODELS["openai"][0]
+    # chat_router borrows mode_classifier's default from the single source
+    # (config), NOT the menu's first item.
+    expected_router = PROVIDER_NODE_DEFAULTS["openai"]["mode_classifier"]
+    assert tab.app.gui_config.chat_router_model == expected_router
     # And the visible dropdown value tracks it.
-    assert tab.node_model_fields["chat_router"].value == LLM_AVAILABLE_MODELS["openai"][0]
+    assert tab.node_model_fields["chat_router"].value == expected_router
 
 
 # ---- temperature-slider greying (sampling-free models) ----

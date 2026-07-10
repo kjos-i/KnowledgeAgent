@@ -52,6 +52,55 @@ def check_window_ordering(top_k: int, num_candidates: int) -> str | None:
     return None
 
 
+# Single source of truth for the default LLM model at each call site, per
+# provider. Tier mapping: classifier/query-builder = cheap, cypher/synthesizer
+# = smart, extractors = cheap (short, repeated, structured-output tasks).
+#
+# config.py is a leaf module (it imports nothing from this package), so every
+# layer can import this without a circular import:
+#   - Settings field defaults (below) — the CLI/headless fallback;
+#   - GuiConfig / CorpusConfig field defaults — the fresh-user / per-corpus
+#     defaults;
+#   - the GUI provider-switch — copies a provider's whole column into the
+#     node fields when the active provider changes.
+# The LLM lifecycle registry no longer duplicates these — install/availability
+# is its concern; the default VALUES live here.
+PROVIDER_NODE_DEFAULTS: dict[str, dict[str, str]] = {
+    "anthropic": {
+        "mode_classifier": "claude-haiku-4-5",
+        "query_builder": "claude-haiku-4-5",
+        "cypher_builder": "claude-sonnet-4-6",
+        "synthesizer": "claude-sonnet-4-6",
+        "entity_extractor": "claude-haiku-4-5",
+        "triples_extractor": "claude-haiku-4-5",
+    },
+    "openai": {
+        "mode_classifier": "gpt-4o-mini",
+        "query_builder": "gpt-4o-mini",
+        "cypher_builder": "gpt-4o",
+        "synthesizer": "gpt-4o",
+        "entity_extractor": "gpt-4o-mini",
+        "triples_extractor": "gpt-4o-mini",
+    },
+    "google": {
+        "mode_classifier": "gemini-1.5-flash",
+        "query_builder": "gemini-1.5-flash",
+        "cypher_builder": "gemini-1.5-pro",
+        "synthesizer": "gemini-1.5-pro",
+        "entity_extractor": "gemini-1.5-flash",
+        "triples_extractor": "gemini-1.5-flash",
+    },
+    "ollama": {
+        "mode_classifier": "qwen2.5:7b",
+        "query_builder": "qwen2.5:7b",
+        "cypher_builder": "qwen2.5:7b",
+        "synthesizer": "qwen2.5:7b",
+        "entity_extractor": "qwen2.5:7b",
+        "triples_extractor": "qwen2.5:7b",
+    },
+}
+
+
 class Settings(BaseSettings):
     """Runtime configuration for the research literature agent.
 
@@ -444,7 +493,7 @@ class Settings(BaseSettings):
     #   - synthesizer    : Sonnet, produces the final cited answer.
     # Toggles below switch nodes off for cost-saving / debugging paths.
     mode_classifier_model: str = Field(
-        default="claude-haiku-4-5-20251001",
+        default=PROVIDER_NODE_DEFAULTS["anthropic"]["mode_classifier"],
         description=(
             "Model used by the mode-classifier node (auto mode). Haiku is "
             "cheap + fast - classification into one of 5 modes is a small, "
@@ -452,7 +501,7 @@ class Settings(BaseSettings):
         ),
     )
     query_builder_model: str = Field(
-        default="claude-haiku-4-5-20251001",
+        default=PROVIDER_NODE_DEFAULTS["anthropic"]["query_builder"],
         description=(
             "Model used by the query-builder node. Haiku is cheap + fast - "
             "the query rewrite is a small, repeated task that doesn't need "
@@ -460,7 +509,7 @@ class Settings(BaseSettings):
         ),
     )
     cypher_builder_model: str = Field(
-        default="claude-sonnet-4-6",
+        default=PROVIDER_NODE_DEFAULTS["anthropic"]["cypher_builder"],
         description=(
             "Model used by the cypher-builder node. Sonnet (not Haiku) - "
             "writing schema-aware Cypher from natural language needs "
@@ -468,7 +517,7 @@ class Settings(BaseSettings):
         ),
     )
     synthesizer_model: str = Field(
-        default="claude-sonnet-4-6",
+        default=PROVIDER_NODE_DEFAULTS["anthropic"]["synthesizer"],
         description=(
             "Model used by the synthesizer node. Sonnet has better reasoning "
             "for citation generation and multi-source synthesis than Haiku, "
@@ -518,7 +567,7 @@ class Settings(BaseSettings):
         ),
     )
     entity_extractor_model: str = Field(
-        default="claude-haiku-4-5-20251001",
+        default=PROVIDER_NODE_DEFAULTS["anthropic"]["entity_extractor"],
         description=(
             "Model used by the LLM entity-extractor adapter (L6). Haiku is "
             "cheap + fast - one call per chunk, the input is short and the "
@@ -538,7 +587,7 @@ class Settings(BaseSettings):
         ),
     )
     triples_extractor_model: str = Field(
-        default="claude-haiku-4-5-20251001",
+        default=PROVIDER_NODE_DEFAULTS["anthropic"]["triples_extractor"],
         description=(
             "Model used by the LLM triples-extractor (L8). Haiku - one "
             "call per chunk, vocabulary-constrained output (15 fixed "
