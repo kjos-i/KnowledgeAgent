@@ -46,6 +46,26 @@ def test_provider_switch_resets_router_model_gui_side():
     assert tab.node_model_fields["chat_router"].value == LLM_AVAILABLE_MODELS["openai"][0]
 
 
+# ---- temperature-slider greying (sampling-free models) ----
+
+
+def test_temp_slider_greys_out_for_sampling_free_model():
+    """A node whose model dropped temperature (e.g. Opus 4.8) has its temp
+    slider disabled with a tooltip; switching to a temp-taking model
+    (Haiku 4.5) re-enables it. The backend omits temperature for those
+    models regardless — this just surfaces that."""
+    tab = _tab()
+    tab.app.gui_config.synthesizer_model = "claude-opus-4-8"
+    tab._sync_temp_enabled("synthesizer")
+    assert tab.node_temp_sliders["synthesizer"].disabled is True
+    assert "temperature" in (tab.node_temp_sliders["synthesizer"].tooltip or "")
+
+    tab.app.gui_config.synthesizer_model = "claude-haiku-4-5"
+    tab._sync_temp_enabled("synthesizer")
+    assert tab.node_temp_sliders["synthesizer"].disabled is False
+    assert tab.node_temp_sliders["synthesizer"].tooltip is None
+
+
 # ---- install / uninstall wiring ----
 
 

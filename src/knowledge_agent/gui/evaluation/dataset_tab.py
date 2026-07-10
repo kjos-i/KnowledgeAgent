@@ -57,6 +57,7 @@ from knowledge_agent.gui._widgets.retrieval_form import (
 )
 from knowledge_agent.gui.evaluation._case_view import case_card, render_case_cards
 from knowledge_agent.gui.settings.llm_tab import LLM_AVAILABLE_MODELS
+from knowledge_agent.llm_factory import supports_temperature
 
 if TYPE_CHECKING:
     from knowledge_agent.evaluation.models import EvalCase, EvalDataset
@@ -167,6 +168,7 @@ class DatasetTab:
             ],
             hint_text="required — pick a model for LLM case generation",
             expand=True,
+            on_blur=self._on_gen_model_changed,
         )
         # Temperature as a slider (0–1, 20 steps) — matches the LLM-tab temp
         # controls; value display trails the slider.
@@ -174,6 +176,8 @@ class DatasetTab:
             value=0.3, min=0.0, max=1.0, divisions=20, on_change=self._on_temp_slide
         )
         self.gen_temp_value_text = ft.Text("0.30", size=12, color=ft.Colors.WHITE, width=42)
+        # A sampling-free model (e.g. Opus 4.8) greys the temp slider out.
+        self._sync_gen_temp_enabled()
         self.status = ft.Text("", size=12, color=ft.Colors.GREY_500)
 
         # No own scroll / expand — the right column scrolls the preview + list
@@ -957,6 +961,26 @@ class DatasetTab:
         self.app.page.show_dialog(dialog)
         self.app.page.update()
         return False
+
+    def _sync_gen_temp_enabled(self) -> None:
+        """Grey out the generation temperature slider when the selected model
+        doesn't accept a temperature (e.g. Opus 4.8). The backend omits
+        temperature for those models regardless; this makes it visible. An
+        empty selection keeps the slider active."""
+        if self.gen_temp_slider is None:
+            return
+        provider = getattr(self.app.gui_config, "llm_provider", "")
+        model = (self.gen_model_dropdown.value or "").strip() if self.gen_model_dropdown else ""
+        takes_temp = supports_temperature(provider, model)
+        self.gen_temp_slider.disabled = not takes_temp
+        self.gen_temp_slider.tooltip = None if takes_temp else f"{model} ignores temperature"
+        if self.gen_temp_value_text is not None:
+            self.gen_temp_value_text.color = ft.Colors.WHITE if takes_temp else ft.Colors.WHITE_38
+
+    def _on_gen_model_changed(self, _e: ft.Event | None = None) -> None:
+        """Re-evaluate temp-slider greying when the generation model changes."""
+        self._sync_gen_temp_enabled()
+        self.app.page.update()
 
     def _on_temp_slide(self, _e: ft.Event | None = None) -> None:
         """Update the inline temperature value display as the slider drags."""

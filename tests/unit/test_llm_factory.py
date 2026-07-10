@@ -15,6 +15,7 @@ from knowledge_agent.llm_factory import (
     _validate_provider_config,
     clear_cache,
     get_llm,
+    supports_temperature,
 )
 
 # init_chat_model is imported lazily inside `_build_llm`, so we patch
@@ -110,6 +111,29 @@ def test_unknown_provider_raises_config_error():
         pytest.raises(ConfigError, match="unknown llm_provider"),
     ):
         _validate_provider_config("not-a-real-provider")
+
+
+# ---- public supports_temperature (drives the GUI slider greying) ----
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-5", "claude-fable-5"],
+)
+def test_supports_temperature_false_for_sampling_free_anthropic(model):
+    assert supports_temperature("anthropic", model) is False
+
+
+@pytest.mark.parametrize("model", ["claude-sonnet-4-6", "claude-haiku-4-5"])
+def test_supports_temperature_true_for_older_anthropic(model):
+    assert supports_temperature("anthropic", model) is True
+
+
+def test_supports_temperature_true_for_non_anthropic_and_empty():
+    # Non-Anthropic providers always accept temperature; an empty/unset
+    # model is treated as "supported" so a blank picker stays enabled.
+    assert supports_temperature("openai", "claude-opus-4-8") is True
+    assert supports_temperature("anthropic", "") is True
 
 
 # ---- dispatch ----

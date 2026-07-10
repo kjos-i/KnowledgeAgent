@@ -64,6 +64,25 @@ def test_ontology_checkbox_hard_disabled_when_not_downloaded(fake_app):
     assert "Installs" in (ed.ontology_checkboxes["mesh"].tooltip or "")
 
 
+def test_extractor_temp_slider_greyed_for_sampling_free_model(fake_app):
+    """The entity/triples temperature sliders grey out when their selected
+    LLM model dropped temperature (e.g. Opus 4.8), and stay active for a
+    temp-taking model (Haiku 4.5)."""
+    fake_app.gui_config.llm_provider = "anthropic"
+    ed = _load(_editor(fake_app), extractors=["llm"])
+    ed._corpus_config = ed._corpus_config.model_copy(
+        update={
+            "entity_extractor_model": "claude-opus-4-8",  # sampling-free
+            "triples_extractor_model": "claude-haiku-4-5",  # takes temperature
+        },
+    )
+    ed._sync_extractor_temp_enabled()
+    assert ed.entity_extractor_temperature_slider.disabled is True
+    assert "temperature" in (ed.entity_extractor_temperature_slider.tooltip or "")
+    assert ed.triples_extractor_temperature_slider.disabled is False
+    assert ed.triples_extractor_temperature_slider.tooltip is None
+
+
 def test_populate_sets_selected_extractors_in_order(fake_app):
     ed = _load(_editor(fake_app), ["hunflair2", "llm"])
     assert ed._selected_extractors == ["hunflair2", "llm"]

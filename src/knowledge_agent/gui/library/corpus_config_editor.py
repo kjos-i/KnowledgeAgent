@@ -82,6 +82,7 @@ from knowledge_agent.kg.schema import (
     MAIN_LABELS,
     SUB_LABEL_TO_MAIN,
 )
+from knowledge_agent.llm_factory import supports_temperature
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -549,6 +550,7 @@ class CorpusConfigEditor:
             on_change=self._on_triples_extractor_temperature_slide,
             on_change_end=self._on_triples_extractor_temperature_committed,
         )
+        self._sync_extractor_temp_enabled()
         # Entities per-extractor group containers — built ONCE here so
         # `_refresh_extractor_groups()` can toggle `.visible` reliably.
         # (Previously built lazily inside build(), which overwrote the
@@ -1220,6 +1222,8 @@ class CorpusConfigEditor:
             self.triples_extractor_temperature_readout.value = _fmt_float(
                 cfg.triples_extractor_temperature,
             )
+        # Loaded models may be sampling-free — grey their temp sliders.
+        self._sync_extractor_temp_enabled()
         # Entity extraction — ordered multi-extractor selection.
         self._selected_extractors = (
             list(cfg.entities.extractors) if cfg.entities is not None else ["llm"]
@@ -1993,6 +1997,34 @@ class CorpusConfigEditor:
         if self.entity_types_mode_radio is not None:
             self.entity_types_mode_radio.visible = gliner_on
 
+    def _sync_extractor_temp_enabled(self) -> None:
+        """Grey out each extractor's temperature slider when its selected
+        model doesn't accept a temperature (e.g. Opus 4.8). The backend
+        omits temperature for those models regardless — this just makes the
+        no-op visible. Provider is the active global LLM provider."""
+        provider = self.app.gui_config.llm_provider
+        cfg = self._corpus_config
+        pairs = (
+            (
+                cfg.entity_extractor_model if cfg is not None else "",
+                self.entity_extractor_temperature_slider,
+                self.entity_extractor_temperature_readout,
+            ),
+            (
+                cfg.triples_extractor_model if cfg is not None else "",
+                self.triples_extractor_temperature_slider,
+                self.triples_extractor_temperature_readout,
+            ),
+        )
+        for model, slider, readout in pairs:
+            if slider is None:
+                continue
+            takes_temp = supports_temperature(provider, model)
+            slider.disabled = not takes_temp
+            slider.tooltip = None if takes_temp else f"{model} ignores temperature"
+            if readout is not None:
+                readout.color = ft.Colors.WHITE if takes_temp else ft.Colors.WHITE_38
+
     def _on_entity_extractor_model_blur(self, e: ft.Event) -> None:
         if self._corpus_config is None or self.entity_extractor_model_field is None:
             return
@@ -2007,6 +2039,7 @@ class CorpusConfigEditor:
         self._corpus_config = self._corpus_config.model_copy(
             update={"entity_extractor_model": raw},
         )
+        self._sync_extractor_temp_enabled()
         self._after_mutation()
 
     def _on_entity_extractor_temperature_slide(self, e: ft.Event) -> None:
@@ -2048,6 +2081,7 @@ class CorpusConfigEditor:
         self._corpus_config = self._corpus_config.model_copy(
             update={"triples_extractor_model": raw},
         )
+        self._sync_extractor_temp_enabled()
         self._after_mutation()
 
     def _on_triples_extractor_temperature_slide(self, e: ft.Event) -> None:

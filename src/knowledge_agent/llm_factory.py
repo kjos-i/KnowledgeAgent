@@ -102,6 +102,15 @@ def _supports_temperature(provider: str, model: str) -> bool:
     return not any(m == name or m.startswith(f"{name}-") for name in _ANTHROPIC_NO_SAMPLING_MODELS)
 
 
+def supports_temperature(provider: str, model: str) -> bool:
+    """Public: whether (provider, model) accepts a `temperature` setting.
+
+    Thin, stable wrapper over the internal check so callers (e.g. the GUI,
+    which greys out its temperature sliders for sampling-free models) share
+    this single source of truth instead of re-deriving the model set."""
+    return _supports_temperature(provider, model)
+
+
 class ConfigError(RuntimeError):
     """Raised when the active provider is mis-configured.
 

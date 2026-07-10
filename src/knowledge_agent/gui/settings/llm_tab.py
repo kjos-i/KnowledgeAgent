@@ -47,6 +47,7 @@ from knowledge_agent.gui.config_store import (
     save_config,
 )
 from knowledge_agent.gui.views._frame import view_header
+from knowledge_agent.llm_factory import supports_temperature
 from knowledge_agent.llm_lifecycle import (
     LLM_PROVIDER_REGISTRY,
     _ollama_daemon_is_reachable,
@@ -76,9 +77,12 @@ _PROVIDER_ORDER: tuple[str, ...] = ("anthropic", "openai", "google", "ollama")
 # appears, promote this to a shared gui/_models.py.)
 LLM_AVAILABLE_MODELS: dict[str, tuple[str, ...]] = {
     "anthropic": (
-        "claude-haiku-4-5-20251001",
-        "claude-sonnet-4-6",
+        "claude-opus-4-8",
         "claude-opus-4-7",
+        "claude-sonnet-5",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5",
+        "claude-fable-5",
     ),
     "openai": ("gpt-4o-mini", "gpt-4o"),
     "google": ("gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"),
@@ -225,6 +229,9 @@ class LlmTab:
                 on_change=lambda e, n=node_name: self._on_temp_slide(n),
                 on_change_end=lambda e, n=node_name: self.on_temp_committed(n),
             )
+            # Grey the slider out when the node's model doesn't accept
+            # temperature (the backend omits it for those models anyway).
+            self._sync_temp_enabled(node_name)
 
         # Rate-limit fields. Empty = None (limiter disabled).
         for provider in _PROVIDER_ORDER:
@@ -583,6 +590,9 @@ class LlmTab:
             router_dropdown.options = list(new_options)
             if router_models:
                 router_dropdown.value = router_models[0]
+        # New provider/model per node → re-evaluate temp-slider greying.
+        for node_name in self.node_temp_sliders:
+            self._sync_temp_enabled(node_name)
         self._sync_provider_rows()
         self.app.page.update()
 
@@ -717,7 +727,25 @@ class LlmTab:
         if not self._commit(f"{node_name} model: {raw}"):
             setattr(self.app.gui_config, attr, current)
             field.value = current
-            self.app.page.update()
+        self._sync_temp_enabled(node_name)
+        self.app.page.update()
+
+    def _sync_temp_enabled(self, node_name: str) -> None:
+        """Enable/disable a node's temperature slider based on whether its
+        selected model accepts a temperature. Sampling-free models (e.g.
+        Opus 4.8) grey out the slider with a tooltip — the backend omits
+        temperature for them regardless."""
+        slider = self.node_temp_sliders.get(node_name)
+        value_text = self.node_temp_value_texts.get(node_name)
+        if slider is None:
+            return
+        provider = self.app.gui_config.llm_provider
+        model = getattr(self.app.gui_config, f"{node_name}_model", "")
+        takes_temp = supports_temperature(provider, model)
+        slider.disabled = not takes_temp
+        slider.tooltip = None if takes_temp else f"{model} ignores temperature"
+        if value_text is not None:
+            value_text.color = ft.Colors.WHITE if takes_temp else ft.Colors.WHITE_38
 
     def _on_temp_slide(self, node_name: str) -> None:
         slider = self.node_temp_sliders.get(node_name)

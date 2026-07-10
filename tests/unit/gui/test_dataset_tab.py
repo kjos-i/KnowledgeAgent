@@ -55,6 +55,23 @@ def test_dataset_tab_builds(fake_app):
     assert DatasetTab(fake_app, coordinator=MagicMock()).build() is not None
 
 
+def test_gen_temp_slider_greyed_for_sampling_free_model(fake_app):
+    """Picking a sampling-free case-generation model (e.g. Opus 4.8) greys
+    out the generation temperature slider; a temp-taking model (Haiku 4.5)
+    re-enables it."""
+    fake_app.gui_config.llm_provider = "anthropic"
+    tab = _tab(fake_app)
+    tab.gen_model_dropdown.value = "claude-opus-4-8"
+    tab._on_gen_model_changed()
+    assert tab.gen_temp_slider.disabled is True
+    assert "temperature" in (tab.gen_temp_slider.tooltip or "")
+
+    tab.gen_model_dropdown.value = "claude-haiku-4-5"
+    tab._on_gen_model_changed()
+    assert tab.gen_temp_slider.disabled is False
+    assert tab.gen_temp_slider.tooltip is None
+
+
 def test_load_and_select_populates_form(fake_app, tmp_path):
     tab = _tab(fake_app)
     tab._load(_dataset_file(tmp_path))
