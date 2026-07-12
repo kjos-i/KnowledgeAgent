@@ -67,6 +67,14 @@ def test_case_columns_match_registry(tmp_path):
         assert col in cols
 
 
+def test_run_columns_include_per_metric_n(tmp_path):
+    EvalLedger(tmp_path / "l.db")
+    with sqlite3.connect(tmp_path / "l.db") as conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(eval_runs)")}
+    for col, _ in R.run_n_columns():
+        assert col in cols
+
+
 def test_foreign_keys_are_enforced(tmp_path):
     led = EvalLedger(tmp_path / "l.db")
     with pytest.raises(sqlite3.IntegrityError), led._connect() as conn:
@@ -96,6 +104,19 @@ def test_save_run_roundtrip(tmp_path):
         assert cases[0]["run_id"] == run_id  # FK wired
         assert json.loads(cases[1]["errors"]) == ["boom"]
         assert cases[1]["hit_at_k"] == 0.0
+
+
+def test_save_run_persists_per_metric_n(tmp_path):
+    led = EvalLedger(tmp_path / "l.db")
+    report = _report()
+    report["summary"]["n_hit_at_k"] = 2
+    report["summary"]["n_chunk_hit_at_k"] = 1
+    led.save_run(report)
+    with sqlite3.connect(tmp_path / "l.db") as conn:
+        conn.row_factory = sqlite3.Row
+        run = conn.execute("SELECT * FROM eval_runs").fetchone()
+        assert run["n_hit_at_k"] == 2
+        assert run["n_chunk_hit_at_k"] == 1
 
 
 def test_list_runs_and_get_run(tmp_path):

@@ -16,6 +16,22 @@ def test_normalize_text_lowercases_strips_accents_collapses_ws():
     assert M.normalize_text("  Café   RÉSUMÉ\tX ") == "cafe resume x"
 
 
+def test_normalize_text_strips_punctuation_keeping_dot_percent_dash():
+    # Commas / slashes / semicolons / underscores / quotes → space; ``.`` ``%``
+    # ``-`` are kept (mirrors the reference's punctuation stripping).
+    assert M.normalize_text("a, b/c; d_e") == "a b c d e"
+    assert M.normalize_text("5.5% co-factor") == "5.5% co-factor"
+
+
+def test_normalize_text_keeps_non_ascii_letters_and_digits():
+    # Greek / CJK letters are kept (only accents are stripped), so terms that
+    # differ only by a non-ASCII character stay distinct — UNLIKE the reference,
+    # which drops every non-ASCII char. Punctuation around them is still stripped.
+    assert M.normalize_text("TGF-β/SMAD") == "tgf-β smad"
+    assert M.normalize_text("北京 policy") == "北京 policy"
+    assert M.normalize_text("α-catenin") != M.normalize_text("β-catenin")
+
+
 def test_safe_mean_skips_none_and_handles_empty():
     assert M.safe_mean([1.0, None, 3.0]) == 2.0
     assert M.safe_mean([None, None]) is None
@@ -32,9 +48,21 @@ def test_hit_mrr_precision_ndcg_primitives():
     assert M.mrr(rel) == 0.5  # first relevant at rank 2
     assert M.mrr([False, False]) == 0.0
     assert M.precision_at_k(rel) == 0.5  # 2 of 4
-    # NDCG: relevant at ranks 2 and 4; ideal has 2 relevant at ranks 1,2.
-    assert 0.0 < M.ndcg_at_k(rel, total_relevant=2) < 1.0
-    assert M.ndcg_at_k([True, True], total_relevant=2) == 1.0
+    # NDCG: relevant at ranks 2 and 4; the ideal is those same labels sorted to
+    # the top (ranks 1,2), so 0 < score < 1.
+    assert 0.0 < M.ndcg_at_k(rel) < 1.0
+    assert M.ndcg_at_k([True, True]) == 1.0
+
+
+def test_ndcg_never_exceeds_one_with_duplicate_gold_docs():
+    """A gold item retrieved in several slots must NOT push NDCG above 1.0 —
+    IDCG is the ideal ordering of the same relevance labels (matches the
+    reference harness; this was the >1 bug that showed 2.09)."""
+    assert M.ndcg_at_k([True, True, True]) == 1.0
+    assert M.ndcg_at_k([False, True, True]) <= 1.0
+    # via the family fn: one gold doc returned 3× → every slot relevant → 1.0.
+    got = M.compute_source_metrics(["d1", "d1", "d1"], expected_sources=["d1"])
+    assert got["ndcg_at_k"] == 1.0
 
 
 # ---- source-level family ----

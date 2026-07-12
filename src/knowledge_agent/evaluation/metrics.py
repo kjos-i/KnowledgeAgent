@@ -37,11 +37,26 @@ _CHUNK_KEYS = (
 
 
 def normalize_text(text: str) -> str:
-    """Lowercase, strip accents, collapse whitespace — so substring matches
-    ignore case/accent/spacing noise."""
+    """Lowercase, strip accents, drop punctuation, and collapse whitespace — so
+    substring matches ignore case/accent/punctuation/spacing noise.
+
+    Punctuation handling mirrors the reference harness (among symbols it keeps
+    only ``.`` ``%`` ``-``), so keyword and snippet matching are comparably
+    forgiving. UNLIKE the reference — which drops every non-ASCII character —
+    non-ASCII *letters and digits* are kept (Greek, CJK, accented bases): a
+    general, multi-domain corpus shouldn't lose ``β``/``µ``/``北`` just because
+    they aren't ASCII, and keeping them makes matching more precise (``α`` stays
+    distinct from ``β``). Accents (combining marks) are still stripped, so
+    ``café`` == ``cafe``.
+    """
     nfkd = unicodedata.normalize("NFKD", text or "")
-    no_accents = "".join(c for c in nfkd if not unicodedata.combining(c))
-    return " ".join(no_accents.lower().split())
+    no_accents = "".join(c for c in nfkd if not unicodedata.combining(c)).lower()
+    # Keep letters/digits of ANY script (`isalnum`) plus the few symbols the
+    # reference keeps; every other character (comma, slash, underscore, quotes,
+    # …) becomes a space. This strips punctuation like the reference but without
+    # its ASCII-only restriction.
+    kept = "".join(c if (c.isalnum() or c in ".%-" or c.isspace()) else " " for c in no_accents)
+    return " ".join(kept.split())
 
 
 def safe_mean(values: Iterable[float | None]) -> float | None:
@@ -73,13 +88,16 @@ def precision_at_k(relevance: Sequence[bool]) -> float:
     return (sum(relevance) / len(relevance)) if relevance else 0.0
 
 
-def ndcg_at_k(relevance: Sequence[bool], total_relevant: int) -> float:
-    """Binary-relevance NDCG. IDCG uses `min(total_relevant, k)` ideal
-    positions, so the score penalizes both bad ranking and not retrieving
-    enough of the gold set."""
+def ndcg_at_k(relevance: Sequence[bool]) -> float:
+    """Binary-relevance NDCG, matching the reference harness's
+    `_ndcg_from_relevance`: IDCG is the DCG of the ideal ordering of the SAME
+    relevance labels (`sorted(..., reverse=True)`), so a real ranking can never
+    beat the ideal and the score stays in [0, 1] — even when a gold item is
+    retrieved in several slots (which previously inflated it above 1)."""
     dcg = sum(1.0 / math.log2(i + 2) for i, rel in enumerate(relevance) if rel)
-    ideal = min(total_relevant, len(relevance))
-    idcg = sum(1.0 / math.log2(i + 2) for i in range(ideal))
+    idcg = sum(
+        1.0 / math.log2(i + 2) for i, rel in enumerate(sorted(relevance, reverse=True)) if rel
+    )
     return (dcg / idcg) if idcg > 0 else 0.0
 
 
@@ -107,7 +125,7 @@ def compute_source_metrics(
         "mrr": mrr(rel),
         "precision_at_k": precision_at_k(rel),
         "recall_at_k": len(found_docs) / len(gold),
-        "ndcg_at_k": ndcg_at_k(rel, len(gold)),
+        "ndcg_at_k": ndcg_at_k(rel),
     }
 
 
@@ -131,7 +149,7 @@ def compute_chunk_metrics(
         "chunk_mrr": mrr(rel),
         "chunk_precision_at_k": precision_at_k(rel),
         "chunk_recall_at_k": found_snippets / len(snippets),
-        "chunk_ndcg_at_k": ndcg_at_k(rel, len(snippets)),
+        "chunk_ndcg_at_k": ndcg_at_k(rel),
     }
 
 

@@ -172,6 +172,7 @@ async def evaluate_case(
         "id": case.id,
         "category": case.category,
         "question": case.question,
+        "expected_output": "\n".join(case.expected_answer_points),
         "answer": run.answer,
         "status": _status(case, values, run, cfg),
         "errors": [run.error] if run.error else [],

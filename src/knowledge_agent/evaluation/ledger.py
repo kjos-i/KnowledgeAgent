@@ -40,7 +40,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from knowledge_agent.evaluation.registry import case_sql_columns, run_sql_columns
+from knowledge_agent.evaluation.registry import case_sql_columns, run_n_columns, run_sql_columns
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -76,12 +76,13 @@ _CASES_PREAMBLE: list[tuple[str, str]] = [
 ]
 _CASES_TRAILING: list[tuple[str, str]] = [
     ("answer", "TEXT"),
+    ("expected_output", "TEXT"),  # gold answer: "\n"-joined expected_answer_points
     ("errors", "TEXT"),  # JSON list
 ]
 
 
 def _run_columns() -> list[tuple[str, str]]:
-    return _RUNS_PREAMBLE + run_sql_columns() + _RUNS_TRAILING
+    return _RUNS_PREAMBLE + run_sql_columns() + run_n_columns() + _RUNS_TRAILING
 
 
 def _case_columns() -> list[tuple[str, str]]:
@@ -165,6 +166,8 @@ class EvalLedger:
         }
         for avg_key, _ in run_sql_columns():
             run_row[avg_key] = summary.get(avg_key)
+        for n_key, _ in run_n_columns():
+            run_row[n_key] = summary.get(n_key)
 
         with closing(self._connect()) as conn:
             run_id = _insert(conn, "eval_runs", _run_columns(), run_row)
@@ -177,6 +180,7 @@ class EvalLedger:
                     "question": case.get("question"),
                     "status": case.get("status"),
                     "answer": case.get("answer"),
+                    "expected_output": case.get("expected_output"),
                     "errors": json.dumps(case.get("errors", [])),
                 }
                 for col, _ in case_sql_columns():

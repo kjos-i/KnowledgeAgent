@@ -47,6 +47,27 @@ def test_build_judge_input_includes_chunks_and_kg_rows():
     assert any("Oslo" in ctx for ctx in data["retrieval_context"])  # kg row stringified in
 
 
+def test_build_judge_input_sentinels_when_case_is_sparse():
+    # No expected_answer_points and no retrieval → DeepEval-safe sentinels
+    # instead of "" / [] (an empty context is a hard error in DeepEval; empty
+    # expected output scores degenerately).
+    run = SimpleNamespace(answer="", retrieved_texts=[], kg_hits=[])
+    case = EvalCase(id="c", question="q?")  # no expected_answer_points
+    data = J.build_judge_input(run, case)
+    assert data["expected_output"] == J._NO_ANSWER_SENTINEL
+    assert data["context"] == [J._NO_ANSWER_SENTINEL]
+    assert data["retrieval_context"] == [J._NO_CONTEXT_SENTINEL]
+
+
+def test_build_judge_input_no_sentinel_when_gold_present():
+    run = SimpleNamespace(answer="A", retrieved_texts=["chunk"], kg_hits=[])
+    case = EvalCase(id="c", question="q?", expected_answer_points=["p1", "p2"])
+    data = J.build_judge_input(run, case)
+    assert data["expected_output"] == "p1\np2"
+    assert data["context"] == ["p1", "p2"]
+    assert data["retrieval_context"] == ["chunk"]
+
+
 def test_run_judge_panel_aggregates_mean_and_sums_tokens(monkeypatch):
     async def fake_score(model, data, threshold):
         if model == "m1":

@@ -28,10 +28,47 @@ def test_summary_avg_keys_unique():
     assert len(keys) == len(set(keys))
 
 
+def test_run_n_columns_pair_one_to_one_with_averages():
+    n_cols = [col for col, _ in R.run_n_columns()]
+    assert len(n_cols) == len(set(n_cols))  # unique
+    assert len(n_cols) == len(R.run_sql_columns())  # one n per run-level average
+    for col, sqltype in R.run_n_columns():
+        assert col.startswith("n_") and sqltype == "INTEGER"
+    # n_<source_key> pairs with the same source key as the average.
+    assert n_cols == [f"n_{src}" for _, src in R.summary_avg_pairs()]
+
+
 def test_pass_rate_has_no_per_case_column():
     pass_rate = next(m for m in R.METRICS if m.key == "pass_rate")
     assert pass_rate.sql_column is None
     assert pass_rate.summary_avg_key is None
+
+
+def test_metric_directions_mark_cost_and_error_metrics_lower_is_better():
+    """higher_is_better is False for cost/error metrics (latency, tokens,
+    hallucination, disallowed keyword hits) and True for score metrics —
+    mirrored onto each summary-avg key. Drives the dashboard's delta pills."""
+    directions = R.metric_directions()
+    for key in (
+        "latency_seconds",
+        "avg_latency_seconds",
+        "judge_total_tokens",
+        "avg_agent_total_tokens",
+        "hallucination",
+        "avg_hallucination",
+        "disallowed_keyword_hits",
+        "avg_disallowed_keyword_hits",
+    ):
+        assert directions[key] is False, key
+    for key in ("pass_rate", "hit_at_k", "avg_hit_at_k", "avg_precision_at_k"):
+        assert directions[key] is True, key
+
+
+def test_group_labels_cover_every_metric_group():
+    """Every group a metric declares has a display label, so the GUI never
+    falls back to a raw group key for a section header."""
+    used_groups = {m.group for m in R.METRICS}
+    assert used_groups <= set(R.GROUP_LABELS)
 
 
 def test_toggle_groups_resolve():

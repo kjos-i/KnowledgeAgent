@@ -13,7 +13,11 @@ import flet as ft
 from knowledge_agent.gui._widgets.retrieval_form import (
     RetrievalControls,
     apply_gray_out,
+    build_input_mode_radios,
+    knobs_to_query_mode,
     mmr_help_text,
+    query_mode_to_knobs,
+    store_forced_by_mode,
 )
 
 
@@ -75,3 +79,49 @@ def test_mmr_help_text_states():
     assert "FTS" in mmr_help_text(lance_on=True, is_fts=True, use_mmr=True)
     assert "MMR off" in mmr_help_text(lance_on=True, is_fts=False, use_mmr=False)
     assert "relevance" in mmr_help_text(lance_on=True, is_fts=False, use_mmr=True)
+
+
+# ---- shared input-mode radio + wiring (SSOT for Settings + eval Dataset) ----
+
+
+def test_input_mode_radios_are_the_three_shared_modes():
+    # The shared builder owns ONLY the modes both forms use; 'conversational'
+    # is chat-only and prepended by the Settings tab itself, never here.
+    radios = build_input_mode_radios()
+    assert [r.value for r in radios] == ["refined", "direct_query", "direct_cypher"]
+    assert all(r.value != "conversational" for r in radios)
+
+
+def test_query_mode_to_knobs_maps_each_mode():
+    assert query_mode_to_knobs("refined") == {"skip_query_builder": False, "user_cypher": None}
+    assert query_mode_to_knobs("direct_query") == {"skip_query_builder": True, "user_cypher": None}
+    assert query_mode_to_knobs("direct_cypher", cypher_text="MATCH (n) RETURN n") == {
+        "skip_query_builder": False,
+        "user_cypher": "MATCH (n) RETURN n",
+    }
+    # conversational carries refined-like knobs (only its query source differs).
+    assert query_mode_to_knobs("conversational") == {
+        "skip_query_builder": False,
+        "user_cypher": None,
+    }
+
+
+def test_query_mode_to_knobs_blank_cypher_is_none():
+    assert query_mode_to_knobs("direct_cypher", cypher_text="   ")["user_cypher"] is None
+
+
+def test_knobs_to_query_mode_is_the_inverse():
+    assert knobs_to_query_mode(skip_query_builder=False, user_cypher=None) == "refined"
+    assert knobs_to_query_mode(skip_query_builder=True, user_cypher=None) == "direct_query"
+    # Cypher wins over the skip flag.
+    assert (
+        knobs_to_query_mode(skip_query_builder=True, user_cypher="MATCH (n) RETURN n")
+        == "direct_cypher"
+    )
+
+
+def test_store_forced_by_mode_only_pins_cypher_to_neo4j():
+    assert store_forced_by_mode("direct_cypher") == "neo4j_only"
+    assert store_forced_by_mode("refined") is None
+    assert store_forced_by_mode("direct_query") is None
+    assert store_forced_by_mode("conversational") is None

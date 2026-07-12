@@ -42,6 +42,10 @@ from knowledge_agent.artifacts import (
 )
 from knowledge_agent.config import disable_env_file, get_settings, reset_after_key_change
 from knowledge_agent.graph import graph
+from knowledge_agent.gui._widgets.retrieval_form import (
+    query_mode_to_knobs,
+    store_forced_by_mode,
+)
 from knowledge_agent.gui.chat_panel import ChatPanel
 from knowledge_agent.gui.chat_router import (
     CHAT_SYSTEM_PROMPT,
@@ -365,38 +369,29 @@ class GuiApp:
     ) -> dict[str, Any]:
         """Build the graph invoke-state for the selected input mode.
 
-        - conversational: the router's distilled `search_query` (fallback to
-          the raw text); the query-builder runs; retrieval mode = user's
-          choice.
-        - direct_query: raw text straight to vector/hybrid (skip the
-          query-builder); mode forced to lancedb_only.
-        - direct_cypher: raw text run as user Cypher against the KG; mode
-          forced to neo4j_only.
+        Query modes map to graph knobs via the shared `query_mode_to_knobs`, so
+        chat and the eval form can't disagree on what a mode means. The store
+        (`retrieval_mode`) is the user's own choice for every mode EXCEPT
+        direct_cypher, which pins neo4j (`store_forced_by_mode`) since Cypher
+        only runs on the graph.
+
+        - conversational: the router's distilled `search_query` (fallback to raw
+          text); query-builder runs.
+        - refined: raw text; query-builder runs.
+        - direct_query: raw text verbatim; skips the query-builder.
+        - direct_cypher: raw text run as user Cypher; store pinned to neo4j.
         """
-        base: dict[str, Any] = {
+        # conversational is the only mode whose query is the router's distilled
+        # text; every other mode searches the raw text (direct_cypher runs it as
+        # Cypher). skip_query_builder / user_cypher come from the shared mapping.
+        query = (search_query or "").strip() or text if input_mode == "conversational" else text
+        return {
             "corpus_config": corpus_config,
             "top_k": self.gui_config.top_k,
             "direct_retrieval": self.gui_config.direct_retrieve,
-        }
-        if input_mode == "direct_query":
-            return {
-                **base,
-                "query": text,
-                "skip_query_builder": True,
-                "retrieval_mode": "lancedb_only",
-            }
-        if input_mode == "direct_cypher":
-            return {
-                **base,
-                "query": text,
-                "user_cypher": text,
-                "retrieval_mode": "neo4j_only",
-            }
-        return {
-            **base,
-            "query": (search_query or "").strip() or text,
-            "skip_query_builder": False,
-            "retrieval_mode": self.gui_config.retrieval_mode,
+            "query": query,
+            "retrieval_mode": store_forced_by_mode(input_mode) or self.gui_config.retrieval_mode,
+            **query_mode_to_knobs(input_mode, cypher_text=text),
         }
 
     async def on_send(self, e: ft.Event) -> None:

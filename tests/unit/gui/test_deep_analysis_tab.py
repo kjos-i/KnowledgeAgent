@@ -85,3 +85,12 @@ def test_refresh_renders_analysis_and_histogram_switch(fake_app, tmp_path):
     tab.hist_dropdown.value = "mrr"
     tab._on_hist_metric_change(MagicMock())
     assert tab.hist_container.content is not None
+
+
+def test_n_present_counts_cases_with_a_value():
+    """`_n_present` — how many cases fed a metric's mean (a None case is dropped);
+    shown as (n=X) on each Metric Balance bar."""
+    tab = DeepAnalysisTab(MagicMock(), coordinator=MagicMock())
+    tab._cases = [{"mrr": 1.0}, {"mrr": None}, {"mrr": 0.5}]
+    assert tab._n_present("mrr") == 2
+    assert tab._n_present("hit_at_k") == 0  # no case has this metric

@@ -14,6 +14,11 @@ PANEL_BG = ft.Colors.BLACK
 """Panel background. Matches the dark Material 3 surface tone the rest
 of the app expects."""
 
+PANEL_BG_RAISED = ft.Colors.GREY_900
+"""A slightly-lighter dark surface for a raised/nested panel — e.g. the left rail
+of a two-column screen — so it lifts off the black page background. One step up
+from PANEL_BG (black); the Evaluation tabs use it for their left rails."""
+
 FRAME_BORDER_COLOR = ft.Colors.GREY_700
 """Border colour for panel frames, input fields, and dividers."""
 

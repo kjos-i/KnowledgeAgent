@@ -106,8 +106,12 @@ def capture_provenance() -> dict[str, Any]:
 
 
 def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
-    """Run-level rollup: pass rate + a mean per registry metric (None-safe,
-    so cases lacking a metric's gold don't drag its average)."""
+    """Run-level rollup: pass rate + a mean per registry metric (None-safe, so
+    cases lacking a metric's gold don't drag its average), plus a per-metric
+    `n_<key>` — how many cases actually fed each mean. Because a no-gold case is
+    dropped (scored `None`) rather than counted, the denominator varies per
+    metric; `n` records it so a mean over 1 case is distinguishable from one
+    over all of them."""
     case_count = len(results)
     pass_count = sum(1 for r in results if r.get("status") == "PASS")
     summary: dict[str, Any] = {
@@ -116,7 +120,9 @@ def build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
         "pass_rate": (pass_count / case_count) if case_count else 0.0,
     }
     for avg_key, source_key in summary_avg_pairs():
-        summary[avg_key] = safe_mean(r.get(source_key) for r in results)
+        values = [r.get(source_key) for r in results]
+        summary[avg_key] = safe_mean(values)
+        summary[f"n_{source_key}"] = sum(1 for v in values if v is not None)
     return summary
 
 

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 import flet as ft
 from flet import canvas as cv
 
+from knowledge_agent.gui._styles import FIELD_LABEL_SIZE, PANEL_BG_RAISED, PANEL_RADIUS
 from knowledge_agent.gui.views._frame import view_header
 
 if TYPE_CHECKING:
@@ -37,20 +38,26 @@ _PALETTE: tuple[str, ...] = (
     ft.Colors.BROWN,
 )
 
-# Chart geometry (px).
-_W, _H = 620, 220
-_ML, _MR, _MT, _MB = 46, 12, 12, 26
+# Chart geometry (px). Extra left/bottom margin for the axis titles + angled
+# time labels on the x-axis.
+_W, _H = 640, 262
+_ML, _MR, _MT, _MB = 72, 16, 14, 76
 
 # 0–1 score groups get a fixed y-axis; tokens/latency auto-scale.
 _SCORE_GROUPS: tuple[str, ...] = ("retrieval", "chunk", "kg", "llm")
+# Chart order matches the reference (Judge Scores right after the summary, then
+# retrieval/chunk, then latency); Knowledge Graph is the KA-specific addition,
+# tokens last.
 _GROUP_HEADERS: dict[str, str] = {
-    "retrieval": "Source Retrieval",
-    "chunk": "Chunk Retrieval",
-    "kg": "Knowledge Graph",
-    "llm": "Judge Scores",
-    "tokens": "Tokens",
-    "latency": "Latency",
+    "llm": "Judge Scores Over Time",
+    "retrieval": "Source Retrieval Quality Over Time",
+    "chunk": "Chunk Retrieval Quality Over Time",
+    "kg": "Knowledge Graph Over Time",
+    "latency": "Latency Over Time",
+    "tokens": "Tokens Over Time",
 }
+# Y-axis title per group (0–1 score groups default to "Score").
+_Y_LABELS: dict[str, str] = {"latency": "Seconds", "tokens": "Tokens"}
 
 
 def _paint(color: str, width: float = 2.0, *, fill: bool = False) -> ft.Paint:
@@ -65,11 +72,12 @@ def _line_chart(
     series: list[tuple[str, str, list[float | None]]],
     x_labels: list[str],
     y_max: float,
+    y_label: str,
+    x_label: str = "Time",
 ) -> ft.Control:
-    """A multi-series line chart on a fixed-size canvas + a widget legend.
-
-    `series` = (label, colour, values-aligned-to-x); None values break the
-    line (a gap). `y_max` sets the top of the y-axis.
+    """A multi-series line chart on a fixed-size canvas + a widget legend, with
+    named x/y axes. `series` = (label, colour, values-aligned-to-x); None values
+    break the line (a gap). `y_max` sets the top of the y-axis.
     """
     n = len(x_labels)
     plot_w = _W - _ML - _MR
@@ -82,18 +90,42 @@ def _line_chart(
     def py(v: float) -> float:
         return _MT + plot_h - (v / y_max) * plot_h
 
+    label_style = ft.TextStyle(size=12, color=ft.Colors.GREY_500)
+    title_style = ft.TextStyle(size=12, color=ft.Colors.GREY_400)
     shapes: list[cv.Shape] = [
         cv.Line(_ML, _MT, _ML, _MT + plot_h, _paint(ft.Colors.GREY_500, 1.0)),
         cv.Line(_ML, _MT + plot_h, _ML + plot_w, _MT + plot_h, _paint(ft.Colors.GREY_500, 1.0)),
     ]
-    label_style = ft.TextStyle(size=12, color=ft.Colors.GREY_500)
+    # Axis titles: y rotated up the left edge, x centred below the time labels.
+    shapes.append(
+        cv.Text(
+            14,
+            _MT + plot_h / 2,
+            y_label,
+            title_style,
+            rotate=-1.5708,
+            alignment=ft.Alignment(0, 0),
+        )
+    )
+    shapes.append(
+        cv.Text(_ML + plot_w / 2, _H - 6, x_label, title_style, alignment=ft.Alignment(0, 0))
+    )
     for frac in (0.0, 0.5, 1.0):
         y = py(y_max * frac)
         shapes.append(cv.Line(_ML, y, _ML + plot_w, y, _paint(ft.Colors.GREY_800, 1.0)))
-        tick = f"{y_max * frac:.2f}" if y_max <= 1 else f"{y_max * frac:.0f}"
-        shapes.append(cv.Text(2, y - 6, tick, label_style))
+        tick = f"{y_max * frac:.2f}" if y_max <= 1 else f"{y_max * frac:g}"
+        shapes.append(cv.Text(_ML - 6, y, tick, label_style, alignment=ft.Alignment(1, 0)))
     for i, lbl in enumerate(x_labels):
-        shapes.append(cv.Text(px(i) - 4, _MT + plot_h + 4, lbl, label_style))
+        shapes.append(
+            cv.Text(
+                px(i),
+                _MT + plot_h + 6,
+                lbl,
+                label_style,
+                rotate=-0.5,
+                alignment=ft.Alignment(1, -1),
+            )
+        )
 
     for _label, color, values in series:
         line_paint = _paint(color, 2.0)
@@ -109,21 +141,32 @@ def _line_chart(
             shapes.append(cv.Circle(cx, cy, 2.5, dot_paint))
             prev = (cx, cy)
 
-    legend = ft.Row(
+    legend = ft.Column(
         [
             ft.Row(
                 [
                     ft.Container(width=12, height=12, bgcolor=color, border_radius=2),
                     ft.Text(label, size=12),
                 ],
-                spacing=3,
+                spacing=6,
             )
             for label, color, _ in series
         ],
-        wrap=True,
-        spacing=12,
+        spacing=4,
     )
-    return ft.Column([cv.Canvas(shapes=shapes, width=_W, height=_H), legend], spacing=4)
+    # Legend on the RIGHT of the chart (chart scrolls horizontally if narrow).
+    return ft.Row(
+        [
+            ft.Row(
+                [cv.Canvas(shapes=shapes, width=_W, height=_H)],
+                scroll=ft.ScrollMode.AUTO,
+                expand=True,
+            ),
+            ft.Container(content=legend, height=_H, padding=ft.Padding.only(left=8)),
+        ],
+        vertical_alignment=ft.CrossAxisAlignment.START,
+        spacing=8,
+    )
 
 
 class TrendsTab:
@@ -139,11 +182,16 @@ class TrendsTab:
     # ---- build ------------------------------------------------------------
 
     def build(self) -> ft.Control:
-        self.dataset_dropdown = ft.Dropdown(label="Dataset", options=[], width=240)
+        self.dataset_dropdown = ft.Dropdown(
+            label="Dataset", options=[], width=240, text_size=FIELD_LABEL_SIZE
+        )
         self.dataset_dropdown.on_change = self._on_dataset_change
-        refresh_button = ft.TextButton("Refresh", icon=ft.Icons.REFRESH, on_click=self._on_refresh)
+        refresh_button = ft.TextButton("Refresh", on_click=self._on_refresh)
         rail = ft.Container(
             width=280,
+            bgcolor=PANEL_BG_RAISED,
+            padding=12,
+            border_radius=PANEL_RADIUS,
             content=ft.Column(
                 [
                     ft.Text("Dataset", weight=ft.FontWeight.BOLD),
@@ -225,7 +273,7 @@ class TrendsTab:
         from knowledge_agent.evaluation.registry import METRICS, metric_labels
 
         labels = metric_labels()
-        x_labels = [str(r["run_id"]) for r in chrono]
+        x_labels = [self._ts_label(r) for r in chrono]  # time points, not run ids
         charts: list[ft.Control] = []
 
         # Summary: pass rate + avg judge score (0–1).
@@ -234,7 +282,16 @@ class TrendsTab:
             for m in METRICS
             if m.group == "summary" and m.summary_avg_key
         ]
-        charts.append(self._chart("Pass Rate & Judge Score", summary_specs, chrono, x_labels, 1.0))
+        charts.append(
+            self._chart(
+                "Pass Rate and Avg Judge Score Over Time",
+                summary_specs,
+                chrono,
+                x_labels,
+                1.0,
+                "Score",
+            )
+        )
 
         for group, header in _GROUP_HEADERS.items():
             metrics = [m for m in METRICS if m.group == group and m.summary_avg_key]
@@ -244,7 +301,9 @@ class TrendsTab:
             y_max = 1.0 if group in _SCORE_GROUPS else self._auto_max(specs, chrono)
             if y_max <= 0:
                 continue
-            charts.append(self._chart(header, specs, chrono, x_labels, y_max))
+            charts.append(
+                self._chart(header, specs, chrono, x_labels, y_max, _Y_LABELS.get(group, "Score"))
+            )
         return charts
 
     def _chart(
@@ -254,15 +313,29 @@ class TrendsTab:
         chrono: list[dict[str, Any]],
         x_labels: list[str],
         y_max: float,
+        y_label: str,
     ) -> ft.Control:
         series = [
             (label, _PALETTE[i % len(_PALETTE)], [self._num(r.get(col)) for r in chrono])
             for i, (col, label) in enumerate(specs)
         ]
         return ft.Column(
-            [ft.Text(header, weight=ft.FontWeight.BOLD), _line_chart(series, x_labels, y_max)],
+            [
+                ft.Text(header, weight=ft.FontWeight.BOLD),
+                _line_chart(series, x_labels, y_max, y_label),
+            ],
             spacing=6,
         )
+
+    @staticmethod
+    def _ts_label(run: dict[str, Any]) -> str:
+        """A compact time-point label for the x-axis: 'MM-DD HH:MM' from the
+        run's ISO timestamp (falls back to the date, then '?')."""
+        ts = run.get("run_timestamp") or ""
+        if "T" in ts:
+            date, time = ts.split("T", 1)
+            return f"{date[5:10]} {time[:5]}"
+        return ts[:10] or "?"
 
     @staticmethod
     def _num(value: Any) -> float | None:

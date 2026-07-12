@@ -32,6 +32,41 @@ ToggleGroup = Literal["source", "chunk", "kg", "judge"]
 DEFAULT_FMT = ".2f"
 DEFAULT_DECIMALS = 3
 
+# ── display constants — single source for the dashboard; the GUI reads these
+#    instead of hardcoding labels/thresholds. ───────────────────────────────
+# Section header per metric group, in display order (dashboard renders sections
+# top-to-bottom in this order). Mirrors the Streamlit reference order —
+# Judge → Source → Chunk — then KA-specific groups. Groups whose metrics all
+# sit in the OVERVIEW_ROW (summary, latency) render nothing and are skipped.
+GROUP_LABELS: dict[str, str] = {
+    "summary": "Summary",
+    "llm": "Average Judge Scores",
+    "retrieval": "Average Source Retrieval Quality",
+    "chunk": "Average Chunk Retrieval Quality",
+    "kg": "Knowledge Graph",
+    "keyword": "Keywords",
+    "citation": "Grounding",
+    "tokens": "Tokens",
+    "latency": "Latency",
+}
+# The top "Average Performance" overview row: a curated, ordered set of headline
+# metric keys pulled ACROSS groups (the one thing group membership can't express).
+# The GUI renders these as the first card row and skips them in their own group
+# section so they aren't shown twice. Left-to-right = list order.
+OVERVIEW_ROW: tuple[str, ...] = (
+    "pass_rate",
+    "avg_judge_run_score",
+    "avg_latency_seconds",
+    "avg_agent_total_tokens",
+    "avg_judge_total_tokens",
+)
+# Section header for the overview row.
+OVERVIEW_LABEL = "Average Performance"
+# Color-band thresholds for a 0–1 score: >= GOOD → green, >= BORDERLINE →
+# orange, below → red. A global display convention (not per-metric).
+SCORE_GOOD_THRESHOLD = 0.8
+SCORE_BORDERLINE_THRESHOLD = 0.5
+
 
 @dataclass(frozen=True, slots=True)
 class MetricDef:
@@ -60,6 +95,11 @@ class MetricDef:
     toggle_group: ToggleGroup | None = None
     """Which user toggle controls whether this metric is computed. None =
     always-on regardless of `EvalConfig.enabled_groups`."""
+    higher_is_better: bool = True
+    """Whether a HIGHER value is an improvement. False for cost/error metrics
+    where lower is better (latency, tokens, hallucination, disallowed-keyword
+    hits) — drives the green/red direction of the dashboard's delta pills and
+    any pass/fail coloring. Single source of truth; the GUI never hardcodes it."""
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +214,7 @@ METRICS: list[MetricDef] = [
         key="disallowed_keyword_hits",
         label="Disallowed Keyword Hits",
         group="keyword",
+        higher_is_better=False,
         sql_column="disallowed_keyword_hits",
         sql_type="INTEGER",
         fmt="d",
@@ -280,6 +321,7 @@ METRICS: list[MetricDef] = [
         key="hallucination",
         label="Hallucination",
         group="llm",
+        higher_is_better=False,
         sql_column="hallucination",
         summary_avg_key="avg_hallucination",
         toggle_group="judge",
@@ -308,6 +350,7 @@ METRICS: list[MetricDef] = [
         key="judge_input_tokens",
         label="Judge Input Tokens",
         group="tokens",
+        higher_is_better=False,
         sql_column="judge_input_tokens",
         sql_type="INTEGER",
         fmt="d",
@@ -320,6 +363,7 @@ METRICS: list[MetricDef] = [
         key="judge_output_tokens",
         label="Judge Output Tokens",
         group="tokens",
+        higher_is_better=False,
         sql_column="judge_output_tokens",
         sql_type="INTEGER",
         fmt="d",
@@ -332,6 +376,7 @@ METRICS: list[MetricDef] = [
         key="judge_total_tokens",
         label="Judge Total Tokens",
         group="tokens",
+        higher_is_better=False,
         sql_column="judge_total_tokens",
         sql_type="INTEGER",
         fmt="d",
@@ -345,6 +390,7 @@ METRICS: list[MetricDef] = [
         key="agent_input_tokens",
         label="Agent Input Tokens",
         group="tokens",
+        higher_is_better=False,
         sql_column="agent_input_tokens",
         sql_type="INTEGER",
         fmt="d",
@@ -356,6 +402,7 @@ METRICS: list[MetricDef] = [
         key="agent_output_tokens",
         label="Agent Output Tokens",
         group="tokens",
+        higher_is_better=False,
         sql_column="agent_output_tokens",
         sql_type="INTEGER",
         fmt="d",
@@ -367,6 +414,7 @@ METRICS: list[MetricDef] = [
         key="agent_total_tokens",
         label="Agent Total Tokens",
         group="tokens",
+        higher_is_better=False,
         sql_column="agent_total_tokens",
         sql_type="INTEGER",
         fmt="d",
@@ -382,6 +430,7 @@ METRICS: list[MetricDef] = [
         key="latency_seconds",
         label="Latency",
         group="latency",
+        higher_is_better=False,
         sql_column="latency_seconds",
         summary_avg_key="avg_latency_seconds",
         fmt=".2f",
@@ -423,6 +472,16 @@ def run_sql_columns() -> list[tuple[str, str]]:
     return [(m.summary_avg_key, "REAL") for m in METRICS if m.summary_avg_key]
 
 
+def run_n_columns() -> list[tuple[str, str]]:
+    """Ordered (n_<key>, "INTEGER") pairs for the per-metric case-count columns
+    in `eval_runs`. `n_<key>` records how many cases had a non-None value for
+    the metric — the denominator behind `avg_<key>`. Because a no-gold case is
+    dropped from the mean (scored None, not 0/1), that denominator varies per
+    metric; storing it keeps a mean over 1 case distinguishable from one over
+    all of them. Paired with `summary_avg_pairs()` by the same source key."""
+    return [(f"n_{m.key}", "INTEGER") for m in METRICS if m.summary_avg_key]
+
+
 def summary_avg_pairs() -> list[tuple[str, str]]:
     """(summary_avg_key, source_key) pairs for building run-level summaries,
     e.g. ("avg_hit_at_k", "hit_at_k")."""
@@ -447,6 +506,19 @@ def metric_fmts() -> dict[str, str]:
         if m.summary_avg_key:
             fmts[m.summary_avg_key] = m.summary_avg_fmt or m.fmt
     return fmts
+
+
+def metric_directions() -> dict[str, bool]:
+    """key → higher_is_better, mirrored onto each summary_avg key.
+
+    Lets any consumer (e.g. the dashboard's delta pills) look up a metric's
+    direction by its per-case OR run-level-average key without hardcoding
+    which metrics are cost/error metrics where lower is better."""
+    directions: dict[str, bool] = {m.key: m.higher_is_better for m in METRICS}
+    for m in METRICS:
+        if m.summary_avg_key:
+            directions[m.summary_avg_key] = m.higher_is_better
+    return directions
 
 
 def metric_decimals() -> dict[str, int]:

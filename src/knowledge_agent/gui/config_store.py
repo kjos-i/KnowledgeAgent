@@ -147,15 +147,18 @@ class GuiConfig(BaseModel):
             "mode-classifier LLM; the others force a specific mode."
         ),
     )
-    input_mode: Literal["conversational", "direct_query", "direct_cypher"] = Field(
+    input_mode: Literal["conversational", "refined", "direct_query", "direct_cypher"] = Field(
         default="conversational",
         description=(
             "How your chat input is interpreted. 'conversational' = the "
             "chat router refines intent and decides when to search; "
-            "'direct_query' = your text goes straight to vector/hybrid "
-            "search (no router, no query-builder); 'direct_cypher' = your "
-            "text runs as raw Cypher against the knowledge graph (power "
-            "users; read-only queries only)."
+            "'refined' = the query-builder rewrites your text, then searches "
+            "your chosen store (no chat router); 'direct_query' = your exact "
+            "text is the search query, unrewritten (no router, no "
+            "query-builder); 'direct_cypher' = your text runs as raw Cypher "
+            "against the knowledge graph (power users; read-only queries only). "
+            "The store comes from retrieval_mode for every mode except "
+            "direct_cypher, which runs on the graph."
         ),
     )
     direct_retrieve: bool = Field(

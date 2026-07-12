@@ -43,6 +43,7 @@ from knowledge_agent.gui._widgets.retrieval_form import (
     LANCE_MODES,
     RetrievalControls,
     apply_gray_out,
+    build_input_mode_radios,
     build_mmr_slider,
     build_search_mode_radios,
     mmr_help_text,
@@ -169,6 +170,11 @@ class RetrievalTab:
             content=ft.Column(
                 spacing=2,
                 controls=[
+                    # Conversational is chat-only (the GUI chat router). It lives
+                    # here, NOT in the shared builder — the eval Dataset form uses
+                    # that builder too and has no router. The other three modes
+                    # come from `build_input_mode_radios` so the two forms can't
+                    # drift on options, labels, or wiring.
                     ft.Radio(
                         value="conversational",
                         label=(
@@ -176,19 +182,7 @@ class RetrievalTab:
                             "and decides when to search"
                         ),
                     ),
-                    ft.Radio(
-                        value="direct_query",
-                        label=(
-                            "Direct query — your text goes straight to "
-                            "vector/hybrid search (no router)"
-                        ),
-                    ),
-                    ft.Radio(
-                        value="direct_cypher",
-                        label=(
-                            "Direct Cypher — run your text as raw Cypher on the knowledge graph"
-                        ),
-                    ),
+                    *build_input_mode_radios(),
                 ],
             ),
         )
@@ -253,15 +247,20 @@ class RetrievalTab:
                             self.app,
                             title="Input mode",
                             text=(
-                                "How your chat input is handled:\n\n"
+                                "How your chat input is handled (the store is "
+                                "your retrieval_mode above, chosen "
+                                "separately):\n\n"
                                 "- Conversational: the chat router reads the "
                                 "conversation, refines your intent, and "
                                 "decides when to search. The normal chat "
                                 "experience.\n\n"
+                                "- Refined query: the query-builder rewrites "
+                                "your text, then searches - like "
+                                "Conversational but without the chat "
+                                "router.\n\n"
                                 "- Direct query: skips the router and the "
                                 "query-builder - your exact text is the "
-                                "search query, run over vector/hybrid "
-                                "search.\n\n"
+                                "search query.\n\n"
                                 "- Direct Cypher: power users - your text is "
                                 "run as raw Cypher against the Neo4j "
                                 "knowledge graph (read-only queries only)."
@@ -270,17 +269,18 @@ class RetrievalTab:
                                 "Just leave this on 'Conversational' — you type "
                                 "a question like you would to a person, and the "
                                 "app figures out when and how to search for you. "
-                                "The other two are shortcuts for advanced users."
+                                "The others are shortcuts for advanced users."
                             ),
                             technical=(
                                 "Conversational routes through the chat "
-                                "router + query-builder LLM nodes. Direct query "
-                                "bypasses both and passes your text straight to "
-                                "the retriever (vector / hybrid per the LanceDB "
-                                "search mode). Direct Cypher bypasses retrieval "
-                                "entirely and executes your text as a read-only "
-                                "Cypher statement against Neo4j (writes are "
-                                "rejected by the safety guard)."
+                                "router + query-builder nodes. Refined skips "
+                                "the router but keeps the query-builder. "
+                                "Direct query skips both - your text is the "
+                                "query verbatim. All three use your "
+                                "retrieval_mode for the store. Direct Cypher "
+                                "executes your text as a read-only Cypher "
+                                "statement against Neo4j (writes are rejected "
+                                "by the safety guard)."
                             ),
                         ),
                     ],

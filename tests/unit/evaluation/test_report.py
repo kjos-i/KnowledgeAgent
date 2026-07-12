@@ -54,6 +54,15 @@ def test_build_summary_none_safe_means():
     assert s["avg_chunk_hit_at_k"] == 1.0  # None skipped → mean(1.0)
 
 
+def test_build_summary_records_per_metric_n():
+    # n_<key> = how many cases fed the mean. Both cases had hit_at_k; only c2
+    # had chunk_hit_at_k (c1 was None → dropped), so its mean rests on n=1.
+    s = RP.build_summary(_results())
+    assert s["n_hit_at_k"] == 2
+    assert s["n_mrr"] == 2
+    assert s["n_chunk_hit_at_k"] == 1
+
+
 def test_build_report_structure(monkeypatch):
     monkeypatch.setattr(RP, "capture_provenance", _fake_provenance)
     rep = RP.build_report(EvalConfig(), _results(), "2026-07-05T10:00:00")

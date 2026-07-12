@@ -60,20 +60,37 @@ def resolve_judge_models(judge_models: tuple[str, ...] | list[str]) -> list[str]
     return [get_settings().mode_classifier_model]
 
 
+# DeepEval sentinels — keep the contextual/hallucination metrics well-defined on
+# sparse cases (mirrors the reference harness's `build_expected_output` /
+# `build_gold_context` / `build_retrieval_context` fallbacks). `expected_output`
+# and `context` need SOMETHING to compare against when a case pins no
+# `expected_answer_points`; `retrieval_context` must be non-empty because
+# DeepEval treats an empty context as a hard error. The gold-context fallback is
+# the sentinel ALONE (the reference also lists "Relevant source: <file>" lines,
+# but KA's sources are doc_id hashes — meaningless as judge context, so dropped).
+_NO_ANSWER_SENTINEL = "Provide a corpus-grounded answer only."
+_NO_CONTEXT_SENTINEL = "No context retrieved."
+
+
 def build_judge_input(run: CaseRun, case: EvalCase) -> dict[str, Any]:
     """Assemble the DeepEval test-case fields from the normalized run + gold.
 
     `retrieval_context` includes BOTH the retrieved chunk texts and the KG
     rows, so faithfulness/correctness judge the answer against the full
     evidence (this is how the KG leg reaches the judge track — no separate
-    KG judge metric needed)."""
+    KG judge metric needed).
+
+    Sentinels fill the gold/context fields when a case is sparse, so the
+    contextual/hallucination metrics stay well-defined instead of erroring or
+    scoring a degenerate value."""
+    points = case.expected_answer_points
     retrieval_context = list(run.retrieved_texts) + [str(h) for h in run.kg_hits]
     return {
         "input": case.question,
         "actual_output": run.answer or "",
-        "expected_output": "\n".join(case.expected_answer_points),
-        "context": list(case.expected_answer_points),
-        "retrieval_context": retrieval_context,
+        "expected_output": "\n".join(points) if points else _NO_ANSWER_SENTINEL,
+        "context": list(points) if points else [_NO_ANSWER_SENTINEL],
+        "retrieval_context": retrieval_context or [_NO_CONTEXT_SENTINEL],
     }
 
 
@@ -149,7 +166,7 @@ def _build_metrics(judge_llm: _JudgeLLM, threshold: float) -> dict[str, Any]:
         "correctness_g_eval": GEval(
             name="Grounded Correctness",
             criteria=(
-                "Determine whether the actual output correctly answers the input, "
+                "Determine whether the actual output correctly answers the user's request, "
                 "covers the important facts from the expected output, and avoids "
                 "unsupported claims."
             ),

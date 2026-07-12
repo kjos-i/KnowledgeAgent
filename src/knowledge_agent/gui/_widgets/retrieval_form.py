@@ -194,3 +194,68 @@ def build_mmr_slider(
         value=value, min=0.0, max=1.0, divisions=20, on_change=_slide, on_change_end=on_change_end
     )
     return slider, value_text
+
+
+# ---------------------------------------------------------------------------
+# Input-mode radio — the "how is my text interpreted as a query" axis, SHARED
+# by Settings → Retrieval and the eval Dataset form so the two can't drift.
+# Only the three modes that map to real backend graph knobs live here:
+#   refined       -> the query-builder rewrites the text (skip_query_builder=False)
+#   direct_query  -> the text is the search query verbatim (skip_query_builder=True)
+#   direct_cypher -> the text is raw Cypher (user_cypher set)
+# The store (retrieval_mode) is an INDEPENDENT knob, NOT bundled here — except
+# direct_cypher, which can only run on the graph (`store_forced_by_mode`).
+# "Conversational" (the GUI chat router) is a chat-only PRE-step on a different
+# axis; the Settings tab prepends it itself. It is deliberately NOT here — the
+# eval harness invokes the backend graph directly and has no router.
+# ---------------------------------------------------------------------------
+
+INPUT_MODE_LABELS: list[tuple[str, str]] = [
+    ("refined", "Refined query — the query builder rewrites your text before searching"),
+    (
+        "direct_query",
+        "Direct query — search your exact text, unrewritten (skips the query builder)",
+    ),
+    ("direct_cypher", "Direct Cypher — run your text as raw Cypher on the knowledge graph"),
+]
+
+
+def build_input_mode_radios() -> list[ft.Radio]:
+    """The three shared query-mode radios (refined / direct_query / direct_cypher).
+
+    A host wraps them in its OWN RadioGroup — the Settings tab prepends its
+    chat-only 'Conversational' radio, the eval form uses just these three — so
+    both render the SAME options + labels from one source. Fresh instances per
+    call (a control can't be shared across the tree)."""
+    return [ft.Radio(value=key, label=label) for key, label in INPUT_MODE_LABELS]
+
+
+def query_mode_to_knobs(mode: str, *, cypher_text: str | None = None) -> dict[str, object]:
+    """Map a query mode to the two graph knobs it controls: `skip_query_builder`
+    (direct_query) and `user_cypher` (direct_cypher). The store (`retrieval_mode`)
+    is independent and NOT set here — see `store_forced_by_mode` for the one
+    exception. Single source for both the chat dispatch and the eval-case save,
+    so they can't disagree on what a mode means."""
+    return {
+        "skip_query_builder": mode == "direct_query",
+        "user_cypher": ((cypher_text or "").strip() or None) if mode == "direct_cypher" else None,
+    }
+
+
+def knobs_to_query_mode(*, skip_query_builder: bool, user_cypher: str | None) -> str:
+    """Inverse of `query_mode_to_knobs`: derive the radio value from a stored
+    case's knobs (Cypher wins, then skip-builder, else refined). Used when the
+    eval form loads an existing case back into the radio."""
+    if user_cypher:
+        return "direct_cypher"
+    if skip_query_builder:
+        return "direct_query"
+    return "refined"
+
+
+def store_forced_by_mode(mode: str) -> str | None:
+    """Direct Cypher can only execute on the graph, so it pins the store to
+    `neo4j_only`; every other query mode leaves the store INDEPENDENT (the
+    user's own retrieval_mode). Returns the forced retrieval_mode, or None when
+    the mode doesn't constrain the store."""
+    return "neo4j_only" if mode == "direct_cypher" else None

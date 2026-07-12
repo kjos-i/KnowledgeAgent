@@ -52,8 +52,12 @@ from knowledge_agent.gui._widgets.retrieval_form import (
     DEFAULT_VALUES,
     RetrievalControls,
     apply_gray_out,
+    build_input_mode_radios,
     build_mmr_slider,
     build_search_mode_radios,
+    knobs_to_query_mode,
+    query_mode_to_knobs,
+    store_forced_by_mode,
 )
 from knowledge_agent.gui.evaluation._case_view import case_card, render_case_cards
 from knowledge_agent.gui.settings.llm_tab import LLM_AVAILABLE_MODELS
@@ -243,23 +247,10 @@ class DatasetTab:
                 on_change=oc,
                 content=ft.Column(
                     spacing=2,
-                    controls=[
-                        ft.Radio(
-                            value="refined",
-                            label=(
-                                "Refined query — the query-builder LLM rewrites your question, "
-                                "then searches"
-                            ),
-                        ),
-                        ft.Radio(
-                            value="direct_query",
-                            label="Direct query — your raw text goes straight to vector/hybrid search",
-                        ),
-                        ft.Radio(
-                            value="direct_cypher",
-                            label="Direct Cypher — run your text as raw Cypher on the knowledge graph",
-                        ),
-                    ],
+                    # Shared with Settings → Retrieval (SSOT). Eval has no chat
+                    # router, so no 'Conversational' option — the harness runs the
+                    # backend graph directly.
+                    controls=build_input_mode_radios(),
                 ),
             ),
             "direct_retrieval": ft.Checkbox(
@@ -494,6 +485,13 @@ class DatasetTab:
         `apply_gray_out` — the same single source Settings → Retrieval uses, so
         the two forms can't disagree. A grayed knob isn't fed to the search."""
         f = self.f
+        # direct_cypher runs only on the graph → pin + lock the store to neo4j
+        # (store_forced_by_mode), so the gray-out below reflects the real legs
+        # and the form can't author a Cypher case that never reaches Neo4j.
+        forced_store = store_forced_by_mode(f["input_mode"].value or "refined")
+        if forced_store:
+            f["retrieval_mode"].value = forced_store
+        f["retrieval_mode"].disabled = forced_store is not None
         apply_gray_out(
             RetrievalControls(
                 lancedb_mode_box=self._lancedb_mode_box,
@@ -771,13 +769,12 @@ class DatasetTab:
         self._mmr_value_text.value = f"{mmr_val:.2f}"
         f["use_mmr"].value = case.retrieval.use_mmr
         f["kg_max_rows"].value = _num_or_default(case.retrieval.kg_max_rows, "kg_max_rows")
-        # Derive the input-mode radio from the case's skip_query_builder / cypher.
-        if case.user_cypher:
-            f["input_mode"].value = "direct_cypher"
-        elif case.retrieval.skip_query_builder:
-            f["input_mode"].value = "direct_query"
-        else:
-            f["input_mode"].value = "refined"
+        # Derive the input-mode radio from the case's knobs (shared mapping,
+        # inverse of query_mode_to_knobs).
+        f["input_mode"].value = knobs_to_query_mode(
+            skip_query_builder=case.retrieval.skip_query_builder,
+            user_cypher=case.user_cypher,
+        )
         f["direct_retrieval"].value = case.retrieval.direct_retrieval
         f["expected_sources"].value = _text(case.expected_sources)
         f["expected_chunks"].value = _text(case.expected_chunks)
@@ -850,11 +847,12 @@ class DatasetTab:
             if not lenient:
                 raise
             top_k = 5
-        # Input-mode radio → the case's skip_query_builder / user_cypher.
+        # Input-mode radio → the case's skip_query_builder / user_cypher, via the
+        # shared mapping (SSOT with the chat dispatch). direct_cypher pins the
+        # store to neo4j (store_forced_by_mode) — Cypher only runs on the graph.
         input_mode = f["input_mode"].value or "refined"
-        cypher = None
-        if input_mode == "direct_cypher":
-            cypher = (f["user_cypher"].value or "").strip() or None
+        knobs = query_mode_to_knobs(input_mode, cypher_text=f["user_cypher"].value)
+        retrieval_mode = store_forced_by_mode(input_mode) or f["retrieval_mode"].value
         return EvalCase(
             id=case_id,
             question=question,
@@ -868,9 +866,9 @@ class DatasetTab:
             expected_answer_points=_lines(f["expected_answer_points"].value),
             expected_entities=_lines(f["expected_entities"].value),
             expected_mode=f["expected_mode"].value or None,
-            user_cypher=cypher,
+            user_cypher=knobs["user_cypher"],
             retrieval={
-                "retrieval_mode": f["retrieval_mode"].value,
+                "retrieval_mode": retrieval_mode,
                 "lancedb_search_mode": f["lancedb_search_mode"].value,
                 "top_k": top_k,
                 "num_candidates": _num(int, f["num_candidates"].value),
@@ -878,7 +876,7 @@ class DatasetTab:
                 "mmr_lambda": float(f["mmr_lambda"].value),  # slider → float
                 "use_mmr": bool(f["use_mmr"].value),
                 "kg_max_rows": _num(int, f["kg_max_rows"].value),
-                "skip_query_builder": input_mode == "direct_query",
+                "skip_query_builder": knobs["skip_query_builder"],
                 "direct_retrieval": bool(f["direct_retrieval"].value),
             },
         )
