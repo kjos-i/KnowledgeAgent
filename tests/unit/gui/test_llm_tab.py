@@ -1,15 +1,15 @@
-"""Tests for the LLM settings tab's chat-router row.
+"""Tests for the LLM settings tab — chat-router row, per-node temperature
+greying, and the provider-switch model reset.
 
-The router is GUI-only, but it reuses the per-node model+temp machinery
-(keyed 'chat_router'). On a provider switch it must reset to the new
-provider's curated model GUI-side — NOT via the backend registry, which
-has no router entry.
+Provider install/uninstall moved to the Installs tab (see test_installs_tab).
+The router is GUI-only but reuses the per-node model+temp machinery (keyed
+'chat_router'); on a provider switch it resets to the new provider's curated
+model GUI-side — NOT via the backend registry, which has no router entry.
 """
 
 from __future__ import annotations
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from knowledge_agent.config import PROVIDER_NODE_DEFAULTS
 from knowledge_agent.gui.config_store import GuiConfig
@@ -68,58 +68,3 @@ def test_temp_slider_greys_out_for_sampling_free_model():
     tab._sync_temp_enabled("synthesizer")
     assert tab.node_temp_sliders["synthesizer"].disabled is False
     assert tab.node_temp_sliders["synthesizer"].tooltip is None
-
-
-# ---- install / uninstall wiring ----
-
-
-def _plan(**kw) -> MagicMock:
-    plan = MagicMock(**kw)
-    plan.summary = kw.get("summary", "SUMMARY")
-    return plan
-
-
-def test_uninstall_active_provider_short_circuits_no_dialog():
-    """The active provider can't be uninstalled — the handler surfaces the
-    plan summary as a status and shows NO confirm dialog."""
-    tab = _tab()
-    plan = _plan(bundled=False, is_active=True, installed=True, summary="X is ACTIVE")
-    with patch(
-        "knowledge_agent.gui.settings.llm_tab.uninstall_llm_provider_plan", return_value=plan
-    ):
-        tab.on_uninstall_clicked("anthropic")
-    assert tab.status.value == "X is ACTIVE"
-    tab.app.page.show_dialog.assert_not_called()
-
-
-def test_uninstall_installed_inactive_shows_confirm_dialog():
-    tab = _tab()
-    plan = _plan(bundled=False, is_active=False, installed=True, display_name="OpenAI")
-    with patch(
-        "knowledge_agent.gui.settings.llm_tab.uninstall_llm_provider_plan", return_value=plan
-    ):
-        tab.on_uninstall_clicked("openai")
-    tab.app.page.show_dialog.assert_called_once()
-
-
-def test_prompt_install_already_installed_short_circuits_no_dialog():
-    tab = _tab()
-    plan = _plan(bundled=False, already_installed=True, summary="already installed")
-    with patch(
-        "knowledge_agent.gui.settings.llm_tab.install_llm_provider_plan",
-        AsyncMock(return_value=plan),
-    ):
-        asyncio.run(tab._prompt_install("anthropic"))
-    assert tab.status.value == "already installed"
-    tab.app.page.show_dialog.assert_not_called()
-
-
-def test_prompt_install_installable_shows_confirm_dialog():
-    tab = _tab()
-    plan = _plan(bundled=False, already_installed=False, display_name="OpenAI")
-    with patch(
-        "knowledge_agent.gui.settings.llm_tab.install_llm_provider_plan",
-        AsyncMock(return_value=plan),
-    ):
-        asyncio.run(tab._prompt_install("openai"))
-    tab.app.page.show_dialog.assert_called_once()

@@ -25,7 +25,7 @@ def test_evaluation_view_builds_six_sub_tabs(fake_app: MagicMock):
     assert ctl.length == len(SUB_TAB_LABELS) == 6
     tab_bar = ctl.content.controls[0]
     assert [t.label for t in tab_bar.tabs] == list(SUB_TAB_LABELS)
-    assert "Dataset" in SUB_TAB_LABELS
+    assert "Create test cases" in SUB_TAB_LABELS
 
 
 def test_evaluation_view_selected_run_defaults_none(fake_app: MagicMock):

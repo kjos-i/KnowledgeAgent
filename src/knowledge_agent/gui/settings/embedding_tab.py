@@ -1,31 +1,25 @@
-"""Settings → Embedding sub-tab — provider + per-provider model + rate.
-
-Same UX pattern as the LLM sub-tab, simpler scope:
+"""Settings → Embedding sub-tab — active provider + model + rate.
 
   1. Active provider — radio group, only INSTALLED providers shown.
-  2. Providers list — all 4 (voyage / openai / google / huggingface)
-     with install state + Install / Uninstall buttons. Buttons are
-     wired to the embedder_lifecycle install/uninstall (pip) behind a
-     confirm dialog.
-  3. Embedding model — single editable Dropdown. Options come from
-     the curated `EMBEDDING_AVAILABLE_MODELS[active_provider]` menu;
-     user can type a custom model name to override.
-  4. Voyage rate limit — Optional[float] (empty = no limit).
+  2. Embedding model — single editable Dropdown. Options come from the
+     curated `EMBEDDING_AVAILABLE_MODELS[active_provider]` menu; user can
+     type a custom model name to override.
+  3. Voyage rate limit — Optional[float] (empty = no limit).
 
-Switching the active provider runs a dimension guard: if the
-corpus already holds chunks at a different vector dimension than
-the new provider's default, the switch is DESTRUCTIVE (the LanceDB
-chunks table pins the dim at creation) and requires a hard confirm.
-The confirm dialog points the user at the Re-embed bulk operation
-to rebuild the corpus under the new provider.
+Install / Uninstall of each provider's pip adapter lives in the **Installs**
+tab now (the global install surface) — the same install-here / choose-there
+split the app already uses for ontologies + extractors. This tab is the
+CHOICE of which installed embedder to use, plus its model + rate.
 
-Active provider's Uninstall is disabled (same rule as LLM tab) —
-switch to another first.
+Switching the active provider runs a dimension guard: if the corpus already
+holds chunks at a different vector dimension than the new provider's default,
+the switch is DESTRUCTIVE (the LanceDB chunks table pins the dim at creation)
+and requires a hard confirm. The confirm dialog points the user at the
+Re-embed bulk operation to rebuild the corpus under the new provider.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -34,11 +28,7 @@ import flet as ft
 from knowledge_agent.config import reset_after_key_change
 from knowledge_agent.embedder_lifecycle import (
     EMBEDDER_PROVIDER_REGISTRY,
-    install_embedder_provider_execute,
-    install_embedder_provider_plan,
     switch_embedder_plan,
-    uninstall_embedder_provider_execute,
-    uninstall_embedder_provider_plan,
 )
 from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
@@ -119,9 +109,9 @@ class EmbeddingTab:
         self.active_provider_radio: ft.RadioGroup | None = None
         self.active_provider_container: ft.Container | None = None
 
-        self.provider_status_texts: dict[str, ft.Text] = {}
-        self.provider_install_buttons: dict[str, ft.Button] = {}
-        self.provider_uninstall_buttons: dict[str, ft.Button] = {}
+        # is_installed per provider — read to build the active-provider radio
+        # (only installed providers are selectable). Install / Uninstall live
+        # in the Installs tab now (the global install surface).
         self._installed_state: dict[str, bool] = {}
 
         self.model_field: ft.Dropdown | None = None
@@ -144,22 +134,6 @@ class EmbeddingTab:
                 italic=True,
             ),
         )
-
-        for provider in _PROVIDER_ORDER:
-            self.provider_status_texts[provider] = ft.Text(
-                "(checking…)",
-                size=12,
-                color=ft.Colors.GREY_500,
-                italic=True,
-            )
-            self.provider_install_buttons[provider] = ft.Button(
-                content=centered_label("Install"),
-                on_click=lambda e, p=provider: self.on_install_clicked(p),
-            )
-            self.provider_uninstall_buttons[provider] = ft.Button(
-                content=centered_label("Uninstall"),
-                on_click=lambda e, p=provider: self.on_uninstall_clicked(p),
-            )
 
         # Single editable model dropdown — options driven by the active
         # provider's curated list; value reflects the active model.
@@ -197,7 +171,6 @@ class EmbeddingTab:
         if self._first_build:
             self._first_build = False
             self._sync_installed_state()
-            self._sync_provider_rows()
             self._sync_active_provider_radio()
 
         return ft.Column(
@@ -211,20 +184,12 @@ class EmbeddingTab:
                 section_header(
                     self.app,
                     "Active provider",
-                    "Switching is immediate. The dimension guard blocks a switch "
-                    "when the new provider's dimension doesn't match the chunks "
-                    "already in your LanceDB corpus.",
+                    "Switching is immediate. Install / Uninstall providers in the "
+                    "Installs tab. The dimension guard blocks a switch when the "
+                    "new provider's dimension doesn't match the chunks already in "
+                    "your LanceDB corpus.",
                 ),
                 self.active_provider_container,
-                section_divider(),
-                # ---- Providers list ------------------------------------
-                section_header(
-                    self.app,
-                    "Providers",
-                    "Install / Uninstall each provider's packages via pip "
-                    "(confirm dialog; a restart is needed after).",
-                ),
-                *[self._render_provider_row(p) for p in _PROVIDER_ORDER],
                 section_divider(),
                 # ---- Model ---------------------------------------------
                 section_header(
@@ -285,39 +250,13 @@ class EmbeddingTab:
                 )
                 self._installed_state[provider] = False
 
-    def _sync_provider_rows(self) -> None:
-        active = self.app.gui_config.embedding_provider
-        for provider in _PROVIDER_ORDER:
-            installed = self._installed_state.get(provider, False)
-            status_text = self.provider_status_texts[provider]
-            install_btn = self.provider_install_buttons[provider]
-            uninstall_btn = self.provider_uninstall_buttons[provider]
-
-            if installed:
-                status_text.value = "✓ installed"
-                status_text.color = ft.Colors.GREEN_300
-            else:
-                status_text.value = "○ not installed"
-                status_text.color = ft.Colors.GREY_400
-
-            install_btn.visible = not installed
-            uninstall_btn.visible = installed
-            if installed and provider == active:
-                uninstall_btn.disabled = True
-                uninstall_btn.tooltip = (
-                    "Active provider can't be uninstalled — switch to another first."
-                )
-            else:
-                uninstall_btn.disabled = False
-                uninstall_btn.tooltip = None
-
     def _sync_active_provider_radio(self) -> None:
         if self.active_provider_container is None:
             return
         installed = [p for p in _PROVIDER_ORDER if self._installed_state.get(p)]
         if not installed:
             self.active_provider_container.content = ft.Text(
-                "No providers installed yet — pick one below and click Install.",
+                "No providers installed yet — install one in the Installs tab.",
                 size=12,
                 color=ft.Colors.AMBER_300,
                 italic=True,
@@ -341,24 +280,6 @@ class EmbeddingTab:
             ),
         )
         self.active_provider_container.content = self.active_provider_radio
-
-    # ----- Provider row builder --------------------------------------------
-
-    def _render_provider_row(self, provider: str) -> ft.Control:
-        display = EMBEDDER_PROVIDER_REGISTRY[provider]["display_name"]
-        return ft.Row(
-            controls=[
-                ft.Text(display, size=12, width=180),
-                ft.Container(
-                    content=self.provider_status_texts[provider],
-                    expand=True,
-                ),
-                self.provider_install_buttons[provider],
-                self.provider_uninstall_buttons[provider],
-            ],
-            spacing=8,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
 
     # ----- Handlers --------------------------------------------------------
 
@@ -453,7 +374,6 @@ class EmbeddingTab:
             ft.DropdownOption(key=m, text=m) for m in EMBEDDING_AVAILABLE_MODELS.get(new_value, ())
         ]
         self.model_field.value = new_model
-        self._sync_provider_rows()
         self.app.page.update()
 
     def _set_status(self, msg: str, *, ok: bool = True) -> None:
@@ -494,64 +414,6 @@ class EmbeddingTab:
             ],
         )
         self.app.page.show_dialog(dialog)
-        self.app.page.update()
-
-    def on_install_clicked(self, provider: str) -> None:
-        """Confirm + pip-install the provider's adapter / libs."""
-        plan = install_embedder_provider_plan(provider)
-        if plan.bundled or plan.already_installed:
-            self._set_status(plan.summary)
-            return
-        self._show_confirm(
-            title=f"Install {plan.display_name}?",
-            body=plan.summary,
-            confirm_label="Install",
-            on_confirm=lambda: asyncio.create_task(self._run_install(provider)),
-        )
-
-    async def _run_install(self, provider: str) -> None:
-        self._set_status(f"Installing {provider} embedder…")
-        plan = install_embedder_provider_plan(provider)
-        result = await install_embedder_provider_execute(plan)
-        if not result.install_ok:
-            tail = result.pip_output[-200:] if result.pip_output else ""
-            self._set_status(f"Install {provider} failed: {tail}", ok=False)
-            return
-        if not result.did_install:
-            self._set_status(f"{provider} was already installed.")
-        elif result.restart_required:
-            self._set_status(f"Installed {provider}. Restart the app for it to take effect.")
-        else:
-            self._set_status(f"Installed {provider}.")
-        self._sync_installed_state()
-        self._sync_provider_rows()
-        self.app.page.update()
-
-    def on_uninstall_clicked(self, provider: str) -> None:
-        """Confirm + pip-uninstall the provider's adapter. No-op cases
-        (bundled / active / not installed) just surface the plan summary."""
-        plan = uninstall_embedder_provider_plan(provider)
-        if plan.bundled or plan.is_active or not plan.installed:
-            self._set_status(plan.summary, ok=not plan.is_active)
-            return
-        self._show_confirm(
-            title=f"Uninstall {plan.display_name}?",
-            body=plan.summary,
-            confirm_label="Uninstall",
-            on_confirm=lambda: asyncio.create_task(self._run_uninstall(provider)),
-        )
-
-    async def _run_uninstall(self, provider: str) -> None:
-        self._set_status(f"Uninstalling {provider} embedder…")
-        plan = uninstall_embedder_provider_plan(provider)
-        result = await uninstall_embedder_provider_execute(plan)
-        if not result.uninstall_ok:
-            tail = result.pip_output[-200:] if result.pip_output else ""
-            self._set_status(f"Uninstall {provider} failed: {tail}", ok=False)
-            return
-        self._set_status(f"Uninstalled {provider}. Restart the app to fully release the module.")
-        self._sync_installed_state()
-        self._sync_provider_rows()
         self.app.page.update()
 
     def on_model_blur(self, e: ft.Event) -> None:

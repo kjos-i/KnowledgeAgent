@@ -1,12 +1,19 @@
-"""Library top-tab coordinator — 4 sub-tabs, fixed layouts.
+"""Library top-tab coordinator — 3 sub-tabs, fixed layouts.
 
 Sub-tabs:
 
-  Select     — dataset picker + info card + docs table (internal 2-col)
+  Metadata   — corpus info card + docs table (internal 2-col). (Corpus
+               SELECTION lives in the global top-bar dropdown, so this tab
+               is the selected corpus's metadata + documents, not a picker —
+               hence "Metadata", renamed from "Select".)
   Ingest     — per-corpus config editor + Ingest / bulk_ops actions
                (internal 2-col)
   Create New — new-corpus form + helper info (internal 2-col)
-  Installs   — global install surface (full width)
+
+Installs was promoted to its own top-level tab — it's a global,
+machine-level install surface (providers / ontologies / weights), not
+corpus-specific — so it no longer lives here. Its widget still lives in
+`gui/library/installs.py`; `app.py` mounts it at the top level.
 
 No draggable splitter — each tab owns its internal layout with fixed
 proportions. Splitters live in Search only.
@@ -20,25 +27,23 @@ import flet as ft
 
 from knowledge_agent.gui.library.create_new_dataset import CreateNewDatasetTab
 from knowledge_agent.gui.library.ingest import IngestTab
-from knowledge_agent.gui.library.installs import InstallsTab
 from knowledge_agent.gui.library.select_dataset import SelectDatasetTab
 
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
 
 
-SUB_TAB_LABELS = ("Select", "Ingest", "Create New", "Installs")
+SUB_TAB_LABELS = ("Metadata", "Ingest", "Create New")
 
 
 class LibraryView:
-    """Top-tab coordinator for Library — 4 sub-tabs, no shared splitter."""
+    """Top-tab coordinator for Library — 3 sub-tabs, no shared splitter."""
 
     def __init__(self, app: GuiApp) -> None:
         self.app = app
         self.select_tab = SelectDatasetTab(app)
         self.ingest_tab = IngestTab(app)
         self.create_tab = CreateNewDatasetTab(app)
-        self.installs_tab = InstallsTab(app)
         # Ingest sub-tab body container — held so it can be rebuilt in
         # place when the active corpus changes (see `refresh_ingest`).
         self._ingest_body: ft.Container | None = None
@@ -70,11 +75,6 @@ class LibraryView:
                 self._ingest_body,
                 ft.Container(
                     content=self.create_tab.build(),
-                    padding=8,
-                    expand=True,
-                ),
-                ft.Container(
-                    content=self.installs_tab.build(),
                     padding=8,
                     expand=True,
                 ),

@@ -54,6 +54,13 @@ from typing import TYPE_CHECKING
 import flet as ft
 
 from knowledge_agent.config import reset_after_key_change
+from knowledge_agent.embedder_lifecycle import (
+    EMBEDDER_PROVIDER_REGISTRY,
+    install_embedder_provider_execute,
+    install_embedder_provider_plan,
+    uninstall_embedder_provider_execute,
+    uninstall_embedder_provider_plan,
+)
 from knowledge_agent.entity_extractors.extractor_lifecycle import (
     EXTRACTOR_REGISTRY,
     delete_extractor_weights_execute,
@@ -98,6 +105,13 @@ from knowledge_agent.kg.ontology_lifecycle import (
     is_ontology_downloaded,
 )
 from knowledge_agent.kg.ontology_linking import ONTOLOGY_REGISTRY
+from knowledge_agent.llm_lifecycle import (
+    LLM_PROVIDER_REGISTRY,
+    install_llm_provider_execute,
+    install_llm_provider_plan,
+    uninstall_llm_provider_execute,
+    uninstall_llm_provider_plan,
+)
 
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
@@ -109,6 +123,8 @@ logger = logging.getLogger(__name__)
 _ONTOLOGY_ORDER: tuple[str, ...] = tuple(_ONTOLOGY_DISPLAY.keys())
 _EXTRACTOR_ORDER: tuple[str, ...] = tuple(EXTRACTOR_REGISTRY.keys())
 _PARSER_ORDER: tuple[str, ...] = tuple(PARSER_LIFECYCLE_REGISTRY.keys())
+_EMBEDDER_PROVIDER_ORDER: tuple[str, ...] = ("voyage", "openai", "google", "huggingface")
+_LLM_PROVIDER_ORDER: tuple[str, ...] = ("anthropic", "openai", "google", "ollama")
 
 
 def _fmt_bytes(n: int) -> str:
@@ -178,7 +194,13 @@ def _resolve_ollama_models_dir() -> Path:
 
 
 class InstallsTab:
-    """Global install surface — ontologies, extractors, parsers."""
+    """Global install surface — ontologies, extractors, parsers, providers.
+
+    Provider *installs* (embedder / LLM pip adapters) live here — the single
+    machine-level install surface. The active-provider CHOICE + model stay in
+    their own tabs (Embedding settings / Search → LLM), which read install
+    state to offer only installed providers.
+    """
 
     def __init__(self, app: GuiApp) -> None:
         self.app = app
@@ -207,6 +229,19 @@ class InstallsTab:
         self.parser_status_texts: dict[str, ft.Text] = {}
         self.parser_install_buttons: dict[str, ft.Button] = {}
         self.parser_uninstall_buttons: dict[str, ft.Button] = {}
+
+        # Embedding-provider row widgets (Install / Uninstall the pip
+        # adapter). The active-provider choice + model live in the Embedding
+        # settings tab; only the install lives here.
+        self.embedder_provider_status_texts: dict[str, ft.Text] = {}
+        self.embedder_provider_install_buttons: dict[str, ft.Button] = {}
+        self.embedder_provider_uninstall_buttons: dict[str, ft.Button] = {}
+
+        # LLM-provider row widgets — same shape as the embedder rows. The
+        # active-provider choice + Ollama daemon status stay in the LLM tab.
+        self.llm_provider_status_texts: dict[str, ft.Text] = {}
+        self.llm_provider_install_buttons: dict[str, ft.Button] = {}
+        self.llm_provider_uninstall_buttons: dict[str, ft.Button] = {}
 
         # ontology_downloads_dir — EDITABLE TextField backed by
         # `GuiConfig.ontology_downloads_dir` (JSON persistence via
@@ -326,6 +361,40 @@ class InstallsTab:
                 on_click=lambda e, n=name: self._on_parser_uninstall(n),
             )
 
+        # Embedding providers: 2 buttons (Install / Uninstall pip adapter),
+        # flipped by visibility. Same shared backend the Embedding tab used.
+        for name in _EMBEDDER_PROVIDER_ORDER:
+            self.embedder_provider_status_texts[name] = ft.Text(
+                "(checking…)",
+                size=12,
+                color=ft.Colors.GREY_500,
+                italic=True,
+            )
+            self.embedder_provider_install_buttons[name] = ft.Button(
+                content=centered_label("Install"),
+                on_click=lambda e, n=name: self._on_embedder_provider_install(n),
+            )
+            self.embedder_provider_uninstall_buttons[name] = ft.Button(
+                content=centered_label("Uninstall"),
+                on_click=lambda e, n=name: self._on_embedder_provider_uninstall(n),
+            )
+
+        for name in _LLM_PROVIDER_ORDER:
+            self.llm_provider_status_texts[name] = ft.Text(
+                "(checking…)",
+                size=12,
+                color=ft.Colors.GREY_500,
+                italic=True,
+            )
+            self.llm_provider_install_buttons[name] = ft.Button(
+                content=centered_label("Install"),
+                on_click=lambda e, n=name: self._on_llm_provider_install(n),
+            )
+            self.llm_provider_uninstall_buttons[name] = ft.Button(
+                content=centered_label("Uninstall"),
+                on_click=lambda e, n=name: self._on_llm_provider_uninstall(n),
+            )
+
     # ----- public API -------------------------------------------------------
 
     def build(self) -> ft.Control:
@@ -334,6 +403,8 @@ class InstallsTab:
             self._sync_downloads_dir()
             self._sync_extractor_state()
             self._sync_parser_state()
+            self._sync_embedder_provider_state()
+            self._sync_llm_provider_state()
             # Ontology state is a disk probe now (no Neo4j) — cheap +
             # sync. The former async Neo4j probe moved into the Ingest
             # tab's bulk_ops surface where node writes belong.
@@ -479,6 +550,55 @@ class InstallsTab:
                         self.parser_uninstall_buttons[name],
                     ),
                     source_url=parser_source_url,
+                )
+            )
+        controls.append(section_divider())
+
+        # ---- Embedding providers (4) -------------------------------
+        controls.append(
+            section_header(
+                self.app,
+                "Embedding providers (4)",
+                "Install / Uninstall each embedder's pip adapter (confirm "
+                "dialog; a restart is needed after). Choose the ACTIVE embedder "
+                "+ model in the Embedding settings, not here. The active "
+                "embedder can't be uninstalled — switch it there first.",
+            )
+        )
+        for name in _EMBEDDER_PROVIDER_ORDER:
+            controls.append(
+                self._simple_row(
+                    EMBEDDER_PROVIDER_REGISTRY[name]["display_name"],
+                    self.embedder_provider_status_texts[name],
+                    (
+                        self.embedder_provider_install_buttons[name],
+                        self.embedder_provider_uninstall_buttons[name],
+                    ),
+                )
+            )
+        controls.append(section_divider())
+
+        # ---- LLM providers (4) -------------------------------------
+        controls.append(
+            section_header(
+                self.app,
+                "LLM providers (4)",
+                "Install / Uninstall each LLM adapter's pip package (confirm "
+                "dialog; a restart is needed after). Choose the ACTIVE LLM + "
+                "per-node models in Search → LLM, not here (that's also where "
+                "the Ollama daemon status lives). The active LLM can't be "
+                "uninstalled — switch it there first.",
+            )
+        )
+        for name in _LLM_PROVIDER_ORDER:
+            controls.append(
+                self._simple_row(
+                    LLM_PROVIDER_REGISTRY[name]["display_name"],
+                    self.llm_provider_status_texts[name],
+                    (
+                        self.llm_provider_install_buttons[name],
+                        self.llm_provider_uninstall_buttons[name],
+                    ),
                 )
             )
         controls.append(self.status)
@@ -705,6 +825,65 @@ class InstallsTab:
                 status_text.color = ft.Colors.GREY_400
             install_btn.visible = not installed
             uninstall_btn.visible = installed
+
+    def _sync_embedder_provider_state(self) -> None:
+        """Install-state (pip adapter) per embedding provider. The active
+        embedder's Uninstall is disabled — switch it in the Embedding settings
+        first (same install-here / choose-there split as ontologies +
+        extractors)."""
+        active = self.app.gui_config.embedding_provider
+        for name in _EMBEDDER_PROVIDER_ORDER:
+            entry = EMBEDDER_PROVIDER_REGISTRY[name]
+            installed = self._safe_bool(entry.get("is_installed_fn"))
+            status_text = self.embedder_provider_status_texts[name]
+            install_btn = self.embedder_provider_install_buttons[name]
+            uninstall_btn = self.embedder_provider_uninstall_buttons[name]
+            if installed:
+                status_text.value = "✓ installed"
+                status_text.color = ft.Colors.GREEN_300
+            else:
+                status_text.value = "○ not installed"
+                status_text.color = ft.Colors.GREY_400
+            install_btn.visible = not installed
+            uninstall_btn.visible = installed
+            if installed and name == active:
+                uninstall_btn.disabled = True
+                uninstall_btn.tooltip = (
+                    "Active embedder can't be uninstalled — switch it in the "
+                    "Embedding settings first."
+                )
+            else:
+                uninstall_btn.disabled = False
+                uninstall_btn.tooltip = None
+
+    def _sync_llm_provider_state(self) -> None:
+        """Install-state (pip adapter) per LLM provider. The active LLM's
+        Uninstall is disabled — switch it in Search → LLM first. Ollama's
+        DAEMON reachability is a runtime concern shown in the LLM tab, not
+        here — this row is only 'is the adapter pip-installed'."""
+        active = self.app.gui_config.llm_provider
+        for name in _LLM_PROVIDER_ORDER:
+            entry = LLM_PROVIDER_REGISTRY[name]
+            installed = self._safe_bool(entry.get("is_installed_fn"))
+            status_text = self.llm_provider_status_texts[name]
+            install_btn = self.llm_provider_install_buttons[name]
+            uninstall_btn = self.llm_provider_uninstall_buttons[name]
+            if installed:
+                status_text.value = "✓ installed"
+                status_text.color = ft.Colors.GREEN_300
+            else:
+                status_text.value = "○ not installed"
+                status_text.color = ft.Colors.GREY_400
+            install_btn.visible = not installed
+            uninstall_btn.visible = installed
+            if installed and name == active:
+                uninstall_btn.disabled = True
+                uninstall_btn.tooltip = (
+                    "Active LLM can't be uninstalled — switch it in Search → LLM first."
+                )
+            else:
+                uninstall_btn.disabled = False
+                uninstall_btn.tooltip = None
 
     def _sync_ontology_state(self) -> None:
         """Read on-disk state for each ontology and update its row.
@@ -1091,4 +1270,107 @@ class InstallsTab:
             f"Uninstalled parser {name!r}. Restart the app to fully release the module."
         )
         self._sync_parser_state()
+        self._safe_update()
+
+    # --- Embedding providers (pip adapter install / uninstall) ---
+    # Same shape as the extractor / parser handlers above: no pre-check —
+    # bundled / already-installed / active-uninstall are handled by button
+    # visibility (+ the disabled active-Uninstall set in _sync), and the
+    # execute functions are themselves no-op guarded for those cases.
+    def _on_embedder_provider_install(self, name: str) -> None:
+        plan = install_embedder_provider_plan(name)
+        self._show_confirm_dialog(
+            title=f"Install {plan.display_name}?",
+            body=plan.summary,
+            confirm_label="Install",
+            on_confirm=lambda: asyncio.create_task(self._run_embedder_provider_install(name)),
+        )
+
+    async def _run_embedder_provider_install(self, name: str) -> None:
+        self._set_status(f"Installing {name!r} embedder adapter…")
+        plan = install_embedder_provider_plan(name)
+        result = await install_embedder_provider_execute(plan)
+        if not result.install_ok:
+            tail = result.pip_output[-200:] if result.pip_output else ""
+            self._set_status(f"Install {name!r} failed: {tail}", ok=False)
+            return
+        if result.restart_required:
+            self._set_status(f"Installed {name!r}. Restart the app for it to take effect.")
+        else:
+            self._set_status(f"{name!r} was already installed.")
+        self._sync_embedder_provider_state()
+        self._safe_update()
+
+    def _on_embedder_provider_uninstall(self, name: str) -> None:
+        plan = uninstall_embedder_provider_plan(name)
+        self._show_confirm_dialog(
+            title=f"Uninstall {plan.display_name}?",
+            body=plan.summary,
+            confirm_label="Uninstall",
+            on_confirm=lambda: asyncio.create_task(self._run_embedder_provider_uninstall(name)),
+        )
+
+    async def _run_embedder_provider_uninstall(self, name: str) -> None:
+        self._set_status(f"Uninstalling {name!r} embedder adapter…")
+        plan = uninstall_embedder_provider_plan(name)
+        result = await uninstall_embedder_provider_execute(plan)
+        if not result.uninstall_ok:
+            tail = result.pip_output[-200:] if result.pip_output else ""
+            self._set_status(f"Uninstall {name!r} failed: {tail}", ok=False)
+            return
+        self._set_status(f"Uninstalled {name!r}. Restart the app to fully release the module.")
+        self._sync_embedder_provider_state()
+        self._safe_update()
+
+    # --- LLM providers (pip adapter install / uninstall) ---
+    # Same no-pre-check pattern as the embedder handlers, with ONE difference:
+    # the install PLAN is async (it probes the Ollama daemon), so it's fetched
+    # in a task before the dialog — mirroring how the LLM tab did it. The
+    # uninstall plan is sync, like every other plan.
+    def _on_llm_provider_install(self, name: str) -> None:
+        self._spawn(self._prompt_llm_provider_install(name))
+
+    async def _prompt_llm_provider_install(self, name: str) -> None:
+        plan = await install_llm_provider_plan(name)
+        self._show_confirm_dialog(
+            title=f"Install {plan.display_name}?",
+            body=plan.summary,
+            confirm_label="Install",
+            on_confirm=lambda: asyncio.create_task(self._run_llm_provider_install(name)),
+        )
+
+    async def _run_llm_provider_install(self, name: str) -> None:
+        self._set_status(f"Installing {name!r} LLM adapter…")
+        plan = await install_llm_provider_plan(name)
+        result = await install_llm_provider_execute(plan)
+        if not result.install_ok:
+            tail = result.pip_output[-200:] if result.pip_output else ""
+            self._set_status(f"Install {name!r} failed: {tail}", ok=False)
+            return
+        if result.restart_required:
+            self._set_status(f"Installed {name!r}. Restart the app for it to take effect.")
+        else:
+            self._set_status(f"{name!r} was already installed.")
+        self._sync_llm_provider_state()
+        self._safe_update()
+
+    def _on_llm_provider_uninstall(self, name: str) -> None:
+        plan = uninstall_llm_provider_plan(name)
+        self._show_confirm_dialog(
+            title=f"Uninstall {plan.display_name}?",
+            body=plan.summary,
+            confirm_label="Uninstall",
+            on_confirm=lambda: asyncio.create_task(self._run_llm_provider_uninstall(name)),
+        )
+
+    async def _run_llm_provider_uninstall(self, name: str) -> None:
+        self._set_status(f"Uninstalling {name!r} LLM adapter…")
+        plan = uninstall_llm_provider_plan(name)
+        result = await uninstall_llm_provider_execute(plan)
+        if not result.uninstall_ok:
+            tail = result.pip_output[-200:] if result.pip_output else ""
+            self._set_status(f"Uninstall {name!r} failed: {tail}", ok=False)
+            return
+        self._set_status(f"Uninstalled {name!r}. Restart the app to fully release the module.")
+        self._sync_llm_provider_state()
         self._safe_update()

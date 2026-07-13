@@ -1,14 +1,13 @@
-"""Settings panel — sub-tabs for the right panel's Settings mode.
+"""Settings — sub-tabs for the top-level Settings tab.
 
-`SettingsView` is the top-level coordinator that composes five sub-tabs:
+`SettingsView` is the coordinator that composes three sub-tabs:
 
   - Keys
-  - Retrieval
-  - LLM
   - Embedding
   - App
 
-Right panel's MODE_SETTINGS dispatches to `SettingsView(app).build()`.
+Retrieval and LLM moved to the Search tab's sub-tabs (per-query knobs);
+`app.py` mounts `SettingsView(app).build()` as a top-level tab.
 """
 
 from knowledge_agent.gui.settings.settings_view import SettingsView

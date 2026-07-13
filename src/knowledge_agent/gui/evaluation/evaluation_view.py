@@ -1,19 +1,18 @@
 """Evaluation top-tab coordinator — 6 sub-tabs, full window (Library model).
 
-Sub-tabs (fixed order):
+Sub-tabs (fixed order), by display label:
 
-  Run            — configure + trigger an eval run (dataset, metric groups,
-                   judge panel, max-cases) → `runner.run(cfg)` in-process
-                   with a progress bar; on completion, refresh + select the
-                   new run and hop to Run Summary.
-  Dataset        — browse/author the gold dataset: a scrollable case list +
-                   a full-field view of the selected case. Read-only in
-                   slice 1; editing / Add-Delete / capture-from-Search / LLM
-                   generation land in later slices.
-  Run Summary    — KPI cards + per-case table for the selected run.
-  Deep Analysis  — metric-balance / distribution / correlation for the run.
-  Trends         — run-level metric trends over time (scoped per dataset).
-  Metrics Guide  — the metrics reference (info_metrics.md).
+  - Run evaluation — configure + trigger an eval run (dataset, metric
+    groups, judge panel, max-cases) → `runner.run(cfg)` in-process with a
+    progress bar; on completion, refresh + select the new run and hop to
+    Run Summary.
+  - Create test cases — browse/author the gold dataset: a scrollable case
+    list + a full-field view of the selected case (editing / Add-Delete /
+    capture-from-Search / LLM generation).
+  - Run Summary — KPI cards + per-case table for the selected run.
+  - Deep Analysis — metric-balance / distribution / correlation for the run.
+  - Trends — run-level metric trends over time (scoped per dataset).
+  - Metrics Guide — the metrics reference (info_metrics.md).
 
 Shared selected-run state lives here: the per-run tabs read
 `self.selected_run_id`, and both the left-rail run selector and a completed
@@ -40,7 +39,14 @@ if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
 
 
-SUB_TAB_LABELS = ("Run", "Dataset", "Run Summary", "Deep Analysis", "Trends", "Metrics Guide")
+SUB_TAB_LABELS = (
+    "Run evaluation",
+    "Create test cases",
+    "Run Summary",
+    "Deep Analysis",
+    "Trends",
+    "Metrics Guide",
+)
 
 
 class EvaluationView:

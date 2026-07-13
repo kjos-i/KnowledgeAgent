@@ -1,34 +1,28 @@
-"""Settings → LLM sub-tab — provider + query-time node models + rates.
+"""Search → LLM sub-tab — active provider + query-time node models + rates.
 
 Layout (top to bottom):
 
   1. Active provider — radio group, only INSTALLED providers shown.
-  2. Providers list — all 4 (anthropic / openai / google / ollama)
-     with install state + Install / Uninstall buttons, wired to the
-     llm_lifecycle install/uninstall (pip) behind a confirm dialog.
-  3. Ollama base URL — TextField (relevant when Ollama is active).
-  4. Per-node models + temperatures — model TextField + temperature
+  2. Ollama — base URL + daemon-reachable status.
+  3. Per-node models + temperatures — model Dropdown + temperature
      Slider for each of: mode_classifier, query_builder,
      cypher_builder, synthesizer. Plus a separate "Chat router" row
      for the GUI-only chat-router model + temperature.
-  5. Per-provider rate limits + retries — 4 Optional[float] fields
+  4. Per-provider rate limits + retries — 4 Optional[float] fields
      + llm_max_retries int.
 
-Install-state queried at first show via the lifecycle's per-provider
-`is_installed_fn`. Ollama daemon reachability is async — probed in a
-background task that updates the Ollama row's status when it
-completes.
-
-UX rule: the currently-active provider can't be uninstalled — that
-button is disabled with an explanatory tooltip. User must switch the
-active provider before removing it.
+Provider Install / Uninstall moved to the Installs tab (the global install
+surface). This tab reads install-state (per-provider `is_installed_fn`) only
+to build the active-provider radio — installed providers are selectable.
+Ollama daemon reachability is async — probed in a background task that updates
+the Ollama daemon-status line (in the Ollama section) when it completes.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import flet as ft
 
@@ -36,7 +30,6 @@ from knowledge_agent.config import PROVIDER_NODE_DEFAULTS, reset_after_key_chang
 from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     PANEL_BG,
-    centered_label,
     labeled_field,
     section_divider,
 )
@@ -51,10 +44,6 @@ from knowledge_agent.llm_factory import supports_temperature
 from knowledge_agent.llm_lifecycle import (
     LLM_PROVIDER_REGISTRY,
     _ollama_daemon_is_reachable,
-    install_llm_provider_execute,
-    install_llm_provider_plan,
-    uninstall_llm_provider_execute,
-    uninstall_llm_provider_plan,
 )
 
 if TYPE_CHECKING:
@@ -117,14 +106,14 @@ class LlmTab:
         self.active_provider_radio: ft.RadioGroup | None = None
         self.active_provider_container: ft.Container | None = None
 
-        # Per-provider row widgets — keyed by provider name.
-        self.provider_status_texts: dict[str, ft.Text] = {}
-        self.provider_install_buttons: dict[str, ft.Button] = {}
-        self.provider_uninstall_buttons: dict[str, ft.Button] = {}
-        # Adapter-installed bool per provider (from `is_installed_fn`).
-        # Ollama daemon-reachable is a separate async probe.
+        # Adapter-installed bool per provider (from `is_installed_fn`) — read
+        # to build the active-provider radio. Install / Uninstall live in the
+        # Installs tab now.
         self._installed_state: dict[str, bool] = {}
+        # Ollama daemon reachability (separate from adapter-installed) —
+        # probed async + shown in the Ollama section below.
         self._ollama_daemon_ok: bool | None = None
+        self.ollama_daemon_status: ft.Text | None = None
 
         self.ollama_url_field: ft.TextField | None = None
 
@@ -159,23 +148,14 @@ class LlmTab:
             ),
         )
 
-        # Provider list — one row per provider. Status text + buttons
-        # are populated by _sync_provider_state() at first build.
-        for provider in _PROVIDER_ORDER:
-            self.provider_status_texts[provider] = ft.Text(
-                "(checking…)",
-                size=12,
-                color=ft.Colors.GREY_500,
-                italic=True,
-            )
-            self.provider_install_buttons[provider] = ft.Button(
-                content=centered_label("Install"),
-                on_click=lambda e, p=provider: self.on_install_clicked(p),
-            )
-            self.provider_uninstall_buttons[provider] = ft.Button(
-                content=centered_label("Uninstall"),
-                on_click=lambda e, p=provider: self.on_uninstall_clicked(p),
-            )
+        # Ollama daemon-reachability status line (shown in the Ollama section
+        # below). Adapter install/uninstall moved to the Installs tab.
+        self.ollama_daemon_status = ft.Text(
+            "(checking daemon…)",
+            size=12,
+            color=ft.Colors.GREY_500,
+            italic=True,
+        )
 
         # Ollama base URL.
         self.ollama_url_field = ft.TextField(
@@ -263,8 +243,8 @@ class LlmTab:
         if self._first_build:
             self._first_build = False
             self._sync_installed_state()
-            self._sync_provider_rows()
             self._sync_active_provider_radio()
+            self._sync_ollama_daemon_status()
             # Async daemon probe — skip when there's no running loop
             # (test env). Live GUI always has one running. Loop-check
             # FIRST so we don't construct a coroutine we never await
@@ -289,26 +269,17 @@ class LlmTab:
                 section_header(
                     self.app,
                     "Active provider",
-                    "Switching is immediate. Install / Uninstall are separate "
-                    "per-provider actions below.",
+                    "Switching is immediate. Install / Uninstall providers in the Installs tab.",
                 ),
                 self.active_provider_container,
                 section_divider(),
-                # ---- Providers list ------------------------------------
-                section_header(
-                    self.app,
-                    "Providers",
-                    "Install / Uninstall each provider's adapter via pip "
-                    "(confirm dialog; a restart is needed after).",
-                ),
-                *[self._render_provider_row(p) for p in _PROVIDER_ORDER],
-                section_divider(),
-                # ---- Ollama base URL -----------------------------------
+                # ---- Ollama --------------------------------------------
                 section_header(self.app, "Ollama"),
                 labeled_field(
                     "Ollama base URL (used when Ollama is active)",
                     self.ollama_url_field,
                 ),
+                self.ollama_daemon_status,
                 section_divider(),
                 # ---- Per-node models + temperatures --------------------
                 section_header(
@@ -412,53 +383,33 @@ class LlmTab:
         except Exception as exc:
             logger.warning("ollama daemon probe failed: %r", exc)
             self._ollama_daemon_ok = False
-        self._sync_provider_rows()
+        self._sync_ollama_daemon_status()
         self.app.page.update()
 
-    def _sync_provider_rows(self) -> None:
-        """Update per-provider status text + button visibility."""
-        active = self.app.gui_config.llm_provider
-        for provider in _PROVIDER_ORDER:
-            installed = self._installed_state.get(provider, False)
-            status_text = self.provider_status_texts[provider]
-            install_btn = self.provider_install_buttons[provider]
-            uninstall_btn = self.provider_uninstall_buttons[provider]
-
-            if provider == "ollama":
-                # Two-part status: adapter + daemon.
-                daemon = self._ollama_daemon_ok
-                if installed and daemon is True:
-                    status_text.value = "✓ installed (daemon reachable)"
-                    status_text.color = ft.Colors.GREEN_300
-                elif installed and daemon is False:
-                    status_text.value = "○ adapter installed; daemon not reachable"
-                    status_text.color = ft.Colors.AMBER_300
-                elif installed and daemon is None:
-                    status_text.value = "✓ adapter installed; probing daemon…"
-                    status_text.color = ft.Colors.GREY_400
-                else:
-                    status_text.value = "○ not installed (adapter + daemon both needed)"
-                    status_text.color = ft.Colors.GREY_400
-            else:
-                if installed:
-                    status_text.value = "✓ installed"
-                    status_text.color = ft.Colors.GREEN_300
-                else:
-                    status_text.value = "○ not installed"
-                    status_text.color = ft.Colors.GREY_400
-
-            # Install button visible when NOT installed; Uninstall when
-            # installed. Active provider's Uninstall is disabled.
-            install_btn.visible = not installed
-            uninstall_btn.visible = installed
-            if installed and provider == active:
-                uninstall_btn.disabled = True
-                uninstall_btn.tooltip = (
-                    "Active provider can't be uninstalled — switch to another first."
-                )
-            else:
-                uninstall_btn.disabled = False
-                uninstall_btn.tooltip = None
+    def _sync_ollama_daemon_status(self) -> None:
+        """Update the Ollama daemon-reachability line (the adapter-install rows
+        moved to the Installs tab; whether the DAEMON is actually running is a
+        runtime concern that belongs beside the base URL)."""
+        if self.ollama_daemon_status is None:
+            return
+        installed = self._installed_state.get("ollama", False)
+        daemon = self._ollama_daemon_ok
+        if not installed:
+            self.ollama_daemon_status.value = (
+                "Ollama adapter not installed — install it in the Installs tab."
+            )
+            self.ollama_daemon_status.color = ft.Colors.GREY_400
+        elif daemon is True:
+            self.ollama_daemon_status.value = "✓ daemon reachable"
+            self.ollama_daemon_status.color = ft.Colors.GREEN_300
+        elif daemon is False:
+            self.ollama_daemon_status.value = (
+                "○ daemon not reachable — install / start it from https://ollama.com/download"
+            )
+            self.ollama_daemon_status.color = ft.Colors.AMBER_300
+        else:
+            self.ollama_daemon_status.value = "probing daemon…"
+            self.ollama_daemon_status.color = ft.Colors.GREY_400
 
     def _sync_active_provider_radio(self) -> None:
         """Rebuild the radio group from currently-installed providers."""
@@ -497,22 +448,6 @@ class LlmTab:
         self.active_provider_container.content = self.active_provider_radio
 
     # ----- Provider row builder --------------------------------------------
-
-    def _render_provider_row(self, provider: str) -> ft.Control:
-        display = LLM_PROVIDER_REGISTRY[provider]["display_name"]
-        return ft.Row(
-            controls=[
-                ft.Text(display, size=12, width=160),
-                ft.Container(
-                    content=self.provider_status_texts[provider],
-                    expand=True,
-                ),
-                self.provider_install_buttons[provider],
-                self.provider_uninstall_buttons[provider],
-            ],
-            spacing=8,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
 
     def _render_node_block(self, node_name: str) -> ft.Control:
         """One node's model dropdown + temperature slider, stacked (model on
@@ -592,101 +527,6 @@ class LlmTab:
         # New provider/model per node → re-evaluate temp-slider greying.
         for node_name in self.node_temp_sliders:
             self._sync_temp_enabled(node_name)
-        self._sync_provider_rows()
-        self.app.page.update()
-
-    def _set_status(self, msg: str, *, ok: bool = True) -> None:
-        if self.status is None:
-            return
-        self.status.value = msg
-        self.status.color = ft.Colors.GREY_400 if ok else ft.Colors.RED_300
-        self.app.page.update()
-
-    def _show_confirm(self, *, title: str, body: str, confirm_label: str, on_confirm: Any) -> None:
-        def _go(_e: ft.Event) -> None:
-            self.app.page.pop_dialog()
-            on_confirm()
-
-        def _cancel(_e: ft.Event) -> None:
-            self.app.page.pop_dialog()
-
-        dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Text(title),
-            content=ft.Container(
-                width=460,
-                content=ft.Text(body, size=12, selectable=True),
-            ),
-            actions=[
-                ft.TextButton("Cancel", on_click=_cancel),
-                ft.Button(content=centered_label(confirm_label), on_click=_go),
-            ],
-        )
-        self.app.page.show_dialog(dialog)
-        self.app.page.update()
-
-    def on_install_clicked(self, provider: str) -> None:
-        """Confirm + pip-install the provider's adapter. The install plan is
-        built async (it may probe the Ollama daemon), so dispatch to a task."""
-        task = asyncio.create_task(self._prompt_install(provider))
-        self._bg_tasks.add(task)
-        task.add_done_callback(self._bg_tasks.discard)
-
-    async def _prompt_install(self, provider: str) -> None:
-        plan = await install_llm_provider_plan(provider)
-        if plan.bundled or plan.already_installed:
-            self._set_status(plan.summary)
-            return
-        self._show_confirm(
-            title=f"Install {plan.display_name}?",
-            body=plan.summary,
-            confirm_label="Install",
-            on_confirm=lambda: asyncio.create_task(self._run_install(provider)),
-        )
-
-    async def _run_install(self, provider: str) -> None:
-        self._set_status(f"Installing {provider} adapter…")
-        plan = await install_llm_provider_plan(provider)
-        result = await install_llm_provider_execute(plan)
-        if not result.install_ok:
-            tail = result.pip_output[-200:] if result.pip_output else ""
-            self._set_status(f"Install {provider} failed: {tail}", ok=False)
-            return
-        if not result.did_install:
-            self._set_status(f"{provider} was already installed.")
-        elif result.restart_required:
-            self._set_status(f"Installed {provider}. Restart the app for it to take effect.")
-        else:
-            self._set_status(f"Installed {provider}.")
-        self._sync_installed_state()
-        self._sync_provider_rows()
-        self.app.page.update()
-
-    def on_uninstall_clicked(self, provider: str) -> None:
-        """Confirm + pip-uninstall the provider's adapter. No-op cases
-        (bundled / active / not installed) just surface the plan summary."""
-        plan = uninstall_llm_provider_plan(provider)
-        if plan.bundled or plan.is_active or not plan.installed:
-            self._set_status(plan.summary, ok=not plan.is_active)
-            return
-        self._show_confirm(
-            title=f"Uninstall {plan.display_name}?",
-            body=plan.summary,
-            confirm_label="Uninstall",
-            on_confirm=lambda: asyncio.create_task(self._run_uninstall(provider)),
-        )
-
-    async def _run_uninstall(self, provider: str) -> None:
-        self._set_status(f"Uninstalling {provider} adapter…")
-        plan = uninstall_llm_provider_plan(provider)
-        result = await uninstall_llm_provider_execute(plan)
-        if not result.uninstall_ok:
-            tail = result.pip_output[-200:] if result.pip_output else ""
-            self._set_status(f"Uninstall {provider} failed: {tail}", ok=False)
-            return
-        self._set_status(f"Uninstalled {provider}. Restart the app to fully release the module.")
-        self._sync_installed_state()
-        self._sync_provider_rows()
         self.app.page.update()
 
     def on_ollama_url_blur(self, e: ft.Event) -> None:

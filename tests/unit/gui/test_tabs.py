@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import flet as ft
 
 from knowledge_agent.gui.chat_panel import ChatPanel
+from knowledge_agent.gui.config_store import GuiConfig
 from knowledge_agent.gui.right_panel import RightPanel
 from knowledge_agent.gui.tabs.evaluation_tab import EvaluationTab
 from knowledge_agent.gui.tabs.library_tab import LibraryTab
@@ -46,6 +47,7 @@ def test_search_tab_composes_chat_panel_and_right_panel_in_row(
     """SearchTab returns a Row via `ResizableSplit`: left pane +
     drag handle + right pane. The exact widget structure is 3
     controls (two Containers around a draggable divider)."""
+    fake_app.gui_config = GuiConfig()  # RightPanel builds Retrieval/LLM, which read config
     fake_app.chat_panel = ChatPanel(fake_app)
     fake_app.right_panel = RightPanel(fake_app)
 
@@ -54,3 +56,21 @@ def test_search_tab_composes_chat_panel_and_right_panel_in_row(
     assert isinstance(ctl, ft.Row)
     # ResizableSplit: [left pane, drag handle, right pane] = 3 controls.
     assert len(ctl.controls) == 3
+
+
+def test_info_tab_builds(fake_app: MagicMock):
+    """Info is now a top-level tab (was a Search right-panel placeholder mode)."""
+    from knowledge_agent.gui.tabs.info_tab import InfoTab
+
+    assert InfoTab(fake_app).build() is not None
+
+
+def test_settings_view_is_three_subtabs(fake_app: MagicMock):
+    """Settings shrank to Keys / Embedding / App — Retrieval + LLM moved to the
+    Search sub-tabs."""
+    from knowledge_agent.gui.settings import SettingsView
+
+    fake_app.gui_config = GuiConfig()
+    ctl = SettingsView(fake_app).build()
+    assert isinstance(ctl, ft.Tabs)
+    assert ctl.length == 3

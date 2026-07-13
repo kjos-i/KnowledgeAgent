@@ -3,19 +3,18 @@
 Owns session state (`messages`, `last_answer`, `last_query`,
 `loaded_file`, `busy`, `_send_task`) and the cross-cutting handlers
 (Send → chat-router → graph, Stop, Clear, Save chat, Save Result,
-Open Result). Page layout is top-level `ft.Tabs` with 3 entries:
+Open Result). Page layout is top-level `ft.Tabs`:
 
-    [ Search ] [ Library ] [ Evaluation ]
+    [ Search ] [ Library ] [ Evaluation ] [ Installs ] [ Settings ] [ Info ]
 
-Search composes `ChatPanel` (left) + `RightPanel` (right, mode-
-switching: Latest / File / Settings / Info). Library and Evaluation
-are top-level tabs because they need the full window for dense
-data tables — that's the architectural reason they aren't right-
-panel modes of Search.
+Search composes `ChatPanel` (left, always mounted) + `RightPanel`
+(right), where the right column is a View / Retrieval / LLM sub-tab
+strip — only that column swaps; the chat stays put.
 
-Settings + Info live as right-panel modes of Search so the user can
-read help / view current settings WHILE composing a query in the
-chat. See `right_panel.py` for the mode list.
+Installs, Settings, and Info are their own top-level tabs (global
+machine-level install surface / global config / reference). They were
+promoted out of Search's right panel so they're one click away and the
+right panel stays focused on the per-query search loop.
 """
 
 from __future__ import annotations
@@ -67,12 +66,15 @@ from knowledge_agent.gui.config_store import (
     save_config,
     switch_active_corpus,
 )
+from knowledge_agent.gui.library.installs import InstallsTab
 from knowledge_agent.gui.right_panel import (
     MODE_FILE,
     MODE_LATEST,
     RightPanel,
 )
+from knowledge_agent.gui.settings import SettingsView
 from knowledge_agent.gui.tabs.evaluation_tab import EvaluationTab
+from knowledge_agent.gui.tabs.info_tab import InfoTab
 from knowledge_agent.gui.tabs.library_tab import LibraryTab
 from knowledge_agent.gui.tabs.search_tab import SearchTab
 from knowledge_agent.kg.corpus_config import CorpusConfig, load_corpus_config
@@ -115,6 +117,9 @@ class GuiApp:
     search_tab: SearchTab = field(init=False)
     library_tab: LibraryTab = field(init=False)
     evaluation_tab: EvaluationTab = field(init=False)
+    installs_tab: InstallsTab = field(init=False)
+    settings_view: SettingsView = field(init=False)
+    info_tab: InfoTab = field(init=False)
     file_picker: ft.FilePicker = field(init=False)
     _send_task: asyncio.Task | None = field(default=None, init=False)
     _info_icons: dict[str, list[ft.IconButton]] = field(default_factory=dict, init=False)
@@ -688,6 +693,9 @@ class GuiApp:
         self.search_tab = SearchTab(self)
         self.library_tab = LibraryTab(self)
         self.evaluation_tab = EvaluationTab(self)
+        self.installs_tab = InstallsTab(self)
+        self.settings_view = SettingsView(self)
+        self.info_tab = InfoTab(self)
 
         # Native Flet `Tabs` (Flutter-style: TabBar + TabBarView aligned
         # by index through a shared `length`). The M3 chrome enforces a
@@ -698,6 +706,9 @@ class GuiApp:
                 ft.Tab(label="Search"),
                 ft.Tab(label="Library"),
                 ft.Tab(label="Evaluation"),
+                ft.Tab(label="Installs"),
+                ft.Tab(label="Settings"),
+                ft.Tab(label="Info"),
             ],
         )
         tab_bodies = ft.TabBarView(
@@ -714,6 +725,21 @@ class GuiApp:
                 ),
                 ft.Container(
                     content=self.evaluation_tab.build(),
+                    padding=8,
+                    expand=True,
+                ),
+                ft.Container(
+                    content=self.installs_tab.build(),
+                    padding=8,
+                    expand=True,
+                ),
+                ft.Container(
+                    content=self.settings_view.build(),
+                    padding=8,
+                    expand=True,
+                ),
+                ft.Container(
+                    content=self.info_tab.build(),
                     padding=8,
                     expand=True,
                 ),
@@ -739,7 +765,7 @@ class GuiApp:
             spacing=8,
         )
         tabs = ft.Tabs(
-            length=3,
+            length=6,
             selected_index=0,
             content=ft.Column(
                 controls=[top_row, tab_bodies],

@@ -1,14 +1,17 @@
-"""Settings view — coordinator for the 5 Settings sub-tabs.
+"""Settings view — coordinator for the Settings top-level tab's sub-tabs.
 
-The right panel's MODE_SETTINGS dispatches here. Internally we render
-native Flet `ft.Tabs` with `secondary=True` so the sub-strip is
-visually distinct from the primary top tab bar (Search / Library /
-Evaluation).
+Settings is now a TOP-LEVEL tab (`app.py` mounts it), not a Search
+right-panel mode. It holds the global, set-once-ish config:
 
-Sub-tab order is fixed: Keys / Retrieval / LLM / Embedding / App.
-Picked so the most-touched-first-launch tab (Keys) sits leftmost and
-the App+Diagnostics tab is last (less-frequent reference). Order is
-the binding decision; tab labels are provisional and may be tweaked.
+  Keys / Embedding / App
+
+Retrieval and LLM were promoted to Search sub-tabs (they're per-query
+knobs you tune beside the chat), so they no longer live here. Embedding
+stays for now — it moves to the Ingest tab when the embedder becomes
+per-corpus (workstream B).
+
+Rendered as native Flet `ft.Tabs` with `secondary=True` so the sub-strip
+is visually distinct from the primary top tab bar.
 """
 
 from __future__ import annotations
@@ -20,32 +23,24 @@ import flet as ft
 from knowledge_agent.gui.settings.app_tab import AppTab
 from knowledge_agent.gui.settings.embedding_tab import EmbeddingTab
 from knowledge_agent.gui.settings.keys_tab import KeysTab
-from knowledge_agent.gui.settings.llm_tab import LlmTab
-from knowledge_agent.gui.settings.retrieval_tab import RetrievalTab
 
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
 
 
-SUB_TAB_LABELS = ("Keys", "Retrieval", "LLM", "Embedding", "App")
+SUB_TAB_LABELS = ("Keys", "Embedding", "App")
 
 
 class SettingsView:
-    """Sub-tab coordinator for the Settings right-panel mode."""
+    """Sub-tab coordinator for the Settings top-level tab."""
 
     def __init__(self, app: GuiApp) -> None:
         self.app = app
         self.keys_tab = KeysTab(app)
-        self.retrieval_tab = RetrievalTab(app)
-        self.llm_tab = LlmTab(app)
         self.embedding_tab = EmbeddingTab(app)
         self.app_tab = AppTab(app)
 
     def build(self) -> ft.Control:
-        # Native Flet Tabs with secondary indicator so the sub-strip
-        # is visually distinct from the top primary tab bar. Sub-tab
-        # bodies wrap in Containers with small padding so the form
-        # inside breathes against the surrounding right-panel frame.
         sub_bar = ft.TabBar(
             tabs=[ft.Tab(label=label) for label in SUB_TAB_LABELS],
             secondary=True,
@@ -53,17 +48,7 @@ class SettingsView:
         sub_bodies = ft.TabBarView(
             controls=[
                 ft.Container(content=self.keys_tab.build(), padding=8, expand=True),
-                ft.Container(
-                    content=self.retrieval_tab.build(),
-                    padding=8,
-                    expand=True,
-                ),
-                ft.Container(content=self.llm_tab.build(), padding=8, expand=True),
-                ft.Container(
-                    content=self.embedding_tab.build(),
-                    padding=8,
-                    expand=True,
-                ),
+                ft.Container(content=self.embedding_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.app_tab.build(), padding=8, expand=True),
             ],
             expand=True,
