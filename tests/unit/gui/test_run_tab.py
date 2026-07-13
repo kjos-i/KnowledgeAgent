@@ -53,36 +53,91 @@ def test_refresh_active_corpus_none_does_not_crash(fake_app: MagicMock):
     assert tab.output_line.value.startswith("Results save to:")
 
 
-def test_pick_dataset_loads_recipe_frozen(fake_app: MagicMock, tmp_path):
-    """Choosing a dataset loads its saved recipe into the (shared) recipe form
-    and freezes it; Unfreeze re-enables the controls for a one-off deviation
-    (the dataset file is never touched). The judge-panel + group-check widgets
-    themselves are covered in test_recipe_form.py — they moved to RecipeForm."""
-    from knowledge_agent.evaluation.models import (
-        EvalCase,
-        EvalDataset,
-        EvalRecipe,
-        save_dataset,
-    )
+def _saved(tmp_path, name, **kw):
+    """Write a one-case dataset with the given header kwargs; return its path."""
+    from knowledge_agent.evaluation.models import EvalCase, EvalDataset, save_dataset
 
-    p = tmp_path / "gold.json"
-    save_dataset(
-        EvalDataset(
-            recipe=EvalRecipe(dataset_kind="knob", judge_threshold=0.0),
-            cases=[EvalCase(id="c", question="q?")],
-        ),
-        p,
+    p = tmp_path / name
+    save_dataset(EvalDataset(cases=[EvalCase(id="c", question="q?")], **kw), p)
+    return p
+
+
+def test_load_state_editable_when_not_frozen(fake_app: MagicMock, tmp_path):
+    """A non-frozen dataset loads with the recipe EDITABLE; the freeze checkbox
+    is enabled when the dataset is final."""
+    from knowledge_agent.evaluation.models import EvalRecipe
+
+    p = _saved(tmp_path, "final.json", status="final", recipe=EvalRecipe(dataset_kind="knob"))
+    tab, _ = _run_tab(fake_app)
+    tab.dataset_field.value = str(p)
+    tab._load_dataset_state(p)
+    assert tab.recipe_form.profile_group.value == "knob"  # recipe loaded
+    assert tab.recipe_form._wrapper.disabled is False  # editable (not frozen)
+    assert tab.freeze_check.disabled is False  # final + not frozen → can freeze
+    assert tab.freeze_check.value is False
+    assert tab.unfreeze_button.visible is False
+
+
+def test_freeze_checkbox_disabled_for_draft(fake_app: MagicMock, tmp_path):
+    """A draft dataset can't be frozen — the checkbox is disabled + hint shows."""
+    p = _saved(tmp_path, "draft.json", status="draft")
+    tab, _ = _run_tab(fake_app)
+    tab.dataset_field.value = str(p)
+    tab._load_dataset_state(p)
+    assert tab.freeze_check.disabled is True
+    assert tab.freeze_hint.visible is True
+
+
+def test_frozen_dataset_loads_readonly(fake_app: MagicMock, tmp_path):
+    """A frozen (final) dataset loads read-only: recipe disabled, freeze
+    checkbox checked + disabled, Unfreeze + badge shown."""
+    from knowledge_agent.evaluation.models import EvalRecipe
+
+    p = _saved(
+        tmp_path, "frozen.json", status="final", frozen=True, recipe=EvalRecipe(dataset_kind="fact")
     )
     tab, _ = _run_tab(fake_app)
-    tab._load_recipe_from(p)
-    rf = tab.recipe_form
-    assert rf.profile_group.value == "knob"  # loaded from the saved recipe
-    assert rf.threshold_fields["judge_threshold"].value == "0"
-    assert rf._wrapper.disabled is True  # frozen on load
+    tab.dataset_field.value = str(p)
+    tab._load_dataset_state(p)
+    assert tab.recipe_form._wrapper.disabled is True  # read-only
+    assert tab.freeze_check.value is True and tab.freeze_check.disabled is True
     assert tab.unfreeze_button.visible is True
-    tab._on_unfreeze_clicked(MagicMock())
-    assert rf._wrapper.disabled is False  # editable for the one-off
-    assert tab.deviation_note.visible is True
+    assert tab.frozen_indicator.visible is True
+
+
+def test_unfreeze_persists_frozen_false(fake_app: MagicMock, tmp_path):
+    """_do_unfreeze clears the frozen flag on disk and re-enables the recipe."""
+    from knowledge_agent.evaluation.models import EvalRecipe, load_dataset
+
+    p = _saved(
+        tmp_path, "frozen.json", status="final", frozen=True, recipe=EvalRecipe(dataset_kind="fact")
+    )
+    tab, _ = _run_tab(fake_app)
+    tab.dataset_field.value = str(p)
+    tab._load_dataset_state(p)
+    tab._do_unfreeze()
+    assert load_dataset(p).frozen is False  # persisted
+    assert tab.recipe_form._wrapper.disabled is False  # editable again
+    assert tab.unfreeze_button.visible is False
+
+
+def test_freeze_on_run_persists(fake_app: MagicMock, tmp_path):
+    """Ticking 'Freeze run settings' + a successful run persists frozen=true."""
+    from knowledge_agent.evaluation.models import EvalRecipe, load_dataset
+
+    p = _saved(tmp_path, "final.json", status="final", recipe=EvalRecipe(dataset_kind="knob"))
+    tab, _ = _run_tab(fake_app)
+    tab.dataset_field.value = str(p)
+    tab._load_dataset_state(p)
+    tab.freeze_check.value = True  # opt-in
+    fake_result = MagicMock(run_id=7, report={"summary": {"pass_count": 1, "case_count": 1}})
+    with patch(
+        "knowledge_agent.evaluation.runner.run",
+        new_callable=AsyncMock,
+        return_value=fake_result,
+    ):
+        asyncio.run(tab._execute_run())
+    assert load_dataset(p).frozen is True  # freeze persisted after the run
 
 
 def test_build_config_maps_recipe_and_thresholds(fake_app: MagicMock):

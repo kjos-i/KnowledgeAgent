@@ -14,8 +14,44 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from knowledge_agent.evaluation.ledger import EvalLedger
     from knowledge_agent.gui.app import GuiApp
+
+
+def confirm_dialog(
+    app: GuiApp,
+    *,
+    title: str,
+    message: str,
+    confirm_label: str,
+    on_confirm: Callable[[], None],
+) -> None:
+    """Pop a modal yes/no confirm. `on_confirm` runs after the dialog closes on
+    the confirm button; Cancel just closes it. Shared so both eval tabs raise an
+    identical confirm (e.g. the Unfreeze warning) instead of building it twice.
+    """
+    import flet as ft
+
+    def _cancel(_e: ft.Event) -> None:
+        app.page.pop_dialog()
+
+    def _ok(_e: ft.Event) -> None:
+        app.page.pop_dialog()
+        on_confirm()
+
+    dialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text(title),
+        content=ft.Text(message, size=12),
+        actions=[
+            ft.TextButton("Cancel", on_click=_cancel),
+            ft.Button(content=confirm_label, on_click=_ok),
+        ],
+    )
+    app.page.show_dialog(dialog)
+    app.page.update()
 
 
 def active_corpus_config_path(app: GuiApp) -> Path | None:

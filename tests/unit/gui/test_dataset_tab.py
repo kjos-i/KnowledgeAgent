@@ -383,6 +383,56 @@ def test_recipe_loaded_from_dataset(fake_app, tmp_path):
     assert tab.recipe_form.threshold_fields["judge_threshold"].value == "0.9"
 
 
+def _frozen_file(tmp_path):
+    """A final + frozen one-case dataset with a recipe; return its path."""
+    from knowledge_agent.evaluation.models import EvalDataset, EvalRecipe, save_dataset
+
+    p = tmp_path / "frozen.json"
+    save_dataset(
+        EvalDataset(
+            status="final",
+            frozen=True,
+            recipe=EvalRecipe(dataset_kind="fact"),
+            cases=[EvalCase(id="c", question="q?")],
+        ),
+        p,
+    )
+    return p
+
+
+def test_frozen_dataset_recipe_readonly(fake_app, tmp_path):
+    """Loading a frozen dataset makes the recipe read-only + shows Unfreeze."""
+    tab = _tab(fake_app)
+    tab._load(_frozen_file(tmp_path))
+    assert tab.recipe_form._wrapper.disabled is True  # recipe read-only
+    assert tab.unfreeze_button.visible is True
+    assert tab.frozen_indicator.visible is True
+
+
+def test_dataset_unfreeze_persists(fake_app, tmp_path):
+    """Unfreeze clears the frozen flag on disk and re-enables the recipe."""
+    from knowledge_agent.evaluation.models import load_dataset
+
+    p = _frozen_file(tmp_path)
+    tab = _tab(fake_app)
+    tab._load(p)
+    tab._do_unfreeze()
+    assert load_dataset(p).frozen is False
+    assert tab.recipe_form._wrapper.disabled is False  # editable again
+
+
+def test_status_to_draft_clears_frozen(fake_app, tmp_path):
+    """Setting status below final clears the frozen lock in-session (invariant),
+    re-enabling the recipe."""
+    tab = _tab(fake_app)
+    tab._load(_frozen_file(tmp_path))
+    assert tab._dataset.frozen is True
+    tab.status_group.value = "draft"
+    tab._on_status_change(MagicMock())
+    assert tab._dataset.frozen is False
+    assert tab.recipe_form._wrapper.disabled is False
+
+
 def test_new_knobs_round_trip(fake_app, tmp_path):
     """The new per-case knobs are read from the form and persisted on the case."""
     p = tmp_path / "k.json"

@@ -54,12 +54,20 @@ class RunTab:
         self._busy = False
         self.dataset_field: ft.TextField | None = None
         # The recipe controls (metric groups + judge panel + gate thresholds +
-        # profile) — one shared widget with the Create-test-cases tab. Here it
-        # is loaded from the selected dataset's saved recipe and rendered FROZEN;
-        # Unfreeze deviates for a single run (never written back).
+        # profile) — one shared widget with the Create-test-cases tab. Loaded
+        # from the selected dataset; editable when the dataset is not frozen,
+        # read-only when it is.
         self.recipe_form: RecipeForm | None = None
+        # Freeze controls. `freeze_check` (next to Run) is the opt-in that locks
+        # the recipe onto the dataset when the run finishes; `unfreeze_button` +
+        # `frozen_indicator` sit at the top and show only when frozen. The
+        # dataset's status + frozen flag drive their enabled/visible state.
+        self.freeze_check: ft.Checkbox | None = None
+        self.freeze_hint: ft.Text | None = None
         self.unfreeze_button: ft.TextButton | None = None
-        self.deviation_note: ft.Text | None = None
+        self.frozen_indicator: ft.Text | None = None
+        self._dataset_status: str = "draft"
+        self._dataset_frozen: bool = False
         self.max_cases_field: ft.TextField | None = None
         self.trace_check: ft.Checkbox | None = None
         self.project_field: ft.TextField | None = None
@@ -127,23 +135,40 @@ class RunTab:
             selectable=True,
         )
 
-        # The recipe editor, shared with the Create-test-cases tab. Built here,
-        # loaded + frozen when a dataset is chosen (`_load_recipe_from`).
+        # The recipe editor, shared with the Create-test-cases tab. Built here;
+        # `_load_dataset_state` sets it read-only vs editable per the dataset's
+        # frozen flag on select. A fresh form (no dataset) is editable.
         self.recipe_form = RecipeForm(self.app)
         recipe_body = self.recipe_form.build()
-        # Frozen until Unfreeze — the recipe belongs to the dataset; the Run tab
-        # only displays it (and lets a single run deviate).
-        self.recipe_form.set_enabled(False)
-        self.unfreeze_button = ft.TextButton(
-            "Unfreeze for a one-off run",
-            icon=ft.Icons.LOCK_OPEN,
-            tooltip="Edit the recipe for THIS run only — the dataset's saved recipe is unchanged",
-            on_click=self._on_unfreeze_clicked,
+        # "Freeze run settings" — the opt-in next to Run: tick it + Run and the
+        # finished run persists frozen=true, locking the recipe onto the
+        # dataset. Disabled unless the dataset is final AND not already frozen.
+        self.freeze_check = ft.Checkbox(
+            label="Freeze run settings",
+            value=False,
+            disabled=True,
+            tooltip="Lock this recipe onto the dataset when the run finishes (final datasets only)",
         )
-        self.deviation_note = ft.Text(
-            "Editing the recipe for THIS run only — not saved to the dataset.",
+        self.freeze_hint = ft.Text(
+            "Set the dataset's status to “final” (in Create test cases) to freeze it.",
+            size=12,
+            color=ft.Colors.GREY_600,
+            italic=True,
+            visible=False,
+        )
+        # Unfreeze + the frozen badge live at the TOP (Evaluation cases section),
+        # shown only when the loaded dataset is frozen.
+        self.frozen_indicator = ft.Text(
+            "\U0001f512 Recipe frozen — read-only",
             size=12,
             color=ft.Colors.ORANGE,
+            visible=False,
+        )
+        self.unfreeze_button = ft.TextButton(
+            "Unfreeze",
+            icon=ft.Icons.LOCK_OPEN,
+            tooltip="Unlock the recipe so it can change again (asks to confirm)",
+            on_click=self._on_unfreeze_clicked,
             visible=False,
         )
 
@@ -215,19 +240,18 @@ class RunTab:
                 # ============ Section: Evaluation cases ============
                 section_title("Evaluation cases"),
                 labeled_field("Dataset", self.dataset_field, trailing=browse_button),
+                ft.Row(
+                    [self.frozen_indicator, self.unfreeze_button],
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=8,
+                ),
                 section_divider(),
                 # ============ Section: Recipe ============
                 # The dataset's saved recipe (metric groups + judge panel + gate
-                # thresholds + profile), loaded read-only. Unfreeze to deviate
-                # for one run without touching the dataset.
+                # thresholds + profile). Editable when the dataset is not frozen;
+                # read-only when it is (Unfreeze up top to edit).
                 section_title("Recipe"),
                 recipe_body,
-                ft.Row(
-                    [self.unfreeze_button, self.deviation_note],
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    spacing=8,
-                    wrap=True,
-                ),
                 section_divider(),
                 # ============ Section: Run options ============
                 section_title("Run options"),
@@ -264,10 +288,11 @@ class RunTab:
                 # ============ Section: Run ============
                 section_title("Run"),
                 ft.Row(
-                    [self.run_button, self.progress],
+                    [self.run_button, self.freeze_check, self.progress],
                     spacing=12,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
+                self.freeze_hint,
                 # Where this run's ledger + reports land — sits under the Run
                 # button as a caption (derived from the active corpus).
                 self.output_line,
@@ -378,35 +403,101 @@ class RunTab:
 
     # ---- recipe freeze/unfreeze -------------------------------------------
 
-    def _load_recipe_from(self, path: Path) -> None:
-        """Load the dataset's saved recipe into the (frozen) recipe form. A
-        legacy dataset with no recipe loads the harness defaults. Re-freezes +
-        resets the Unfreeze affordance on every dataset change."""
+    def _load_dataset_state(self, path: Path) -> None:
+        """Load the selected dataset's recipe + status + frozen flag, then sync
+        the freeze UI. A bad / legacy dataset falls back to harness-default
+        recipe + draft / unfrozen. Called on every dataset change."""
         from knowledge_agent.evaluation.models import load_dataset
 
-        recipe = None
+        status, frozen, recipe = "draft", False, None
         try:
-            recipe = load_dataset(path).recipe
+            ds = load_dataset(path)
+            status, frozen, recipe = ds.status, ds.frozen, ds.recipe
         except Exception:  # broad: a bad dataset already surfaces in the case view
-            recipe = None
+            pass
+        self._dataset_status = status
+        self._dataset_frozen = frozen
         if self.recipe_form is not None:
             self.recipe_form.load(recipe)
-            self.recipe_form.set_enabled(False)
+        self._apply_frozen_ui()
+
+    def _apply_frozen_ui(self) -> None:
+        """Sync the freeze checkbox, Unfreeze button, frozen badge, and the
+        recipe's read-only state to the dataset's status + frozen flag. Frozen ⇒
+        recipe read-only; the freeze checkbox is enabled only when the dataset
+        is final AND not already frozen."""
+        final = self._dataset_status == "final"
+        frozen = self._dataset_frozen
+        if self.recipe_form is not None:
+            self.recipe_form.set_enabled(not frozen)
+        if self.freeze_check is not None:
+            self.freeze_check.value = frozen
+            self.freeze_check.disabled = (not final) or frozen
+        if self.freeze_hint is not None:
+            self.freeze_hint.visible = not final and not frozen
         if self.unfreeze_button is not None:
-            self.unfreeze_button.visible = True
-        if self.deviation_note is not None:
-            self.deviation_note.visible = False
+            self.unfreeze_button.visible = frozen
+        if self.frozen_indicator is not None:
+            self.frozen_indicator.visible = frozen
 
     def _on_unfreeze_clicked(self, _e: ft.Event) -> None:
-        """Make the recipe editable for a ONE-OFF run — the change is used by
-        this run only and never written back to the dataset."""
-        if self.recipe_form is not None:
-            self.recipe_form.set_enabled(True)
-        if self.unfreeze_button is not None:
-            self.unfreeze_button.visible = False
-        if self.deviation_note is not None:
-            self.deviation_note.visible = True
+        """Unfreeze the dataset — a deliberate, confirmed action that clears the
+        frozen flag on disk so the recipe can change again."""
+        if not (self.dataset_field and self.dataset_field.value):
+            return
+        from knowledge_agent.gui.evaluation._common import confirm_dialog
+
+        confirm_dialog(
+            self.app,
+            title="Unfreeze run settings?",
+            message=(
+                "This unlocks the recipe so it can be changed again, and clears "
+                "the frozen state saved on the dataset."
+            ),
+            confirm_label="Unfreeze",
+            on_confirm=self._do_unfreeze,
+        )
+
+    def _do_unfreeze(self) -> None:
+        from knowledge_agent.evaluation.models import load_dataset, save_dataset
+
+        path = Path(self.dataset_field.value) if self.dataset_field else None
+        if path is None:
+            return
+        try:
+            ds = load_dataset(path)
+            ds.frozen = False
+            save_dataset(ds, path)
+        except Exception as exc:  # broad: I/O / parse failure → status line
+            self._set_status(f"could not unfreeze: {exc}")
+            return
+        self._dataset_frozen = False
+        self._apply_frozen_ui()
+        self._set_status("Unfroze run settings — the recipe is editable again.")
         self.app.page.update()
+
+    def _freeze_dataset(self) -> None:
+        """Persist the current recipe + frozen=true on the dataset — the 'Freeze
+        run settings' opt-in, run after a successful run when the box is ticked.
+        Only a final dataset can be frozen (the checkbox enforces it too)."""
+        from knowledge_agent.evaluation.models import load_dataset, save_dataset
+
+        path = Path(self.dataset_field.value) if self.dataset_field else None
+        if path is None:
+            return
+        try:
+            ds = load_dataset(path)
+            if ds.status != "final":
+                return  # invariant: only a final dataset can be frozen
+            if self.recipe_form is not None:
+                ds.recipe = self.recipe_form.to_recipe()
+            ds.frozen = True
+            save_dataset(ds, path)
+        except Exception as exc:  # broad: I/O / parse failure → status line
+            self._set_status(f"run done, but freeze failed: {exc}")
+            return
+        self._dataset_frozen = True
+        self._apply_frozen_ui()
 
     # ---- tracing ----------------------------------------------------------
 
@@ -493,7 +584,7 @@ class RunTab:
             return
         if files and files[0].path and self.dataset_field is not None:
             self.dataset_field.value = files[0].path
-            self._load_recipe_from(Path(files[0].path))
+            self._load_dataset_state(Path(files[0].path))
             self._refresh_case_view()
             self.app.page.update()
 
@@ -536,11 +627,16 @@ class RunTab:
             self._set_busy(False, f"run failed: {exc}")
             return
         summary = result.report.get("summary", {})
+        froze = bool(self.freeze_check and self.freeze_check.value)
         self._set_busy(
             False,
             f"done: run {result.run_id} — "
-            f"{summary.get('pass_count')}/{summary.get('case_count')} pass.",
+            f"{summary.get('pass_count')}/{summary.get('case_count')} pass."
+            + (" Recipe frozen." if froze else ""),
         )
+        # Opt-in freeze: lock this recipe onto the dataset now the run succeeded.
+        if froze:
+            self._freeze_dataset()
         self.coordinator.on_run_complete(result.run_id)
 
     def _build_config(self) -> EvalConfig:

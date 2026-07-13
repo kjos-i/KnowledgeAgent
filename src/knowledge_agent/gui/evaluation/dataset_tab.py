@@ -87,8 +87,12 @@ class DatasetTab:
         self.status_group: ft.RadioGroup | None = None
         # The dataset's recipe editor (metric groups + judge panel + gate
         # thresholds + profile) — the SAME widget the Run tab shows read-only.
-        # Edits ride along with any dataset save (see `_stamp_header`).
+        # Edits ride along with any dataset save (see `_stamp_header`). Goes
+        # read-only when the dataset is frozen; Unfreeze (top, with confirm)
+        # unlocks it.
         self.recipe_form: RecipeForm | None = None
+        self.unfreeze_button: ft.TextButton | None = None
+        self.frozen_indicator: ft.Text | None = None
         self.case_list: ft.Column | None = None
         self.form: ft.Column | None = None
         self.status: ft.Text | None = None
@@ -149,9 +153,11 @@ class DatasetTab:
             tooltip="Start a new empty dataset in the corpus folder",
             on_click=self._on_new_dataset,
         )
-        # Status = the whole dataset's authoring state; 3 radios side by side.
+        # Status = the whole dataset's authoring state; radios side by side.
+        # Dropping to draft clears any frozen lock (frozen requires final).
         self.status_group = ft.RadioGroup(
             value="draft",
+            on_change=self._on_status_change,
             content=ft.Row([ft.Radio(value=s, label=s) for s in statuses], spacing=12),
         )
         new_case_button = ft.TextButton("Case form", icon=ft.Icons.ADD, on_click=self._on_new)
@@ -191,8 +197,23 @@ class DatasetTab:
 
         # Recipe editor (shared widget with the Run tab). Built now; populated
         # from the dataset's saved recipe on load (`_load` / `_start_new_dataset`)
-        # and persisted with any save (`_stamp_header`).
+        # and persisted with any save (`_stamp_header`). Read-only when frozen.
         self.recipe_form = RecipeForm(self.app)
+        # Frozen badge + Unfreeze (with confirm) — shown only when the loaded
+        # dataset is frozen; sit at the top by Status.
+        self.frozen_indicator = ft.Text(
+            "\U0001f512 Recipe frozen — read-only",
+            size=12,
+            color=ft.Colors.ORANGE,
+            visible=False,
+        )
+        self.unfreeze_button = ft.TextButton(
+            "Unfreeze",
+            icon=ft.Icons.LOCK_OPEN,
+            tooltip="Unlock the recipe so it can change again (asks to confirm)",
+            on_click=self._on_unfreeze_clicked,
+            visible=False,
+        )
 
         # No own scroll / expand — the right column scrolls the preview + list
         # together (avoids a nested-scroll region).
@@ -331,10 +352,16 @@ class DatasetTab:
                         trailing=ft.Row([browse_button, new_dataset_button], spacing=6),
                     ),
                     labeled_field("Status", self.status_group),
+                    ft.Row(
+                        [self.frozen_indicator, self.unfreeze_button],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=8,
+                    ),
                     section_divider(),
                     # ============ Section: Recipe ============
                     # The dataset's canonical run settings — the Run tab loads
-                    # these read-only. Saved with the dataset on any commit.
+                    # these read-only. Saved with the dataset on any commit;
+                    # read-only here too when the dataset is frozen.
                     section_title("Recipe"),
                     self.recipe_form.build(),
                     section_divider(),
@@ -697,6 +724,7 @@ class DatasetTab:
             self.status_group.value = ds.status
         if self.recipe_form is not None:
             self.recipe_form.load(ds.recipe)  # fresh dataset → default recipe
+        self._apply_frozen_ui()
         self._clear_form()
         self._render_list()
         self._render_preview()
@@ -722,6 +750,7 @@ class DatasetTab:
             self.status_group.value = ds.status
         if self.recipe_form is not None:
             self.recipe_form.load(ds.recipe)
+        self._apply_frozen_ui()
         self._clear_form()
         self._render_list()
         self._render_preview()
@@ -923,6 +952,65 @@ class DatasetTab:
             self._dataset.status = self.status_group.value or "draft"
         if self.recipe_form is not None:
             self._dataset.recipe = self.recipe_form.to_recipe()
+        # Invariant: only a final dataset can be frozen.
+        if self._dataset.status != "final":
+            self._dataset.frozen = False
+
+    def _apply_frozen_ui(self) -> None:
+        """Sync the recipe's read-only state + the Unfreeze affordance to the
+        dataset's frozen flag. Frozen ⇒ recipe read-only; cases stay editable."""
+        frozen = bool(self._dataset is not None and self._dataset.frozen)
+        if self.recipe_form is not None:
+            self.recipe_form.set_enabled(not frozen)
+        if self.unfreeze_button is not None:
+            self.unfreeze_button.visible = frozen
+        if self.frozen_indicator is not None:
+            self.frozen_indicator.visible = frozen
+
+    def _on_status_change(self, _e: ft.Event) -> None:
+        """Dropping the status below 'final' clears any frozen lock (invariant:
+        only a final dataset can be frozen) and re-enables the recipe. Persists
+        on the next save via `_stamp_header`."""
+        if self._dataset is None or self.status_group is None:
+            return
+        if self.status_group.value != "final" and self._dataset.frozen:
+            self._dataset.frozen = False
+            self._apply_frozen_ui()
+        self.app.page.update()
+
+    def _on_unfreeze_clicked(self, _e: ft.Event) -> None:
+        """Unfreeze — a confirmed action that clears the frozen flag so the
+        recipe can change again."""
+        if self._dataset is None:
+            return
+        from knowledge_agent.gui.evaluation._common import confirm_dialog
+
+        confirm_dialog(
+            self.app,
+            title="Unfreeze run settings?",
+            message=(
+                "This unlocks the recipe so it can be changed again, and clears "
+                "the frozen state saved on the dataset."
+            ),
+            confirm_label="Unfreeze",
+            on_confirm=self._do_unfreeze,
+        )
+
+    def _do_unfreeze(self) -> None:
+        from knowledge_agent.evaluation.models import save_dataset
+
+        path = self._current_path()
+        if self._dataset is None or path is None:
+            return
+        self._dataset.frozen = False
+        try:
+            save_dataset(self._dataset, path)
+        except Exception as exc:  # broad: I/O failure → status line
+            self._set_status(f"could not unfreeze: {exc}")
+            return
+        self._apply_frozen_ui()
+        self._set_status("Unfroze — the recipe is editable again.")
+        self.app.page.update()
 
     def _on_new(self, _e: ft.Event) -> None:
         self._selected = None

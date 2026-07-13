@@ -22,7 +22,7 @@ import json
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from knowledge_agent.config import check_window_ordering
 from knowledge_agent.evaluation.config import DEFAULT_ENABLED_GROUPS
@@ -37,7 +37,7 @@ RetrievalMode = Literal[
 ]
 LanceDbSearchMode = Literal["hybrid", "fts", "vector"]
 CaseOrigin = Literal["manual", "llm", "search"]
-DatasetStatus = Literal["draft", "in progress", "final"]
+DatasetStatus = Literal["draft", "final"]
 DatasetKind = Literal["fact", "knob", "router"]
 """What KIND of thing a dataset measures — a one-click profile that fills the
 recipe AND is the filter tag (a word, not a boolean):
@@ -311,8 +311,17 @@ class EvalDataset(BaseModel):
 
     status: DatasetStatus = Field(
         default="draft",
-        description="User lifecycle label (draft / in progress / final) — visibility only.",
+        description="User lifecycle label (draft / final) — visibility only.",
     )
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _coerce_legacy_status(cls, v: object) -> object:
+        # "in progress" was retired 2026-07-13 (status is draft/final only).
+        # Map any older dataset's value forward so it still loads instead of
+        # failing the Literal check.
+        return "draft" if v == "in progress" else v
+
     name: str = Field(default="", description="Human-readable dataset name.")
     description: str = Field(default="", description="Optional notes about the dataset.")
     recipe: EvalRecipe | None = Field(
@@ -325,7 +334,28 @@ class EvalDataset(BaseModel):
             "own fingerprint."
         ),
     )
+    frozen: bool = Field(
+        default=False,
+        description=(
+            "Whether the recipe (run settings) is LOCKED. Only ever true when "
+            "status == 'final' (the `_frozen_requires_final` validator clears a "
+            "stale flag otherwise). Frozen ⇒ the recipe renders read-only in "
+            "both eval tabs; the user sets it by ticking 'Freeze run settings' "
+            "on a Run, and clears it via Unfreeze (with a confirm). Locks the "
+            "recipe ONLY — cases stay editable. Header-only, so it's excluded "
+            "from `compute_dataset_hash`."
+        ),
+    )
     cases: list[EvalCase] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _frozen_requires_final(self) -> EvalDataset:
+        # Invariant: only a final dataset can be frozen. If the status isn't
+        # final (e.g. set back to draft), any stale `frozen` flag is cleared so
+        # the two can never disagree on disk.
+        if self.status != "final" and self.frozen:
+            self.frozen = False
+        return self
 
 
 def load_dataset(path: Path | str) -> EvalDataset:

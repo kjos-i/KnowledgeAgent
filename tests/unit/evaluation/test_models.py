@@ -116,6 +116,30 @@ def test_load_dataset_accepts_both_shapes(tmp_path):
     assert [c.id for c in load_cases(arr)] == ["b"]
 
 
+def test_legacy_in_progress_status_coerces_to_draft(tmp_path):
+    """The retired 'in progress' status (dropped 2026-07-13; draft/final only)
+    maps forward to 'draft' so an older dataset still loads instead of failing
+    the Literal."""
+    p = tmp_path / "legacy.json"
+    p.write_text(
+        json.dumps({"status": "in progress", "cases": [{"id": "a", "question": "q?"}]}),
+        encoding="utf-8",
+    )
+    assert load_dataset(p).status == "draft"
+
+
+def test_frozen_roundtrips_and_requires_final(tmp_path):
+    """`frozen` persists in the header for a final dataset; the invariant
+    validator clears it for any non-final status."""
+    p = tmp_path / "f.json"
+    save_dataset(
+        EvalDataset(status="final", frozen=True, cases=[EvalCase(id="a", question="q?")]), p
+    )
+    assert load_dataset(p).frozen is True
+    assert EvalDataset(status="draft", frozen=True).frozen is False  # invariant coerces
+    assert EvalDataset().frozen is False  # default is unfrozen
+
+
 def test_load_rejects_json_scalar(tmp_path):
     p = tmp_path / "bad.json"
     p.write_text(json.dumps(42), encoding="utf-8")
