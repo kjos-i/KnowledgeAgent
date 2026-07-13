@@ -26,11 +26,12 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
-from knowledge_agent.gui._styles import PANEL_BG_RAISED, PANEL_RADIUS
+from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail
 from knowledge_agent.gui.views._frame import empty_state, view_header
 
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
+    from knowledge_agent.gui.evaluation.evaluation_view import EvaluationView
 
 # Body text one size up from Flet markdown's small default (still inside the
 # tab's 12–16 range), applied to paragraphs, links, lists, emphasis, and table
@@ -71,8 +72,10 @@ def _split_anchored(text: str) -> list[tuple[str | None, str]]:
 class MetricsGuideTab:
     """Static metrics-reference sub-tab (renders info_metrics.md)."""
 
-    def __init__(self, app: GuiApp) -> None:
+    def __init__(self, app: GuiApp, coordinator: EvaluationView) -> None:
         self.app = app
+        self.coordinator = coordinator
+        self.rail: DashboardRail | None = None
         self.body: ft.Container | None = None
         # The scrollable doc column (scroll target). A Column — NOT a ListView:
         # `scroll_to(scroll_key=…)` is documented as ineffective for controls that
@@ -81,39 +84,30 @@ class MetricsGuideTab:
         self._scroll: ft.Column | None = None
 
     def build(self) -> ft.Control:
+        # The SAME shared rail as the other three view tabs (its selection isn't
+        # used here — the guide is static — but the column stays consistent, and
+        # its Refresh reloads the doc via `on_change`).
+        self.rail = DashboardRail(self.app, self.coordinator, on_change=self._reload_guide)
+        rail_ctl = self.rail.build()
         self.body = ft.Container(content=self._guide_body(), expand=True)
-        rail = ft.Container(
-            width=280,
-            bgcolor=PANEL_BG_RAISED,
-            padding=12,
-            border_radius=PANEL_RADIUS,
-            content=ft.Column(
-                [
-                    ft.Text("Metrics Guide", weight=ft.FontWeight.BOLD),
-                    ft.TextButton("Refresh", on_click=self._on_refresh),
-                    ft.Divider(),
-                    ft.Text(
-                        "Reference for every evaluation metric — the toggle groups "
-                        "(source / chunk / KG / judge), the judge panel, scoring "
-                        "pathways, and the PASS / REVIEW verdict logic. Tap a metric "
-                        "in a glance table to jump to its section.",
-                        size=12,
-                        color=ft.Colors.GREY_400,
-                    ),
-                ],
-                spacing=8,
-            ),
-        )
         return ft.Column(
             [
                 view_header("Metrics Guide"),
                 ft.Row(
-                    [rail, self.body], expand=True, vertical_alignment=ft.CrossAxisAlignment.START
+                    [rail_ctl, self.body],
+                    expand=True,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
                 ),
             ],
             expand=True,
             spacing=8,
         )
+
+    def refresh(self) -> None:
+        """Sync the shared rail (runs + selection). The guide body is static;
+        it reloads via the rail's Refresh (`_reload_guide`)."""
+        if self.rail is not None:
+            self.rail.refresh()
 
     def _guide_body(self) -> ft.Control:
         path = _guide_path()
@@ -151,9 +145,9 @@ class MetricsGuideTab:
         elif href:
             self.app.page.launch_url(href)
 
-    def _on_refresh(self, _e: ft.Event) -> None:
+    def _reload_guide(self) -> None:
         """Reload the guide doc from disk (it's the single source; may have been
-        edited)."""
+        edited). Fired by the shared rail's Refresh."""
         if self.body is not None:
             self.body.content = self._guide_body()
             self.app.page.update()

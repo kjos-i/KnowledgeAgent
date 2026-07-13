@@ -189,6 +189,23 @@ def section_title(text: str) -> ft.Text:
     return ft.Text(text, size=SECTION_TITLE_SIZE, weight=ft.FontWeight.BOLD)
 
 
+# The four Evaluation dashboard view tabs share one section-header style so they
+# read identically: NON-bold at 16 (the tab text ceiling) with top breathing
+# room. Deliberately scoped to the dashboard — the app-wide `section_title`
+# stays bold. Separate sections with `section_divider()`.
+DASHBOARD_HEADER_SIZE = 16
+
+
+def dashboard_section_header(text: str) -> ft.Container:
+    """A dashboard body section header (Run Summary / Deep Analysis / Trends /
+    Metrics Guide) — non-bold, size `DASHBOARD_HEADER_SIZE`, with top padding so
+    it doesn't crowd the section above."""
+    return ft.Container(
+        padding=ft.Padding.only(top=10),
+        content=ft.Text(text, size=DASHBOARD_HEADER_SIZE),
+    )
+
+
 def section_divider() -> ft.Divider:
     """The separator *between* a panel's sections — thicker (2) + brighter
     (GREY_500) than Flet's dim 1px default, so section breaks stand out. For

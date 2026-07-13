@@ -18,7 +18,8 @@ from typing import TYPE_CHECKING, Any
 import flet as ft
 from flet import canvas as cv
 
-from knowledge_agent.gui._styles import FIELD_LABEL_SIZE, PANEL_BG_RAISED, PANEL_RADIUS
+from knowledge_agent.gui._styles import dashboard_section_header, section_divider
+from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail
 from knowledge_agent.gui.views._frame import view_header
 
 if TYPE_CHECKING:
@@ -102,8 +103,7 @@ class RunSummaryTab:
     def __init__(self, app: GuiApp, coordinator: EvaluationView) -> None:
         self.app = app
         self.coordinator = coordinator
-        self.run_dropdown: ft.Dropdown | None = None
-        self.metadata: ft.Column | None = None
+        self.rail: DashboardRail | None = None
         self.body: ft.Column | None = None
         self._runs: list[dict[str, Any]] = []
         self._cases: list[dict[str, Any]] = []
@@ -122,29 +122,8 @@ class RunSummaryTab:
     # ---- build ------------------------------------------------------------
 
     def build(self) -> ft.Control:
-        # Flet 0.85's Dropdown takes on_change as an attribute, not a ctor kwarg.
-        self.run_dropdown = ft.Dropdown(
-            label="Run", options=[], width=240, text_size=FIELD_LABEL_SIZE
-        )
-        self.run_dropdown.on_change = self._on_select_run
-        self.metadata = ft.Column(controls=[], spacing=2)
-        refresh_button = ft.TextButton("Refresh", on_click=self._on_refresh)
-        rail = ft.Container(
-            width=280,
-            bgcolor=PANEL_BG_RAISED,
-            padding=12,
-            border_radius=PANEL_RADIUS,
-            content=ft.Column(
-                controls=[
-                    ft.Text("Run", weight=ft.FontWeight.BOLD),
-                    self.run_dropdown,
-                    refresh_button,
-                    ft.Divider(),
-                    self.metadata,
-                ],
-                spacing=8,
-            ),
-        )
+        self.rail = DashboardRail(self.app, self.coordinator, on_change=self._render_body)
+        rail_ctl = self.rail.build()
         self.body = ft.Column(
             controls=[
                 ft.Text("Run an evaluation, or press Refresh to load past runs.", italic=True)
@@ -157,7 +136,9 @@ class RunSummaryTab:
             controls=[
                 view_header("Run Summary"),
                 ft.Row(
-                    [rail, self.body], expand=True, vertical_alignment=ft.CrossAxisAlignment.START
+                    [rail_ctl, self.body],
+                    expand=True,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
                 ),
             ],
             expand=True,
@@ -172,78 +153,41 @@ class RunSummaryTab:
         return active_eval_ledger(self.app)
 
     def refresh(self) -> None:
-        """Reload runs from the ledger + render the selected (or newest) run.
+        """Reload the rail (runs + selection) then render the selected run.
         Safe before any run exists (shows an empty state)."""
-        if self.body is None or self.run_dropdown is None:
+        if self.rail is not None:
+            self.rail.refresh()
+        self._render_body()
+
+    def _render_body(self) -> None:
+        """Render the KPI + per-case body for the coordinator's selected run —
+        the rail owns the selectors + recipe panel; this owns the body."""
+        if self.body is None:
             return
-        self._runs = self._ledger().list_runs()
-        if not self._runs:
+        run_id = self.coordinator.selected_run_id
+        if run_id is None:
             self.body.controls = [ft.Text("No evaluation runs recorded yet.", italic=True)]
-            self.run_dropdown.options = []
-            self._render_metadata(None)
             self.app.page.update()
             return
-
-        self.run_dropdown.options = [
-            ft.DropdownOption(key=str(r["run_id"]), text=self._run_label(r)) for r in self._runs
-        ]
-        run_id = self.coordinator.selected_run_id or self._runs[0]["run_id"]
-        self.coordinator.selected_run_id = run_id
-        self.run_dropdown.value = str(run_id)
-
         ledger = self._ledger()
         run = ledger.get_run(run_id)
+        if run is None:
+            self.body.controls = [ft.Text("Run not found — press Refresh.", italic=True)]
+            self.app.page.update()
+            return
         cases = ledger.get_run_cases(run_id)
         self._cases = cases
+        self._runs = ledger.list_runs()
         # Previous run (next-lower run_id) drives the delta pills on the KPI
         # cards — mirroring the Streamlit dashboard's compare-to-previous view.
         prev_id = max((r["run_id"] for r in self._runs if r["run_id"] < run_id), default=None)
         prev_run = ledger.get_run(prev_id) if prev_id is not None else None
-        self._render_metadata(run)
         # A newly loaded/refreshed run resets the chart filters to all-selected;
         # per-toggle changes (which don't re-enter refresh) persist within a run.
         self._chart_metrics = None
         self._chart_cases = None
         self.body.controls = self._build_body(run, prev_run, cases)
         self.app.page.update()
-
-    @staticmethod
-    def _run_label(run: dict[str, Any]) -> str:
-        from pathlib import Path
-
-        ts = (run.get("run_timestamp") or "")[:16]
-        dataset = Path(run.get("dataset_path") or "").name or "?"
-        return f"Run {run['run_id']} — {ts} ({dataset})"
-
-    def _render_metadata(self, run: dict[str, Any] | None) -> None:
-        if self.metadata is None:
-            return
-        if run is None:
-            self.metadata.controls = []
-            return
-        import json
-        from pathlib import Path
-
-        def _parse(raw: Any) -> Any:
-            if isinstance(raw, str):
-                try:
-                    return json.loads(raw)
-                except ValueError:
-                    return raw
-            return raw
-
-        groups = _parse(run.get("enabled_groups")) or []
-        thresholds = _parse(run.get("gate_thresholds")) or {}
-        lines = [
-            ft.Text("Run details", weight=ft.FontWeight.BOLD),
-            ft.Text(f"Dataset: {Path(run.get('dataset_path') or '').name or '?'}", size=12),
-            ft.Text(f"Cases: {run.get('case_count')}", size=12),
-            ft.Text(f"Groups: {', '.join(groups) if groups else '(none)'}", size=12),
-        ]
-        lines += [ft.Text(f"{k}: {v}", size=12) for k, v in thresholds.items()]
-        if run.get("git_commit"):
-            lines.append(ft.Text(f"commit: {run['git_commit'][:8]}", size=12))
-        self.metadata.controls = lines
 
     # ---- body: KPIs + table ----------------------------------------------
 
@@ -253,8 +197,11 @@ class RunSummaryTab:
         return [
             self._overview_row(run, prev_run),
             *self._kpi_sections(run, prev_run),
+            section_divider(),
             self._case_table(cases),
+            section_divider(),
             self._metric_scores_by_case(cases),
+            section_divider(),
             self._answer_detail(cases),
         ]
 
@@ -403,11 +350,11 @@ class RunSummaryTab:
         return f"n = {n} of {total}"
 
     @staticmethod
-    def _section_header(text: str) -> ft.Text:
-        """A dashboard section header (Average Performance, Judge Scores, …).
-        Larger than the app's section_title on purpose, matching the Streamlit
-        reference's subheaders; size is the single `_SECTION_HEADER_SIZE`."""
-        return ft.Text(text, size=_SECTION_HEADER_SIZE, weight=ft.FontWeight.BOLD)
+    def _section_header(text: str) -> ft.Control:
+        """A dashboard body section header (Average Performance, Judge Scores, …)
+        — the shared non-bold style all four view tabs use (`section_divider()`
+        separates the sections)."""
+        return dashboard_section_header(text)
 
     @staticmethod
     def _kpi_card(
@@ -476,7 +423,7 @@ class RunSummaryTab:
         self._render_case_rows()
         return ft.Column(
             [
-                ft.Text("Per-case results", weight=ft.FontWeight.BOLD, size=_SECTION_HEADER_SIZE),
+                self._section_header("Per-case results"),
                 self._color_legend(),
                 self._table_host,
             ],
@@ -972,13 +919,3 @@ class RunSummaryTab:
         if not isinstance(hit, (int, float)):
             return "Not evaluated"
         return "Yes" if hit == 1.0 else "No"
-
-    # ---- handlers ---------------------------------------------------------
-
-    def _on_select_run(self, _e: ft.Event) -> None:
-        if self.run_dropdown and self.run_dropdown.value:
-            self.coordinator.selected_run_id = int(self.run_dropdown.value)
-            self.refresh()
-
-    def _on_refresh(self, _e: ft.Event) -> None:
-        self.refresh()

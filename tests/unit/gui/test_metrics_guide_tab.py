@@ -27,7 +27,7 @@ def test_info_metrics_doc_ships_with_harness():
 
 
 def test_metrics_guide_builds(fake_app: MagicMock):
-    assert MetricsGuideTab(fake_app).build() is not None
+    assert MetricsGuideTab(fake_app, coordinator=MagicMock()).build() is not None
 
 
 def test_split_anchored_strips_tags_and_keys_sections():
@@ -54,7 +54,7 @@ def test_doc_anchors_back_every_glance_link():
 
 def test_on_tap_link_scrolls_to_the_anchor_section(fake_app: MagicMock):
     # scroll_to is a coroutine, so the handler is async and must be awaited.
-    tab = MetricsGuideTab(fake_app)
+    tab = MetricsGuideTab(fake_app, coordinator=MagicMock())
     tab._scroll = MagicMock()
     tab._scroll.scroll_to = AsyncMock()
     asyncio.run(tab._on_tap_link(SimpleNamespace(data="#faithfulness")))
@@ -63,7 +63,7 @@ def test_on_tap_link_scrolls_to_the_anchor_section(fake_app: MagicMock):
 
 
 def test_build_renders_keyed_anchor_sections(fake_app: MagicMock):
-    tab = MetricsGuideTab(fake_app)
+    tab = MetricsGuideTab(fake_app, coordinator=MagicMock())
     tab.build()
     assert tab._scroll is not None  # scrollable ListView built
     keyed = [c for c in tab._scroll.controls if getattr(c, "key", None) is not None]

@@ -25,8 +25,13 @@ from typing import TYPE_CHECKING, Any
 import flet as ft
 from flet import canvas as cv
 
-from knowledge_agent.gui._styles import FIELD_LABEL_SIZE, PANEL_BG_RAISED, PANEL_RADIUS
-from knowledge_agent.gui.evaluation.run_summary_tab import RunSummaryTab, _score_color
+from knowledge_agent.gui._styles import (
+    FIELD_LABEL_SIZE,
+    dashboard_section_header,
+    section_divider,
+)
+from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail
+from knowledge_agent.gui.evaluation.run_summary_tab import _score_color
 from knowledge_agent.gui.views._frame import view_header
 
 if TYPE_CHECKING:
@@ -224,8 +229,7 @@ class DeepAnalysisTab:
     def __init__(self, app: GuiApp, coordinator: EvaluationView) -> None:
         self.app = app
         self.coordinator = coordinator
-        self.run_dropdown: ft.Dropdown | None = None
-        self.metadata: ft.Column | None = None
+        self.rail: DashboardRail | None = None
         self.body: ft.Column | None = None
         self.hist_dropdown: ft.Dropdown | None = None
         self.hist_container: ft.Container | None = None
@@ -236,28 +240,8 @@ class DeepAnalysisTab:
     # ---- build ------------------------------------------------------------
 
     def build(self) -> ft.Control:
-        self.run_dropdown = ft.Dropdown(
-            label="Run", options=[], width=240, text_size=FIELD_LABEL_SIZE
-        )
-        self.run_dropdown.on_change = self._on_select_run
-        self.metadata = ft.Column(controls=[], spacing=2)
-        refresh_button = ft.TextButton("Refresh", on_click=self._on_refresh)
-        rail = ft.Container(
-            width=280,
-            bgcolor=PANEL_BG_RAISED,
-            padding=12,
-            border_radius=PANEL_RADIUS,
-            content=ft.Column(
-                [
-                    ft.Text("Run", weight=ft.FontWeight.BOLD),
-                    self.run_dropdown,
-                    refresh_button,
-                    ft.Divider(),
-                    self.metadata,
-                ],
-                spacing=8,
-            ),
-        )
+        self.rail = DashboardRail(self.app, self.coordinator, on_change=self._render_body)
+        rail_ctl = self.rail.build()
         self.body = ft.Column(
             [ft.Text("Run an evaluation, or press Refresh to analyze a run.", italic=True)],
             scroll=ft.ScrollMode.AUTO,
@@ -268,7 +252,9 @@ class DeepAnalysisTab:
             [
                 view_header("Deep Analysis"),
                 ft.Row(
-                    [rail, self.body], expand=True, vertical_alignment=ft.CrossAxisAlignment.START
+                    [rail_ctl, self.body],
+                    expand=True,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
                 ),
             ],
             expand=True,
@@ -283,65 +269,41 @@ class DeepAnalysisTab:
         return active_eval_ledger(self.app)
 
     def refresh(self) -> None:
-        if self.body is None or self.run_dropdown is None:
+        """Reload the rail (runs + selection) then render the selected run."""
+        if self.rail is not None:
+            self.rail.refresh()
+        self._render_body()
+
+    def _render_body(self) -> None:
+        """Render the deep-analysis body for the coordinator's selected run —
+        the rail owns the selectors + recipe panel; this owns the body."""
+        if self.body is None:
             return
-        ledger = self._ledger()
-        runs = ledger.list_runs()
-        self._runs = runs
-        if not runs:
+        run_id = self.coordinator.selected_run_id
+        if run_id is None:
             self.body.controls = [ft.Text("No evaluation runs recorded yet.", italic=True)]
-            self.run_dropdown.options = []
-            self._render_metadata(None)
             self.app.page.update()
             return
-        self.run_dropdown.options = [
-            ft.DropdownOption(key=str(r["run_id"]), text=RunSummaryTab._run_label(r)) for r in runs
-        ]
-        run_id = self.coordinator.selected_run_id or runs[0]["run_id"]
-        self.coordinator.selected_run_id = run_id
-        self.run_dropdown.value = str(run_id)
+        ledger = self._ledger()
         run = ledger.get_run(run_id)
+        if run is None:
+            self.body.controls = [ft.Text("Run not found — press Refresh.", italic=True)]
+            self.app.page.update()
+            return
+        self._runs = ledger.list_runs()
         self._cases = ledger.get_run_cases(run_id)
-        self._render_metadata(run)
-
         self.body.controls = [
             *self._balance_sections(run),
+            section_divider(),
             self._distribution_section(),
+            section_divider(),
             self._correlation_section(),
+            section_divider(),
             self._latency_section(),
+            section_divider(),
             self._token_usage_section(),
         ]
         self.app.page.update()
-
-    def _render_metadata(self, run: dict[str, Any] | None) -> None:
-        if self.metadata is None:
-            return
-        if run is None:
-            self.metadata.controls = []
-            return
-        import json
-        from pathlib import Path
-
-        def _parse(raw: Any) -> Any:
-            if isinstance(raw, str):
-                try:
-                    return json.loads(raw)
-                except ValueError:
-                    return raw
-            return raw
-
-        groups = _parse(run.get("enabled_groups")) or []
-        thresholds = _parse(run.get("gate_thresholds")) or {}
-        lines = [
-            ft.Text("Run details", weight=ft.FontWeight.BOLD),
-            ft.Text(f"Dataset: {Path(run.get('dataset_path') or '').name or '?'}", size=12),
-            ft.Text(f"Cases: {run.get('case_count')}", size=12),
-            ft.Text(f"Groups: {', '.join(groups) if groups else '(none)'}", size=12),
-        ]
-        lines += [ft.Text(f"{k}: {v}", size=12) for k, v in thresholds.items()]
-        if run.get("git_commit"):
-            lines.append(ft.Text(f"commit: {run['git_commit'][:8]}", size=12))
-        self.metadata.controls = lines
 
     # ---- metric balance (bar-of-means) ------------------------------------
 
@@ -403,12 +365,12 @@ class DeepAnalysisTab:
 
         grid = ft.Column(
             [
-                ft.Row(cards[i : i + 2], spacing=24, vertical_alignment=ft.CrossAxisAlignment.START)
+                ft.Row(cards[i : i + 2], spacing=40, vertical_alignment=ft.CrossAxisAlignment.START)
                 for i in range(0, len(cards), 2)
             ],
-            spacing=16,
+            spacing=28,
         )
-        return [ft.Text("Metric Balance", weight=ft.FontWeight.BOLD), grid]
+        return [dashboard_section_header("Metric Balance"), grid]
 
     @staticmethod
     def _group_card(group: str, body: list[ft.Control]) -> ft.Control:
@@ -478,7 +440,7 @@ class DeepAnalysisTab:
         self.hist_container = ft.Container(content=self._histogram(self._hist_metric))
         return ft.Column(
             [
-                ft.Text("Score Distribution", weight=ft.FontWeight.BOLD),
+                dashboard_section_header("Score Distribution"),
                 ft.Text(
                     "Select a metric to see how scores spread across cases.",
                     size=12,
@@ -542,7 +504,7 @@ class DeepAnalysisTab:
     def _latency_section(self) -> ft.Control:
         return ft.Column(
             [
-                ft.Text("Latency by Case", weight=ft.FontWeight.BOLD),
+                dashboard_section_header("Latency by Case"),
                 ft.Text(
                     "Total latency per case (seconds). KA measures total latency only "
                     "— no retrieval/LLM split.",
@@ -559,7 +521,7 @@ class DeepAnalysisTab:
     def _token_usage_section(self) -> ft.Control:
         return ft.Column(
             [
-                ft.Text("Token Usage by Case", weight=ft.FontWeight.BOLD),
+                dashboard_section_header("Token Usage by Case"),
                 ft.Text(
                     "Agent input and output tokens per case.", size=12, color=ft.Colors.GREY_400
                 ),
@@ -584,7 +546,7 @@ class DeepAnalysisTab:
             return ft.Text("Correlation needs at least 2 comparable metrics.", italic=True)
         return ft.Column(
             [
-                ft.Text("Metric Correlations (Pearson)", weight=ft.FontWeight.BOLD),
+                dashboard_section_header("Metric Correlations (Pearson)"),
                 ft.Text(
                     "Pearson correlation. Hallucination is excluded "
                     "(lower = better, would invert the sign).",
@@ -712,13 +674,3 @@ class DeepAnalysisTab:
         if r is None:
             return "#e8e8e8", "—", ft.Colors.BLACK
         return _corr_color(r), f"{r:.2f}", ft.Colors.WHITE if abs(r) > 0.55 else ft.Colors.BLACK
-
-    # ---- handlers ---------------------------------------------------------
-
-    def _on_select_run(self, _e: ft.Event) -> None:
-        if self.run_dropdown and self.run_dropdown.value:
-            self.coordinator.selected_run_id = int(self.run_dropdown.value)
-            self.refresh()
-
-    def _on_refresh(self, _e: ft.Event) -> None:
-        self.refresh()

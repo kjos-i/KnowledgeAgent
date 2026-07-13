@@ -48,27 +48,43 @@ SUB_TAB_LABELS = (
     "Metrics Guide",
 )
 
+# The eval-output (view) tabs — tinted apart from the two authoring tabs, and
+# auto-refreshed on select (they read the shared ledger; the authoring tabs
+# own their own state).
+_VIEW_TABS = frozenset({"Run Summary", "Deep Analysis", "Trends", "Metrics Guide"})
+
 
 class EvaluationView:
     """Top-tab coordinator for Evaluation — 5 sub-tabs, no shared splitter."""
 
     def __init__(self, app: GuiApp) -> None:
         self.app = app
-        # The run the per-run result tabs display. None until a run exists /
-        # is selected. Set by the Run tab on completion + the left-rail
-        # selector.
+        # Shared dashboard selection, read by all four view tabs' left rails
+        # (`DashboardRail`) so they stay in step. `selected_run_id` drives the
+        # per-run tabs (Run Summary / Deep Analysis); `selected_dataset` scopes
+        # Trends + narrows the run picker. Set by the rails + the Run tab on
+        # completion.
         self.selected_run_id: int | None = None
+        self.selected_dataset: str | None = None
         self._tabs: ft.Tabs | None = None
         self.run_tab = RunTab(app, coordinator=self)
         self.dataset_tab = DatasetTab(app, coordinator=self)
         self.run_summary_tab = RunSummaryTab(app, coordinator=self)
         self.deep_analysis_tab = DeepAnalysisTab(app, coordinator=self)
         self.trends_tab = TrendsTab(app, coordinator=self)
-        self.metrics_guide_tab = MetricsGuideTab(app)
+        self.metrics_guide_tab = MetricsGuideTab(app, coordinator=self)
 
     def build(self) -> ft.Control:
+        # The four view (eval-output) tabs get a tinted label so they read as a
+        # distinct group from the two authoring tabs. (ft.Tab has no per-tab
+        # background; a coloured label Control is the native way to tint one.)
         sub_bar = ft.TabBar(
-            tabs=[ft.Tab(label=label) for label in SUB_TAB_LABELS],
+            tabs=[
+                ft.Tab(
+                    label=ft.Text(label, color=ft.Colors.TEAL_300) if label in _VIEW_TABS else label
+                )
+                for label in SUB_TAB_LABELS
+            ],
             secondary=True,
         )
         sub_bodies = ft.TabBarView(
@@ -85,10 +101,27 @@ class EvaluationView:
         self._tabs = ft.Tabs(
             length=len(SUB_TAB_LABELS),
             selected_index=0,
+            on_change=self._on_subtab_change,
             content=ft.Column(controls=[sub_bar, sub_bodies], expand=True, spacing=0),
             expand=True,
         )
         return self._tabs
+
+    def _on_subtab_change(self, _e: ft.Event) -> None:
+        """Auto-refresh a view tab when it's selected — the shared rail + body
+        pick up the latest ledger without a manual Refresh. The two authoring
+        tabs manage their own state, so they're skipped."""
+        if self._tabs is None:
+            return
+        view_tabs = {
+            SUB_TAB_LABELS.index("Run Summary"): self.run_summary_tab,
+            SUB_TAB_LABELS.index("Deep Analysis"): self.deep_analysis_tab,
+            SUB_TAB_LABELS.index("Trends"): self.trends_tab,
+            SUB_TAB_LABELS.index("Metrics Guide"): self.metrics_guide_tab,
+        }
+        tab = view_tabs.get(self._tabs.selected_index)
+        if tab is not None:
+            tab.refresh()
 
     def on_run_complete(self, run_id: int) -> None:
         """A run finished in the Run tab: select it + jump to Run Summary.

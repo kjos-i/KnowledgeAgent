@@ -39,7 +39,7 @@ def test_trends_needs_two_runs(fake_app, tmp_path):
     coordinator.selected_run_id = None
     tab = TrendsTab(fake_app, coordinator=coordinator)
     tab.build()
-    with patch.object(tab, "_ledger", return_value=led):
+    with patch("knowledge_agent.gui.evaluation._common.active_eval_ledger", return_value=led):
         tab.refresh()
     assert "Need at least 2 runs" in tab.body.controls[0].value
 
@@ -52,7 +52,7 @@ def test_trends_renders_charts_for_two_runs(fake_app, tmp_path):
     coordinator.selected_run_id = None
     tab = TrendsTab(fake_app, coordinator=coordinator)
     tab.build()
-    with patch.object(tab, "_ledger", return_value=led):
+    with patch("knowledge_agent.gui.evaluation._common.active_eval_ledger", return_value=led):
         tab.refresh()
-    assert tab.dataset_dropdown.options  # dataset filter populated
+    assert tab.rail.dataset_dd.options  # dataset filter populated
     assert len(tab.body.controls) >= 1  # >=1 chart built (canvas construction OK)

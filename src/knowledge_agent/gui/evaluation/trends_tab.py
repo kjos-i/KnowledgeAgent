@@ -13,13 +13,13 @@ polling.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import flet as ft
 from flet import canvas as cv
 
-from knowledge_agent.gui._styles import FIELD_LABEL_SIZE, PANEL_BG_RAISED, PANEL_RADIUS
+from knowledge_agent.gui._styles import dashboard_section_header, section_divider
+from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail, dataset_of
 from knowledge_agent.gui.views._frame import view_header
 
 if TYPE_CHECKING:
@@ -175,32 +175,14 @@ class TrendsTab:
     def __init__(self, app: GuiApp, coordinator: EvaluationView) -> None:
         self.app = app
         self.coordinator = coordinator
-        self.dataset_dropdown: ft.Dropdown | None = None
+        self.rail: DashboardRail | None = None
         self.body: ft.Column | None = None
-        self._dataset: str | None = None
 
     # ---- build ------------------------------------------------------------
 
     def build(self) -> ft.Control:
-        self.dataset_dropdown = ft.Dropdown(
-            label="Dataset", options=[], width=240, text_size=FIELD_LABEL_SIZE
-        )
-        self.dataset_dropdown.on_change = self._on_dataset_change
-        refresh_button = ft.TextButton("Refresh", on_click=self._on_refresh)
-        rail = ft.Container(
-            width=280,
-            bgcolor=PANEL_BG_RAISED,
-            padding=12,
-            border_radius=PANEL_RADIUS,
-            content=ft.Column(
-                [
-                    ft.Text("Dataset", weight=ft.FontWeight.BOLD),
-                    self.dataset_dropdown,
-                    refresh_button,
-                ],
-                spacing=8,
-            ),
-        )
+        self.rail = DashboardRail(self.app, self.coordinator, on_change=self._render_body)
+        rail_ctl = self.rail.build()
         self.body = ft.Column(
             [ft.Text("Run evaluations, or press Refresh to load trends.", italic=True)],
             scroll=ft.ScrollMode.AUTO,
@@ -211,7 +193,9 @@ class TrendsTab:
             [
                 view_header("Historical Trends"),
                 ft.Row(
-                    [rail, self.body], expand=True, vertical_alignment=ft.CrossAxisAlignment.START
+                    [rail_ctl, self.body],
+                    expand=True,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
                 ),
             ],
             expand=True,
@@ -226,46 +210,36 @@ class TrendsTab:
         return active_eval_ledger(self.app)
 
     def refresh(self) -> None:
-        if self.body is None or self.dataset_dropdown is None:
-            return
-        runs = self._ledger().list_runs()
-        datasets = list(dict.fromkeys(self._dataset_name(r) for r in runs))
-        self.dataset_dropdown.options = [ft.DropdownOption(key=d, text=d) for d in datasets]
+        """Reload the rail (runs + selection) then render the trend for the
+        shared selected dataset."""
+        if self.rail is not None:
+            self.rail.refresh()
+        self._render_body()
 
-        if not datasets:
+    def _render_body(self) -> None:
+        """Render the cross-run trend charts for the coordinator's selected
+        dataset — the rail owns the selectors; this owns the charts. Uses the
+        SAME `dataset_of` identity the rail selects by, so they stay in step."""
+        if self.body is None:
+            return
+        ds = self.coordinator.selected_dataset
+        if ds is None:
             self.body.controls = [ft.Text("No evaluation runs recorded yet.", italic=True)]
             self.app.page.update()
             return
-
-        if self._dataset not in datasets:
-            self._dataset = self._default_dataset(runs, datasets)
-        self.dataset_dropdown.value = self._dataset
-
-        chrono = [r for r in reversed(runs) if self._dataset_name(r) == self._dataset]
+        runs = self._ledger().list_runs()
+        chrono = [r for r in reversed(runs) if dataset_of(r) == ds]
         if len(chrono) < 2:
             self.body.controls = [
                 ft.Text(
-                    f"Need at least 2 runs of '{self._dataset}' for a trend "
-                    f"({len(chrono)} recorded).",
+                    f"Need at least 2 runs of '{ds}' for a trend ({len(chrono)} recorded).",
                     italic=True,
                 )
             ]
             self.app.page.update()
             return
-
         self.body.controls = self._build_charts(chrono)
         self.app.page.update()
-
-    @staticmethod
-    def _dataset_name(run: dict[str, Any]) -> str:
-        return Path(run.get("dataset_path") or "").name or "?"
-
-    def _default_dataset(self, runs: list[dict[str, Any]], datasets: list[str]) -> str:
-        selected = self.coordinator.selected_run_id
-        for r in runs:
-            if r["run_id"] == selected:
-                return self._dataset_name(r)
-        return datasets[0]
 
     # ---- charts -----------------------------------------------------------
 
@@ -304,7 +278,14 @@ class TrendsTab:
             charts.append(
                 self._chart(header, specs, chrono, x_labels, y_max, _Y_LABELS.get(group, "Score"))
             )
-        return charts
+        # Interleave section dividers so the trend charts read as distinct
+        # sections — the same common style as Run Summary / Deep Analysis.
+        out: list[ft.Control] = []
+        for i, chart in enumerate(charts):
+            if i:
+                out.append(section_divider())
+            out.append(chart)
+        return out
 
     def _chart(
         self,
@@ -321,7 +302,7 @@ class TrendsTab:
         ]
         return ft.Column(
             [
-                ft.Text(header, weight=ft.FontWeight.BOLD),
+                dashboard_section_header(header),
                 _line_chart(series, x_labels, y_max, y_label),
             ],
             spacing=6,
@@ -345,13 +326,3 @@ class TrendsTab:
         vals = [self._num(r.get(col)) for col, _ in specs for r in chrono]
         top = max((v for v in vals if v is not None), default=0.0)
         return top * 1.1 if top > 0 else 0.0
-
-    # ---- handlers ---------------------------------------------------------
-
-    def _on_dataset_change(self, _e: ft.Event) -> None:
-        if self.dataset_dropdown and self.dataset_dropdown.value:
-            self._dataset = self.dataset_dropdown.value
-            self.refresh()
-
-    def _on_refresh(self, _e: ft.Event) -> None:
-        self.refresh()

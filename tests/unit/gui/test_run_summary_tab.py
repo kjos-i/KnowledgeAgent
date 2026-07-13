@@ -56,7 +56,7 @@ def test_refresh_empty_ledger_shows_empty_state(fake_app: MagicMock, tmp_path):
     led = EvalLedger(tmp_path / "l.db")
     tab = RunSummaryTab(fake_app, coordinator=MagicMock())
     tab.build()
-    with patch.object(tab, "_ledger", return_value=led):
+    with patch("knowledge_agent.gui.evaluation._common.active_eval_ledger", return_value=led):
         tab.refresh()
     assert "No evaluation runs" in tab.body.controls[0].value
 
@@ -68,10 +68,10 @@ def test_refresh_renders_selected_run(fake_app: MagicMock, tmp_path):
     coordinator.selected_run_id = None
     tab = RunSummaryTab(fake_app, coordinator=coordinator)
     tab.build()
-    with patch.object(tab, "_ledger", return_value=led):
+    with patch("knowledge_agent.gui.evaluation._common.active_eval_ledger", return_value=led):
         tab.refresh()
     assert coordinator.selected_run_id == 1  # newest auto-selected
-    assert tab.run_dropdown.options  # run listed in the selector
+    assert tab.rail.run_dd.options  # run listed in the selector
     assert len(tab.body.controls) > 1  # headline + KPI sections + table (not the empty state)
 
 
@@ -88,7 +88,7 @@ def test_refresh_with_two_runs_renders_delta_pills(fake_app: MagicMock, tmp_path
     coordinator.selected_run_id = None
     tab = RunSummaryTab(fake_app, coordinator=coordinator)
     tab.build()
-    with patch.object(tab, "_ledger", return_value=led):
+    with patch("knowledge_agent.gui.evaluation._common.active_eval_ledger", return_value=led):
         tab.refresh()  # must not raise while building the delta pills
     assert coordinator.selected_run_id == 2  # newest auto-selected
     assert len(tab.body.controls) > 1
@@ -116,7 +116,7 @@ def test_sort_by_orders_and_flips_on_repeat_click(fake_app: MagicMock, tmp_path)
     coordinator.selected_run_id = None
     tab = RunSummaryTab(fake_app, coordinator=coordinator)
     tab.build()
-    with patch.object(tab, "_ledger", return_value=led):
+    with patch("knowledge_agent.gui.evaluation._common.active_eval_ledger", return_value=led):
         tab.refresh()
     tab._sort_by("hit_at_k")  # ascending → 0.0 before 1.0
     assert [c["case_id"] for c in tab._sorted_cases()] == ["c2", "c1"]
@@ -149,7 +149,7 @@ def test_metric_scores_chart_defaults_all_and_filters(fake_app: MagicMock, tmp_p
     coordinator.selected_run_id = None
     tab = RunSummaryTab(fake_app, coordinator=coordinator)
     tab.build()
-    with patch.object(tab, "_ledger", return_value=led):
+    with patch("knowledge_agent.gui.evaluation._common.active_eval_ledger", return_value=led):
         tab.refresh()
     cols = {c for c, _ in tab._chart_metric_cols(tab._cases)}
     assert "hit_at_k" in cols  # a 0-1 score column with data is chartable
@@ -216,6 +216,6 @@ def test_refresh_renders_n_line_when_present(fake_app: MagicMock, tmp_path):
     coordinator.selected_run_id = None
     tab = RunSummaryTab(fake_app, coordinator=coordinator)
     tab.build()
-    with patch.object(tab, "_ledger", return_value=led):
+    with patch("knowledge_agent.gui.evaluation._common.active_eval_ledger", return_value=led):
         tab.refresh()
     assert len(tab.body.controls) > 1

@@ -65,7 +65,7 @@ def test_refresh_empty_ledger(fake_app, tmp_path):
     led = EvalLedger(tmp_path / "l.db")
     tab = DeepAnalysisTab(fake_app, coordinator=MagicMock())
     tab.build()
-    with patch.object(tab, "_ledger", return_value=led):
+    with patch("knowledge_agent.gui.evaluation._common.active_eval_ledger", return_value=led):
         tab.refresh()
     assert "No evaluation runs" in tab.body.controls[0].value
 
@@ -77,7 +77,7 @@ def test_refresh_renders_analysis_and_histogram_switch(fake_app, tmp_path):
     coordinator.selected_run_id = None
     tab = DeepAnalysisTab(fake_app, coordinator=coordinator)
     tab.build()
-    with patch.object(tab, "_ledger", return_value=led):
+    with patch("knowledge_agent.gui.evaluation._common.active_eval_ledger", return_value=led):
         tab.refresh()
     assert coordinator.selected_run_id == 1
     assert len(tab.body.controls) > 1  # header + balance + distribution + correlation
