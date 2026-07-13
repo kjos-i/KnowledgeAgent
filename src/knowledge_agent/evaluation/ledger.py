@@ -75,6 +75,9 @@ _RUNS_TRAILING: list[tuple[str, str]] = [
     ("judge_models", "TEXT"),  # JSON list — the judge panel that actually ran
     # Dataset-recipe provenance (C2): the profile tag + the recipe fingerprint
     # (twin of dataset_hash). NULL when the dataset carries no saved recipe.
+    # PROVENANCE / FILTER ONLY — the dashboard groups + compares runs by these;
+    # they are NEVER read by scoring or the pass-gate (the run's actual gate
+    # thresholds live in `gate_thresholds`).
     ("dataset_kind", "TEXT"),
     ("recipe_hash", "TEXT"),
 ]
@@ -92,7 +95,9 @@ _CASES_TRAILING: list[tuple[str, str]] = [
     ("answer", "TEXT"),
     ("expected_output", "TEXT"),  # gold answer: "\n"-joined expected_answer_points
     ("errors", "TEXT"),  # JSON list
-    ("origin", "TEXT"),  # case provenance: manual / llm / search / chat (added 2026-07-13)
+    # Case provenance: manual / llm / search / chat (added 2026-07-13). FILTER
+    # ONLY — lets the dashboard compare origins; never read by scoring.
+    ("origin", "TEXT"),
 ]
 
 

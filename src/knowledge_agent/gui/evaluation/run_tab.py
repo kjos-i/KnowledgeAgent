@@ -34,7 +34,7 @@ from knowledge_agent.gui._styles import (
 from knowledge_agent.gui._widgets.info_icon import info_icon
 from knowledge_agent.gui.config_store import get_api_key
 from knowledge_agent.gui.evaluation._case_view import render_case_cards
-from knowledge_agent.gui.settings.llm_tab import LLM_AVAILABLE_MODELS
+from knowledge_agent.gui.evaluation._recipe_form import RecipeForm
 
 if TYPE_CHECKING:
     from knowledge_agent.evaluation.config import EvalConfig
@@ -42,10 +42,6 @@ if TYPE_CHECKING:
     from knowledge_agent.gui.evaluation.evaluation_view import EvaluationView
 
 logger = logging.getLogger(__name__)
-
-# Metric-group toggles + their defaults. judge is OFF by default — it calls
-# LLM judges and costs money; source/chunk/kg are deterministic + free.
-_GROUP_DEFAULTS: dict[str, bool] = {"source": True, "chunk": True, "kg": True, "judge": False}
 
 
 class RunTab:
@@ -57,16 +53,13 @@ class RunTab:
         self._bg_tasks: set[asyncio.Task] = set()
         self._busy = False
         self.dataset_field: ft.TextField | None = None
-        self.group_checks: dict[str, ft.Checkbox] = {}
-        self.judge_panel: ft.Column | None = None
-        self.judge_dropdown: ft.Dropdown | None = None  # the single model picker
-        self.judge_models: list[str] = []  # names Added into the list below
-        self.add_judge_button: ft.TextButton | None = None
-        # "No judges → default fallback" note (shown when the panel is empty).
-        self.judge_fallback_hint: ft.Text | None = None
-        # Wraps the judge panel + hint + add button; greys out (stays visible)
-        # when the judge metric is unchecked.
-        self.judge_section: ft.Container | None = None
+        # The recipe controls (metric groups + judge panel + gate thresholds +
+        # profile) — one shared widget with the Create-test-cases tab. Here it
+        # is loaded from the selected dataset's saved recipe and rendered FROZEN;
+        # Unfreeze deviates for a single run (never written back).
+        self.recipe_form: RecipeForm | None = None
+        self.unfreeze_button: ft.TextButton | None = None
+        self.deviation_note: ft.Text | None = None
         self.max_cases_field: ft.TextField | None = None
         self.trace_check: ft.Checkbox | None = None
         self.project_field: ft.TextField | None = None
@@ -134,72 +127,25 @@ class RunTab:
             selectable=True,
         )
 
-        self.group_checks = {
-            group: ft.Checkbox(
-                label=group,
-                value=_GROUP_DEFAULTS[group],
-                on_change=self._on_judge_toggle if group == "judge" else None,
-            )
-            for group in _GROUP_DEFAULTS
-        }
-
-        self.judge_models = []
-        judge_on = self.group_checks["judge"].value
-        # ONE picker + Add: choose a model, Add appends its name to the list
-        # below (`judge_panel`). The list is what actually runs.
-        self.judge_dropdown = ft.Dropdown(
-            editable=True,
-            options=self._judge_options(),
+        # The recipe editor, shared with the Create-test-cases tab. Built here,
+        # loaded + frozen when a dataset is chosen (`_load_recipe_from`).
+        self.recipe_form = RecipeForm(self.app)
+        recipe_body = self.recipe_form.build()
+        # Frozen until Unfreeze — the recipe belongs to the dataset; the Run tab
+        # only displays it (and lets a single run deviate).
+        self.recipe_form.set_enabled(False)
+        self.unfreeze_button = ft.TextButton(
+            "Unfreeze for a one-off run",
+            icon=ft.Icons.LOCK_OPEN,
+            tooltip="Edit the recipe for THIS run only — the dataset's saved recipe is unchanged",
+            on_click=self._on_unfreeze_clicked,
         )
-        self.add_judge_button = ft.TextButton(
-            "Add judge model",
-            icon=ft.Icons.ADD,
-            on_click=self._on_add_judge_clicked,
-        )
-        self.judge_panel = ft.Column(controls=[], spacing=4)  # added-judge list
-        self.judge_fallback_hint = ft.Text(
-            "No judges added — one default judge from your active provider is used.",
+        self.deviation_note = ft.Text(
+            "Editing the recipe for THIS run only — not saved to the dataset.",
             size=12,
-            color=ft.Colors.GREY_600,
-            italic=True,
+            color=ft.Colors.ORANGE,
+            visible=False,
         )
-        # Always visible; the whole box greys out (disabled cascades to
-        # children in Flet) when the judge metric is unchecked.
-        self.judge_section = ft.Container(
-            disabled=not judge_on,
-            content=ft.Column(
-                [
-                    sub_section_header(
-                        "Judge panel",
-                        trailing=info_icon(
-                            self.app,
-                            title="Judge panel",
-                            text=(
-                                "LLM judges — they call your provider and cost "
-                                "money, which is why the judge metric is OFF by "
-                                "default. Each model you add scores every case; the "
-                                "panel's mean is the judge score. Add none and one "
-                                "default judge from your active provider is used."
-                            ),
-                        ),
-                    ),
-                    ft.Row(
-                        [
-                            ft.Container(
-                                content=labeled_field("Judge model", self.judge_dropdown),
-                                expand=True,
-                            ),
-                            self.add_judge_button,
-                        ],
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    self.judge_panel,
-                    self.judge_fallback_hint,
-                ],
-                spacing=6,
-            ),
-        )
-        self._refresh_judge_list()
 
         self.max_cases_field = ft.TextField(
             width=200,
@@ -270,10 +216,18 @@ class RunTab:
                 section_title("Evaluation cases"),
                 labeled_field("Dataset", self.dataset_field, trailing=browse_button),
                 section_divider(),
-                # ============ Section: Metrics ============
-                section_title("Metrics"),
-                ft.Row([self.group_checks[g] for g in _GROUP_DEFAULTS], wrap=True),
-                self.judge_section,
+                # ============ Section: Recipe ============
+                # The dataset's saved recipe (metric groups + judge panel + gate
+                # thresholds + profile), loaded read-only. Unfreeze to deviate
+                # for one run without touching the dataset.
+                section_title("Recipe"),
+                recipe_body,
+                ft.Row(
+                    [self.unfreeze_button, self.deviation_note],
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=8,
+                    wrap=True,
+                ),
                 section_divider(),
                 # ============ Section: Run options ============
                 section_title("Run options"),
@@ -422,65 +376,37 @@ class RunTab:
         self.case_list.controls = self._case_controls()
         self.app.page.update()
 
-    # ---- judge panel ------------------------------------------------------
+    # ---- recipe freeze/unfreeze -------------------------------------------
 
-    def _judge_options(self) -> list[ft.DropdownOption]:
-        provider = getattr(self.app.gui_config, "llm_provider", "")
-        return [ft.DropdownOption(key=m, text=m) for m in LLM_AVAILABLE_MODELS.get(provider, ())]
+    def _load_recipe_from(self, path: Path) -> None:
+        """Load the dataset's saved recipe into the (frozen) recipe form. A
+        legacy dataset with no recipe loads the harness defaults. Re-freezes +
+        resets the Unfreeze affordance on every dataset change."""
+        from knowledge_agent.evaluation.models import load_dataset
 
-    def _refresh_judge_list(self) -> None:
-        """Rebuild the added-judge list rows + toggle the empty fallback note."""
-        if self.judge_panel is not None:
-            self.judge_panel.controls = [self._judge_list_row(n) for n in self.judge_models]
-        if self.judge_fallback_hint is not None:
-            self.judge_fallback_hint.visible = not self.judge_models
+        recipe = None
+        try:
+            recipe = load_dataset(path).recipe
+        except Exception:  # broad: a bad dataset already surfaces in the case view
+            recipe = None
+        if self.recipe_form is not None:
+            self.recipe_form.load(recipe)
+            self.recipe_form.set_enabled(False)
+        if self.unfreeze_button is not None:
+            self.unfreeze_button.visible = True
+        if self.deviation_note is not None:
+            self.deviation_note.visible = False
 
-    def _judge_list_row(self, name: str) -> ft.Control:
-        """One added-judge list item: bullet + model name + a fixed 'temp 0'
-        badge + remove button. The temperature is shown (read-only) because
-        judges always run deterministically at temperature 0 — surfacing it
-        just tells the curator what setting each judge runs at."""
-        return ft.Row(
-            [
-                ft.Icon(ft.Icons.CIRCLE, size=6, color=ft.Colors.GREY_500),
-                ft.Text(name, size=12, color=ft.Colors.GREY_200, expand=True),
-                ft.Text("temp 0", size=12, color=ft.Colors.GREY_500, italic=True),
-                ft.IconButton(
-                    icon=ft.Icons.CLOSE,
-                    icon_size=16,
-                    tooltip="Remove this judge",
-                    on_click=lambda _e, n=name: self._remove_judge(n),
-                ),
-            ],
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=6,
-        )
-
-    def _on_judge_toggle(self, _e: ft.Event) -> None:
-        # Grey the whole judge box out (still visible) when judge is off —
-        # `disabled` cascades to the picker, the list, and the Add button.
-        on = self.group_checks["judge"].value
-        if self.judge_section is not None:
-            self.judge_section.disabled = not on
+    def _on_unfreeze_clicked(self, _e: ft.Event) -> None:
+        """Make the recipe editable for a ONE-OFF run — the change is used by
+        this run only and never written back to the dataset."""
+        if self.recipe_form is not None:
+            self.recipe_form.set_enabled(True)
+        if self.unfreeze_button is not None:
+            self.unfreeze_button.visible = False
+        if self.deviation_note is not None:
+            self.deviation_note.visible = True
         self.app.page.update()
-
-    def _on_add_judge_clicked(self, _e: ft.Event) -> None:
-        """Move the picked model into the judge list (dedup), then clear the
-        picker for the next add."""
-        if self.judge_dropdown is None:
-            return
-        name = (self.judge_dropdown.value or "").strip()
-        if name and name not in self.judge_models:
-            self.judge_models.append(name)
-            self.judge_dropdown.value = None
-            self._refresh_judge_list()
-        self.app.page.update()
-
-    def _remove_judge(self, name: str) -> None:
-        if name in self.judge_models:
-            self.judge_models.remove(name)
-            self._refresh_judge_list()
-            self.app.page.update()
 
     # ---- tracing ----------------------------------------------------------
 
@@ -567,13 +493,14 @@ class RunTab:
             return
         if files and files[0].path and self.dataset_field is not None:
             self.dataset_field.value = files[0].path
+            self._load_recipe_from(Path(files[0].path))
             self._refresh_case_view()
             self.app.page.update()
 
     def _on_run_clicked(self, _e: ft.Event) -> None:
         if self._busy or not self._loop_running():
             return
-        if not any(cb.value for cb in self.group_checks.values()):
+        if not (self.recipe_form and self.recipe_form.any_group_selected()):
             self._set_status("Select at least one metric group.")
             return
         if not (self.dataset_field and self.dataset_field.value):
@@ -620,12 +547,19 @@ class RunTab:
         from knowledge_agent.evaluation.config import load_eval_config
         from knowledge_agent.gui.evaluation._common import active_corpus_config_path
 
-        groups = frozenset(g for g, cb in self.group_checks.items() if cb.value)
-        judge_models = tuple(self.judge_models)
-        overrides: dict = {
-            "enabled_groups": groups,
-            "judge_models": judge_models,
-        }
+        # The (possibly deviated) recipe on the form drives the run's metric
+        # groups, judge panel, and the three gate thresholds. dataset_kind is
+        # NOT read here — it's provenance the runner stamps from the dataset's
+        # SAVED recipe, so the ledger records which canonical recipe this run
+        # is associated with even when the form deviated.
+        recipe = self.recipe_form.to_recipe() if self.recipe_form else None
+        overrides: dict = {}
+        if recipe is not None:
+            overrides["enabled_groups"] = frozenset(recipe.enabled_groups)
+            overrides["judge_models"] = tuple(recipe.judge_models)
+            overrides["judge_threshold"] = recipe.judge_threshold
+            overrides["metadata_match_threshold"] = recipe.metadata_match_threshold
+            overrides["required_keyword_threshold"] = recipe.required_keyword_threshold
         if self.dataset_field and self.dataset_field.value:
             overrides["dataset_path"] = Path(self.dataset_field.value)
         corpus_path = active_corpus_config_path(self.app)

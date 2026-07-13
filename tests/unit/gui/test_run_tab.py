@@ -53,57 +53,56 @@ def test_refresh_active_corpus_none_does_not_crash(fake_app: MagicMock):
     assert tab.output_line.value.startswith("Results save to:")
 
 
-def test_judge_section_grays_until_judge_group_on(fake_app: MagicMock):
-    """The judge box stays visible but greys out (disabled) until the judge
-    metric is ticked — options show, just disabled."""
+def test_pick_dataset_loads_recipe_frozen(fake_app: MagicMock, tmp_path):
+    """Choosing a dataset loads its saved recipe into the (shared) recipe form
+    and freezes it; Unfreeze re-enables the controls for a one-off deviation
+    (the dataset file is never touched). The judge-panel + group-check widgets
+    themselves are covered in test_recipe_form.py — they moved to RecipeForm."""
+    from knowledge_agent.evaluation.models import (
+        EvalCase,
+        EvalDataset,
+        EvalRecipe,
+        save_dataset,
+    )
+
+    p = tmp_path / "gold.json"
+    save_dataset(
+        EvalDataset(
+            recipe=EvalRecipe(dataset_kind="knob", judge_threshold=0.0),
+            cases=[EvalCase(id="c", question="q?")],
+        ),
+        p,
+    )
     tab, _ = _run_tab(fake_app)
-    assert tab.judge_section.disabled is True  # judge off by default → grayed
-    tab.group_checks["judge"].value = True
-    tab._on_judge_toggle(MagicMock())
-    assert tab.judge_section.disabled is False
+    tab._load_recipe_from(p)
+    rf = tab.recipe_form
+    assert rf.profile_group.value == "knob"  # loaded from the saved recipe
+    assert rf.threshold_fields["judge_threshold"].value == "0"
+    assert rf._wrapper.disabled is True  # frozen on load
+    assert tab.unfreeze_button.visible is True
+    tab._on_unfreeze_clicked(MagicMock())
+    assert rf._wrapper.disabled is False  # editable for the one-off
+    assert tab.deviation_note.visible is True
 
 
-def test_add_and_remove_judges(fake_app: MagicMock):
-    """Pick a model → Add appends it to the judge list; the picker clears; X
-    removes it; duplicates are ignored."""
-    tab, _ = _run_tab(fake_app)
-    assert tab.judge_models == []  # empty by default
-    tab.judge_dropdown.value = "model-a"
-    tab._on_add_judge_clicked(MagicMock())
-    assert tab.judge_models == ["model-a"]
-    assert tab.judge_dropdown.value is None  # picker cleared for the next add
-    assert len(tab.judge_panel.controls) == 1
-    # Dedup: re-adding the same model is a no-op.
-    tab.judge_dropdown.value = "model-a"
-    tab._on_add_judge_clicked(MagicMock())
-    assert tab.judge_models == ["model-a"]
-    tab._remove_judge("model-a")
-    assert tab.judge_models == []
-
-
-def test_judge_fallback_hint_toggles_with_list(fake_app: MagicMock):
-    """The 'no judges added → default fallback' note shows only when the list
-    is empty."""
-    tab, _ = _run_tab(fake_app)
-    assert tab.judge_fallback_hint.visible is True  # empty list → fallback note
-    tab.judge_dropdown.value = "model-a"
-    tab._on_add_judge_clicked(MagicMock())
-    assert tab.judge_fallback_hint.visible is False
-
-
-def test_build_config_maps_form(fake_app: MagicMock):
+def test_build_config_maps_recipe_and_thresholds(fake_app: MagicMock):
+    """`_build_config` reads the recipe form — metric groups, judge panel, AND
+    the three gate thresholds all flow into the EvalConfig (C2c)."""
     tab, _ = _run_tab(fake_app)
     tab.dataset_field.value = "/tmp/eval/my_gold.json"  # user Browsed to a dataset
-    tab.group_checks["chunk"].value = False
-    tab.group_checks["kg"].value = False
-    tab.group_checks["judge"].value = True
-    tab.judge_dropdown.value = "claude-haiku-4-5-20251001"
-    tab._on_add_judge_clicked(MagicMock())
+    rf = tab.recipe_form
+    rf.group_checks["chunk"].value = False
+    rf.group_checks["kg"].value = False
+    rf.group_checks["judge"].value = True
+    rf.judge_dropdown.value = "claude-haiku-4-5-20251001"
+    rf._on_add_judge_clicked(MagicMock())
+    rf.threshold_fields["judge_threshold"].value = "0.9"
     tab.max_cases_field.value = "3"
 
     cfg = tab._build_config()
     assert cfg.enabled_groups == frozenset({"source", "judge"})
     assert cfg.judge_models == ("claude-haiku-4-5-20251001",)
+    assert cfg.judge_threshold == 0.9  # gate threshold flowed through
     assert cfg.max_cases == 3
     assert cfg.dataset_path.name == "my_gold.json"
 
@@ -124,7 +123,7 @@ def test_execute_run_invokes_runner_and_notifies_coordinator(fake_app: MagicMock
 
 def test_run_click_blocks_when_no_group_selected(fake_app: MagicMock):
     tab, _ = _run_tab(fake_app)
-    for cb in tab.group_checks.values():
+    for cb in tab.recipe_form.group_checks.values():
         cb.value = False
     # Force the loop guard open so the *group* validation is what stops it.
     with (

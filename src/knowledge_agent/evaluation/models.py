@@ -275,7 +275,9 @@ class EvalRecipe(BaseModel):
         description=(
             "Dataset profile (fact / knob / router) — a one-click preset that "
             "fills the rest of this recipe AND is the run's filter tag. None = "
-            "unset / custom recipe."
+            "unset / custom recipe. PROVENANCE ONLY: it groups/compares runs in "
+            "the dashboard and is never read by scoring or the pass-gate — only "
+            "the gate thresholds below gate."
         ),
     )
     enabled_groups: list[str] = Field(

@@ -346,6 +346,43 @@ def test_input_mode_derived_on_load(fake_app, tmp_path):
     assert tab.f["input_mode"].value == "refined"
 
 
+def test_recipe_saved_with_dataset(fake_app, tmp_path):
+    """The recipe authored on the tab persists with the dataset on a case save
+    — it rides along like the status header (`_stamp_header`)."""
+    p = tmp_path / "r.json"
+    tab = _tab(fake_app, p)
+    tab._on_new(MagicMock())
+    tab.f["id"].value = "c1"
+    tab.f["question"].value = "q?"
+    # Pick the Knob profile on the recipe form (judge off, gates at 0).
+    tab.recipe_form.profile_group.value = "knob"
+    tab.recipe_form._on_profile_change(MagicMock())
+    tab._on_save_case(MagicMock())
+
+    ds = load_dataset(p)
+    assert ds.recipe is not None
+    assert ds.recipe.dataset_kind == "knob"
+    assert "judge" not in ds.recipe.enabled_groups
+
+
+def test_recipe_loaded_from_dataset(fake_app, tmp_path):
+    """Loading a dataset populates the recipe form from its saved recipe."""
+    from knowledge_agent.evaluation.models import EvalDataset, EvalRecipe, save_dataset
+
+    p = tmp_path / "r.json"
+    save_dataset(
+        EvalDataset(
+            recipe=EvalRecipe(dataset_kind="fact", judge_threshold=0.9),
+            cases=[EvalCase(id="c", question="q?")],
+        ),
+        p,
+    )
+    tab = _tab(fake_app)
+    tab._load(p)
+    assert tab.recipe_form.profile_group.value == "fact"
+    assert tab.recipe_form.threshold_fields["judge_threshold"].value == "0.9"
+
+
 def test_new_knobs_round_trip(fake_app, tmp_path):
     """The new per-case knobs are read from the form and persisted on the case."""
     p = tmp_path / "k.json"

@@ -167,6 +167,8 @@ def build_report(
         "synthesizer_model": model_config.get("synthesizer_model"),
         "judge_models": judge_models,
         # Dataset-recipe provenance (None when the dataset has no saved recipe).
+        # Filter/grouping tags for the dashboard — never read by scoring or the
+        # pass-gate (the gates that ran are in `gate_thresholds` above).
         "dataset_kind": recipe.dataset_kind if recipe is not None else None,
         "recipe_hash": compute_recipe_hash(recipe),
         "prompts_snapshot": {

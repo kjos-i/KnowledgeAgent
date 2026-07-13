@@ -60,6 +60,7 @@ from knowledge_agent.gui._widgets.retrieval_form import (
     store_forced_by_mode,
 )
 from knowledge_agent.gui.evaluation._case_view import case_card, render_case_cards
+from knowledge_agent.gui.evaluation._recipe_form import RecipeForm
 from knowledge_agent.gui.settings.llm_tab import LLM_AVAILABLE_MODELS
 from knowledge_agent.llm_factory import supports_temperature
 
@@ -84,6 +85,10 @@ class DatasetTab:
         self.coordinator = coordinator
         self.dataset_field: ft.TextField | None = None
         self.status_group: ft.RadioGroup | None = None
+        # The dataset's recipe editor (metric groups + judge panel + gate
+        # thresholds + profile) — the SAME widget the Run tab shows read-only.
+        # Edits ride along with any dataset save (see `_stamp_header`).
+        self.recipe_form: RecipeForm | None = None
         self.case_list: ft.Column | None = None
         self.form: ft.Column | None = None
         self.status: ft.Text | None = None
@@ -183,6 +188,11 @@ class DatasetTab:
         # A sampling-free model (e.g. Opus 4.8) greys the temp slider out.
         self._sync_gen_temp_enabled()
         self.status = ft.Text("", size=12, color=ft.Colors.GREY_500)
+
+        # Recipe editor (shared widget with the Run tab). Built now; populated
+        # from the dataset's saved recipe on load (`_load` / `_start_new_dataset`)
+        # and persisted with any save (`_stamp_header`).
+        self.recipe_form = RecipeForm(self.app)
 
         # No own scroll / expand — the right column scrolls the preview + list
         # together (avoids a nested-scroll region).
@@ -321,6 +331,12 @@ class DatasetTab:
                         trailing=ft.Row([browse_button, new_dataset_button], spacing=6),
                     ),
                     labeled_field("Status", self.status_group),
+                    section_divider(),
+                    # ============ Section: Recipe ============
+                    # The dataset's canonical run settings — the Run tab loads
+                    # these read-only. Saved with the dataset on any commit.
+                    section_title("Recipe"),
+                    self.recipe_form.build(),
                     section_divider(),
                     # ============ Section: Progress ============
                     section_title("Progress"),
@@ -679,6 +695,8 @@ class DatasetTab:
             self.dataset_field.value = str(path)
         if self.status_group is not None:
             self.status_group.value = ds.status
+        if self.recipe_form is not None:
+            self.recipe_form.load(ds.recipe)  # fresh dataset → default recipe
         self._clear_form()
         self._render_list()
         self._render_preview()
@@ -702,6 +720,8 @@ class DatasetTab:
             self.dataset_field.value = str(path)
         if self.status_group is not None:
             self.status_group.value = ds.status
+        if self.recipe_form is not None:
+            self.recipe_form.load(ds.recipe)
         self._clear_form()
         self._render_list()
         self._render_preview()
@@ -890,6 +910,19 @@ class DatasetTab:
         if v:
             return Path(v)
         return self._path
+
+    def _stamp_header(self) -> None:
+        """Copy the dataset-level header controls (status + recipe) onto the
+        in-memory dataset so the next `save_dataset` persists them. Called by
+        every save path — the header rides along with any dataset write, the
+        same way a case edit does. The recipe is run config + a provenance tag
+        (dataset_kind); it never changes how a case is scored."""
+        if self._dataset is None:
+            return
+        if self.status_group is not None:
+            self._dataset.status = self.status_group.value or "draft"
+        if self.recipe_form is not None:
+            self._dataset.recipe = self.recipe_form.to_recipe()
 
     def _on_new(self, _e: ft.Event) -> None:
         self._selected = None
@@ -1103,6 +1136,7 @@ class DatasetTab:
             if self.status_group is not None:
                 self.status_group.value = self._dataset.status
         self._dataset.cases.extend(cases)
+        self._stamp_header()  # persist status + recipe alongside the new cases
         try:
             save_dataset(self._dataset, path)
         except Exception as exc:  # broad: I/O failure → status
@@ -1142,10 +1176,9 @@ class DatasetTab:
             return
         if self._dataset is None:
             self._dataset = EvalDataset()
-        # Status edit rides along with any save (name is the filename now —
-        # the human `name` header field was dropped from the UI).
-        if self.status_group is not None:
-            self._dataset.status = self.status_group.value or "draft"
+        # Status + recipe edits ride along with any save (name is the filename
+        # now — the human `name` header field was dropped from the UI).
+        self._stamp_header()
 
         if self._selected is not None and 0 <= self._selected < len(self._dataset.cases):
             self._dataset.cases[self._selected] = case
@@ -1176,6 +1209,7 @@ class DatasetTab:
             self._set_status("No dataset path to save to.")
             return
         del self._dataset.cases[idx]
+        self._stamp_header()  # persist status + recipe alongside the deletion
         try:
             save_dataset(self._dataset, path)
         except Exception as exc:  # broad: I/O failure → status line
