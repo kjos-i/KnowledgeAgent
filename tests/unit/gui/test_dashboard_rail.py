@@ -92,6 +92,39 @@ def test_selected_run_wins_dataset(fake_app, tmp_path):
     assert coord.selected_run_id == 1
 
 
+def test_dropdowns_wired_to_on_select(fake_app, tmp_path):
+    """Flet 0.85 Dropdowns fire on_select (NOT on_change) — the handlers must be
+    on `on_select` or a picked run/dataset is silently lost and refresh snaps
+    back to the newest run. (Direct-call tests can't catch this; assert wiring.)"""
+    led = EvalLedger(tmp_path / "l.db")
+    rail, _, _ = _rail(fake_app, led)
+    # == (not is): a bound method is a fresh wrapper each access, but compares
+    # equal by (__self__, __func__).
+    assert rail.run_dd.on_select == rail._on_run_change
+    assert rail.dataset_dd.on_select == rail._on_dataset_change
+
+
+def test_selected_run_survives_refresh(fake_app, tmp_path):
+    """Picking an older run then refreshing keeps it — refresh must not snap to
+    the newest run (the reported bug)."""
+    led = EvalLedger(tmp_path / "l.db")
+    led.save_run(_report("alpha", "2026-07-01T09:00:00"))  # run 1
+    led.save_run(_report("alpha", "2026-07-02T09:00:00"))  # run 2
+    led.save_run(_report("alpha", "2026-07-03T09:00:00"))  # run 3 (newest)
+    rail, coord, _ = _rail(fake_app, led)
+    assert coord.selected_run_id == 3  # newest by default
+    # user picks run 2 via the dropdown (its on_select handler)
+    rail.run_dd.value = "2"
+    with patch(_LEDGER, return_value=led):
+        rail._on_run_change(MagicMock())
+    assert coord.selected_run_id == 2
+    # refresh (Refresh button / tab-select) must KEEP run 2, not revert to 3
+    with patch(_LEDGER, return_value=led):
+        rail.refresh()
+    assert coord.selected_run_id == 2
+    assert rail.run_dd.value == "2"
+
+
 def test_empty_ledger_no_selection(fake_app, tmp_path):
     led = EvalLedger(tmp_path / "l.db")
     rail, coord, _ = _rail(fake_app, led)

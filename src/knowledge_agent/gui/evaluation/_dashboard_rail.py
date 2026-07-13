@@ -79,15 +79,18 @@ class DashboardRail:
     # ---- build ------------------------------------------------------------
 
     def build(self) -> ft.Control:
-        # Flet 0.85's Dropdown takes on_change as an attribute, not a ctor kwarg.
+        # Flet 0.85's Dropdown fires `on_select` (NOT on_change) — wiring
+        # on_change silently never fires, so a picked run/dataset would be lost
+        # and the next refresh would snap back to the newest. Mirror the app's
+        # other Dropdowns (corpus selector, dataset-tab dropdowns).
         self.dataset_dd = ft.Dropdown(
             label="Dataset", options=[], width=_RAIL_WIDTH - 24, text_size=FIELD_LABEL_SIZE
         )
-        self.dataset_dd.on_change = self._on_dataset_change
+        self.dataset_dd.on_select = self._on_dataset_change
         self.run_dd = ft.Dropdown(
             label="Run", options=[], width=_RAIL_WIDTH - 24, text_size=FIELD_LABEL_SIZE
         )
-        self.run_dd.on_change = self._on_run_change
+        self.run_dd.on_select = self._on_run_change
         refresh_button = ft.TextButton("Refresh", icon=ft.Icons.REFRESH, on_click=self._on_refresh)
         self.context = ft.Column(controls=[], spacing=2)
         return ft.Container(
