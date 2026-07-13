@@ -7,6 +7,7 @@ tests are hermetic; files are written to tmp_path.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from knowledge_agent.evaluation import report as RP
 from knowledge_agent.evaluation.config import EvalConfig
@@ -75,6 +76,49 @@ def test_build_report_structure(monkeypatch):
     assert rep["dataset_hash"] is None  # not passed → None
     rep2 = RP.build_report(EvalConfig(), _results(), "t", dataset_hash="h123")
     assert rep2["dataset_hash"] == "h123"
+
+
+def test_build_report_lifts_filter_keys(monkeypatch):
+    """C1: model / dataset / corpus / judge fields are surfaced at the TOP
+    level (not only inside prompts_snapshot) so the ledger can column them."""
+    monkeypatch.setattr(
+        RP,
+        "capture_provenance",
+        lambda: {
+            "git_commit": "abc",
+            "model_config": {"llm_provider": "anthropic", "synthesizer_model": "claude-sonnet-5"},
+            "prompts": {},
+        },
+    )
+    cfg = EvalConfig(
+        dataset_path=Path("/data/escrt_bootstrap.json"),
+        corpus_config_path=Path("/corpora/corpus_beta/corpus.toml"),
+        enabled_groups=frozenset({"source", "judge"}),
+        judge_models=("claude-haiku-4-5",),
+    )
+    rep = RP.build_report(cfg, _results(), "t")
+    assert rep["llm_provider"] == "anthropic"
+    assert rep["synthesizer_model"] == "claude-sonnet-5"
+    assert rep["dataset_name"] == "escrt_bootstrap"  # stem of the dataset file
+    assert rep["corpus_name"] == "corpus_beta"  # the corpus FOLDER name
+    assert rep["judge_models"] == ["claude-haiku-4-5"]  # the panel that ran
+
+
+def test_build_report_judge_models_empty_when_group_off(monkeypatch):
+    """Judge group off → judge_models empty (no judge ran) even if a panel
+    was configured — so a filter on judge model reflects reality."""
+    monkeypatch.setattr(
+        RP,
+        "capture_provenance",
+        lambda: {"git_commit": None, "model_config": {}, "prompts": {}},
+    )
+    cfg = EvalConfig(
+        dataset_path=Path("d.json"),
+        judge_models=("m",),
+        enabled_groups=frozenset({"source"}),
+    )
+    rep = RP.build_report(cfg, _results(), "t")
+    assert rep["judge_models"] == []
 
 
 def test_write_report_creates_json_and_csv(tmp_path, monkeypatch):

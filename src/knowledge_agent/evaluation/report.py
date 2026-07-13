@@ -139,12 +139,27 @@ def build_report(
     run provenance next to `git_commit` — so a trend view can tell when the
     gold itself changed between runs.
     """
+    # Lazy import: keep report's import path free of the judge module's
+    # (potentially heavy) deps for the non-judge surfaces that import report.
+    from knowledge_agent.evaluation.judge import resolve_judge_models
+
     prov = capture_provenance()
+    model_config = prov["model_config"]
+    # The judge PANEL that actually ran (resolved to the provider default when
+    # the user left it empty). Empty when the judge group is off — no judge ran.
+    judge_models = resolve_judge_models(cfg.judge_models) if "judge" in cfg.enabled_groups else []
     return {
         "run_timestamp": run_timestamp,
         "dataset_path": str(cfg.dataset_path),
+        # Filter keys lifted to the top level so the ledger can column them
+        # (previously only reachable inside prompts_snapshot / the paths).
+        "dataset_name": cfg.dataset_path.stem if cfg.dataset_path else None,
+        "corpus_name": (cfg.corpus_config_path.parent.name if cfg.corpus_config_path else None),
         "dataset_hash": dataset_hash,
         "git_commit": prov["git_commit"],
+        "llm_provider": model_config.get("llm_provider"),
+        "synthesizer_model": model_config.get("synthesizer_model"),
+        "judge_models": judge_models,
         "prompts_snapshot": {
             "model_config": prov["model_config"],
             "prompts": prov["prompts"],

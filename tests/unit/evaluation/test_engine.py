@@ -49,6 +49,15 @@ def test_evaluate_case_review_on_retrieval_miss(monkeypatch):
     assert result["status"] == "REVIEW"
 
 
+def test_evaluate_case_records_origin(monkeypatch):
+    """C1: the case's provenance (origin) flows into the result dict so the
+    ledger can column it. Defaults to 'manual'; here we pin 'search'."""
+    case = EvalCase(id="c1", question="q?", origin="search")
+    _patch_run(monkeypatch, _run(answer="x"))
+    result = asyncio.run(E.evaluate_case(case, None, EvalConfig()))
+    assert result["origin"] == "search"
+
+
 def test_evaluate_case_review_on_disallowed_keyword(monkeypatch):
     case = EvalCase(id="c3", question="q?", disallowed_keywords=["lorem"])
     _patch_run(monkeypatch, _run(answer="contains lorem ipsum"))

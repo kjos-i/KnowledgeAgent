@@ -63,6 +63,16 @@ _RUNS_PREAMBLE: list[tuple[str, str]] = [
 _RUNS_TRAILING: list[tuple[str, str]] = [
     ("enabled_groups", "TEXT"),  # JSON list
     ("gate_thresholds", "TEXT"),  # JSON dict
+    # Filter columns (added 2026-07-13). Lifted out of prompts_snapshot /
+    # derived from the run's paths so the dashboard can query runs by model /
+    # dataset / corpus without parsing JSON. Add-only migration extends old
+    # DBs (existing rows get NULL). `dataset_kind` + `recipe_hash` join here
+    # with workstream C2 (the dataset recipe), which is their source.
+    ("dataset_name", "TEXT"),
+    ("corpus_name", "TEXT"),
+    ("llm_provider", "TEXT"),
+    ("synthesizer_model", "TEXT"),
+    ("judge_models", "TEXT"),  # JSON list — the judge panel that actually ran
 ]
 
 _CASES_PREAMBLE: list[tuple[str, str]] = [
@@ -78,6 +88,7 @@ _CASES_TRAILING: list[tuple[str, str]] = [
     ("answer", "TEXT"),
     ("expected_output", "TEXT"),  # gold answer: "\n"-joined expected_answer_points
     ("errors", "TEXT"),  # JSON list
+    ("origin", "TEXT"),  # case provenance: manual / llm / search / chat (added 2026-07-13)
 ]
 
 
@@ -163,6 +174,11 @@ class EvalLedger:
             "pass_rate": summary.get("pass_rate"),
             "enabled_groups": json.dumps(sorted(report.get("enabled_groups", []))),
             "gate_thresholds": json.dumps(report.get("gate_thresholds", {})),
+            "dataset_name": report.get("dataset_name"),
+            "corpus_name": report.get("corpus_name"),
+            "llm_provider": report.get("llm_provider"),
+            "synthesizer_model": report.get("synthesizer_model"),
+            "judge_models": json.dumps(report.get("judge_models", [])),
         }
         for avg_key, _ in run_sql_columns():
             run_row[avg_key] = summary.get(avg_key)
@@ -182,6 +198,7 @@ class EvalLedger:
                     "answer": case.get("answer"),
                     "expected_output": case.get("expected_output"),
                     "errors": json.dumps(case.get("errors", [])),
+                    "origin": case.get("origin"),
                 }
                 for col, _ in case_sql_columns():
                     case_row[col] = case.get(col)

@@ -106,6 +106,52 @@ def test_save_run_roundtrip(tmp_path):
         assert cases[1]["hit_at_k"] == 0.0
 
 
+def test_save_run_persists_filter_columns(tmp_path):
+    """C1 filter columns (added 2026-07-13): the run-level model / dataset /
+    corpus / judge fields + the per-case origin round-trip into their own
+    columns (so the dashboard can query them without parsing JSON)."""
+    led = EvalLedger(tmp_path / "l.db")
+    report = _report()
+    report.update(
+        {
+            "dataset_name": "escrt_bootstrap",
+            "corpus_name": "corpus_beta",
+            "llm_provider": "anthropic",
+            "synthesizer_model": "claude-sonnet-5",
+            "judge_models": ["claude-haiku-4-5", "claude-opus-4-8"],
+        }
+    )
+    report["results"][0]["origin"] = "search"
+    report["results"][1]["origin"] = "llm"
+    led.save_run(report)
+    with sqlite3.connect(tmp_path / "l.db") as conn:
+        conn.row_factory = sqlite3.Row
+        run = conn.execute("SELECT * FROM eval_runs").fetchone()
+        assert run["dataset_name"] == "escrt_bootstrap"
+        assert run["corpus_name"] == "corpus_beta"
+        assert run["llm_provider"] == "anthropic"
+        assert run["synthesizer_model"] == "claude-sonnet-5"
+        assert json.loads(run["judge_models"]) == ["claude-haiku-4-5", "claude-opus-4-8"]
+        cases = conn.execute("SELECT * FROM eval_cases ORDER BY case_id").fetchall()
+        assert cases[0]["origin"] == "search"
+        assert cases[1]["origin"] == "llm"
+
+
+def test_save_run_filter_columns_default_when_absent(tmp_path):
+    """A bare / legacy report (no filter keys) stores NULL / empty-JSON, not
+    an error — save_run reads the new keys defensively."""
+    led = EvalLedger(tmp_path / "l.db")
+    led.save_run(_report())  # _report() carries none of the new keys
+    with sqlite3.connect(tmp_path / "l.db") as conn:
+        conn.row_factory = sqlite3.Row
+        run = conn.execute("SELECT * FROM eval_runs").fetchone()
+        assert run["dataset_name"] is None
+        assert run["synthesizer_model"] is None
+        assert json.loads(run["judge_models"]) == []
+        case = conn.execute("SELECT * FROM eval_cases LIMIT 1").fetchone()
+        assert case["origin"] is None  # _report()'s cases have no origin
+
+
 def test_save_run_persists_per_metric_n(tmp_path):
     led = EvalLedger(tmp_path / "l.db")
     report = _report()
