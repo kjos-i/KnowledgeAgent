@@ -25,6 +25,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from knowledge_agent.config import check_window_ordering
+from knowledge_agent.evaluation.config import DEFAULT_ENABLED_GROUPS
 
 RetrievalMode = Literal[
     "auto",
@@ -37,6 +38,14 @@ RetrievalMode = Literal[
 LanceDbSearchMode = Literal["hybrid", "fts", "vector"]
 CaseOrigin = Literal["manual", "llm", "search"]
 DatasetStatus = Literal["draft", "in progress", "final"]
+DatasetKind = Literal["fact", "knob", "router"]
+"""What KIND of thing a dataset measures — a one-click profile that fills the
+recipe AND is the filter tag (a word, not a boolean):
+  - fact:   answer quality. Judge ON, gates strict. The default kind.
+  - knob:   retrieval-parameter sweeps. Judge OFF (cost), gates relaxed —
+            you read the metric curves, not pass/fail.
+  - router: mode-routing regression. Checks the classifier picks the right leg.
+"""
 
 
 class RetrievalSettings(BaseModel):
@@ -247,6 +256,45 @@ def validate_dataset(cases: list[EvalCase]) -> dict[str, list[str]]:
     return invalid
 
 
+class EvalRecipe(BaseModel):
+    """The run settings BOUND to a dataset — its canonical "how to run me".
+
+    Lives in the EvalDataset HEADER, so it is excluded from
+    `compute_dataset_hash` (which fingerprints only the cases): flipping a
+    threshold or the judge panel doesn't invalidate run comparability against
+    the gold. The GUI Run tab auto-loads it on open, renders it frozen, and
+    offers Unfreeze → deviate for a one-off run, OR Save to update this block.
+
+    `compute_recipe_hash` fingerprints it (the twin of the dataset hash), so a
+    run records WHICH recipe it used and can detect a later re-save. Field
+    defaults mirror `EvalConfig` — a fresh recipe == the harness defaults.
+    """
+
+    dataset_kind: DatasetKind | None = Field(
+        default=None,
+        description=(
+            "Dataset profile (fact / knob / router) — a one-click preset that "
+            "fills the rest of this recipe AND is the run's filter tag. None = "
+            "unset / custom recipe."
+        ),
+    )
+    enabled_groups: list[str] = Field(
+        default_factory=lambda: sorted(DEFAULT_ENABLED_GROUPS),
+        description="Metric groups this dataset runs under (see ALL_TOGGLE_GROUPS).",
+    )
+    judge_models: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The LLM-judge panel (model IDs). Empty → a single default judge "
+            "resolved from the active provider. Consulted only when 'judge' is "
+            "in enabled_groups."
+        ),
+    )
+    judge_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    metadata_match_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
+    required_keyword_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
 class EvalDataset(BaseModel):
     """A gold dataset: a header of human metadata + the cases.
 
@@ -265,6 +313,16 @@ class EvalDataset(BaseModel):
     )
     name: str = Field(default="", description="Human-readable dataset name.")
     description: str = Field(default="", description="Optional notes about the dataset.")
+    recipe: EvalRecipe | None = Field(
+        default=None,
+        description=(
+            "The canonical run settings for this dataset (metric groups, judge "
+            "panel, gate thresholds, profile). None = no recipe saved yet "
+            "(legacy datasets, or one never frozen). Header-only, so it's "
+            "excluded from `compute_dataset_hash`; `compute_recipe_hash` is its "
+            "own fingerprint."
+        ),
+    )
     cases: list[EvalCase] = Field(default_factory=list)
 
 
@@ -326,3 +384,19 @@ def compute_dataset_hash(cases: list[EvalCase]) -> str:
     """
     items = sorted(json.dumps(c.model_dump(mode="json"), sort_keys=True) for c in cases)
     return hashlib.sha256("\n".join(items).encode("utf-8")).hexdigest()
+
+
+def compute_recipe_hash(recipe: EvalRecipe | None) -> str | None:
+    """A stable SHA-256 fingerprint of a dataset's recipe, or None when the
+    dataset has no recipe.
+
+    The twin of `compute_dataset_hash`: `dataset_hash` says "did the gold
+    change?", `recipe_hash` says "did the way we run it change?". Stamped on
+    each run (the ledger's `recipe_hash`) so a trend view can tell a genuine
+    quality shift from a mere threshold/judge re-tune, and detect when a run
+    used a since-edited recipe. Key-order-independent (sorted keys) so only a
+    real value change moves it."""
+    if recipe is None:
+        return None
+    payload = json.dumps(recipe.model_dump(mode="json"), sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

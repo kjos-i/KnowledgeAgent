@@ -91,7 +91,7 @@ async def run(
     from knowledge_agent.evaluation.ledger import EvalLedger
     from knowledge_agent.evaluation.models import (
         compute_dataset_hash,
-        load_cases,
+        load_dataset,
         validate_dataset,
     )
 
@@ -100,7 +100,10 @@ async def run(
             "No dataset selected — choose a gold dataset first "
             "(GUI: Browse in the corpus folder; CLI: --dataset / KA_EVAL_DATASET)."
         )
-    cases = load_cases(cfg.dataset_path)
+    # Load the FULL dataset (header + cases): the header carries the recipe
+    # whose `dataset_kind` + `recipe_hash` are stamped as run provenance.
+    dataset = load_dataset(cfg.dataset_path)
+    cases = dataset.cases
     # Refuse up-front (before spending tokens) if any case leaves a required
     # retrieval knob blank — otherwise it would silently fall back to the
     # shifting global setting and the run wouldn't be reproducible. Catches
@@ -142,7 +145,9 @@ async def run(
         results = await evaluate_cases(cases, corpus_config, cfg, on_progress=on_progress)
 
     run_timestamp = datetime.now(UTC).isoformat(timespec="seconds")
-    report = report_mod.build_report(cfg, results, run_timestamp, dataset_hash=dataset_hash)
+    report = report_mod.build_report(
+        cfg, results, run_timestamp, dataset_hash=dataset_hash, recipe=dataset.recipe
+    )
     json_path, csv_path = report_mod.write_report(report, cfg.output_dir)
     run_id = EvalLedger(cfg.ledger_path).save_run(report)
 

@@ -121,6 +121,33 @@ def test_build_report_judge_models_empty_when_group_off(monkeypatch):
     assert rep["judge_models"] == []
 
 
+def test_build_report_stamps_recipe_provenance(monkeypatch):
+    """C2: dataset_kind + recipe_hash come from the dataset's saved recipe."""
+    from knowledge_agent.evaluation.models import EvalRecipe, compute_recipe_hash
+
+    monkeypatch.setattr(
+        RP,
+        "capture_provenance",
+        lambda: {"git_commit": None, "model_config": {}, "prompts": {}},
+    )
+    recipe = EvalRecipe(dataset_kind="knob", judge_threshold=0.9)
+    rep = RP.build_report(EvalConfig(dataset_path=Path("d.json")), _results(), "t", recipe=recipe)
+    assert rep["dataset_kind"] == "knob"
+    assert rep["recipe_hash"] == compute_recipe_hash(recipe)
+
+
+def test_build_report_recipe_provenance_none_without_recipe(monkeypatch):
+    """No recipe on the dataset → both provenance keys are None (not an error)."""
+    monkeypatch.setattr(
+        RP,
+        "capture_provenance",
+        lambda: {"git_commit": None, "model_config": {}, "prompts": {}},
+    )
+    rep = RP.build_report(EvalConfig(dataset_path=Path("d.json")), _results(), "t")
+    assert rep["dataset_kind"] is None
+    assert rep["recipe_hash"] is None
+
+
 def test_write_report_creates_json_and_csv(tmp_path, monkeypatch):
     monkeypatch.setattr(
         RP, "capture_provenance", lambda: {"git_commit": None, "model_config": {}, "prompts": {}}

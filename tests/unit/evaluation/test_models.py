@@ -10,9 +10,11 @@ from pydantic import ValidationError
 from knowledge_agent.evaluation.models import (
     EvalCase,
     EvalDataset,
+    EvalRecipe,
     RetrievalSettings,
     append_case,
     compute_dataset_hash,
+    compute_recipe_hash,
     load_cases,
     load_dataset,
     required_knobs,
@@ -158,6 +160,58 @@ def test_dataset_hash_is_content_addressed():
     # content-sensitive: editing a case changes the hash
     a2 = EvalCase(id="a", question="q1?", required_keywords=["y"])
     assert compute_dataset_hash([a2, b]) != h
+
+
+# ---- recipe (C2) ----
+
+
+def test_recipe_defaults_mirror_evalconfig():
+    r = EvalRecipe()
+    assert sorted(r.enabled_groups) == ["chunk", "kg", "source"]
+    assert r.judge_threshold == 0.5
+    assert r.metadata_match_threshold == 0.8
+    assert r.required_keyword_threshold == 0.5
+    assert r.judge_models == []
+    assert r.dataset_kind is None
+
+
+def test_recipe_roundtrips_on_the_dataset_header(tmp_path):
+    p = tmp_path / "gold.json"
+    ds = EvalDataset(
+        recipe=EvalRecipe(dataset_kind="knob", enabled_groups=["source"], judge_threshold=0.9),
+        cases=[EvalCase(id="a", question="q?")],
+    )
+    save_dataset(ds, p)
+    loaded = load_dataset(p)
+    assert loaded.recipe is not None
+    assert loaded.recipe.dataset_kind == "knob"
+    assert loaded.recipe.enabled_groups == ["source"]
+    assert loaded.recipe.judge_threshold == 0.9
+
+
+def test_recipe_is_excluded_from_the_dataset_hash():
+    """The recipe lives on the header, so flipping it must NOT move the
+    dataset's content fingerprint (run comparability vs the gold)."""
+    cases = [EvalCase(id="a", question="q?")]
+    bare = compute_dataset_hash(EvalDataset(cases=cases).cases)
+    with_recipe = compute_dataset_hash(
+        EvalDataset(recipe=EvalRecipe(dataset_kind="fact", judge_threshold=0.1), cases=cases).cases
+    )
+    assert bare == with_recipe
+
+
+def test_recipe_hash_none_when_absent_and_content_addressed():
+    assert compute_recipe_hash(None) is None
+    h = compute_recipe_hash(EvalRecipe(dataset_kind="fact"))
+    assert len(h) == 64
+    # a value change moves it; the same content re-hashes identically
+    assert compute_recipe_hash(EvalRecipe(dataset_kind="knob")) != h
+    assert compute_recipe_hash(EvalRecipe(dataset_kind="fact")) == h
+
+
+def test_recipe_rejects_unknown_dataset_kind():
+    with pytest.raises(ValidationError):
+        EvalRecipe(dataset_kind="bogus")  # type: ignore[arg-type]
 
 
 # ---- per-case tuning knobs: defaults + conditional-required validation ----

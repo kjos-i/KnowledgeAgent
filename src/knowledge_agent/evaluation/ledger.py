@@ -73,6 +73,10 @@ _RUNS_TRAILING: list[tuple[str, str]] = [
     ("llm_provider", "TEXT"),
     ("synthesizer_model", "TEXT"),
     ("judge_models", "TEXT"),  # JSON list — the judge panel that actually ran
+    # Dataset-recipe provenance (C2): the profile tag + the recipe fingerprint
+    # (twin of dataset_hash). NULL when the dataset carries no saved recipe.
+    ("dataset_kind", "TEXT"),
+    ("recipe_hash", "TEXT"),
 ]
 
 _CASES_PREAMBLE: list[tuple[str, str]] = [
@@ -179,6 +183,8 @@ class EvalLedger:
             "llm_provider": report.get("llm_provider"),
             "synthesizer_model": report.get("synthesizer_model"),
             "judge_models": json.dumps(report.get("judge_models", [])),
+            "dataset_kind": report.get("dataset_kind"),
+            "recipe_hash": report.get("recipe_hash"),
         }
         for avg_key, _ in run_sql_columns():
             run_row[avg_key] = summary.get(avg_key)

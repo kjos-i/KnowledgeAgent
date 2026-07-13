@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from knowledge_agent.evaluation.config import EvalConfig
+    from knowledge_agent.evaluation.models import EvalRecipe
 
 
 # ---------------------------------------------------------------------------
@@ -132,16 +133,21 @@ def build_report(
     run_timestamp: str,
     *,
     dataset_hash: str | None = None,
+    recipe: EvalRecipe | None = None,
 ) -> dict[str, Any]:
     """Assemble the full report dict (what the ledger + JSON consume).
 
     `dataset_hash` (a SHA-256 of the scored dataset's cases) is recorded as
     run provenance next to `git_commit` — so a trend view can tell when the
-    gold itself changed between runs.
+    gold itself changed between runs. `recipe` (the dataset's saved recipe, if
+    any) contributes two more provenance keys: `dataset_kind` (the fact/knob/
+    router profile — a filter tag) and `recipe_hash` (its fingerprint — the
+    twin of dataset_hash, so a run records WHICH recipe it ran under).
     """
-    # Lazy import: keep report's import path free of the judge module's
+    # Lazy imports: keep report's import path free of the judge module's
     # (potentially heavy) deps for the non-judge surfaces that import report.
     from knowledge_agent.evaluation.judge import resolve_judge_models
+    from knowledge_agent.evaluation.models import compute_recipe_hash
 
     prov = capture_provenance()
     model_config = prov["model_config"]
@@ -160,6 +166,9 @@ def build_report(
         "llm_provider": model_config.get("llm_provider"),
         "synthesizer_model": model_config.get("synthesizer_model"),
         "judge_models": judge_models,
+        # Dataset-recipe provenance (None when the dataset has no saved recipe).
+        "dataset_kind": recipe.dataset_kind if recipe is not None else None,
+        "recipe_hash": compute_recipe_hash(recipe),
         "prompts_snapshot": {
             "model_config": prov["model_config"],
             "prompts": prov["prompts"],

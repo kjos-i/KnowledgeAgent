@@ -119,6 +119,8 @@ def test_save_run_persists_filter_columns(tmp_path):
             "llm_provider": "anthropic",
             "synthesizer_model": "claude-sonnet-5",
             "judge_models": ["claude-haiku-4-5", "claude-opus-4-8"],
+            "dataset_kind": "fact",
+            "recipe_hash": "cafe" * 16,
         }
     )
     report["results"][0]["origin"] = "search"
@@ -132,6 +134,8 @@ def test_save_run_persists_filter_columns(tmp_path):
         assert run["llm_provider"] == "anthropic"
         assert run["synthesizer_model"] == "claude-sonnet-5"
         assert json.loads(run["judge_models"]) == ["claude-haiku-4-5", "claude-opus-4-8"]
+        assert run["dataset_kind"] == "fact"
+        assert run["recipe_hash"] == "cafe" * 16
         cases = conn.execute("SELECT * FROM eval_cases ORDER BY case_id").fetchall()
         assert cases[0]["origin"] == "search"
         assert cases[1]["origin"] == "llm"
@@ -148,6 +152,8 @@ def test_save_run_filter_columns_default_when_absent(tmp_path):
         assert run["dataset_name"] is None
         assert run["synthesizer_model"] is None
         assert json.loads(run["judge_models"]) == []
+        assert run["dataset_kind"] is None
+        assert run["recipe_hash"] is None
         case = conn.execute("SELECT * FROM eval_cases LIMIT 1").fetchone()
         assert case["origin"] is None  # _report()'s cases have no origin
 
