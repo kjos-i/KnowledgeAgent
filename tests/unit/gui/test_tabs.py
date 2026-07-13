@@ -65,12 +65,13 @@ def test_info_tab_builds(fake_app: MagicMock):
     assert InfoTab(fake_app).build() is not None
 
 
-def test_settings_view_is_three_subtabs(fake_app: MagicMock):
-    """Settings shrank to Keys / Embedding / App — Retrieval + LLM moved to the
-    Search sub-tabs."""
+def test_settings_view_is_two_subtabs(fake_app: MagicMock):
+    """Settings shrank to Keys / App — Retrieval + LLM moved to the Search
+    sub-tabs, and Embedding moved to the per-corpus Ingest config editor
+    (the embedder is per-corpus now)."""
     from knowledge_agent.gui.settings import SettingsView
 
     fake_app.gui_config = GuiConfig()
     ctl = SettingsView(fake_app).build()
     assert isinstance(ctl, ft.Tabs)
-    assert ctl.length == 3
+    assert ctl.length == 2

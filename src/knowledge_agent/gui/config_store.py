@@ -723,23 +723,40 @@ def apply_llm_to_env(cfg: GuiConfig) -> None:
             os.environ[var] = str(value)
 
 
-def apply_embedding_to_env(cfg: GuiConfig) -> None:
-    """Bridge GuiConfig's embedding fields to the matching env vars.
+def apply_voyage_rate_to_env(cfg: GuiConfig) -> None:
+    """Bridge JUST the Voyage rate limit (GLOBAL) to env.
 
-    Active provider + per-provider models + active model bridge
-    unconditionally. Voyage rate limit uses the unset-env-var-=-None
-    convention (same as the LLM rate limits).
+    The Voyage rate is an account-throughput cap, so it stays global even
+    now that the embedder's provider/model/dims are per-corpus. Factored
+    out so the corpus editor's embedding section can write it (badged
+    "global") WITHOUT calling `apply_embedding_to_env`, which would clobber
+    the per-corpus EMBEDDING_PROVIDER / MODEL / DIMS the active-corpus
+    bridge owns. Uses the unset-env-var-=-None convention (same as the LLM
+    rate limits).
+    """
+    var = "VOYAGE_REQUESTS_PER_SECOND"
+    if cfg.voyage_requests_per_second is None:
+        os.environ.pop(var, None)
+    else:
+        os.environ[var] = str(cfg.voyage_requests_per_second)
+
+
+def apply_embedding_to_env(cfg: GuiConfig) -> None:
+    """Bridge GuiConfig's GLOBAL embedding fields to the matching env vars.
+
+    Note: since the embedder went per-corpus, the active corpus's
+    provider/model/dims override these via
+    `apply_active_corpus_embedding_to_env` (called AFTER this at startup).
+    These globals now serve as the no-corpus fallback + the per-provider
+    menu-defaults; the Voyage rate (delegated to `apply_voyage_rate_to_env`)
+    is the one value that stays authoritative.
     """
     os.environ["EMBEDDING_PROVIDER"] = cfg.embedding_provider
     os.environ["EMBEDDING_MODEL"] = cfg.embedding_model
     os.environ["OPENAI_EMBEDDING_MODEL"] = cfg.openai_embedding_model
     os.environ["GOOGLE_EMBEDDING_MODEL"] = cfg.google_embedding_model
     os.environ["HF_EMBEDDING_MODEL"] = cfg.hf_embedding_model
-    var = "VOYAGE_REQUESTS_PER_SECOND"
-    if cfg.voyage_requests_per_second is None:
-        os.environ.pop(var, None)
-    else:
-        os.environ[var] = str(cfg.voyage_requests_per_second)
+    apply_voyage_rate_to_env(cfg)
 
 
 def apply_connection_to_env(cfg: GuiConfig) -> None:

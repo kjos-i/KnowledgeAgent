@@ -3,12 +3,13 @@
 Settings is now a TOP-LEVEL tab (`app.py` mounts it), not a Search
 right-panel mode. It holds the global, set-once-ish config:
 
-  Keys / Embedding / App
+  Keys / App
 
 Retrieval and LLM were promoted to Search sub-tabs (they're per-query
 knobs you tune beside the chat), so they no longer live here. Embedding
-stays for now — it moves to the Ingest tab when the embedder becomes
-per-corpus (workstream B).
+also left: the embedder is per-corpus now, so provider/model live in the
+Ingest tab's per-corpus config editor and install/uninstall in the
+Installs tab (workstream B, 2026-07-13).
 
 Rendered as native Flet `ft.Tabs` with `secondary=True` so the sub-strip
 is visually distinct from the primary top tab bar.
@@ -21,14 +22,13 @@ from typing import TYPE_CHECKING
 import flet as ft
 
 from knowledge_agent.gui.settings.app_tab import AppTab
-from knowledge_agent.gui.settings.embedding_tab import EmbeddingTab
 from knowledge_agent.gui.settings.keys_tab import KeysTab
 
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
 
 
-SUB_TAB_LABELS = ("Keys", "Embedding", "App")
+SUB_TAB_LABELS = ("Keys", "App")
 
 
 class SettingsView:
@@ -37,7 +37,6 @@ class SettingsView:
     def __init__(self, app: GuiApp) -> None:
         self.app = app
         self.keys_tab = KeysTab(app)
-        self.embedding_tab = EmbeddingTab(app)
         self.app_tab = AppTab(app)
 
     def build(self) -> ft.Control:
@@ -48,7 +47,6 @@ class SettingsView:
         sub_bodies = ft.TabBarView(
             controls=[
                 ft.Container(content=self.keys_tab.build(), padding=8, expand=True),
-                ft.Container(content=self.embedding_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.app_tab.build(), padding=8, expand=True),
             ],
             expand=True,

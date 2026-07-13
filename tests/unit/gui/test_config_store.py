@@ -349,6 +349,17 @@ def test_apply_active_corpus_embedding_noop_when_toml_missing(monkeypatch, tmp_p
     assert os.environ["EMBEDDING_PROVIDER"] == "voyage"
 
 
+def test_apply_voyage_rate_to_env_sets_and_pops(monkeypatch):
+    """The Voyage rate stays global; the corpus editor bridges JUST it via
+    this helper (set when present, pop when cleared) without touching the
+    per-corpus EMBEDDING_* vars."""
+    monkeypatch.setattr(os, "environ", dict(os.environ))
+    config_store.apply_voyage_rate_to_env(config_store.GuiConfig(voyage_requests_per_second=5.0))
+    assert os.environ["VOYAGE_REQUESTS_PER_SECOND"] == "5.0"
+    config_store.apply_voyage_rate_to_env(config_store.GuiConfig(voyage_requests_per_second=None))
+    assert "VOYAGE_REQUESTS_PER_SECOND" not in os.environ
+
+
 # ---- switch_active_corpus (single-source app-wide corpus switch) ----
 
 

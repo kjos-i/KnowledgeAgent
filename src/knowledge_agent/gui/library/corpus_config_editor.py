@@ -50,7 +50,17 @@ from typing import TYPE_CHECKING
 import flet as ft
 from pydantic import ValidationError
 
-from knowledge_agent.config import PROVIDER_NODE_DEFAULTS, Settings, get_settings
+from knowledge_agent.config import (
+    PROVIDER_NODE_DEFAULTS,
+    Settings,
+    get_settings,
+    reset_after_key_change,
+)
+from knowledge_agent.embedder_lifecycle import (
+    EMBEDDER_PROVIDER_REGISTRY,
+    HF_EMBEDDING_MODELS,
+    switch_embedder_plan,
+)
 from knowledge_agent.entity_extractors.extractor_lifecycle import (
     EXTRACTOR_REGISTRY,
     is_extractor_ready,
@@ -65,6 +75,11 @@ from knowledge_agent.gui._styles import (
     sub_section_header,
 )
 from knowledge_agent.gui._widgets.info_icon import info_icon
+from knowledge_agent.gui.config_store import (
+    ConfigError,
+    apply_voyage_rate_to_env,
+    save_config,
+)
 from knowledge_agent.gui.library.create_new_dataset import _write_corpus_toml
 from knowledge_agent.gui.library.session_state import load_session, update_draft
 from knowledge_agent.gui.settings.llm_tab import LLM_AVAILABLE_MODELS
@@ -120,6 +135,49 @@ _ONTOLOGY_DISPLAY: dict[str, str] = {
     "dron": "DRON",
     "fibo": "FIBO",
 }
+
+
+# Curated per-provider embedding model menus (moved here from the deleted
+# Settings → Embedding tab — the corpus editor is now the sole consumer).
+# Each dropdown is `editable=True`, so off-menu / custom models are typeable.
+EMBEDDING_AVAILABLE_MODELS: dict[str, tuple[str, ...]] = {
+    "voyage": (
+        "voyage-multimodal-3",
+        "voyage-3-large",
+        "voyage-3",
+        "voyage-code-3",
+    ),
+    "openai": (
+        "text-embedding-3-small",
+        "text-embedding-3-large",
+        "text-embedding-ada-002",
+    ),
+    "google": (
+        "models/text-embedding-004",
+        "models/embedding-001",
+    ),
+    "huggingface": (
+        "BAAI/bge-m3",
+        "mixedbread-ai/mxbai-embed-large-v1",
+        "BAAI/bge-small-en-v1.5",
+        "sentence-transformers/all-MiniLM-L6-v2",
+    ),
+}
+
+
+def _embedding_dims_for(provider: str, model: str) -> int | None:
+    """Vector dimension for a provider+model, or None when unknown.
+
+    HuggingFace dims are per-model (`HF_EMBEDDING_MODELS`); the cloud
+    providers have one dim across their models (the registry `default_dim`).
+    None = off-menu / custom model whose dim we can't know — the caller
+    keeps the corpus's current `embedding_dims` in that case.
+    """
+    if provider == "huggingface":
+        hf = HF_EMBEDDING_MODELS.get(model)
+        return hf.dimensions if hf is not None else None
+    entry = EMBEDDER_PROVIDER_REGISTRY.get(provider)
+    return entry["provenance"].default_dim if entry is not None else None
 
 
 class CorpusConfigEditor:
@@ -221,6 +279,18 @@ class CorpusConfigEditor:
         self.min_figure_bytes_field: ft.TextField | None = None
         self.optimize_indexes_checkbox: ft.Checkbox | None = None
 
+        # ----- Embedding (per-corpus; provider/model/dims) -----
+        # The embedder is corpus-bound (LanceDB pins the vector dim at
+        # ingest). Provider + model write to corpus.toml (staged);
+        # embedding_dims is DERIVED from them (not a raw field). The Voyage
+        # rate is GLOBAL (account throughput) — badged so, written straight
+        # to GuiConfig, not staged. Install/Uninstall live in the Installs
+        # tab; this is the CHOICE of which installed embedder the corpus uses.
+        self.embedding_provider_dropdown: ft.Dropdown | None = None
+        self.embedding_model_field: ft.Dropdown | None = None
+        self.voyage_rate_field: ft.TextField | None = None
+        self.voyage_rate_row: ft.Container | None = None
+
         # ----- Entity extraction -----
         # Multi-extractor (priority-ordered union): `_selected_extractors`
         # is the ordered source of truth (index 0 = base/primary). The
@@ -244,6 +314,7 @@ class CorpusConfigEditor:
         self.labels_subtitle: ft.Text | None = None
         self.openalex_subtitle: ft.Text | None = None
         self.chunks_subtitle: ft.Text | None = None
+        self.embedding_subtitle: ft.Text | None = None
         self.entities_subtitle: ft.Text | None = None
         self.ontology_subtitle: ft.Text | None = None
         self.triples_subtitle: ft.Text | None = None
@@ -270,6 +341,11 @@ class CorpusConfigEditor:
             color=ft.Colors.GREY_400,
         )
         self.chunks_subtitle = ft.Text(
+            "",
+            size=12,
+            color=ft.Colors.GREY_400,
+        )
+        self.embedding_subtitle = ft.Text(
             "",
             size=12,
             color=ft.Colors.GREY_400,
@@ -729,6 +805,55 @@ class CorpusConfigEditor:
             ),
         )
 
+        # ----- Embedding (per-corpus provider + model; global Voyage rate) -----
+        self.embedding_provider_dropdown = ft.Dropdown(
+            value="voyage",
+            options=[
+                ft.DropdownOption(
+                    key=p,
+                    text=EMBEDDER_PROVIDER_REGISTRY[p]["display_name"],
+                )
+                for p in EMBEDDING_AVAILABLE_MODELS
+            ],
+            border=ft.InputBorder.OUTLINE,
+            border_color=FRAME_BORDER_COLOR,
+            bgcolor=PANEL_BG,
+            on_select=self._on_embedding_provider_changed,
+        )
+        self.embedding_model_field = ft.Dropdown(
+            value="voyage-multimodal-3",
+            options=[
+                ft.DropdownOption(key=m, text=m)
+                for m in EMBEDDING_AVAILABLE_MODELS.get("voyage", ())
+            ],
+            editable=True,
+            enable_filter=True,
+            border=ft.InputBorder.OUTLINE,
+            border_color=FRAME_BORDER_COLOR,
+            bgcolor=PANEL_BG,
+            on_blur=self._on_embedding_model_blur,
+        )
+        self.voyage_rate_field = ft.TextField(
+            value="",
+            hint_text="(empty = no limit)",
+            border=ft.InputBorder.OUTLINE,
+            border_color=FRAME_BORDER_COLOR,
+            bgcolor=PANEL_BG,
+            on_blur=self._on_voyage_rate_blur,
+            tooltip=(
+                "Voyage uses its native (non-LangChain) client, so its rate "
+                "limit lives here. GLOBAL — an account-throughput cap shared "
+                "by every corpus, not a per-corpus value."
+            ),
+        )
+        # Voyage rate row is only shown when the corpus's provider is Voyage
+        # (the other providers have no rate knob here). Visibility toggled by
+        # `_refresh_voyage_rate_visibility`.
+        self.voyage_rate_row = ft.Container(
+            padding=ft.Padding.symmetric(vertical=6),
+            content=labeled_field("Voyage requests/sec (global)", self.voyage_rate_field),
+        )
+
         # ----- Cross-doc thresholds -----
         self.cross_doc_threshold_field = ft.TextField(
             value="2",
@@ -914,6 +1039,33 @@ class CorpusConfigEditor:
                                 ),
                             ],
                         ),
+                    ],
+                ),
+                # ---- Section 3b: Embedding (per-corpus) ----
+                ft.ExpansionTile(
+                    title=self._section_title(
+                        "Embedding",
+                        "Which embedder turns this corpus's chunks into "
+                        "vectors. Per-corpus — LanceDB pins the vector "
+                        "dimension at ingest, so a corpus is locked to the "
+                        "embedder it was built with; changing it after ingest "
+                        "is destructive (requires a Re-embed).\n\n"
+                        "Install / uninstall providers in the Installs tab. "
+                        "The vector dimension is derived from the provider + "
+                        "model (not a raw field). The Voyage rate limit is "
+                        "global — an account cap shared by every corpus.",
+                    ),
+                    subtitle=self.embedding_subtitle,
+                    controls=[
+                        ft.Container(
+                            padding=ft.Padding.symmetric(vertical=6),
+                            content=labeled_field("Provider", self.embedding_provider_dropdown),
+                        ),
+                        ft.Container(
+                            padding=ft.Padding.symmetric(vertical=6),
+                            content=labeled_field("Embedding model", self.embedding_model_field),
+                        ),
+                        self.voyage_rate_row,
                     ],
                 ),
                 # ---- Section 4: Entities (L6) ----
@@ -1204,6 +1356,19 @@ class CorpusConfigEditor:
             self.min_figure_bytes_field.value = str(cfg.min_figure_bytes)
         if self.optimize_indexes_checkbox is not None:
             self.optimize_indexes_checkbox.value = cfg.optimize_indexes_per_ingest
+        # Embedding (per-corpus provider + model; Voyage rate is global).
+        if self.embedding_provider_dropdown is not None:
+            self.embedding_provider_dropdown.value = cfg.embedding_provider
+        if self.embedding_model_field is not None:
+            self.embedding_model_field.options = [
+                ft.DropdownOption(key=m, text=m)
+                for m in EMBEDDING_AVAILABLE_MODELS.get(cfg.embedding_provider, ())
+            ]
+            self.embedding_model_field.value = cfg.embedding_model
+        if self.voyage_rate_field is not None:
+            rate = self.app.gui_config.voyage_requests_per_second
+            self.voyage_rate_field.value = "" if rate is None else str(rate)
+        self._refresh_voyage_rate_visibility()
         # Entities (L6) per-corpus fields.
         if self.entity_extractor_model_field is not None:
             self.entity_extractor_model_field.value = cfg.entity_extractor_model
@@ -1295,6 +1460,13 @@ class CorpusConfigEditor:
                 if knob_deltas > 1:
                     cur_str += "s"
             self.chunks_subtitle.value = _cur_new(base_str, cur_str)
+        # Embedding: provider · model · dims (dims derived from the model).
+        if self.embedding_subtitle is not None:
+            base_str = (
+                f"{base.embedding_provider} · {base.embedding_model} · {base.embedding_dims}-dim"
+            )
+            cur_str = f"{cfg.embedding_provider} · {cfg.embedding_model} · {cfg.embedding_dims}-dim"
+            self.embedding_subtitle.value = _cur_new(base_str, cur_str)
         # Entities: on/off + extractor + "+N knob change(s)" hint when
         # LLM model / temperature are pending changes.
         if self.entities_subtitle is not None:
@@ -2214,6 +2386,183 @@ class CorpusConfigEditor:
             update={field_name: new_value},
         )
         self._after_mutation()
+
+    # ----- Embedding (per-corpus) field handlers --------------------------
+
+    def _refresh_voyage_rate_visibility(self) -> None:
+        """Show the Voyage rate row only when the corpus uses Voyage (the
+        other providers have no rate knob here)."""
+        if self.voyage_rate_row is None or self._corpus_config is None:
+            return
+        self.voyage_rate_row.visible = self._corpus_config.embedding_provider == "voyage"
+
+    def _on_embedding_provider_changed(self, e: ft.Event) -> None:
+        """Switch the corpus's embedding provider (staged to corpus.toml).
+
+        Dimension guard: LanceDB pins the vector dim at table creation, so
+        switching to a provider whose default dim differs from the corpus's
+        existing chunks is DESTRUCTIVE. `switch_embedder_plan` reads the
+        active corpus's LanceDB table (the per-corpus bridge points
+        `get_settings()` at this corpus); on a mismatch we hard-confirm and
+        point the user at Re-embed. No data / matching dim applies straight
+        through.
+        """
+        if self._corpus_config is None or self.embedding_provider_dropdown is None:
+            return
+        new_provider = self.embedding_provider_dropdown.value
+        if new_provider not in EMBEDDER_PROVIDER_REGISTRY:
+            return
+        current = self._corpus_config.embedding_provider
+        if new_provider == current:
+            return
+        try:
+            plan = switch_embedder_plan(new_provider)
+        except Exception as exc:
+            logger.warning(
+                "switch_embedder_plan(%s) failed (%r); switching without dim guard",
+                new_provider,
+                exc,
+            )
+            plan = None
+        if plan is not None and plan.dim_mismatch:
+            self._show_embedding_confirm(
+                title="Embedding dimension change",
+                body=(
+                    f"{plan.summary}\n\nAfter switching, run the Re-embed bulk "
+                    f"operation (Library → Bulk operations) to rebuild the "
+                    f"existing chunks under {new_provider}."
+                ),
+                confirm_label="Switch anyway",
+                on_confirm=lambda: self._apply_embedding_provider(new_provider),
+                on_cancel=lambda: self._revert_embedding_provider(current),
+            )
+            return
+        self._apply_embedding_provider(new_provider)
+
+    def _apply_embedding_provider(self, new_provider: str) -> None:
+        """Commit an embedding-provider switch: stage provider + its default
+        model + derived dims, and repopulate the model dropdown."""
+        if (
+            self._corpus_config is None
+            or self.embedding_provider_dropdown is None
+            or self.embedding_model_field is None
+        ):
+            return
+        new_model = EMBEDDER_PROVIDER_REGISTRY[new_provider]["default_model"]
+        dims = _embedding_dims_for(new_provider, new_model) or self._corpus_config.embedding_dims
+        self._corpus_config = self._corpus_config.model_copy(
+            update={
+                "embedding_provider": new_provider,
+                "embedding_model": new_model,
+                "embedding_dims": dims,
+            },
+        )
+        self.embedding_provider_dropdown.value = new_provider
+        self.embedding_model_field.options = [
+            ft.DropdownOption(key=m, text=m)
+            for m in EMBEDDING_AVAILABLE_MODELS.get(new_provider, ())
+        ]
+        self.embedding_model_field.value = new_model
+        self._refresh_voyage_rate_visibility()
+        self._after_mutation()
+
+    def _revert_embedding_provider(self, provider: str) -> None:
+        """Snap the provider dropdown back after a cancelled dim-change switch."""
+        if self.embedding_provider_dropdown is None:
+            return
+        self.embedding_provider_dropdown.value = provider
+        self.app.page.update()
+
+    def _on_embedding_model_blur(self, e: ft.Event) -> None:
+        """Persist a model edit (staged) + re-derive the vector dimension."""
+        if self._corpus_config is None or self.embedding_model_field is None:
+            return
+        raw = (self.embedding_model_field.value or "").strip()
+        current = self._corpus_config.embedding_model
+        if not raw:
+            self.embedding_model_field.value = current
+            self.app.page.update()
+            return
+        if raw == current:
+            return
+        provider = self._corpus_config.embedding_provider
+        dims = _embedding_dims_for(provider, raw) or self._corpus_config.embedding_dims
+        self._corpus_config = self._corpus_config.model_copy(
+            update={"embedding_model": raw, "embedding_dims": dims},
+        )
+        self._after_mutation()
+
+    def _on_voyage_rate_blur(self, e: ft.Event) -> None:
+        """Persist the Voyage rate — GLOBAL (GuiConfig), NOT staged to
+        corpus.toml. Writes GuiConfig + bridges JUST the rate to env (never
+        the per-corpus provider/model, which the active-corpus bridge owns).
+        """
+        if self.voyage_rate_field is None:
+            return
+        raw = (self.voyage_rate_field.value or "").strip()
+        current = self.app.gui_config.voyage_requests_per_second
+        if not raw:
+            new_value: float | None = None
+        else:
+            try:
+                new_value = float(raw)
+                if new_value <= 0:
+                    raise ValueError("must be positive")
+            except (ValueError, TypeError):
+                self.voyage_rate_field.value = "" if current is None else str(current)
+                self.app.page.update()
+                return
+        if new_value == current:
+            return
+        self.app.gui_config.voyage_requests_per_second = new_value
+        try:
+            save_config(self.app.gui_config)
+        except ConfigError as exc:
+            self.app.gui_config.voyage_requests_per_second = current
+            self.voyage_rate_field.value = "" if current is None else str(current)
+            if self.status is not None:
+                self.status.value = f"could not save: {exc}"
+            self.app.page.update()
+            return
+        apply_voyage_rate_to_env(self.app.gui_config)
+        try:
+            reset_after_key_change()
+        except Exception as exc:
+            logger.warning("reset_after_key_change failed: %r", exc)
+        self.app.page.update()
+
+    def _show_embedding_confirm(
+        self,
+        *,
+        title: str,
+        body: str,
+        confirm_label: str,
+        on_confirm: Callable[[], None],
+        on_cancel: Callable[[], None] | None = None,
+    ) -> None:
+        """Modal confirm for a destructive embedder switch (mirrors the
+        dialog shape the old Settings → Embedding tab used)."""
+
+        def _go(_e: ft.Event) -> None:
+            self.app.page.pop_dialog()
+            on_confirm()
+
+        def _cancel(_e: ft.Event) -> None:
+            self.app.page.pop_dialog()
+            if on_cancel is not None:
+                on_cancel()
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text(title),
+            content=ft.Container(width=460, content=ft.Text(body, size=12, selectable=True)),
+            actions=[
+                ft.TextButton("Cancel", on_click=_cancel),
+                ft.Button(content=centered_label(confirm_label), on_click=_go),
+            ],
+        )
+        self.app.page.show_dialog(dialog)
+        self.app.page.update()
 
     # ============ Cross-cutting helpers (staging, deps, dirty, discard) =====
 
