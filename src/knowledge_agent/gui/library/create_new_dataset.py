@@ -61,6 +61,7 @@ from knowledge_agent.gui._styles import (
 from knowledge_agent.gui.config_store import (
     ConfigError,
     CorpusEntry,
+    apply_active_corpus_embedding_to_env,
     apply_connection_to_env,
     save_config,
     set_corpus_password,
@@ -624,6 +625,9 @@ class CreateNewDatasetTab:
         # Bridge + reset caches so subsequent queries hit the new
         # corpus.
         apply_connection_to_env(self.app.gui_config)
+        # Bridge the new corpus's embedder (its freshly-written corpus.toml)
+        # so ingest/query use it, not a stale global default.
+        apply_active_corpus_embedding_to_env(self.app.gui_config)
         import os
 
         os.environ["NEO4J_PASSWORD"] = password

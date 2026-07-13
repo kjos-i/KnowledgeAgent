@@ -5,6 +5,15 @@ Mirrors `llm_factory.py` but for the embedding side. `embed_texts()`
 refactor) are the dispatch points used by `ingestion/embed.py` and
 the agent's query-side embedding call.
 
+Per-corpus resolution: `embedding_provider` / `embedding_model` /
+`embedding_dims` are read from `get_settings()`, but those globals are
+bridged from the ACTIVE corpus's `corpus.toml` (see
+`kg.corpus_config.apply_corpus_embedding_to_env`) — the embedder is
+per-corpus because LanceDB pins the vector dimension at ingest. The
+factory reads `settings.embedding_model` for the resolved model on
+EVERY provider (single source); the per-provider Settings fields
+(`openai_embedding_model`, ...) are GUI menu-defaults only.
+
 Voyage (today's default, multimodal-capable) has a non-LangChain API
 shape — `multimodal_embed(inputs=[[text]], ...)` — so it keeps its
 native client path. The three add-on providers (OpenAI, Google,
@@ -275,7 +284,7 @@ async def embed_chunks(
             provider,
         )
     texts = [_text_of(c) for c in chunks]
-    model = _active_model_for(provider)
+    model = settings.embedding_model
     embedder = _build_langchain_embedder(provider, model)
     if input_type == "query":
         return list(await asyncio.gather(*(embedder.aembed_query(t) for t in texts)))
@@ -315,7 +324,7 @@ async def embed_texts(texts: list[str], input_type: str = "document") -> list[li
     if provider == "voyage":
         return await asyncio.to_thread(_voyage_call, texts, input_type)
 
-    model = _active_model_for(provider)
+    model = settings.embedding_model
     embedder = _build_langchain_embedder(provider, model)
     if input_type == "query":
         # Fan out queries concurrently. For one-query callers (the
@@ -323,20 +332,6 @@ async def embed_texts(texts: list[str], input_type: str = "document") -> list[li
         # multi-query callers the gather amortises round-trips.
         return list(await asyncio.gather(*(embedder.aembed_query(t) for t in texts)))
     return await embedder.aembed_documents(texts)
-
-
-def _active_model_for(provider: str) -> str:
-    """Pick the per-provider model name from Settings."""
-    settings = get_settings()
-    if provider == "openai":
-        return settings.openai_embedding_model
-    if provider == "google":
-        return settings.google_embedding_model
-    if provider == "huggingface":
-        return settings.hf_embedding_model
-    # voyage is handled inline above (uses settings.embedding_model
-    # directly); shouldn't reach here.
-    raise ConfigError(f"no per-provider model field for {provider!r}")
 
 
 def clear_cache() -> None:

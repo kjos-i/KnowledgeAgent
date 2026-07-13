@@ -198,6 +198,17 @@ def test_settings_defaults_for_optional_fields() -> None:
     assert s.chunk_max_tokens == 512
 
 
+def test_settings_reads_embedding_dims_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The per-corpus bridge (`apply_corpus_embedding_to_env`) writes
+    EMBEDDING_DIMS to carry a corpus's vector dimension; Settings must read
+    that env var, else per-corpus dims silently fall back to the 1024
+    default and LanceDB tables get the wrong shape. This path is new — the
+    global `apply_embedding_to_env` never set EMBEDDING_DIMS — so pin it."""
+    monkeypatch.setenv("EMBEDDING_DIMS", "768")
+    s = Settings(**_minimal_required())  # type: ignore[arg-type]
+    assert s.embedding_dims == 768
+
+
 # ---------------------------------------------------------------------------
 # Retrieval-window invariant: top_k <= num_candidates.
 #

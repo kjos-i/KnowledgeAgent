@@ -92,8 +92,12 @@ logger = logging.getLogger(__name__)
 
 async def _cmd_ingest(args: argparse.Namespace) -> int:
     """Build a plan via `bulk_ops.ingest_folder_plan`, then execute."""
+    from knowledge_agent.config import reset_after_key_change
     from knowledge_agent.ingestion import bulk_ops
-    from knowledge_agent.kg.corpus_config import load_corpus_config
+    from knowledge_agent.kg.corpus_config import (
+        apply_corpus_embedding_to_env,
+        load_corpus_config,
+    )
 
     folder = Path(args.folder).expanduser().resolve()
     if not folder.is_dir():
@@ -106,6 +110,10 @@ async def _cmd_ingest(args: argparse.Namespace) -> int:
         return 1
 
     config = load_corpus_config(config_path)
+    # Resolve the embedder from THIS corpus (per-corpus; LanceDB pins the
+    # vector dim at ingest), overriding any global / .env embedder.
+    apply_corpus_embedding_to_env(config)
+    reset_after_key_change()
     plan = await bulk_ops.ingest_folder_plan(
         folder,
         main_label=args.main_label,
@@ -143,14 +151,22 @@ async def _cmd_ingest(args: argparse.Namespace) -> int:
 
 async def _cmd_query(args: argparse.Namespace) -> int:
     """Invoke the compiled agent graph and print the answer."""
+    from knowledge_agent.config import reset_after_key_change
     from knowledge_agent.graph import graph
-    from knowledge_agent.kg.corpus_config import load_corpus_config
+    from knowledge_agent.kg.corpus_config import (
+        apply_corpus_embedding_to_env,
+        load_corpus_config,
+    )
 
     config_path = Path(args.config).expanduser().resolve()
     if not config_path.is_file():
         print(f"error: corpus config not found: {config_path}", file=sys.stderr)
         return 1
     corpus_config = load_corpus_config(config_path)
+    # Resolve the embedder from THIS corpus (per-corpus; query vectors must
+    # come from the same model the corpus was ingested with).
+    apply_corpus_embedding_to_env(corpus_config)
+    reset_after_key_change()
 
     initial_state: dict[str, Any] = {
         "query": args.query,

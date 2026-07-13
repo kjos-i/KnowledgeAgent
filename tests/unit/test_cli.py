@@ -142,6 +142,10 @@ async def test_cmd_ingest_empty_folder_returns_zero(tmp_path):
             "knowledge_agent.kg.corpus_config.load_corpus_config",
             return_value=MagicMock(),
         ),
+        # Per-corpus embedder bridge + cache reset are glue the CLI now
+        # composes; no-op them here (covered by their own suites).
+        patch("knowledge_agent.kg.corpus_config.apply_corpus_embedding_to_env"),
+        patch("knowledge_agent.config.reset_after_key_change"),
         patch(
             "knowledge_agent.ingestion.bulk_ops.ingest_folder_plan",
             new_callable=AsyncMock,
@@ -182,6 +186,10 @@ async def test_cmd_ingest_propagates_failure_count_to_exit_code(tmp_path):
             "knowledge_agent.kg.corpus_config.load_corpus_config",
             return_value=MagicMock(),
         ),
+        # Per-corpus embedder bridge + cache reset are glue the CLI now
+        # composes; no-op them here (covered by their own suites).
+        patch("knowledge_agent.kg.corpus_config.apply_corpus_embedding_to_env"),
+        patch("knowledge_agent.config.reset_after_key_change"),
         patch(
             "knowledge_agent.ingestion.bulk_ops.ingest_folder_plan",
             new_callable=AsyncMock,
@@ -224,6 +232,10 @@ async def test_cmd_query_prints_answer_text(tmp_path):
             "knowledge_agent.kg.corpus_config.load_corpus_config",
             return_value=MagicMock(),
         ),
+        # Per-corpus embedder bridge + cache reset are glue the CLI now
+        # composes; no-op them here (covered by their own suites).
+        patch("knowledge_agent.kg.corpus_config.apply_corpus_embedding_to_env"),
+        patch("knowledge_agent.config.reset_after_key_change"),
         patch(
             "knowledge_agent.graph.graph.ainvoke",
             new_callable=AsyncMock,
@@ -256,6 +268,10 @@ async def test_cmd_query_output_saves_answer_files(tmp_path):
             "knowledge_agent.kg.corpus_config.load_corpus_config",
             return_value=MagicMock(),
         ),
+        # Per-corpus embedder bridge + cache reset are glue the CLI now
+        # composes; no-op them here (covered by their own suites).
+        patch("knowledge_agent.kg.corpus_config.apply_corpus_embedding_to_env"),
+        patch("knowledge_agent.config.reset_after_key_change"),
         patch(
             "knowledge_agent.graph.graph.ainvoke",
             new_callable=AsyncMock,
@@ -290,6 +306,10 @@ async def test_cmd_query_output_invalid_format_returns_one(tmp_path):
             "knowledge_agent.kg.corpus_config.load_corpus_config",
             return_value=MagicMock(),
         ),
+        # Per-corpus embedder bridge + cache reset are glue the CLI now
+        # composes; no-op them here (covered by their own suites).
+        patch("knowledge_agent.kg.corpus_config.apply_corpus_embedding_to_env"),
+        patch("knowledge_agent.config.reset_after_key_change"),
         patch(
             "knowledge_agent.graph.graph.ainvoke",
             new_callable=AsyncMock,
@@ -320,6 +340,10 @@ async def test_cmd_query_returns_one_when_no_answer(tmp_path):
             "knowledge_agent.kg.corpus_config.load_corpus_config",
             return_value=MagicMock(),
         ),
+        # Per-corpus embedder bridge + cache reset are glue the CLI now
+        # composes; no-op them here (covered by their own suites).
+        patch("knowledge_agent.kg.corpus_config.apply_corpus_embedding_to_env"),
+        patch("knowledge_agent.config.reset_after_key_change"),
         patch(
             "knowledge_agent.graph.graph.ainvoke",
             new_callable=AsyncMock,

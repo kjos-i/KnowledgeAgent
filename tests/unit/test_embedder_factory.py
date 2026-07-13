@@ -148,6 +148,35 @@ async def test_openai_dispatch_uses_embed_documents_for_document_input():
     fake_embedder.aembed_query.assert_not_called()
 
 
+async def test_langchain_model_comes_from_embedding_model_not_per_provider():
+    """Single source: the factory resolves the model from
+    `settings.embedding_model` for EVERY provider — NOT the per-provider
+    field (`openai_embedding_model`, ...), which is a GUI menu-default only.
+    Give the two DIFFERENT values and assert the LangChain embedder is built
+    with `embedding_model`. Guards the 2026-07-13 per-corpus change that
+    dropped `_active_model_for`'s per-provider fan-out."""
+    settings = _FakeSettings(
+        embedding_provider="openai",
+        openai_api_key="sk-openai",
+        embedding_model="text-embedding-3-large",  # the corpus's resolved model
+        openai_embedding_model="text-embedding-3-small",  # must be IGNORED
+    )
+    fake_embedder = MagicMock()
+    fake_embedder.aembed_documents = AsyncMock(return_value=[[0.1]])
+    with (
+        patch(
+            "knowledge_agent.embedder_factory.get_settings",
+            return_value=settings,
+        ),
+        patch(
+            "knowledge_agent.embedder_factory._build_langchain_embedder",
+            return_value=fake_embedder,
+        ) as build,
+    ):
+        await embed_texts(["hi"], input_type="document")
+    build.assert_called_once_with("openai", "text-embedding-3-large")
+
+
 async def test_google_dispatch_uses_embed_query_for_query_input():
     settings = _FakeSettings(
         embedding_provider="google",

@@ -2,8 +2,14 @@
 
 Each corpus folder gets its own `corpus.toml` holding the choices that
 vary per corpus (which knowledge-graph layers are active, sub-label
-filter). Shared infrastructure settings (Neo4j URI, API keys, embedding
-model) stay in `config.py` + `.env`.
+filter, extractor models, and the embedder). Shared infrastructure
+settings (Neo4j URI, API keys) stay in `config.py` + `.env`. The
+embedder (provider/model/dims) is per-corpus and lives here because
+LanceDB pins the vector dimension at ingest — a global embedder would
+silently mismatch the moment a second corpus uses a different one.
+`apply_corpus_embedding_to_env` (below) bridges the active corpus's
+embedder into the environment so `get_settings()` — and thus ingest +
+query embedding — resolve to THIS corpus's embedder.
 
 Principle (parallel to `config.py` + `.env`):
   - This module defines the SHAPE (Pydantic models + loader).
@@ -25,6 +31,7 @@ Why TOML, not YAML:
   - Same format as `pyproject.toml`, one less syntax for contributors.
 """
 
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -753,6 +760,39 @@ class CorpusConfig(BaseModel):
             "`layers.triples=true`. Per-corpus."
         ),
     )
+    embedding_provider: Literal["voyage", "openai", "google", "huggingface"] = Field(
+        default="voyage",
+        description=(
+            "Embedding provider for THIS corpus. The embedder is physically "
+            "corpus-bound — LanceDB pins the vector dimension at table "
+            "creation — so it lives here, per-corpus, NOT in global settings "
+            "(same rationale as the extractor models above: baked into the "
+            "persisted store). Voyage is the default (multimodal-capable). "
+            "Changing it on a corpus that already holds chunks is destructive "
+            "(needs a re-embed); the dimension guard in "
+            "`embedder_lifecycle.switch_embedder_plan` surfaces that. Default "
+            "mirrors `Settings.embedding_provider`."
+        ),
+    )
+    embedding_model: str = Field(
+        default="voyage-multimodal-3",
+        description=(
+            "Embedding model for THIS corpus's provider. Must stay consistent "
+            "with the chunks already in LanceDB — the vector dimension is "
+            "pinned at table creation. Default mirrors `Settings.embedding_model`."
+        ),
+    )
+    embedding_dims: int = Field(
+        default=1024,
+        ge=1,
+        description=(
+            "Vector dimension produced by this corpus's embedding model "
+            "(voyage-multimodal-3 = 1024, OpenAI = 1536, Google = 768, HF "
+            "varies). Fixed by the model; LanceDB pins it at table creation, "
+            "so it must match the existing chunks. Default mirrors "
+            "`Settings.embedding_dims`."
+        ),
+    )
     entities: EntityConfig | None = Field(
         default=None,
         description=(
@@ -986,6 +1026,32 @@ def load_corpus_config(path: Path) -> CorpusConfig:
     text = path.read_text(encoding="utf-8")
     raw = dict(tomlkit.loads(text))
     return CorpusConfig.model_validate(raw)
+
+
+def apply_corpus_embedding_to_env(config: CorpusConfig) -> None:
+    """Write a corpus's embedder settings into the environment.
+
+    Sets `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_DIMS` so that
+    `get_settings()` — and therefore both ingest (`embed_chunks`) and query
+    (`embed_texts`) embedding, plus the LanceDB table schema
+    (`chunks_schema` reads `embedding_dims`) — resolve to THIS corpus's
+    embedder instead of any global default.
+
+    The caller MUST clear cached settings afterwards
+    (`config.reset_after_key_change()`); `get_settings` is `lru_cache`d, so
+    the new env values only take effect after a clear (same contract as the
+    key/connection bridges). Callers: the GUI corpus-switch bridge
+    (`gui.config_store.apply_active_corpus_embedding_to_env`) and the
+    headless CLI + eval entrypoints, which load a `corpus.toml` and then run
+    the embedding factory.
+
+    Only the three resolved fields are written — the factory reads the
+    active model from `EMBEDDING_MODEL` for every provider (see
+    `embedder_factory`), so no per-provider env var is needed.
+    """
+    os.environ["EMBEDDING_PROVIDER"] = config.embedding_provider
+    os.environ["EMBEDDING_MODEL"] = config.embedding_model
+    os.environ["EMBEDDING_DIMS"] = str(config.embedding_dims)
 
 
 def corpus_folder(corpus_toml_path: Path) -> Path:

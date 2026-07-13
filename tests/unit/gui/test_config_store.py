@@ -308,6 +308,47 @@ def test_apply_active_corpus_password_no_active_corpus(monkeypatch):
     assert "NEO4J_PASSWORD" not in os.environ
 
 
+# ---- apply_active_corpus_embedding_to_env (per-corpus embedder bridge) ----
+
+
+def test_apply_active_corpus_embedding_bridges_from_corpus_toml(monkeypatch, tmp_path):
+    """The active corpus's embedder (corpus.toml) lands in the EMBEDDING_*
+    env vars, overriding whatever global default was there — so ingest +
+    query embed with THIS corpus's model, not a stale global one."""
+    monkeypatch.setattr(os, "environ", dict(os.environ))
+    toml_path = tmp_path / "corpus.toml"
+    toml_path.write_text(
+        'embedding_provider = "openai"\n'
+        'embedding_model = "text-embedding-3-large"\n'
+        "embedding_dims = 1536\n"
+    )
+    cfg = config_store.GuiConfig(corpus_config_path=toml_path)
+    config_store.apply_active_corpus_embedding_to_env(cfg)
+    assert os.environ["EMBEDDING_PROVIDER"] == "openai"
+    assert os.environ["EMBEDDING_MODEL"] == "text-embedding-3-large"
+    assert os.environ["EMBEDDING_DIMS"] == "1536"
+
+
+def test_apply_active_corpus_embedding_noop_without_active_corpus(monkeypatch):
+    """No active corpus (corpus_config_path is None) -> leaves the global
+    embedding env untouched rather than raising or clearing it."""
+    monkeypatch.setattr(os, "environ", dict(os.environ))
+    os.environ["EMBEDDING_PROVIDER"] = "voyage"
+    cfg = config_store.GuiConfig(corpus_config_path=None)
+    config_store.apply_active_corpus_embedding_to_env(cfg)
+    assert os.environ["EMBEDDING_PROVIDER"] == "voyage"
+
+
+def test_apply_active_corpus_embedding_noop_when_toml_missing(monkeypatch, tmp_path):
+    """A dangling corpus_config_path (file gone) is logged + skipped, not
+    raised — the global embedding env stays in place."""
+    monkeypatch.setattr(os, "environ", dict(os.environ))
+    os.environ["EMBEDDING_PROVIDER"] = "voyage"
+    cfg = config_store.GuiConfig(corpus_config_path=tmp_path / "gone.toml")
+    config_store.apply_active_corpus_embedding_to_env(cfg)
+    assert os.environ["EMBEDDING_PROVIDER"] == "voyage"
+
+
 # ---- switch_active_corpus (single-source app-wide corpus switch) ----
 
 

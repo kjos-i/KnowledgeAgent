@@ -54,6 +54,7 @@ from knowledge_agent.gui.chat_router import (
 from knowledge_agent.gui.config_store import (
     ConfigError,
     GuiConfig,
+    apply_active_corpus_embedding_to_env,
     apply_active_corpus_password_to_env,
     apply_connection_to_env,
     apply_embedding_to_env,
@@ -681,6 +682,10 @@ class GuiApp:
         apply_retrieval_to_env(self.gui_config)
         apply_llm_to_env(self.gui_config)
         apply_embedding_to_env(self.gui_config)
+        # Override the global embedder with the ACTIVE corpus's own
+        # (corpus.toml) — the embedder is per-corpus (LanceDB pins the
+        # vector dim at ingest). Must run AFTER apply_embedding_to_env.
+        apply_active_corpus_embedding_to_env(self.gui_config)
         apply_ontology_downloads_dir_to_env(self.gui_config)
         get_settings.cache_clear()
 

@@ -11,6 +11,7 @@ TOML has no code-execution surface - it's a data-only format. There is
 no analog to YAML's `!!python/object/apply:os.system` to test against.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,7 @@ from knowledge_agent.kg.corpus_config import (
     EntityConfig,
     LayerFlags,
     OntologyConfig,
+    apply_corpus_embedding_to_env,
     corpus_figures_dir,
     corpus_folder,
     load_corpus_config,
@@ -53,6 +55,58 @@ def test_corpus_config_defaults():
     assert config.layers.ontology_mesh is False
     assert config.entities is None
     assert config.ontology == {}
+
+
+# ---- embedder (per-corpus) ----
+
+
+def test_corpus_config_embedding_defaults():
+    """The embedder is per-corpus; its defaults mirror the Settings global
+    default (Voyage multimodal-3, 1024-dim)."""
+    config = CorpusConfig()
+    assert config.embedding_provider == "voyage"
+    assert config.embedding_model == "voyage-multimodal-3"
+    assert config.embedding_dims == 1024
+
+
+def test_load_corpus_config_embedding_section(tmp_path: Path):
+    """An explicit embedder in corpus.toml is parsed verbatim."""
+    toml_path = tmp_path / "corpus.toml"
+    toml_path.write_text(
+        'embedding_provider = "openai"\n'
+        'embedding_model = "text-embedding-3-large"\n'
+        "embedding_dims = 1536\n"
+    )
+    config = load_corpus_config(toml_path)
+    assert config.embedding_provider == "openai"
+    assert config.embedding_model == "text-embedding-3-large"
+    assert config.embedding_dims == 1536
+
+
+def test_corpus_config_rejects_unknown_embedding_provider():
+    """The provider is a closed Literal — a typo fails at load, not at the
+    first embed call."""
+    with pytest.raises(ValidationError):
+        CorpusConfig(embedding_provider="voyaage")  # type: ignore[arg-type]
+
+
+def test_apply_corpus_embedding_to_env_sets_the_three_vars(monkeypatch):
+    """Writes exactly the three resolved env vars the factory
+    (EMBEDDING_PROVIDER/MODEL) + LanceDB schema (EMBEDDING_DIMS) read.
+    monkeypatch.setenv records the originals so the direct os.environ writes
+    are rolled back after the test."""
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "OLD")
+    monkeypatch.setenv("EMBEDDING_MODEL", "OLD")
+    monkeypatch.setenv("EMBEDDING_DIMS", "0")
+    config = CorpusConfig(
+        embedding_provider="google",
+        embedding_model="models/text-embedding-004",
+        embedding_dims=768,
+    )
+    apply_corpus_embedding_to_env(config)
+    assert os.environ["EMBEDDING_PROVIDER"] == "google"
+    assert os.environ["EMBEDDING_MODEL"] == "models/text-embedding-004"
+    assert os.environ["EMBEDDING_DIMS"] == "768"
 
 
 # ---- load_corpus_config: happy path ----

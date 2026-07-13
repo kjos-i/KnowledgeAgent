@@ -801,6 +801,40 @@ def apply_active_corpus_password_to_env(cfg: GuiConfig) -> bool:
     return False
 
 
+def apply_active_corpus_embedding_to_env(cfg: GuiConfig) -> None:
+    """Bridge the ACTIVE corpus's embedder (`corpus.toml`) -> env vars.
+
+    The embedder is per-corpus — LanceDB pins the vector dimension at
+    ingest — so each corpus's `corpus.toml` owns its provider/model/dims.
+    This reads the active corpus's config and applies them to the
+    environment so `get_settings()` (and thus ingest + query embedding)
+    match the corpus rather than a stale global default. Delegates the
+    actual env write to the backend `apply_corpus_embedding_to_env` so the
+    GUI, CLI, and eval paths share one implementation.
+
+    Mirrors `apply_active_corpus_password_to_env`: call at startup (AFTER
+    `apply_embedding_to_env`, so the corpus overrides the global defaults)
+    AND on every corpus switch. No active corpus, a missing file, or a
+    parse error leaves the global embedding settings in place (logged) —
+    it never raises. The caller owns `reset_after_key_change()` (same
+    contract as the connection/password bridges).
+    """
+    path = cfg.corpus_config_path
+    if path is None or not Path(path).is_file():
+        return
+    try:
+        from knowledge_agent.kg.corpus_config import (
+            apply_corpus_embedding_to_env,
+            load_corpus_config,
+        )
+
+        corpus = load_corpus_config(Path(path))
+    except Exception as exc:
+        logger.warning("could not apply active corpus embedder to env: %r", exc)
+        return
+    apply_corpus_embedding_to_env(corpus)
+
+
 class SwitchOutcome(NamedTuple):
     """Result of `switch_active_corpus`.
 
@@ -857,6 +891,7 @@ def switch_active_corpus(cfg: GuiConfig, name: str) -> SwitchOutcome:
         return SwitchOutcome(ok=False, message=f"could not save: {exc}")
 
     apply_connection_to_env(cfg)
+    apply_active_corpus_embedding_to_env(cfg)
     had_password = apply_active_corpus_password_to_env(cfg)
     if not had_password:
         return SwitchOutcome(

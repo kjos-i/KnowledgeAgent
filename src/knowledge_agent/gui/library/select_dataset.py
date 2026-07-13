@@ -60,6 +60,7 @@ from knowledge_agent.gui._styles import (
 )
 from knowledge_agent.gui.config_store import (
     ConfigError,
+    apply_active_corpus_embedding_to_env,
     apply_connection_to_env,
     get_corpus_password,
     save_config,
@@ -946,6 +947,10 @@ class SelectDatasetTab:
         # on the sentinel. Either way, drop caches so the next backend read
         # rebuilds against the new target.
         apply_connection_to_env(self.app.gui_config)
+        # Removing the active corpus promotes a DIFFERENT corpus (or none);
+        # bridge its embedder so ingest/query match the newly-active corpus.
+        # No-op when no corpus remains (corpus_config_path is None).
+        apply_active_corpus_embedding_to_env(self.app.gui_config)
         if new_active_name is not None:
             password = get_corpus_password(new_active_name) or ""
             if password:

@@ -119,6 +119,15 @@ async def run(
     if cfg.max_cases is not None:
         cases = cases[: cfg.max_cases]
     corpus_config = _load_corpus_config(cfg)
+    if corpus_config is not None:
+        # Resolve the embedder from the corpus under evaluation (per-corpus;
+        # query vectors must match the model the corpus was ingested with),
+        # overriding any global / .env embedder.
+        from knowledge_agent.config import reset_after_key_change
+        from knowledge_agent.kg.corpus_config import apply_corpus_embedding_to_env
+
+        apply_corpus_embedding_to_env(corpus_config)
+        reset_after_key_change()
 
     logger.info("evaluating %d case(s), groups=%s", len(cases), sorted(cfg.enabled_groups))
     if trace:
