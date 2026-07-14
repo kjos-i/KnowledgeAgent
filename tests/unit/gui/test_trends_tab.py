@@ -32,13 +32,16 @@ def _report(dataset: str, hit: float, recipe_hash: str = "recipe-abc") -> dict:
 
 
 def test_trends_builds(fake_app):
-    assert TrendsTab(fake_app, coordinator=MagicMock()).build() is not None
+    assert (
+        TrendsTab(fake_app, coordinator=MagicMock(compare_kind="fact", compare_selected=[])).build()
+        is not None
+    )
 
 
 def test_trends_needs_two_runs(fake_app, tmp_path):
     led = EvalLedger(tmp_path / "l.db")
     led.save_run(_report("escrt_bootstrap.json", 1.0))
-    coordinator = MagicMock()
+    coordinator = MagicMock(compare_kind="fact", compare_selected=[])
     coordinator.selected_run_id = None
     tab = TrendsTab(fake_app, coordinator=coordinator)
     tab.build()
@@ -51,7 +54,7 @@ def test_trends_renders_charts_for_two_runs(fake_app, tmp_path):
     led = EvalLedger(tmp_path / "l.db")
     led.save_run(_report("escrt_bootstrap.json", 0.5))
     led.save_run(_report("escrt_bootstrap.json", 1.0))
-    coordinator = MagicMock()
+    coordinator = MagicMock(compare_kind="fact", compare_selected=[])
     coordinator.selected_run_id = None
     tab = TrendsTab(fake_app, coordinator=coordinator)
     tab.build()

@@ -1,4 +1,4 @@
-"""Evaluation top-tab coordinator — 6 sub-tabs, full window (Library model).
+"""Evaluation top-tab coordinator — 7 sub-tabs, full window (Library model).
 
 Sub-tabs (fixed order), by display label:
 
@@ -11,7 +11,9 @@ Sub-tabs (fixed order), by display label:
     capture-from-Search / LLM generation).
   - Run Summary — KPI cards + per-case table for the selected run.
   - Run Charts — metric-balance / distribution / correlation for the run.
-  - Trends — run-level metric trends over time (scoped per dataset).
+  - Compare Datasets — several datasets' runs side by side (one kind), a
+    metric × run table + grouped bars.
+  - Trends — run-level metric trends over time (scoped per recipe hash).
   - Metrics Guide — the metrics reference (info_metrics.md).
 
 Shared selected-run state lives here: the per-run tabs read
@@ -24,10 +26,11 @@ its internal layout; no shared splitter.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import flet as ft
 
+from knowledge_agent.gui.evaluation.compare_tab import CompareDatasetsTab
 from knowledge_agent.gui.evaluation.dataset_tab import DatasetTab
 from knowledge_agent.gui.evaluation.metrics_guide_tab import MetricsGuideTab
 from knowledge_agent.gui.evaluation.run_charts_tab import RunChartsTab
@@ -44,6 +47,7 @@ SUB_TAB_LABELS = (
     "Create test cases",
     "Run Summary",
     "Run Charts",
+    "Compare Datasets",
     "Trends",
     "Metrics Guide",
 )
@@ -51,7 +55,7 @@ SUB_TAB_LABELS = (
 # The eval-output (view) tabs — tinted apart from the two authoring tabs, and
 # auto-refreshed on select (they read the shared ledger; the authoring tabs
 # own their own state).
-_VIEW_TABS = frozenset({"Run Summary", "Run Charts", "Trends", "Metrics Guide"})
+_VIEW_TABS = frozenset({"Run Summary", "Run Charts", "Compare Datasets", "Trends", "Metrics Guide"})
 
 
 class EvaluationView:
@@ -66,11 +70,17 @@ class EvaluationView:
         # completion.
         self.selected_run_id: int | None = None
         self.selected_dataset: str | None = None
+        # Compare Datasets picker state — shared across every rail instance (the
+        # Compare section lives on the shared DashboardRail); only the Compare
+        # tab's body consumes it. compare_selected = [{"dataset", "run_id"}, ...].
+        self.compare_kind: str = "fact"
+        self.compare_selected: list[dict[str, Any]] = []
         self._tabs: ft.Tabs | None = None
         self.run_tab = RunTab(app, coordinator=self)
         self.dataset_tab = DatasetTab(app, coordinator=self)
         self.run_summary_tab = RunSummaryTab(app, coordinator=self)
         self.run_charts_tab = RunChartsTab(app, coordinator=self)
+        self.compare_tab = CompareDatasetsTab(app, coordinator=self)
         self.trends_tab = TrendsTab(app, coordinator=self)
         self.metrics_guide_tab = MetricsGuideTab(app, coordinator=self)
 
@@ -81,9 +91,7 @@ class EvaluationView:
         sub_bar = ft.TabBar(
             tabs=[
                 ft.Tab(
-                    label=ft.Text(label, color=ft.Colors.INDIGO_200)
-                    if label in _VIEW_TABS
-                    else label
+                    label=ft.Text(label, color=ft.Colors.BLUE_400) if label in _VIEW_TABS else label
                 )
                 for label in SUB_TAB_LABELS
             ],
@@ -95,6 +103,7 @@ class EvaluationView:
                 ft.Container(content=self.dataset_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.run_summary_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.run_charts_tab.build(), padding=8, expand=True),
+                ft.Container(content=self.compare_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.trends_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.metrics_guide_tab.build(), padding=8, expand=True),
             ],
@@ -118,6 +127,7 @@ class EvaluationView:
         view_tabs = {
             SUB_TAB_LABELS.index("Run Summary"): self.run_summary_tab,
             SUB_TAB_LABELS.index("Run Charts"): self.run_charts_tab,
+            SUB_TAB_LABELS.index("Compare Datasets"): self.compare_tab,
             SUB_TAB_LABELS.index("Trends"): self.trends_tab,
             SUB_TAB_LABELS.index("Metrics Guide"): self.metrics_guide_tab,
         }

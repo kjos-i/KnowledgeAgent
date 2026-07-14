@@ -263,7 +263,7 @@ class RunChartsTab:
                 ),
             ],
             expand=True,
-            vertical_alignment=ft.CrossAxisAlignment.START,
+            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
         )
 
     # ---- data / refresh ---------------------------------------------------

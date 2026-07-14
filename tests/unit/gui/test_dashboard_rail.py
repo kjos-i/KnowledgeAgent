@@ -32,7 +32,13 @@ def _report(dataset: str, run_ts: str) -> dict:
 
 
 def _rail(fake_app, led, **coord_kw):
-    state = {"selected_run_id": None, "selected_dataset": None, **coord_kw}
+    state = {
+        "selected_run_id": None,
+        "selected_dataset": None,
+        "compare_kind": "fact",
+        "compare_selected": [],
+        **coord_kw,
+    }
     coord = SimpleNamespace(**state)
     on_change = MagicMock()
     rail = DashboardRail(fake_app, coord, on_change=on_change)

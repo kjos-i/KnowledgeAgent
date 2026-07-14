@@ -22,11 +22,11 @@ def _tab_label(t: ft.Tab) -> str:
     return t.label.value if isinstance(t.label, ft.Text) else t.label
 
 
-def test_evaluation_view_builds_six_sub_tabs(fake_app: MagicMock):
+def test_evaluation_view_builds_seven_sub_tabs(fake_app: MagicMock):
     view = EvaluationView(fake_app)
     ctl = view.build()
     assert isinstance(ctl, ft.Tabs)
-    assert ctl.length == len(SUB_TAB_LABELS) == 6
+    assert ctl.length == len(SUB_TAB_LABELS) == 7
     tab_bar = ctl.content.controls[0]
     assert [_tab_label(t) for t in tab_bar.tabs] == list(SUB_TAB_LABELS)
     assert "Create test cases" in SUB_TAB_LABELS
@@ -39,7 +39,7 @@ def test_view_tabs_are_tinted(fake_app: MagicMock):
     tab_bar = view.build().content.controls[0]
     by_label = {_tab_label(t): t for t in tab_bar.tabs}
     assert isinstance(by_label["Run Summary"].label, ft.Text)  # tinted view tab
-    assert by_label["Trends"].label.color == ft.Colors.INDIGO_200
+    assert by_label["Trends"].label.color == ft.Colors.BLUE_400
     assert by_label["Run evaluation"].label == "Run evaluation"  # plain authoring tab
 
 

@@ -758,10 +758,10 @@ class GuiApp:
                 ft.Tab(label="Search"),
                 ft.Tab(label="Library"),
                 ft.Tab(label="Evaluation"),
-                ft.Tab(label=ft.Text("Installs", color=ft.Colors.INDIGO_200)),
-                ft.Tab(label=ft.Text("Keys", color=ft.Colors.INDIGO_200)),
-                ft.Tab(label=ft.Text("Settings", color=ft.Colors.INDIGO_200)),
-                ft.Tab(label=ft.Text("Info", color=ft.Colors.INDIGO_200)),
+                ft.Tab(label=ft.Text("Installs", color=ft.Colors.BLUE_400)),
+                ft.Tab(label=ft.Text("Keys", color=ft.Colors.BLUE_400)),
+                ft.Tab(label=ft.Text("Settings", color=ft.Colors.BLUE_400)),
+                ft.Tab(label=ft.Text("Info", color=ft.Colors.BLUE_400)),
             ],
         )
         tab_bodies = ft.TabBarView(

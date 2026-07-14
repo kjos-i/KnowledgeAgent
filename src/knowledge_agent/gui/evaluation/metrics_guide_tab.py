@@ -100,7 +100,7 @@ class MetricsGuideTab:
                 ),
             ],
             expand=True,
-            vertical_alignment=ft.CrossAxisAlignment.START,
+            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
         )
 
     def refresh(self) -> None:

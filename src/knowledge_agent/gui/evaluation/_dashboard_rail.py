@@ -1,17 +1,19 @@
 """The shared left column for the four Evaluation dashboard tabs.
 
-ONE widget — a **Dataset → Run** drill-down + Refresh + a read-only context
-panel (the selected run's recipe + short hash) — mounted identically on Run
-Summary, Run Charts, Trends, AND Metrics Guide. Even where a tab's body
-doesn't consume the selection (Metrics Guide), the column still shows so the
-context is always visible. SSOT: the run/dataset selectors + selected-run
-metadata that used to be copied into each tab live here once.
+ONE widget — the shared left column for EVERY dashboard tab (Run Summary, Run
+Charts, Compare Datasets, Trends, Metrics Guide), so the column is IDENTICAL
+everywhere. Sections top→bottom: Refresh · "Run summary & charts" (Dataset →
+Run drill-down + a read-only run-info panel) · "Compare Datasets" (the
+multi-dataset picker). Each tab's BODY consumes only the sections relevant to
+it (e.g. only the Compare tab reads the Compare picker). SSOT: the selectors +
+selected-run metadata live here once.
 
 A control can only mount in one place, so each tab holds its OWN `DashboardRail`
-instance; they share the selection through the coordinator (`selected_dataset`
-+ `selected_run_id`) and re-sync from it on `refresh()`. The host tab passes
-`on_change`, fired when the selection changes or Refresh is pressed, so it can
-re-render its own body from the shared selection.
+instance; they share state through the coordinator (`selected_dataset` +
+`selected_run_id` for the run picker; `compare_kind` + `compare_selected` for
+the Compare picker) and re-sync from it on `refresh()`. The host tab passes
+`on_change`, fired when any selection changes or Refresh is pressed, so it can
+re-render its own body from the shared state.
 
 The context panel reads the RUN's row in the ledger — the immutable snapshot of
 what that run actually used (groups, thresholds, judges, kind, `recipe_hash`) —
@@ -80,6 +82,12 @@ class DashboardRail:
         self.run_dd: ft.Dropdown | None = None
         self.context: ft.Column | None = None
         self._runs: list[dict[str, Any]] = []
+        # Compare Datasets section controls. Its state lives on the coordinator
+        # (compare_kind / compare_selected) so every tab's rail instance stays
+        # in step; only the Compare tab's body consumes it.
+        self.compare_kind_group: ft.RadioGroup | None = None
+        self.compare_dataset_dd: ft.Dropdown | None = None
+        self.compare_list: ft.Column | None = None
 
     # ---- build ------------------------------------------------------------
 
@@ -110,8 +118,11 @@ class DashboardRail:
                     self.dataset_dd,
                     self.run_dd,
                     self.context,
+                    *self._build_compare_section(),
                 ],
                 spacing=8,
+                scroll=ft.ScrollMode.AUTO,
+                expand=True,
             ),
         )
 
@@ -170,6 +181,7 @@ class DashboardRail:
         self.coordinator.selected_run_id = run_id
         self.run_dd.value = str(run_id) if run_id is not None else None
         self._render_context(self._ledger().get_run(run_id) if run_id is not None else None)
+        self._sync_compare()
 
     def _render_context(self, run: dict[str, Any] | None) -> None:
         """The read-only recipe panel for the selected run — sourced from the
@@ -186,9 +198,9 @@ class DashboardRail:
         judges = _parse(run.get("judge_models")) or []
         rhash = run.get("recipe_hash")
         lines: list[ft.Control] = [
-            ft.Text("Recipe (this run)", weight=ft.FontWeight.BOLD, size=12),
+            ft.Text("Run Information", weight=ft.FontWeight.BOLD, size=12),
             ft.Text(f"Dataset: {dataset_of(run)}", size=12),
-            ft.Text(f"Type: {run.get('dataset_kind') or 'custom'}", size=12),
+            ft.Text(f"Case Type: {run.get('dataset_kind') or 'not set'}", size=12),
             ft.Text(f"Recipe hash: {rhash[:8] if rhash else '—'}", size=12),
             ft.Text(f"Groups: {', '.join(groups) if groups else '(none)'}", size=12),
             ft.Text(f"Judges: {', '.join(judges) if judges else '(default)'}", size=12),
@@ -220,5 +232,147 @@ class DashboardRail:
 
     def _on_refresh(self, _e: ft.Event) -> None:
         self.refresh()
+        self.app.page.update()
+        self._on_change()
+
+    # ---- Compare Datasets section -----------------------------------------
+
+    def _build_compare_section(self) -> list[ft.Control]:
+        """The Compare Datasets picker — shown on every rail, but only the
+        Compare tab's body reads it. Fact/Knob selector → dataset dropdown +
+        Add → a row per added dataset with its own run dropdown + remove ✕.
+        State lives on the coordinator so all rail instances stay in step."""
+        self.compare_kind_group = ft.RadioGroup(
+            value=self.coordinator.compare_kind,
+            content=ft.Row(
+                [ft.Radio(value="fact", label="Fact"), ft.Radio(value="knob", label="Knob")],
+                spacing=4,
+            ),
+            on_change=self._on_compare_kind_change,
+        )
+        self.compare_dataset_dd = ft.Dropdown(
+            label="Dataset", options=[], width=_RAIL_WIDTH - 24, text_size=FIELD_LABEL_SIZE
+        )
+        add_btn = ft.TextButton("Add dataset", icon=ft.Icons.ADD, on_click=self._on_compare_add)
+        self.compare_list = ft.Column(controls=[], spacing=6)
+        return [
+            sub_section_header("Compare Datasets"),
+            self.compare_kind_group,
+            ft.Container(height=8),
+            self.compare_dataset_dd,
+            add_btn,
+            self.compare_list,
+        ]
+
+    def _runs_for_dataset(self, ds: str) -> list[dict[str, Any]]:
+        """Runs for a dataset (newest first — `list_runs` is newest-first)."""
+        return [r for r in self._runs if dataset_of(r) == ds]
+
+    def _compare_datasets_of_kind(self) -> list[str]:
+        """Distinct dataset names (corpus-scoped) of the picker's current kind."""
+        out: list[str] = []
+        for r in self._runs:
+            if (r.get("dataset_kind") or "fact") != self.coordinator.compare_kind:
+                continue
+            d = dataset_of(r)
+            if d not in out:
+                out.append(d)
+        return out
+
+    def _sync_compare(self) -> None:
+        """Sync the Compare picker to the coordinator state + loaded runs: prune
+        stale selections, repopulate the Add dropdown (this kind's not-yet-added
+        datasets), rebuild the per-dataset run rows."""
+        if self.compare_dataset_dd is None:
+            return
+        valid_ids = {r["run_id"] for r in self._runs}
+        for sel in self.coordinator.compare_selected:
+            if sel["run_id"] not in valid_ids:
+                runs = self._runs_for_dataset(sel["dataset"])
+                sel["run_id"] = runs[0]["run_id"] if runs else None
+        self.coordinator.compare_selected = [
+            s for s in self.coordinator.compare_selected if self._runs_for_dataset(s["dataset"])
+        ]
+        chosen = {s["dataset"] for s in self.coordinator.compare_selected}
+        available = [d for d in self._compare_datasets_of_kind() if d not in chosen]
+        self.compare_dataset_dd.options = [ft.DropdownOption(key=d, text=d) for d in available]
+        if self.compare_dataset_dd.value not in available:
+            self.compare_dataset_dd.value = available[0] if available else None
+        self._rebuild_compare_list()
+
+    def _rebuild_compare_list(self) -> None:
+        """One row per added dataset: name + remove ✕, and its run dropdown."""
+        if self.compare_list is None:
+            return
+        rows: list[ft.Control] = []
+        for sel in self.coordinator.compare_selected:
+            ds = sel["dataset"]
+            runs = self._runs_for_dataset(ds)
+            run_dd = ft.Dropdown(
+                options=[ft.DropdownOption(key=str(r["run_id"]), text=_run_label(r)) for r in runs],
+                value=str(sel["run_id"]) if sel["run_id"] is not None else None,
+                width=_RAIL_WIDTH - 40,
+                text_size=FIELD_LABEL_SIZE,
+            )
+            run_dd.on_select = lambda e, d=ds: self._on_compare_run_change(d, e)
+            remove = ft.IconButton(
+                icon=ft.Icons.CLOSE,
+                icon_size=16,
+                tooltip="Remove",
+                on_click=lambda e, d=ds: self._on_compare_remove(d),
+            )
+            rows.append(
+                ft.Column(
+                    [
+                        ft.Row(
+                            [ft.Text(ds, size=12, weight=ft.FontWeight.BOLD, expand=True), remove],
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            spacing=0,
+                        ),
+                        run_dd,
+                    ],
+                    spacing=2,
+                )
+            )
+        self.compare_list.controls = rows or [
+            ft.Text("No datasets added yet.", size=12, italic=True, color=ft.Colors.GREY_500)
+        ]
+
+    def _on_compare_kind_change(self, _e: ft.Event) -> None:
+        if self.compare_kind_group is None:
+            return
+        self.coordinator.compare_kind = self.compare_kind_group.value or "fact"
+        self.coordinator.compare_selected = []  # Fact and Knob aren't comparable
+        self._sync_compare()
+        self.app.page.update()
+        self._on_change()
+
+    def _on_compare_add(self, _e: ft.Event) -> None:
+        if self.compare_dataset_dd is None or not self.compare_dataset_dd.value:
+            return
+        ds = self.compare_dataset_dd.value
+        if any(s["dataset"] == ds for s in self.coordinator.compare_selected):
+            return
+        runs = self._runs_for_dataset(ds)
+        self.coordinator.compare_selected.append(
+            {"dataset": ds, "run_id": runs[0]["run_id"] if runs else None}
+        )
+        self._sync_compare()
+        self.app.page.update()
+        self._on_change()
+
+    def _on_compare_run_change(self, ds: str, e: ft.Event) -> None:
+        val = e.control.value
+        for sel in self.coordinator.compare_selected:
+            if sel["dataset"] == ds:
+                sel["run_id"] = int(val) if val else None
+                break
+        self._on_change()
+
+    def _on_compare_remove(self, ds: str) -> None:
+        self.coordinator.compare_selected = [
+            s for s in self.coordinator.compare_selected if s["dataset"] != ds
+        ]
+        self._sync_compare()
         self.app.page.update()
         self._on_change()
