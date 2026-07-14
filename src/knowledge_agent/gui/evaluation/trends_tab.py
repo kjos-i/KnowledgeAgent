@@ -2,8 +2,8 @@
 
 Multi-series line charts drawn on `flet.canvas` (Flet 0.85 has no built-in
 LineChart) — zero new dependencies. Reads every `eval_runs` row via
-`EvalLedger.list_runs`, scoped to ONE dataset (left-rail dataset filter,
-default = the selected run's dataset) so comparisons stay apples-to-apples.
+`EvalLedger.list_runs`, scoped to ONE recipe hash (all runs that used the
+same recipe as the selected run) so comparisons stay apples-to-apples.
 Plots the pre-aggregated `avg_*` columns straight from the ledger — no
 in-GUI aggregation, no pandas.
 
@@ -19,7 +19,7 @@ import flet as ft
 from flet import canvas as cv
 
 from knowledge_agent.gui._styles import dashboard_section_header, section_divider
-from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail, dataset_of
+from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail
 from knowledge_agent.gui.views._frame import view_header
 
 if TYPE_CHECKING:
@@ -170,7 +170,7 @@ def _line_chart(
 
 
 class TrendsTab:
-    """Cross-run trend charts sub-tab (scoped per dataset)."""
+    """Cross-run trend charts sub-tab (scoped per recipe hash)."""
 
     def __init__(self, app: GuiApp, coordinator: EvaluationView) -> None:
         self.app = app
@@ -211,28 +211,32 @@ class TrendsTab:
 
     def refresh(self) -> None:
         """Reload the rail (runs + selection) then render the trend for the
-        shared selected dataset."""
+        selected run's recipe."""
         if self.rail is not None:
             self.rail.refresh()
         self._render_body()
 
     def _render_body(self) -> None:
-        """Render the cross-run trend charts for the coordinator's selected
-        dataset — the rail owns the selectors; this owns the charts. Uses the
-        SAME `dataset_of` identity the rail selects by, so they stay in step."""
+        """Render the cross-run trend charts for the selected run's RECIPE —
+        the rail owns the selectors; this owns the charts. Trends group by
+        `recipe_hash` (every run that used the same recipe as the selected
+        run), so a trend compares apples-to-apples over time."""
         if self.body is None:
             return
-        ds = self.coordinator.selected_dataset
-        if ds is None:
-            self.body.controls = [ft.Text("No evaluation runs recorded yet.", italic=True)]
+        runs = self._ledger().list_runs()
+        selected = next((r for r in runs if r["run_id"] == self.coordinator.selected_run_id), None)
+        rhash = selected.get("recipe_hash") if selected else None
+        if rhash is None:
+            self.body.controls = [
+                ft.Text("Select a run — Trends group by its recipe hash.", italic=True)
+            ]
             self.app.page.update()
             return
-        runs = self._ledger().list_runs()
-        chrono = [r for r in reversed(runs) if dataset_of(r) == ds]
+        chrono = [r for r in reversed(runs) if r.get("recipe_hash") == rhash]
         if len(chrono) < 2:
             self.body.controls = [
                 ft.Text(
-                    f"Need at least 2 runs of '{ds}' for a trend ({len(chrono)} recorded).",
+                    f"Need at least 2 runs with this recipe for a trend ({len(chrono)} recorded).",
                     italic=True,
                 )
             ]

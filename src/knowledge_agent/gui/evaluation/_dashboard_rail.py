@@ -27,7 +27,12 @@ from typing import TYPE_CHECKING, Any
 
 import flet as ft
 
-from knowledge_agent.gui._styles import FIELD_LABEL_SIZE, PANEL_BG_RAISED, PANEL_RADIUS
+from knowledge_agent.gui._styles import (
+    FIELD_LABEL_SIZE,
+    PANEL_BG_RAISED,
+    PANEL_RADIUS,
+    sub_section_header,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -100,10 +105,10 @@ class DashboardRail:
             border_radius=PANEL_RADIUS,
             content=ft.Column(
                 controls=[
+                    refresh_button,
+                    sub_section_header("Run summary & charts"),
                     self.dataset_dd,
                     self.run_dd,
-                    refresh_button,
-                    ft.Divider(),
                     self.context,
                 ],
                 spacing=8,
