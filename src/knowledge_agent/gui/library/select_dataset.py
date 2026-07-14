@@ -70,7 +70,6 @@ from knowledge_agent.gui.library.config_diff import config_diff
 from knowledge_agent.gui.library.documents_view import DocumentsView
 from knowledge_agent.gui.library.session_state import load_session
 from knowledge_agent.kg.corpus_config import CorpusConfig, load_corpus_config
-from knowledge_agent.search.client import get_search_client
 
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
@@ -630,6 +629,10 @@ class SelectDatasetTab:
         chunks_str = "—"
         breakdown = "—"
         n_docs = 0
+        # Local import: keeps lancedb out of GUI startup (warmed by the graph
+        # pre-warm). See app.py `_prewarm_graph`.
+        from knowledge_agent.search.client import get_search_client
+
         try:
             rows = await get_search_client().list_indexed_docs()
         except Exception as exc:

@@ -53,7 +53,6 @@ import flet as ft
 
 from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, PANEL_BG, labeled_field
 from knowledge_agent.gui.views._frame import empty_state
-from knowledge_agent.search.client import get_search_client
 
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
@@ -205,6 +204,10 @@ class DocumentsView:
         self.doc_list.controls = [ft.Text("Loading …", italic=True, color=ft.Colors.GREY_500)]
         self.coverage_text.value = ""
         self.app.page.update()
+        # Local import: keeps lancedb out of GUI startup (warmed in the
+        # background by the graph pre-warm). See app.py `_prewarm_graph`.
+        from knowledge_agent.search.client import get_search_client
+
         try:
             rows = await get_search_client().list_indexed_docs()
         except Exception as exc:
@@ -509,6 +512,8 @@ class DocumentsView:
     ) -> None:
         if not doc_id or not patch:
             return
+        from knowledge_agent.search.client import get_search_client
+
         try:
             await get_search_client().update_doc_metadata(doc_id, patch)
         except Exception as exc:

@@ -356,7 +356,7 @@ async def test_on_send_direct_cypher_skips_router_and_invokes_graph(fake_page: M
         patch.object(app, "_load_corpus_config", return_value=MagicMock()),
         patch.object(app, "_diag"),
         patch("knowledge_agent.gui.app.get_chat_router") as get_router,
-        patch("knowledge_agent.gui.app.graph", fake_graph),
+        patch("knowledge_agent.graph.graph", fake_graph),
     ):
         await app.on_send(MagicMock())
 
@@ -391,7 +391,7 @@ async def test_on_send_conversational_runs_router_and_gates_retrieval(fake_page:
         patch.object(app, "_load_corpus_config", return_value=MagicMock()),
         patch.object(app, "_diag"),
         patch("knowledge_agent.gui.app.get_chat_router", return_value=router) as get_router,
-        patch("knowledge_agent.gui.app.graph", fake_graph),
+        patch("knowledge_agent.graph.graph", fake_graph),
     ):
         await app.on_send(MagicMock())
 

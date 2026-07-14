@@ -20,7 +20,9 @@ right panel stays focused on the per-query search loop.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -41,7 +43,6 @@ from knowledge_agent.artifacts import (
 )
 from knowledge_agent.config import disable_env_file, get_settings, reset_after_key_change
 from knowledge_agent.evaluation.models import RetrievalSettings
-from knowledge_agent.graph import graph
 from knowledge_agent.gui._widgets.retrieval_form import (
     query_mode_to_knobs,
     store_forced_by_mode,
@@ -510,11 +511,14 @@ class GuiApp:
                 f"query={invoke_state['query']!r}) ..."
             )
             try:
+                # Lazy-loaded off the UI thread (kept out of startup). Usually a
+                # cache hit — build() pre-warms it in the background.
+                graph = await asyncio.to_thread(_import_graph)
                 final_state = await graph.ainvoke(invoke_state)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.warning("graph.ainvoke raised: %r", exc)
+                logger.warning("graph load/invoke raised: %r", exc)
                 self.chat_panel.append_system(f"retrieval failed: {exc}")
                 return
 
@@ -822,6 +826,29 @@ class GuiApp:
         # to the frontend correctly. Flet 0.85's public path is
         # `page._services.register_service(picker)`.
         self.page._services.register_service(self.file_picker)  # type: ignore[attr-defined]
+
+        # Pre-warm the agent graph off the UI thread so the first query doesn't
+        # pay the ~3s backend import (langgraph + lancedb + neo4j). Startup no
+        # longer imports it; on_send loads it lazily — usually a cache hit by the
+        # time the user sends.
+        threading.Thread(target=_prewarm_graph, daemon=True).start()
+
+
+def _import_graph() -> Any:
+    """Import + return the agent graph. Heavy (~3s: langgraph + lancedb + neo4j),
+    so it is kept out of GUI startup and loaded lazily on the first query. Reads
+    the attribute fresh from its source module so tests can patch
+    `knowledge_agent.graph.graph`."""
+    from knowledge_agent.graph import graph
+
+    return graph
+
+
+def _prewarm_graph() -> None:
+    """Best-effort background import (see build()) so the first query is a cache
+    hit. Errors are swallowed here — the real load in on_send surfaces them."""
+    with contextlib.suppress(Exception):  # best-effort; on_send re-raises for real
+        _import_graph()
 
 
 def _page_factory(page: ft.Page) -> None:
