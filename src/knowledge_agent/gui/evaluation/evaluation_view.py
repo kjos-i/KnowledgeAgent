@@ -81,7 +81,7 @@ class EvaluationView:
         sub_bar = ft.TabBar(
             tabs=[
                 ft.Tab(
-                    label=ft.Text(label, color=ft.Colors.INDIGO_300)
+                    label=ft.Text(label, color=ft.Colors.INDIGO_200)
                     if label in _VIEW_TABS
                     else label
                 )

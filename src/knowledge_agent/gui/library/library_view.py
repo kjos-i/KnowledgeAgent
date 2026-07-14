@@ -1,14 +1,14 @@
 """Library top-tab coordinator — 3 sub-tabs, fixed layouts.
 
-Sub-tabs:
+Sub-tabs (left → right, corpus lifecycle order):
 
+  Create New — new-corpus form + helper info (internal 2-col)
+  Ingest     — per-corpus config editor + Ingest / bulk_ops actions
+               (internal 2-col)
   Metadata   — corpus info card + docs table (internal 2-col). (Corpus
                SELECTION lives in the global top-bar dropdown, so this tab
                is the selected corpus's metadata + documents, not a picker —
                hence "Metadata", renamed from "Select".)
-  Ingest     — per-corpus config editor + Ingest / bulk_ops actions
-               (internal 2-col)
-  Create New — new-corpus form + helper info (internal 2-col)
 
 Installs was promoted to its own top-level tab — it's a global,
 machine-level install surface (providers / ontologies / weights), not
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
 
 
-SUB_TAB_LABELS = ("Metadata", "Ingest", "Create New")
+SUB_TAB_LABELS = ("Create New", "Ingest", "Metadata")
 
 
 class LibraryView:
@@ -68,13 +68,13 @@ class LibraryView:
         sub_bodies = ft.TabBarView(
             controls=[
                 ft.Container(
-                    content=self.select_tab.build(),
+                    content=self.create_tab.build(),
                     padding=8,
                     expand=True,
                 ),
                 self._ingest_body,
                 ft.Container(
-                    content=self.create_tab.build(),
+                    content=self.select_tab.build(),
                     padding=8,
                     expand=True,
                 ),

@@ -5,20 +5,25 @@ description + rows + Divider between sections). No ExpansionTiles —
 the user needs to see every install target at a glance to decide
 what's next.
 
-Three sections, plus a global-config header:
+Global-config header, then five install sections (top → bottom):
 
-  0. **Global config** — `ontology_downloads_dir` path (read-only for
-     now; editable landing in Slice 4). Downloaded ontology source
-     files live here; shared across every corpus.
-  1. **Ontologies** — 18 rows. Status = disk state (whether the
-     source file has been downloaded to `ontology_downloads_dir`),
-     with size in bytes when present. Neo4j node writes are NOT
-     managed here — they happen automatically during ingest when a
-     corpus with the ontology enabled runs. One button axis:
-       - `Download`/`Delete download` — wraps
-         `download_ontology_download_execute` /
-         `delete_ontology_download_execute` (disk only).
-  2. **Entity extractors** — 4 rows. Status = compound (pip package +
+  0. **Global download locations** — the editable `ontology_downloads_dir`
+     path (+ Browse), plus read-only echoes of the effective location, the
+     HF Hub cache (extractor weights), and the Ollama models dir. Shared
+     across every corpus.
+  1. **LLM providers** — 4 rows. Install / Uninstall each LLM adapter's pip
+     package (wraps `install_llm_provider_execute` /
+     `uninstall_llm_provider_execute`). The active-LLM choice lives in
+     Search → LLM.
+  2. **Embedding providers** — 4 rows. Install / Uninstall each embedder's
+     pip adapter (wraps `install_embedder_provider_execute` /
+     `uninstall_embedder_provider_execute`). The active-embedder choice
+     lives in the Embedding settings.
+  3. **Parsers** — 2 rows. Pip install/uninstall wired to
+     `install_parser_extra_execute` / `uninstall_parser_extra_execute`.
+     Whisper weights auto-download inside Docling on first ingest use
+     — disclosed in the row text rather than fought upstream.
+  4. **Entity extractors** — 4 rows. Status = compound (pip package +
      pinned weights on disk). Two independent axes:
        - `Install`/`Uninstall` — pip package (wraps
          `install_extractor_execute` / `uninstall_extractor_execute`).
@@ -26,10 +31,14 @@ Three sections, plus a global-config header:
          (wraps `download_extractor_weights_execute` /
          `delete_extractor_weights_execute`).
      Disk size for downloaded weights shown in the status chip.
-  3. **Parsers** — 2 rows. Pip install/uninstall wired to
-     `install_parser_extra_execute` / `uninstall_parser_extra_execute`.
-     Whisper weights auto-download inside Docling on first ingest use
-     — disclosed in the row text rather than fought upstream.
+  5. **Ontologies** — 18 rows. Status = disk state (whether the
+     source file has been downloaded to `ontology_downloads_dir`),
+     with size in bytes when present. Neo4j node writes are NOT
+     managed here — they happen automatically during ingest when a
+     corpus with the ontology enabled runs. One button axis:
+       - `Download`/`Delete download` — wraps
+         `download_ontology_download_execute` /
+         `delete_ontology_download_execute` (disk only).
 
 Button label flip: like the LLM tab, `Install` becomes `Uninstall`
 (and `Download` becomes `Delete download`) based on live state so the
@@ -459,56 +468,51 @@ class InstallsTab:
             section_divider(),
         ]
 
-        # ---- Ontologies (18) ---------------------------------------
+        # ---- LLM providers (4) -------------------------------------
         controls.append(
             section_header(
                 self.app,
-                "Ontologies (18)",
-                "Download the source file(s) to disk here. Neo4j term nodes "
-                "are written during ingest — not by these buttons — so "
-                "downloading is safe (no schema change).",
+                "LLM providers (4)",
+                "Install / Uninstall each LLM adapter's pip package (confirm "
+                "dialog; a restart is needed after). Choose the ACTIVE LLM + "
+                "per-node models in Search → LLM, not here (that's also where "
+                "the Ollama daemon status lives). The active LLM can't be "
+                "uninstalled — switch it there first.",
             )
         )
-        for name in _ONTOLOGY_ORDER:
-            ont_prov = ONTOLOGY_REGISTRY.get(name, {}).get("provenance")
+        for name in _LLM_PROVIDER_ORDER:
             controls.append(
                 self._simple_row(
-                    _ONTOLOGY_DISPLAY[name],
-                    self.ontology_status_texts[name],
+                    LLM_PROVIDER_REGISTRY[name]["display_name"],
+                    self.llm_provider_status_texts[name],
                     (
-                        self.ontology_download_buttons[name],
-                        self.ontology_delete_buttons[name],
+                        self.llm_provider_install_buttons[name],
+                        self.llm_provider_uninstall_buttons[name],
                     ),
-                    source_url=ont_prov.source_url if ont_prov else None,
                 )
             )
         controls.append(section_divider())
 
-        # ---- Entity extractors (4) ---------------------------------
+        # ---- Embedding providers (4) -------------------------------
         controls.append(
             section_header(
                 self.app,
-                "Entity extractors (4)",
-                "L6 adapters. LLM is bundled. GLiNER / GLiNER-BioMed / HunFlair2 "
-                "need BOTH the pip extras (adapter library) AND their pinned "
-                "model weights downloaded. No auto-download at first inference — "
-                "extraction raises if weights are missing.",
+                "Embedding providers (4)",
+                "Install / Uninstall each embedder's pip adapter (confirm "
+                "dialog; a restart is needed after). Choose the ACTIVE embedder "
+                "+ model in the Embedding settings, not here. The active "
+                "embedder can't be uninstalled — switch it there first.",
             )
         )
-        for name in _EXTRACTOR_ORDER:
-            display = EXTRACTOR_REGISTRY[name]["display_name"]
-            ext_prov = EXTRACTOR_REGISTRY[name].get("provenance")
+        for name in _EMBEDDER_PROVIDER_ORDER:
             controls.append(
                 self._simple_row(
-                    display,
-                    self.extractor_status_texts[name],
+                    EMBEDDER_PROVIDER_REGISTRY[name]["display_name"],
+                    self.embedder_provider_status_texts[name],
                     (
-                        self.extractor_install_buttons[name],
-                        self.extractor_uninstall_buttons[name],
-                        self.extractor_download_buttons[name],
-                        self.extractor_delete_buttons[name],
+                        self.embedder_provider_install_buttons[name],
+                        self.embedder_provider_uninstall_buttons[name],
                     ),
-                    source_url=ext_prov.source_url if ext_prov else None,
                 )
             )
         controls.append(section_divider())
@@ -545,51 +549,56 @@ class InstallsTab:
             )
         controls.append(section_divider())
 
-        # ---- Embedding providers (4) -------------------------------
+        # ---- Entity extractors (4) ---------------------------------
         controls.append(
             section_header(
                 self.app,
-                "Embedding providers (4)",
-                "Install / Uninstall each embedder's pip adapter (confirm "
-                "dialog; a restart is needed after). Choose the ACTIVE embedder "
-                "+ model in the Embedding settings, not here. The active "
-                "embedder can't be uninstalled — switch it there first.",
+                "Entity extractors (4)",
+                "L6 adapters. LLM is bundled. GLiNER / GLiNER-BioMed / HunFlair2 "
+                "need BOTH the pip extras (adapter library) AND their pinned "
+                "model weights downloaded. No auto-download at first inference — "
+                "extraction raises if weights are missing.",
             )
         )
-        for name in _EMBEDDER_PROVIDER_ORDER:
+        for name in _EXTRACTOR_ORDER:
+            display = EXTRACTOR_REGISTRY[name]["display_name"]
+            ext_prov = EXTRACTOR_REGISTRY[name].get("provenance")
             controls.append(
                 self._simple_row(
-                    EMBEDDER_PROVIDER_REGISTRY[name]["display_name"],
-                    self.embedder_provider_status_texts[name],
+                    display,
+                    self.extractor_status_texts[name],
                     (
-                        self.embedder_provider_install_buttons[name],
-                        self.embedder_provider_uninstall_buttons[name],
+                        self.extractor_install_buttons[name],
+                        self.extractor_uninstall_buttons[name],
+                        self.extractor_download_buttons[name],
+                        self.extractor_delete_buttons[name],
                     ),
+                    source_url=ext_prov.source_url if ext_prov else None,
                 )
             )
         controls.append(section_divider())
 
-        # ---- LLM providers (4) -------------------------------------
+        # ---- Ontologies (18) ---------------------------------------
         controls.append(
             section_header(
                 self.app,
-                "LLM providers (4)",
-                "Install / Uninstall each LLM adapter's pip package (confirm "
-                "dialog; a restart is needed after). Choose the ACTIVE LLM + "
-                "per-node models in Search → LLM, not here (that's also where "
-                "the Ollama daemon status lives). The active LLM can't be "
-                "uninstalled — switch it there first.",
+                "Ontologies (18)",
+                "Download the source file(s) to disk here. Neo4j term nodes "
+                "are written during ingest — not by these buttons — so "
+                "downloading is safe (no schema change).",
             )
         )
-        for name in _LLM_PROVIDER_ORDER:
+        for name in _ONTOLOGY_ORDER:
+            ont_prov = ONTOLOGY_REGISTRY.get(name, {}).get("provenance")
             controls.append(
                 self._simple_row(
-                    LLM_PROVIDER_REGISTRY[name]["display_name"],
-                    self.llm_provider_status_texts[name],
+                    _ONTOLOGY_DISPLAY[name],
+                    self.ontology_status_texts[name],
                     (
-                        self.llm_provider_install_buttons[name],
-                        self.llm_provider_uninstall_buttons[name],
+                        self.ontology_download_buttons[name],
+                        self.ontology_delete_buttons[name],
                     ),
+                    source_url=ont_prov.source_url if ont_prov else None,
                 )
             )
         controls.append(self.status)

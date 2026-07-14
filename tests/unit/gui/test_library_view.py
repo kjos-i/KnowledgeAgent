@@ -20,7 +20,7 @@ def test_ingest_complete_wired_to_select_refresh(fake_app):
 def test_installs_is_no_longer_a_library_subtab():
     """Installs was promoted to a top-level tab, so Library is now 3 sub-tabs."""
     assert "Installs" not in SUB_TAB_LABELS
-    assert SUB_TAB_LABELS == ("Metadata", "Ingest", "Create New")
+    assert SUB_TAB_LABELS == ("Create New", "Ingest", "Metadata")
 
 
 def test_library_view_no_longer_owns_installs(fake_app):

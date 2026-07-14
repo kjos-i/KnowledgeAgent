@@ -1,15 +1,15 @@
-"""Settings — sub-tabs for the top-level Settings tab.
+"""Settings — the app-level Settings tab and the Keys tab.
 
-`SettingsView` is the coordinator that composes three sub-tabs:
-
-  - Keys
-  - Embedding
-  - App
+`Settings` (app-level config) and `Keys` (API credentials) are each their
+own top-level tab, mounted directly by `app.py`. They were split out of a
+former single `SettingsView` "Keys / App" sub-tab shell (2026-07-14).
 
 Retrieval and LLM moved to the Search tab's sub-tabs (per-query knobs);
-`app.py` mounts `SettingsView(app).build()` as a top-level tab.
+Embedding moved to the per-corpus Ingest config editor (the embedder is
+per-corpus now).
 """
 
-from knowledge_agent.gui.settings.settings_view import SettingsView
+from knowledge_agent.gui.settings.app_tab import AppTab
+from knowledge_agent.gui.settings.keys_tab import KeysTab
 
-__all__ = ["SettingsView"]
+__all__ = ["AppTab", "KeysTab"]

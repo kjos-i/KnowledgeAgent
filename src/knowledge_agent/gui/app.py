@@ -5,16 +5,17 @@ Owns session state (`messages`, `last_answer`, `last_query`,
 (Send → chat-router → graph, Stop, Clear, Save chat, Save Result,
 Open Result). Page layout is top-level `ft.Tabs`:
 
-    [ Search ] [ Library ] [ Evaluation ] [ Installs ] [ Settings ] [ Info ]
+    [ Search ] [ Library ] [ Evaluation ] [ Installs ] [ Keys ] [ Settings ] [ Info ]
 
 Search composes `ChatPanel` (left, always mounted) + `RightPanel`
 (right), where the right column is a View / Retrieval / LLM sub-tab
 strip — only that column swaps; the chat stays put.
 
-Installs, Settings, and Info are their own top-level tabs (global
-machine-level install surface / global config / reference). They were
-promoted out of Search's right panel so they're one click away and the
-right panel stays focused on the per-query search loop.
+Installs, Settings, Keys, and Info are their own top-level tabs (global
+machine-level install surface / app-level config / API keys / reference).
+They were promoted out of Search's right panel so they're one click away
+and the right panel stays focused on the per-query search loop. Settings +
+Keys were split from a former single "Settings" sub-tab shell (2026-07-14).
 """
 
 from __future__ import annotations
@@ -75,7 +76,7 @@ from knowledge_agent.gui.right_panel import (
     MODE_LATEST,
     RightPanel,
 )
-from knowledge_agent.gui.settings import SettingsView
+from knowledge_agent.gui.settings import AppTab, KeysTab
 from knowledge_agent.gui.tabs.evaluation_tab import EvaluationTab
 from knowledge_agent.gui.tabs.info_tab import InfoTab
 from knowledge_agent.gui.tabs.library_tab import LibraryTab
@@ -128,7 +129,9 @@ class GuiApp:
     library_tab: LibraryTab = field(init=False)
     evaluation_tab: EvaluationTab = field(init=False)
     installs_tab: InstallsTab = field(init=False)
-    settings_view: SettingsView = field(init=False)
+    # Settings top tab shows app-level config (AppTab); Keys is its own tab.
+    app_tab: AppTab = field(init=False)
+    keys_tab: KeysTab = field(init=False)
     info_tab: InfoTab = field(init=False)
     file_picker: ft.FilePicker = field(init=False)
     _send_task: asyncio.Task | None = field(default=None, init=False)
@@ -738,21 +741,27 @@ class GuiApp:
         self.library_tab = LibraryTab(self)
         self.evaluation_tab = EvaluationTab(self)
         self.installs_tab = InstallsTab(self)
-        self.settings_view = SettingsView(self)
+        self.app_tab = AppTab(self)
+        self.keys_tab = KeysTab(self)
         self.info_tab = InfoTab(self)
 
         # Native Flet `Tabs` (Flutter-style: TabBar + TabBarView aligned
         # by index through a shared `length`). The M3 chrome enforces a
         # ~46 px floor on Tab.height — accepted as the right cost for
         # native accessibility / keyboard nav / indicator animation.
+        # The utility cluster (Installs / Keys / Settings / Info — global config
+        # + reference) gets an INDIGO_200 label tint so it reads as distinct from
+        # the work surfaces (Search / Library / Evaluation), the same device the
+        # eval dashboard uses to set its view sub-tabs apart.
         tab_bar = ft.TabBar(
             tabs=[
                 ft.Tab(label="Search"),
                 ft.Tab(label="Library"),
                 ft.Tab(label="Evaluation"),
-                ft.Tab(label="Installs"),
-                ft.Tab(label="Settings"),
-                ft.Tab(label="Info"),
+                ft.Tab(label=ft.Text("Installs", color=ft.Colors.INDIGO_200)),
+                ft.Tab(label=ft.Text("Keys", color=ft.Colors.INDIGO_200)),
+                ft.Tab(label=ft.Text("Settings", color=ft.Colors.INDIGO_200)),
+                ft.Tab(label=ft.Text("Info", color=ft.Colors.INDIGO_200)),
             ],
         )
         tab_bodies = ft.TabBarView(
@@ -778,7 +787,12 @@ class GuiApp:
                     expand=True,
                 ),
                 ft.Container(
-                    content=self.settings_view.build(),
+                    content=self.keys_tab.build(),
+                    padding=8,
+                    expand=True,
+                ),
+                ft.Container(
+                    content=self.app_tab.build(),
                     padding=8,
                     expand=True,
                 ),
@@ -809,7 +823,7 @@ class GuiApp:
             spacing=8,
         )
         tabs = ft.Tabs(
-            length=6,
+            length=7,
             selected_index=0,
             content=ft.Column(
                 controls=[top_row, tab_bodies],
