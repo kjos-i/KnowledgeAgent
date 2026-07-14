@@ -32,9 +32,18 @@ from typing import Literal
 
 import flet as ft
 
-from knowledge_agent.gui._styles import FRAME_BORDER_COLOR
-
 Orientation = Literal["horizontal", "vertical"]
+
+# Pill-handle grip: a thin rounded capsule that brightens on hover, inset by
+# `_PILL_END_GAP` px at each end so it stops around the neighbouring box's
+# rounded corners (radius 8) instead of overrunning them. Tune `_PILL_END_GAP`:
+# bigger = shorter pill (more corner clearance), smaller = longer (toward the
+# corners). `_TRACK_COLOR` is a faint full-length seam that keeps the width grabbable.
+_PILL_THICKNESS = 4
+_PILL_END_GAP = 6
+_PILL_COLOR = ft.Colors.GREY_500
+_PILL_HOVER = ft.Colors.GREY_300
+_TRACK_COLOR = ft.Colors.with_opacity(0.08, ft.Colors.WHITE)
 
 
 class ResizableSplit:
@@ -96,13 +105,16 @@ class ResizableSplit:
     # ----- divider builders + drag handlers --------------------------------
 
     def _build_horizontal_divider(self) -> ft.Control:
+        pill = _pill(vertical=True)
         bar = ft.Container(
             width=self._divider_thickness,
-            bgcolor=FRAME_BORDER_COLOR,
-            alignment=ft.Alignment(0, 0),
-            content=_grip(vertical=True),
+            bgcolor=_TRACK_COLOR,
+            padding=ft.Padding(0, _PILL_END_GAP, 0, _PILL_END_GAP),
+            content=ft.Column(
+                [pill], expand=True, horizontal_alignment=ft.CrossAxisAlignment.CENTER
+            ),
         )
-        bar.on_hover = lambda e: self._hover_divider(bar, e)
+        bar.on_hover = lambda e: self._hover_pill(pill, e)
         return ft.GestureDetector(
             content=bar,
             drag_interval=10,
@@ -111,13 +123,14 @@ class ResizableSplit:
         )
 
     def _build_vertical_divider(self) -> ft.Control:
+        pill = _pill(vertical=False)
         bar = ft.Container(
             height=self._divider_thickness,
-            bgcolor=FRAME_BORDER_COLOR,
-            alignment=ft.Alignment(0, 0),
-            content=_grip(vertical=False),
+            bgcolor=_TRACK_COLOR,
+            padding=ft.Padding(_PILL_END_GAP, 0, _PILL_END_GAP, 0),
+            content=ft.Row([pill], expand=True, vertical_alignment=ft.CrossAxisAlignment.CENTER),
         )
-        bar.on_hover = lambda e: self._hover_divider(bar, e)
+        bar.on_hover = lambda e: self._hover_pill(pill, e)
         return ft.GestureDetector(
             content=bar,
             drag_interval=10,
@@ -125,10 +138,10 @@ class ResizableSplit:
             mouse_cursor=ft.MouseCursor.RESIZE_UP_DOWN,
         )
 
-    def _hover_divider(self, bar: ft.Container, e: ft.Event) -> None:
-        """Brighten the divider while the pointer is over it, so it reads as an
-        interactive handle rather than a static border."""
-        bar.bgcolor = ft.Colors.BLUE_GREY_600 if e.data == "true" else FRAME_BORDER_COLOR
+    def _hover_pill(self, pill: ft.Container, e: ft.Event) -> None:
+        """Brighten the pill grip while the pointer is over the divider, so it
+        reads as an interactive handle."""
+        pill.bgcolor = _PILL_HOVER if e.data == "true" else _PILL_COLOR
         self.page.update()
 
     def _on_horizontal_drag(self, e: ft.DragUpdateEvent) -> None:
@@ -158,19 +171,17 @@ class ResizableSplit:
         self.page.update()
 
 
-def _grip(*, vertical: bool) -> ft.Control:
-    """A small 3-dot drag grip centered on the divider. `vertical=True` stacks
-    the dots (the vertical bar between left/right panes); False rows them (a
-    horizontal bar between top/bottom panes)."""
-    dots = [
-        ft.Container(width=3, height=3, bgcolor=ft.Colors.GREY_500, border_radius=2)
-        for _ in range(3)
-    ]
-    if vertical:
-        return ft.Column(
-            dots, spacing=3, tight=True, horizontal_alignment=ft.CrossAxisAlignment.CENTER
-        )
-    return ft.Row(dots, spacing=3, tight=True, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+def _pill(*, vertical: bool) -> ft.Container:
+    """A thin rounded capsule 'grip' that expands to fill the divider between the
+    builders' fixed end gaps. `vertical=True` is a tall pill (left/right panes);
+    False is a wide pill (top/bottom panes)."""
+    return ft.Container(
+        width=_PILL_THICKNESS if vertical else None,
+        height=_PILL_THICKNESS if not vertical else None,
+        bgcolor=_PILL_COLOR,
+        border_radius=_PILL_THICKNESS,
+        expand=True,
+    )
 
 
 def _clamp(value: int, lo: int, hi: int) -> int:
