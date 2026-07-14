@@ -90,17 +90,17 @@ class MetricsGuideTab:
         self.rail = DashboardRail(self.app, self.coordinator, on_change=self._reload_guide)
         rail_ctl = self.rail.build()
         self.body = ft.Container(content=self._guide_body(), expand=True)
-        return ft.Column(
+        return ft.Row(
             [
-                view_header("Metrics Guide"),
-                ft.Row(
-                    [rail_ctl, self.body],
+                rail_ctl,
+                ft.Column(
+                    [view_header("Metrics Guide"), self.body],
                     expand=True,
-                    vertical_alignment=ft.CrossAxisAlignment.START,
+                    spacing=8,
                 ),
             ],
             expand=True,
-            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.START,
         )
 
     def refresh(self) -> None:

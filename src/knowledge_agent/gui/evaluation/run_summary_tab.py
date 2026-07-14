@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 import flet as ft
 from flet import canvas as cv
 
-from knowledge_agent.gui._styles import dashboard_section_header, section_divider
+from knowledge_agent.gui._styles import dashboard_section_header, section_divider, thin_rule
 from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail
 from knowledge_agent.gui.views._frame import view_header
 
@@ -133,17 +133,17 @@ class RunSummaryTab:
             expand=True,
             spacing=14,
         )
-        return ft.Column(
-            controls=[
-                view_header("Run Summary"),
-                ft.Row(
-                    [rail_ctl, self.body],
+        return ft.Row(
+            [
+                rail_ctl,
+                ft.Column(
+                    [view_header("Run Summary"), self.body],
                     expand=True,
-                    vertical_alignment=ft.CrossAxisAlignment.START,
+                    spacing=8,
                 ),
             ],
             expand=True,
-            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.START,
         )
 
     # ---- data / refresh ---------------------------------------------------
@@ -195,9 +195,17 @@ class RunSummaryTab:
     def _build_body(
         self, run: dict[str, Any], prev_run: dict[str, Any] | None, cases: list[dict[str, Any]]
     ) -> list[ft.Control]:
+        # Metric sections (Average Performance + each group row) separated by a
+        # thin sub-section rule; the heavier section_divider() below marks the
+        # break from the metrics down to the case table / detail sections.
+        metric_sections = [self._overview_row(run, prev_run), *self._kpi_sections(run, prev_run)]
+        metrics: list[ft.Control] = []
+        for i, section in enumerate(metric_sections):
+            if i:
+                metrics.append(thin_rule())
+            metrics.append(section)
         return [
-            self._overview_row(run, prev_run),
-            *self._kpi_sections(run, prev_run),
+            *metrics,
             section_divider(),
             self._case_table(cases),
             section_divider(),

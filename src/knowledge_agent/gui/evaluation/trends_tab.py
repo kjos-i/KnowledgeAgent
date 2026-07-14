@@ -189,17 +189,17 @@ class TrendsTab:
             expand=True,
             spacing=16,
         )
-        return ft.Column(
+        return ft.Row(
             [
-                view_header("Historical Trends"),
-                ft.Row(
-                    [rail_ctl, self.body],
+                rail_ctl,
+                ft.Column(
+                    [view_header("Historical Trends"), self.body],
                     expand=True,
-                    vertical_alignment=ft.CrossAxisAlignment.START,
+                    spacing=8,
                 ),
             ],
             expand=True,
-            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.START,
         )
 
     # ---- data / refresh ---------------------------------------------------

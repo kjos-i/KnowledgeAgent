@@ -48,6 +48,7 @@ actually ship a frozen distribution.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import logging
 import shutil
 import sys
@@ -261,29 +262,20 @@ def _anthropic_is_installed() -> bool:
     provider like any other — installed only if the user picks it in
     the first-launch wizard.
     """
-    try:
-        import langchain_anthropic  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    # `find_spec` checks the package is present WITHOUT importing it — importing
+    # the SDK here just to test installed-ness cost ~1.7s per provider (~7s for
+    # the four), all on the GUI-startup path (LLM tab). This is a hot check.
+    return importlib.util.find_spec("langchain_anthropic") is not None
 
 
 def _openai_is_installed() -> bool:
     """True iff `langchain-openai` is importable."""
-    try:
-        import langchain_openai  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    return importlib.util.find_spec("langchain_openai") is not None
 
 
 def _google_is_installed() -> bool:
     """True iff `langchain-google-genai` is importable."""
-    try:
-        import langchain_google_genai  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    return importlib.util.find_spec("langchain_google_genai") is not None
 
 
 def _ollama_adapter_is_installed() -> bool:
@@ -294,11 +286,7 @@ def _ollama_adapter_is_installed() -> bool:
     running, and vice versa. The install dialog surfaces both
     statuses.
     """
-    try:
-        import langchain_ollama  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    return importlib.util.find_spec("langchain_ollama") is not None
 
 
 async def _ollama_daemon_is_reachable() -> bool:
