@@ -141,6 +141,26 @@ def test_save_run_persists_filter_columns(tmp_path):
         assert cases[1]["origin"] == "llm"
 
 
+def test_save_run_persists_source_conversation(tmp_path):
+    """A chat-sourced case's conversation is snapshotted into eval_cases as JSON
+    (display only — so Run Summary → Answer Detail can show it) and round-trips
+    via get_run_cases. A case with no conversation stores [] (not NULL / error)."""
+    led = EvalLedger(tmp_path / "l.db")
+    report = _report()
+    report["results"][0]["origin"] = "chat"
+    report["results"][0]["source_conversation"] = [
+        {"role": "user", "content": "why did the valve fail?"},
+        {"role": "assistant", "content": "Let me search the corpus."},
+    ]
+    # results[1] carries no source_conversation key → stored as [].
+    led.save_run(report)
+    cases = led.get_run_cases(led.list_runs()[0]["run_id"])
+    conv = json.loads(cases[0]["source_conversation"])
+    assert [t["role"] for t in conv] == ["user", "assistant"]
+    assert conv[0]["content"] == "why did the valve fail?"
+    assert json.loads(cases[1]["source_conversation"]) == []  # absent → empty list
+
+
 def test_save_run_filter_columns_default_when_absent(tmp_path):
     """A bare / legacy report (no filter keys) stores NULL / empty-JSON, not
     an error — save_run reads the new keys defensively."""

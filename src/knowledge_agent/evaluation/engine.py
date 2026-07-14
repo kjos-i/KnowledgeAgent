@@ -173,6 +173,9 @@ async def evaluate_case(
         "category": case.category,
         "question": case.question,
         "origin": case.origin,
+        # Chat provenance (origin="chat"): as plain dicts so the ledger can JSON
+        # it. Display only — never scored.
+        "source_conversation": [t.model_dump() for t in case.source_conversation],
         "expected_output": "\n".join(case.expected_answer_points),
         "answer": run.answer,
         "status": _status(case, values, run, cfg),

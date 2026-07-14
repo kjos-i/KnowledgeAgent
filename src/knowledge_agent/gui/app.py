@@ -40,6 +40,7 @@ from knowledge_agent.artifacts import (
     save_chat,
 )
 from knowledge_agent.config import disable_env_file, get_settings, reset_after_key_change
+from knowledge_agent.evaluation.models import RetrievalSettings
 from knowledge_agent.graph import graph
 from knowledge_agent.gui._widgets.retrieval_form import (
     query_mode_to_knobs,
@@ -108,6 +109,13 @@ class GuiApp:
     messages: list[BaseMessage] = field(default_factory=list)
     last_answer: AgentAnswer | None = None
     last_query: str | None = None
+    # For the eval "capture from search / chat" flow: the chat router's distilled
+    # query for the last conversational send (None in direct modes), and a
+    # snapshot of the retrieval knobs that send ran under. They let a captured
+    # case pin what the search ACTUALLY used (not form defaults) and, for chat,
+    # carry the router's distilled question. See gui/evaluation/dataset_tab.
+    last_search_query: str | None = None
+    last_retrieval: RetrievalSettings | None = None
     gui_config: GuiConfig = field(default_factory=GuiConfig)
     busy: bool = False
     loaded_file: _LoadedFile | None = None
@@ -366,6 +374,29 @@ class GuiApp:
 
     # ----- Send + chat-router + graph --------------------------------------
 
+    def _retrieval_snapshot(self) -> RetrievalSettings:
+        """The retrieval knobs the current send runs under, as a per-case
+        `RetrievalSettings`.
+
+        The graph reads these from the active GuiConfig (bridged to Settings),
+        so the snapshot mirrors GuiConfig — every knob pinned, none left to
+        drift — so the eval "capture from search / chat" flow reproduces the
+        exact search instead of falling back to form defaults."""
+        cfg = self.gui_config
+        knobs = query_mode_to_knobs(cfg.input_mode)
+        return RetrievalSettings(
+            retrieval_mode=store_forced_by_mode(cfg.input_mode) or cfg.retrieval_mode,
+            lancedb_search_mode=cfg.lancedb_search_mode,
+            top_k=cfg.top_k,
+            skip_query_builder=bool(knobs.get("skip_query_builder", False)),
+            direct_retrieval=cfg.direct_retrieve,
+            num_candidates=cfg.num_candidates,
+            rrf_rank_constant=cfg.rrf_rank_constant,
+            mmr_lambda=cfg.mmr_lambda,
+            use_mmr=cfg.use_mmr,
+            kg_max_rows=cfg.kg_max_rows,
+        )
+
     def _invoke_state_for_input_mode(
         self,
         input_mode: str,
@@ -494,6 +525,10 @@ class GuiApp:
 
             self.last_answer = answer
             self.last_query = text
+            # For the eval capture flow: the router's distilled query (chat only)
+            # + the exact retrieval knobs this send ran under.
+            self.last_search_query = search_query
+            self.last_retrieval = self._retrieval_snapshot()
             n_chunk = len(answer.chunk_sources)
             n_kg = len(answer.kg_sources)
             if self.gui_config.direct_retrieve:

@@ -7,6 +7,7 @@ no real eval_output is touched.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import flet as ft
@@ -170,6 +171,72 @@ def test_labeled_box_has_title_and_border():
     inner = box.controls[1]
     assert inner.border is not None
     assert inner.content.value == "x"
+
+
+def _text_values(control) -> list[str]:
+    """Every `ft.Text`-like value in a control subtree (walks title/content/
+    controls) — for asserting a labelled block is present without pinning the
+    exact tree shape."""
+    out: list[str] = []
+    val = getattr(control, "value", None)
+    if isinstance(val, str):
+        out.append(val)
+    for attr in ("title", "content"):
+        child = getattr(control, attr, None)
+        if child is not None:
+            out.extend(_text_values(child))
+    for child in getattr(control, "controls", None) or []:
+        out.extend(_text_values(child))
+    return out
+
+
+def test_conversation_block_renders_turns():
+    raw = json.dumps(
+        [
+            {"role": "user", "content": "why did the valve fail?"},
+            {"role": "assistant", "content": "let me search the corpus"},
+        ]
+    )
+    block = RunSummaryTab._conversation_block(raw)
+    assert block is not None
+    md = block.controls[1].content  # labeled_box → [label Text, Container(content=Markdown)]
+    assert isinstance(md, ft.Markdown)
+    assert "**user:** why did the valve fail?" in md.value
+    assert "**assistant:** let me search the corpus" in md.value
+
+
+def test_conversation_block_none_when_empty_or_invalid():
+    assert RunSummaryTab._conversation_block(None) is None
+    assert RunSummaryTab._conversation_block("[]") is None  # no turns
+    assert RunSummaryTab._conversation_block("not json") is None  # unparseable
+    # a turn with only whitespace content contributes no line → None
+    assert (
+        RunSummaryTab._conversation_block(json.dumps([{"role": "user", "content": "  "}])) is None
+    )
+
+
+def test_answer_detail_shows_conversation_only_for_chat_case(fake_app: MagicMock):
+    tab = RunSummaryTab(fake_app, coordinator=MagicMock())
+    tab.build()
+    cases = [
+        {
+            "case_id": "c1",
+            "status": "PASS",
+            "question": "q?",
+            "answer": "a",
+            "source_conversation": json.dumps([{"role": "user", "content": "hi there"}]),
+        },
+        {
+            "case_id": "c2",
+            "status": "PASS",
+            "question": "q2?",
+            "answer": "a2",
+            "source_conversation": "[]",
+        },
+    ]
+    tiles = tab._answer_detail(cases).controls[1:]  # after the "Answer Detail" header
+    assert any("Conversation (chat)" in s for s in _text_values(tiles[0]))  # chat case
+    assert not any("Conversation (chat)" in s for s in _text_values(tiles[1]))  # non-chat
 
 
 def test_metric_cell_color_is_direction_aware(fake_app: MagicMock):

@@ -19,8 +19,11 @@ from langchain_core.runnables import RunnableLambda
 from knowledge_agent.evaluation.generator import (
     EvalGenerationConnectionError,
     GeneratedCase,
+    GeneratedGold,
     Passage,
     generate_cases,
+    generate_gold_for_question,
+    passages_from_sources,
     sample_passages,
 )
 from knowledge_agent.evaluation.models import validate_case
@@ -170,3 +173,76 @@ async def test_sample_passages_caps_at_n():
 async def test_sample_passages_zero_returns_empty():
     # n <= 0 short-circuits before any client call.
     assert await sample_passages(0) == []
+
+
+# ---- generate_gold_for_question (the "Query from chat" + LLM path) ----
+
+
+async def test_generate_gold_for_question_writes_gold_for_a_given_question():
+    """The question is FIXED (the chat's distilled query); the LLM writes only
+    the gold (answer points + keywords) for it, grounded in the passages."""
+    llm = _fake_llm(GeneratedGold(answer_points=["the valve corroded"], keywords=["valve"]))
+    gold = await generate_gold_for_question(
+        "why did the valve fail?", [Passage("d1", "the valve corroded over time")], llm=llm
+    )
+    assert isinstance(gold, GeneratedGold)
+    assert gold.answer_points == ["the valve corroded"]
+    assert gold.keywords == ["valve"]
+
+
+async def test_generate_gold_for_question_aborts_on_connection_error():
+    def _conn_boom(_messages):
+        raise ConnectionError("Connection error.")
+
+    with pytest.raises(EvalGenerationConnectionError, match="network"):
+        await generate_gold_for_question("q?", [Passage("d1", "x")], llm=_fake_llm(_conn_boom))
+
+
+# ---- passages_from_sources (re-fetch cited chunk text for grounding) ----
+
+
+def _chunk_client(chunks_by_doc):
+    client = MagicMock()
+    client.get_chunks_by_doc_id = AsyncMock(
+        side_effect=lambda doc_id: chunks_by_doc.get(doc_id, [])
+    )
+    return client
+
+
+async def test_passages_from_sources_refetches_cited_chunk_full_text():
+    """chunk_sources carry only a short quote; the helper re-fetches the cited
+    chunk's FULL text by chunk_id (not every chunk of the doc)."""
+    client = _chunk_client(
+        {
+            "d1": [
+                {"chunk_id": "d1-0", "text": "full text zero"},
+                {"chunk_id": "d1-1", "text": "full text one"},
+            ]
+        }
+    )
+    sources = [SimpleNamespace(doc_id="d1", chunk_id="d1-1", quote="short quote")]
+    passages = await passages_from_sources(sources, client=client)
+    assert [(p.doc_id, p.text) for p in passages] == [("d1", "full text one")]
+
+
+async def test_passages_from_sources_falls_back_to_quote_when_refetch_empty():
+    client = _chunk_client({})  # nothing re-fetched (chunk gone / no table)
+    sources = [SimpleNamespace(doc_id="d1", chunk_id="d1-1", quote="the anchoring quote")]
+    passages = await passages_from_sources(sources, client=client)
+    assert [(p.doc_id, p.text) for p in passages] == [("d1", "the anchoring quote")]
+
+
+async def test_passages_from_sources_dedups_preserving_citation_order():
+    client = _chunk_client(
+        {
+            "d1": [{"chunk_id": "d1-0", "text": "zero"}],
+            "d2": [{"chunk_id": "d2-0", "text": "two"}],
+        }
+    )
+    sources = [
+        SimpleNamespace(doc_id="d1", chunk_id="d1-0", quote=None),
+        SimpleNamespace(doc_id="d2", chunk_id="d2-0", quote=None),
+        SimpleNamespace(doc_id="d1", chunk_id="d1-0", quote=None),  # dup → dropped
+    ]
+    passages = await passages_from_sources(sources, client=client)
+    assert [(p.doc_id, p.text) for p in passages] == [("d1", "zero"), ("d2", "two")]

@@ -58,6 +58,33 @@ def test_evaluate_case_records_origin(monkeypatch):
     assert result["origin"] == "search"
 
 
+def test_evaluate_case_records_source_conversation(monkeypatch):
+    """A chat case's conversation flows into the result dict as plain dicts, so
+    the ledger can JSON-snapshot it for Answer Detail. Display only, never scored."""
+    case = EvalCase(
+        id="c1",
+        question="why did the valve fail?",
+        origin="chat",
+        source_conversation=[
+            {"role": "user", "content": "valve trouble?"},
+            {"role": "assistant", "content": "let me check the corpus"},
+        ],
+    )
+    _patch_run(monkeypatch, _run(answer="x"))
+    result = asyncio.run(E.evaluate_case(case, None, EvalConfig()))
+    assert result["source_conversation"] == [
+        {"role": "user", "content": "valve trouble?"},
+        {"role": "assistant", "content": "let me check the corpus"},
+    ]
+
+
+def test_evaluate_case_source_conversation_empty_for_non_chat(monkeypatch):
+    case = EvalCase(id="c1", question="q?", origin="manual")
+    _patch_run(monkeypatch, _run(answer="x"))
+    result = asyncio.run(E.evaluate_case(case, None, EvalConfig()))
+    assert result["source_conversation"] == []
+
+
 def test_evaluate_case_review_on_disallowed_keyword(monkeypatch):
     case = EvalCase(id="c3", question="q?", disallowed_keywords=["lorem"])
     _patch_run(monkeypatch, _run(answer="contains lorem ipsum"))

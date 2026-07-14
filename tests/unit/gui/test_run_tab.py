@@ -63,8 +63,9 @@ def _saved(tmp_path, name, **kw):
 
 
 def test_load_state_editable_when_not_frozen(fake_app: MagicMock, tmp_path):
-    """A non-frozen dataset loads with the recipe EDITABLE; the freeze checkbox
-    is enabled when the dataset is final."""
+    """A non-frozen dataset loads with the recipe EDITABLE — except Case Type,
+    which is always read-only in Run. Max cases + Tracing are editable, the
+    freeze checkbox is enabled, and Unfreeze is present but greyed out."""
     from knowledge_agent.evaluation.models import EvalRecipe
 
     p = _saved(tmp_path, "final.json", status="final", recipe=EvalRecipe(dataset_kind="knob"))
@@ -73,9 +74,12 @@ def test_load_state_editable_when_not_frozen(fake_app: MagicMock, tmp_path):
     tab._load_dataset_state(p)
     assert tab.recipe_form.profile_group.value == "knob"  # recipe loaded
     assert tab.recipe_form._wrapper.disabled is False  # editable (not frozen)
+    assert tab.recipe_form.profile_group.disabled is True  # Case Type read-only in Run
+    assert tab.max_cases_field.disabled is False  # editable (not frozen)
+    assert tab.trace_check.disabled is False
     assert tab.freeze_check.disabled is False  # final + not frozen → can freeze
     assert tab.freeze_check.value is False
-    assert tab.unfreeze_button.visible is False
+    assert tab.unfreeze_button.disabled is True  # present but greyed until frozen
 
 
 def test_freeze_checkbox_disabled_for_draft(fake_app: MagicMock, tmp_path):
@@ -89,8 +93,9 @@ def test_freeze_checkbox_disabled_for_draft(fake_app: MagicMock, tmp_path):
 
 
 def test_frozen_dataset_loads_readonly(fake_app: MagicMock, tmp_path):
-    """A frozen (final) dataset loads read-only: recipe disabled, freeze
-    checkbox checked + disabled, Unfreeze + badge shown."""
+    """A frozen (final) dataset locks the whole tab: recipe + Max cases +
+    Tracing all disabled, freeze checkbox checked + disabled, Unfreeze enabled,
+    badge shown."""
     from knowledge_agent.evaluation.models import EvalRecipe
 
     p = _saved(
@@ -100,8 +105,11 @@ def test_frozen_dataset_loads_readonly(fake_app: MagicMock, tmp_path):
     tab.dataset_field.value = str(p)
     tab._load_dataset_state(p)
     assert tab.recipe_form._wrapper.disabled is True  # read-only
+    assert tab.max_cases_field.disabled is True  # whole tab locks
+    assert tab.trace_check.disabled is True
+    assert tab._project_row.disabled is True
     assert tab.freeze_check.value is True and tab.freeze_check.disabled is True
-    assert tab.unfreeze_button.visible is True
+    assert tab.unfreeze_button.disabled is False  # active when frozen
     assert tab.frozen_indicator.visible is True
 
 
@@ -118,7 +126,8 @@ def test_unfreeze_persists_frozen_false(fake_app: MagicMock, tmp_path):
     tab._do_unfreeze()
     assert load_dataset(p).frozen is False  # persisted
     assert tab.recipe_form._wrapper.disabled is False  # editable again
-    assert tab.unfreeze_button.visible is False
+    assert tab.max_cases_field.disabled is False  # whole tab editable again
+    assert tab.unfreeze_button.disabled is True  # greyed again (not frozen)
 
 
 def test_freeze_on_run_persists(fake_app: MagicMock, tmp_path):

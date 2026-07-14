@@ -147,7 +147,13 @@ def test_save_invalid_case_surfaces_error(fake_app, tmp_path):
 
 
 def test_capture_from_search_prefills_new_case(fake_app):
+    from knowledge_agent.evaluation.models import RetrievalSettings
+
     fake_app.last_query = "why did the valve fail?"
+    fake_app.last_search_query = None  # not a chat send
+    # The exact settings the search ran under — capture must PIN these, not the
+    # form defaults (the pre-existing reproducibility bug this fixes).
+    fake_app.last_retrieval = RetrievalSettings(retrieval_mode="neo4j_only", top_k=9)
     fake_app.last_answer = SimpleNamespace(
         chunk_sources=[
             SimpleNamespace(doc_id="doc_a"),
@@ -161,14 +167,141 @@ def test_capture_from_search_prefills_new_case(fake_app):
     assert tab.f["question"].value == "why did the valve fail?"
     assert tab.f["origin"].value == "search"
     assert tab.f["expected_sources"].value == "doc_a\ndoc_b"  # deduped, order-preserved
+    # Retrieval pinned from the snapshot, not the blank-form defaults.
+    assert tab.f["retrieval_mode"].value == "neo4j_only"
+    assert tab.f["top_k"].value == "9"
 
 
 def test_capture_from_search_no_result(fake_app):
     fake_app.last_answer = None
     fake_app.last_query = None
+    fake_app.last_search_query = None
     tab = _tab(fake_app)
     tab._on_capture_from_search(MagicMock())
     assert "No search result" in tab.status.value
+
+
+# ---- "Query from chat" (the router-test / chat-sourced-cases flow) ----
+
+
+def _chat_app(fake_app):
+    """Prime fake_app as if a Conversational search just ran: a distilled query,
+    a retrieval snapshot, retrieved sources, and a small conversation (with a
+    trailing status note that must be dropped)."""
+    from knowledge_agent.evaluation.models import RetrievalSettings
+
+    fake_app.last_query = "raw typed text"  # what the user typed
+    fake_app.last_search_query = "distilled: why did the valve fail?"  # router output
+    fake_app.last_retrieval = RetrievalSettings(retrieval_mode="lancedb_only", top_k=7)
+    fake_app.last_answer = SimpleNamespace(
+        chunk_sources=[SimpleNamespace(doc_id="doc_a", chunk_id="a0", quote="q")]
+    )
+    fake_app.messages = [
+        SimpleNamespace(type="human", content="valve trouble?"),
+        SimpleNamespace(type="ai", content="Let me search the corpus."),
+        SimpleNamespace(type="ai", content="(Answered from 1 chunk + 0 KG sources.)"),
+    ]
+    fake_app.gui_config.chat_router_model = "claude-haiku-4-5"
+    return fake_app
+
+
+def test_query_from_chat_toggle_fills_question_and_provenance(fake_app):
+    _chat_app(fake_app)
+    tab = _tab(fake_app)
+    tab.from_chat_check.value = True
+    tab._on_from_chat_toggled(MagicMock())
+    assert tab.f["question"].value == "distilled: why did the valve fail?"  # distilled, not raw
+    assert tab.f["origin"].value == "chat"
+    assert tab.f["retrieval_mode"].value == "lancedb_only"  # pinned from the snapshot
+    assert tab.f["top_k"].value == "7"
+    # Conversation captured (status note dropped) + router model recorded.
+    assert [t.role for t in tab._chat_conversation] == ["user", "assistant"]
+    assert tab._chat_conversation[0].content == "valve trouble?"
+    assert tab._chat_router_model == "claude-haiku-4-5"
+    assert tab.gen_multi_button.disabled is True  # a chat = one conversation = one case
+
+
+def test_query_from_chat_toggle_reverts_without_a_chat(fake_app):
+    fake_app.last_search_query = None  # no conversational search yet
+    tab = _tab(fake_app)
+    tab.from_chat_check.value = True
+    tab._on_from_chat_toggled(MagicMock())
+    assert tab.from_chat_check.value is False  # auto-reverted
+    assert "Conversational search" in tab.status.value
+
+
+def test_read_form_attaches_conversation_only_for_chat_origin(fake_app):
+    _chat_app(fake_app)
+    tab = _tab(fake_app)
+    tab.from_chat_check.value = True
+    tab._on_from_chat_toggled(MagicMock())
+    tab.f["id"].value = "cc"
+    case = tab._read_form()
+    assert case.origin == "chat"
+    assert [t.role for t in case.source_conversation] == ["user", "assistant"]
+    assert case.chat_router_model == "claude-haiku-4-5"
+    # Flip origin off chat → provenance is NOT written onto the built case.
+    tab.f["origin"].value = "manual"
+    case2 = tab._read_form()
+    assert case2.source_conversation == []
+    assert case2.chat_router_model is None
+
+
+def test_capture_from_search_with_chat_uses_distilled_query(fake_app):
+    _chat_app(fake_app)
+    tab = _tab(fake_app)
+    tab.from_chat_check.value = True
+    tab._on_capture_from_search(MagicMock())
+    assert tab.f["question"].value == "distilled: why did the valve fail?"  # distilled, not raw
+    assert tab.f["origin"].value == "chat"
+    assert tab.f["expected_sources"].value == "doc_a"
+    assert [t.role for t in tab._chat_conversation] == ["user", "assistant"]
+
+
+async def test_generate_one_from_chat_writes_gold_for_chat_question(fake_app):
+    from knowledge_agent.evaluation.generator import GeneratedGold
+
+    _chat_app(fake_app)
+    tab = _tab(fake_app)
+    tab.gen_model_dropdown.value = "some-model"
+    tab.from_chat_check.value = True
+    with (
+        patch(
+            "knowledge_agent.evaluation.generator.generate_gold_for_question",
+            new=AsyncMock(
+                return_value=GeneratedGold(answer_points=["it corroded"], keywords=["valve"])
+            ),
+        ),
+        patch(
+            "knowledge_agent.evaluation.generator.passages_from_sources",
+            new=AsyncMock(return_value=[]),
+        ),
+    ):
+        await tab._on_generate_one(MagicMock())
+    # Question stays the chat's distilled query; the LLM only filled the gold.
+    assert tab.f["question"].value == "distilled: why did the valve fail?"
+    assert tab.f["origin"].value == "chat"
+    assert tab.f["expected_answer_points"].value == "it corroded"
+    assert tab.f["required_keywords"].value == "valve"
+    assert tab.f["expected_sources"].value == "doc_a"  # the chat's own retrieved sources
+
+
+def test_fill_form_restores_chat_provenance_and_checkbox(fake_app):
+    from knowledge_agent.evaluation.models import ConversationTurn
+
+    tab = _tab(fake_app)
+    case = EvalCase(
+        id="cc",
+        question="q?",
+        origin="chat",
+        source_conversation=[ConversationTurn(role="user", content="hi")],
+        chat_router_model="m1",
+    )
+    tab._fill_form(case)
+    assert tab._chat_conversation[0].content == "hi"
+    assert tab._chat_router_model == "m1"
+    assert tab.from_chat_check.value is True  # reflects origin
+    assert tab.gen_multi_button.disabled is True
 
 
 async def test_generate_multiple_appends_candidates_and_saves(fake_app, tmp_path):

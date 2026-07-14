@@ -181,6 +181,25 @@ def test_set_enabled_freezes_and_unfreezes(fake_app: MagicMock):
     assert rf._wrapper.disabled is False
 
 
+def test_case_type_readonly_stays_locked_when_unfrozen(fake_app: MagicMock):
+    """The Run tab mounts the form with case_type_readonly=True: the Case Type
+    radio is disabled independent of the wrapper freeze — it stays locked even
+    after set_enabled(True) unfreezes the rest. It still shows the loaded value
+    and writes it back unchanged. A default mount leaves the radio editable."""
+    fake_app.gui_config.llm_provider = "anthropic"
+    ro = RecipeForm(fake_app, case_type_readonly=True)
+    ro.build()
+    assert ro.profile_group.disabled is True  # Case Type read-only...
+    assert ro._wrapper.disabled is False  # ...the rest editable
+    ro.set_enabled(True)  # unfreeze the rest
+    assert ro.profile_group.disabled is True  # STILL locked (owned by Create test cases)
+    ro.load(EvalRecipe(dataset_kind="knob"))
+    assert ro.profile_group.value == "knob"  # displays the loaded value
+    assert ro.to_recipe().dataset_kind == "knob"  # writes it back unchanged
+
+    assert not _form(fake_app).profile_group.disabled  # default mount → editable
+
+
 def test_any_group_selected(fake_app: MagicMock):
     rf = _form(fake_app)
     assert rf.any_group_selected() is True

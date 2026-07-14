@@ -13,6 +13,7 @@ in-process, so it refreshes exactly when a run finishes.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 import flet as ft
@@ -825,6 +826,33 @@ class RunSummaryTab:
             status = c.get("status") or ""
             icon = "✅" if status == "PASS" else "⚠️"
             score = self._fmt(c.get("avg_judge_score"), fmts.get("avg_judge_score", ".2f"))
+            detail_controls: list[ft.Control] = [
+                self._detail_block("Question", c.get("question")),
+                self._detail_block("Expected answer", c.get("expected_output"), markdown=True),
+                self._detail_block("Agent answer", c.get("answer"), markdown=True),
+                self._labeled_box(
+                    "Quick Stats",
+                    ft.Row(
+                        [
+                            self._stat("Score", score),
+                            self._stat(
+                                "Latency",
+                                self._fmt(
+                                    c.get("latency_seconds"),
+                                    fmts.get("latency_seconds", ".2f"),
+                                ),
+                            ),
+                            self._stat("Hit@k", self._hit_display(c.get("hit_at_k"))),
+                        ],
+                        spacing=28,
+                    ),
+                ),
+            ]
+            # For origin="chat" cases only: show the conversation that produced
+            # the question (provenance, snapshotted into the ledger at run time).
+            conversation = self._conversation_block(c.get("source_conversation"))
+            if conversation is not None:
+                detail_controls.append(conversation)
             tiles.append(
                 ft.ExpansionTile(
                     title=ft.Text(
@@ -833,42 +861,37 @@ class RunSummaryTab:
                     controls=[
                         ft.Container(
                             padding=ft.Padding.symmetric(horizontal=12, vertical=4),
-                            content=ft.Column(
-                                spacing=8,
-                                controls=[
-                                    self._detail_block("Question", c.get("question")),
-                                    self._detail_block(
-                                        "Expected answer", c.get("expected_output"), markdown=True
-                                    ),
-                                    self._detail_block(
-                                        "Agent answer", c.get("answer"), markdown=True
-                                    ),
-                                    self._labeled_box(
-                                        "Quick Stats",
-                                        ft.Row(
-                                            [
-                                                self._stat("Score", score),
-                                                self._stat(
-                                                    "Latency",
-                                                    self._fmt(
-                                                        c.get("latency_seconds"),
-                                                        fmts.get("latency_seconds", ".2f"),
-                                                    ),
-                                                ),
-                                                self._stat(
-                                                    "Hit@k", self._hit_display(c.get("hit_at_k"))
-                                                ),
-                                            ],
-                                            spacing=28,
-                                        ),
-                                    ),
-                                ],
-                            ),
+                            content=ft.Column(spacing=8, controls=detail_controls),
                         )
                     ],
                 )
             )
         return ft.Column([self._section_header("Answer Detail"), *tiles], spacing=4)
+
+    @staticmethod
+    def _conversation_block(raw: Any) -> ft.Control | None:
+        """The chat that produced an origin='chat' case, or None when the case has
+        no stored conversation. `raw` is the ledger's JSON string (a list of
+        {role, content} turns); rendered as markdown so the roles read clearly."""
+        if not raw:
+            return None
+        try:
+            turns = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(turns, list):
+            return None
+        lines: list[str] = []
+        for t in turns:
+            if not isinstance(t, dict):
+                continue
+            role = (t.get("role") or "?").strip()
+            content = (t.get("content") or "").strip()
+            if content:
+                lines.append(f"**{role}:** {content}")
+        if not lines:
+            return None
+        return RunSummaryTab._detail_block("Conversation (chat)", "\n\n".join(lines), markdown=True)
 
     @staticmethod
     def _labeled_box(label: str, body: ft.Control) -> ft.Control:

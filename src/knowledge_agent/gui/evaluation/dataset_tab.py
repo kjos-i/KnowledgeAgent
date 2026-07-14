@@ -65,7 +65,14 @@ from knowledge_agent.gui.settings.llm_tab import LLM_AVAILABLE_MODELS
 from knowledge_agent.llm_factory import supports_temperature
 
 if TYPE_CHECKING:
-    from knowledge_agent.evaluation.models import EvalCase, EvalDataset
+    from langchain_core.messages import BaseMessage
+
+    from knowledge_agent.evaluation.models import (
+        ConversationTurn,
+        EvalCase,
+        EvalDataset,
+        RetrievalSettings,
+    )
     from knowledge_agent.gui.app import GuiApp
     from knowledge_agent.gui.evaluation.evaluation_view import EvaluationView
 
@@ -75,6 +82,46 @@ _PREVIEW_DEBOUNCE_S = 0.3  # settle time before the live preview re-renders
 # the same x (aligned left edges) instead of hugging its variable-width caption.
 # Wide enough for the longest label ("expected_answer_points").
 _FORM_LABEL_WIDTH = 190
+
+# The exact prefixes of the bracketed status notes app.on_send appends to the
+# chat history ("(Answered from N chunk…)", "(Retrieved N raw chunk…)"). They're
+# UI chatter, not real turns, so a captured chat conversation drops them.
+_STATUS_NOTE_PREFIXES = ("(Answered from", "(Retrieved ")
+
+
+def _conversation_from_messages(messages: list[BaseMessage]) -> list[ConversationTurn]:
+    """The user/assistant turns of a chat as `ConversationTurn`s — provenance for
+    an `origin="chat"` case. Skips empty messages and the bracketed status notes
+    (see `_STATUS_NOTE_PREFIXES`) that on_send adds to the history."""
+    from knowledge_agent.evaluation.models import ConversationTurn
+
+    role_by_type = {"human": "user", "ai": "assistant", "system": "system"}
+    turns: list[ConversationTurn] = []
+    for m in messages or []:
+        content = getattr(m, "content", "")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        if content.startswith(_STATUS_NOTE_PREFIXES):
+            continue
+        turns.append(
+            ConversationTurn(
+                role=role_by_type.get(getattr(m, "type", ""), "assistant"), content=content
+            )
+        )
+    return turns
+
+
+def _dedup_doc_ids(chunk_sources: list) -> list[str]:
+    """The distinct doc_ids from an answer's chunk_sources, order-preserved —
+    the gold `expected_sources` for a captured search/chat case."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for cs in chunk_sources or []:
+        doc_id = getattr(cs, "doc_id", None)
+        if doc_id and doc_id not in seen:
+            seen.add(doc_id)
+            out.append(doc_id)
+    return out
 
 
 class DatasetTab:
@@ -113,11 +160,20 @@ class DatasetTab:
         self.update_button: ft.Button | None = None
         # form field widgets (created in build)
         self.f: dict[str, ft.Control] = {}
+        # "Query from chat" toggle: when on, a seeded case takes its QUESTION from
+        # the last Search chat's distilled query (origin=chat) and the seeds
+        # (From-search / LLM) only fill the rest.
+        self.from_chat_check: ft.Checkbox | None = None
         # state
         self._dataset: EvalDataset | None = None
         self._cases: list[EvalCase] = []
         self._selected: int | None = None
         self._path: Path | None = None
+        # Chat provenance carried onto an origin="chat" case (not editable form
+        # fields): the captured conversation turns + the router model that
+        # distilled the query. Set on capture-from-chat, restored on load.
+        self._chat_conversation: list[ConversationTurn] = []
+        self._chat_router_model: str | None = None
         # Pending debounced preview refresh (cancelled + replaced on each edit).
         self._preview_task: asyncio.Task | None = None
 
@@ -171,6 +227,21 @@ class DatasetTab:
             "LLM (multiple)",
             icon=ft.Icons.AUTO_AWESOME_MOTION,
             on_click=self._on_generate_multiple,
+        )
+        # Orthogonal to the three seeds: when on, a seeded case's QUESTION is the
+        # last chat's distilled query (origin=chat) and the seeds only fill the
+        # rest. A chat is one conversation → one case, so it disables the bulk
+        # generator.
+        self.from_chat_check = ft.Checkbox(
+            label="Query from chat",
+            value=False,
+            tooltip=(
+                "Take the question from the last Search chat's distilled query "
+                "(origin=chat). From-search then only adds sources and LLM only "
+                "writes the gold — neither overwrites the question. Run a "
+                "Conversational search first."
+            ),
+            on_change=self._on_from_chat_toggled,
         )
         self.gen_count = ft.TextField(value="5", width=80, dense=True)
         self.gen_one_spinner = ft.ProgressRing(visible=False, width=16, height=16, stroke_width=2)
@@ -357,12 +428,9 @@ class DatasetTab:
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         spacing=8,
                     ),
-                    section_divider(),
-                    # ============ Section: Recipe ============
-                    # The dataset's canonical run settings — the Run tab loads
-                    # these read-only. Saved with the dataset on any commit;
-                    # read-only here too when the dataset is frozen.
-                    section_title("Recipe"),
+                    # The dataset's canonical run settings (case type + metric
+                    # groups + judge panel + gate thresholds). Saved with the
+                    # dataset on any commit; the Run tab shows them read-only.
                     self.recipe_form.build(),
                     section_divider(),
                     # ============ Section: Progress ============
@@ -374,6 +442,7 @@ class DatasetTab:
                     # Three sub-sections: seed a single case, bulk-generate many,
                     # and the shared LLM model/temperature both generators use.
                     sub_section_title("Generate new case by"),
+                    self.from_chat_check,
                     ft.Row(
                         [
                             new_case_button,
@@ -795,6 +864,40 @@ class DatasetTab:
 
     # ---- form <-> case ----------------------------------------------------
 
+    def _set_retrieval_fields(
+        self, rs: RetrievalSettings, *, user_cypher: str | None = None
+    ) -> None:
+        """Populate the form's retrieval knobs from a `RetrievalSettings` — shared
+        by load-a-case (`_fill_form`) and pin-what-the-search-ran-under
+        (`_pin_retrieval`) so the two can't drift. Nullable knobs fall back to the
+        standard default display (never blank). The input-mode radio is derived
+        from skip_query_builder + user_cypher (inverse of query_mode_to_knobs)."""
+        f = self.f
+        f["retrieval_mode"].value = rs.retrieval_mode
+        f["lancedb_search_mode"].value = rs.lancedb_search_mode
+        f["top_k"].value = str(rs.top_k)
+        f["num_candidates"].value = _num_or_default(rs.num_candidates, "num_candidates")
+        f["rrf_rank_constant"].value = _num_or_default(rs.rrf_rank_constant, "rrf_rank_constant")
+        mmr_val = (
+            rs.mmr_lambda if rs.mmr_lambda is not None else float(DEFAULT_VALUES["mmr_lambda"])
+        )
+        f["mmr_lambda"].value = mmr_val
+        self._mmr_value_text.value = f"{mmr_val:.2f}"
+        f["use_mmr"].value = rs.use_mmr
+        f["kg_max_rows"].value = _num_or_default(rs.kg_max_rows, "kg_max_rows")
+        f["input_mode"].value = knobs_to_query_mode(
+            skip_query_builder=rs.skip_query_builder, user_cypher=user_cypher
+        )
+        f["direct_retrieval"].value = rs.direct_retrieval
+        self._sync_retrieval_gray_out()
+
+    def _pin_retrieval(self, rs: RetrievalSettings | None) -> None:
+        """Pin the form's retrieval knobs to a real search's settings (the app's
+        `last_retrieval` snapshot) instead of the blank-form defaults, so a
+        captured case reproduces the search it came from. No-op when None."""
+        if rs is not None:
+            self._set_retrieval_fields(rs)
+
     def _fill_form(self, case: EvalCase) -> None:
         f = self.f
         f["id"].value = case.id
@@ -802,29 +905,7 @@ class DatasetTab:
         f["origin"].value = case.origin
         f["category"].value = case.category
         f["notes"].value = case.notes
-        f["retrieval_mode"].value = case.retrieval.retrieval_mode
-        f["lancedb_search_mode"].value = case.retrieval.lancedb_search_mode
-        f["top_k"].value = str(case.retrieval.top_k)
-        f["num_candidates"].value = _num_or_default(case.retrieval.num_candidates, "num_candidates")
-        f["rrf_rank_constant"].value = _num_or_default(
-            case.retrieval.rrf_rank_constant, "rrf_rank_constant"
-        )
-        mmr_val = (
-            case.retrieval.mmr_lambda
-            if case.retrieval.mmr_lambda is not None
-            else float(DEFAULT_VALUES["mmr_lambda"])
-        )
-        f["mmr_lambda"].value = mmr_val
-        self._mmr_value_text.value = f"{mmr_val:.2f}"
-        f["use_mmr"].value = case.retrieval.use_mmr
-        f["kg_max_rows"].value = _num_or_default(case.retrieval.kg_max_rows, "kg_max_rows")
-        # Derive the input-mode radio from the case's knobs (shared mapping,
-        # inverse of query_mode_to_knobs).
-        f["input_mode"].value = knobs_to_query_mode(
-            skip_query_builder=case.retrieval.skip_query_builder,
-            user_cypher=case.user_cypher,
-        )
-        f["direct_retrieval"].value = case.retrieval.direct_retrieval
+        self._set_retrieval_fields(case.retrieval, user_cypher=case.user_cypher)
         f["expected_sources"].value = _text(case.expected_sources)
         f["expected_chunks"].value = _text(case.expected_chunks)
         f["required_keywords"].value = _text(case.required_keywords)
@@ -833,7 +914,14 @@ class DatasetTab:
         f["expected_entities"].value = _text(case.expected_entities)
         f["expected_mode"].value = case.expected_mode or _NONE
         f["user_cypher"].value = case.user_cypher or ""
-        self._sync_retrieval_gray_out()
+        # Restore chat provenance so editing an origin="chat" case keeps it, and
+        # reflect it in the checkbox (+ the bulk-generator lock it drives).
+        self._chat_conversation = list(case.source_conversation)
+        self._chat_router_model = case.chat_router_model
+        if self.from_chat_check is not None:
+            self.from_chat_check.value = case.origin == "chat"
+            if self.gen_multi_button is not None:
+                self.gen_multi_button.disabled = self.from_chat_check.value
 
     def _clear_form(self) -> None:
         f = self.f
@@ -861,6 +949,10 @@ class DatasetTab:
         f["input_mode"].value = "refined"
         f["direct_retrieval"].value = False
         f["expected_mode"].value = _NONE
+        # Drop any chat provenance — a fresh/blank case is not chat-sourced until
+        # capture-from-chat sets it again. (origin resets to "manual" above.)
+        self._chat_conversation = []
+        self._chat_router_model = None
         self._sync_retrieval_gray_out()
 
     def _read_form(self, *, lenient: bool = False) -> EvalCase:
@@ -902,10 +994,11 @@ class DatasetTab:
         input_mode = f["input_mode"].value or "refined"
         knobs = query_mode_to_knobs(input_mode, cypher_text=f["user_cypher"].value)
         retrieval_mode = store_forced_by_mode(input_mode) or f["retrieval_mode"].value
+        origin = f["origin"].value or "manual"
         return EvalCase(
             id=case_id,
             question=question,
-            origin=f["origin"].value or "manual",
+            origin=origin,
             category=(f["category"].value or "").strip(),
             notes=(f["notes"].value or "").strip(),
             expected_sources=_lines(f["expected_sources"].value),
@@ -916,6 +1009,10 @@ class DatasetTab:
             expected_entities=_lines(f["expected_entities"].value),
             expected_mode=f["expected_mode"].value or None,
             user_cypher=knobs["user_cypher"],
+            # Chat provenance rides along ONLY for origin="chat" (ignored by
+            # scoring, like `notes`; see EvalCase.source_conversation).
+            source_conversation=(self._chat_conversation if origin == "chat" else []),
+            chat_router_model=(self._chat_router_model if origin == "chat" else None),
             retrieval={
                 "retrieval_mode": retrieval_mode,
                 "lancedb_search_mode": f["lancedb_search_mode"].value,
@@ -1015,37 +1112,97 @@ class DatasetTab:
     def _on_new(self, _e: ft.Event) -> None:
         self._selected = None
         self._clear_form()
+        # With 'Query from chat' on, a new case starts with the chat's distilled
+        # question (not blank); revert the toggle if there's no chat to draw from.
+        if self.from_chat_check and self.from_chat_check.value:
+            if self._chat_available():
+                self._apply_chat_source()
+            else:
+                self.from_chat_check.value = False
+                if self.gen_multi_button is not None:
+                    self.gen_multi_button.disabled = False
         self._render_list()
         self._render_preview()
-        self._set_status("new case — fill the form, then Add case")
+        msg = (
+            "new chat-sourced case — question from the last chat; add the gold, then Add case"
+            if self.f["origin"].value == "chat"
+            else "new case — fill the form, then Add case"
+        )
+        self._set_status(msg)
+
+    def _chat_available(self) -> bool:
+        """True when the last Search send was a conversational chat that produced
+        a distilled query to seed a case from."""
+        return bool(getattr(self.app, "last_search_query", None))
+
+    def _apply_chat_source(self) -> None:
+        """Fill the question + `origin=chat` + pinned retrieval + stored
+        conversation from the last chat. Leaves the gold (sources / answer points)
+        for a seed or manual entry. No-op when there's no chat query."""
+        query = getattr(self.app, "last_search_query", None)
+        if not query:
+            return
+        self.f["question"].value = query
+        self.f["origin"].value = "chat"
+        self._pin_retrieval(getattr(self.app, "last_retrieval", None))
+        self._chat_conversation = _conversation_from_messages(self.app.messages)
+        self._chat_router_model = getattr(self.app.gui_config, "chat_router_model", None)
+
+    def _on_from_chat_toggled(self, _e: ft.Event) -> None:
+        """Turn 'Query from chat' on/off. On: seed the question from the last
+        chat's distilled query (warn + revert if there's no chat yet) and disable
+        the bulk generator (a chat is one conversation → one case). Off: drop the
+        chat provenance and reset origin to manual."""
+        on = bool(self.from_chat_check and self.from_chat_check.value)
+        if on and not self._chat_available():
+            self.from_chat_check.value = False
+            self._set_status("No chat query yet — run a Conversational search in Search first.")
+            self.app.page.update()
+            return
+        if self.gen_multi_button is not None:
+            self.gen_multi_button.disabled = on
+        if on:
+            self._apply_chat_source()
+        else:
+            self._chat_conversation = []
+            self._chat_router_model = None
+            if (self.f["origin"].value or "") == "chat":
+                self.f["origin"].value = "manual"
+        self._render_preview()
+        self.app.page.update()
 
     def _on_capture_from_search(self, _e: ft.Event) -> None:
-        """Pre-fill a NEW case from the last Search result — the question +
-        the retrieved doc_ids (deduped, order-preserved) as expected_sources,
-        `origin=search`. The user reviews (keywords / answer points) + commits.
+        """Pre-fill a NEW case from the last Search result — the question + the
+        retrieved doc_ids (deduped, order-preserved) as expected_sources, pinning
+        the retrieval settings the search ACTUALLY ran under (not form defaults).
 
-        This is the authoring-side of the 'capture from search' flow: no
-        cross-view navigation — the user is already here to curate the set."""
-        answer = getattr(self.app, "last_answer", None)
-        query = getattr(self.app, "last_query", None)
+        With 'Query from chat' on, the question is the router's DISTILLED query
+        and `origin=chat` (+ the conversation is stored); otherwise the raw query
+        and `origin=search`. The user reviews (keywords / answer points) + commits."""
+        app = self.app
+        from_chat = bool(self.from_chat_check and self.from_chat_check.value)
+        answer = getattr(app, "last_answer", None)
+        query = getattr(app, "last_search_query" if from_chat else "last_query", None)
         if answer is None or not query:
-            self._set_status("No search result to capture — run a query in Search first.")
+            need = "a Conversational search" if from_chat else "a query"
+            self._set_status(f"No search result to capture — run {need} in Search first.")
             return
-        seen: set[str] = set()
-        sources: list[str] = []
-        for cs in getattr(answer, "chunk_sources", None) or []:
-            doc_id = getattr(cs, "doc_id", None)
-            if doc_id and doc_id not in seen:
-                seen.add(doc_id)
-                sources.append(doc_id)
+        sources = _dedup_doc_ids(getattr(answer, "chunk_sources", None) or [])
         self._selected = None
         self._clear_form()
         self.f["question"].value = query
         self.f["expected_sources"].value = _text(sources)
-        self.f["origin"].value = "search"
+        self._pin_retrieval(getattr(app, "last_retrieval", None))
+        if from_chat:
+            self.f["origin"].value = "chat"
+            self._chat_conversation = _conversation_from_messages(app.messages)
+            self._chat_router_model = getattr(app.gui_config, "chat_router_model", None)
+        else:
+            self.f["origin"].value = "search"
         self._render_list()
         self._render_preview()
-        self._set_status(f"captured from search ({len(sources)} source(s)) — review, then Add case")
+        kind = "chat" if from_chat else "search"
+        self._set_status(f"captured from {kind} ({len(sources)} source(s)) — review, then Add case")
 
     def _selected_gen_model(self) -> str | None:
         """The chosen LLM model for case generation, or None to let the backend
@@ -1108,10 +1265,14 @@ class DatasetTab:
             self.app.page.update()
 
     async def _on_generate_one(self, _e: ft.Event) -> None:
-        """Draft ONE LLM candidate straight into the form for review — nothing
-        is written until you Add case (unlike Generate multiple, which bulk-adds
-        unreviewed). The candidate is flagged `origin=llm`."""
+        """Draft ONE LLM candidate straight into the form for review — nothing is
+        written until you Add case. With 'Query from chat' on, the LLM writes only
+        the GOLD for the chat's distilled question (origin=chat); otherwise it
+        invents a whole case from a corpus passage (origin=llm)."""
         if not self._require_gen_model():
+            return
+        if self.from_chat_check and self.from_chat_check.value:
+            await self._generate_gold_from_chat()
             return
         from knowledge_agent.evaluation.generator import (
             EvalGenerationConnectionError,
@@ -1143,6 +1304,55 @@ class DatasetTab:
         self._render_list()
         self._render_preview()
         self._set_status("generated one candidate (origin=llm) — review, then Add case")
+
+    async def _generate_gold_from_chat(self) -> None:
+        """The 'Query from chat' + LLM path: keep the chat's distilled query as the
+        question, and have the LLM write the gold (answer points + keywords) FOR it
+        from the chat's own retrieved passages (not a fresh corpus sample, and not
+        the agent's own answer — that would be circular). origin=chat."""
+        from knowledge_agent.evaluation.generator import (
+            EvalGenerationConnectionError,
+            generate_gold_for_question,
+            passages_from_sources,
+        )
+
+        query = getattr(self.app, "last_search_query", None)
+        answer = getattr(self.app, "last_answer", None)
+        if not query:
+            self._set_status("No chat query — run a Conversational search in Search first.")
+            return
+        self._set_busy(self.gen_one_button, self.gen_one_spinner, True)
+        self._set_status("writing gold for the chat question…")
+        try:
+            passages = await passages_from_sources(getattr(answer, "chunk_sources", None) or [])
+            gold = await generate_gold_for_question(
+                query,
+                passages,
+                model=self._selected_gen_model(),
+                temperature=self._selected_gen_temp(),
+            )
+        except EvalGenerationConnectionError as exc:
+            self._set_busy(self.gen_one_button, self.gen_one_spinner, False)
+            self._set_status(str(exc))
+            return
+        except Exception as exc:  # broad: provider / LLM errors → status
+            self._set_busy(self.gen_one_button, self.gen_one_spinner, False)
+            self._set_status(f"generation failed: {exc}")
+            return
+        self._set_busy(self.gen_one_button, self.gen_one_spinner, False)
+        # Fresh case: chat question + provenance + pinned retrieval, then the
+        # LLM-written gold + the chat's own retrieved sources.
+        self._selected = None
+        self._clear_form()
+        self._apply_chat_source()
+        self.f["expected_answer_points"].value = _text(gold.answer_points)
+        self.f["required_keywords"].value = _text(gold.keywords)
+        self.f["expected_sources"].value = _text(
+            _dedup_doc_ids(getattr(answer, "chunk_sources", None) or [])
+        )
+        self._render_list()
+        self._render_preview()
+        self._set_status("wrote gold for the chat question (origin=chat) — review, then Add case")
 
     def _on_generate_multiple(self, _e: ft.Event) -> None:
         """Validate the count, then CONFIRM before bulk-drafting: these cost LLM

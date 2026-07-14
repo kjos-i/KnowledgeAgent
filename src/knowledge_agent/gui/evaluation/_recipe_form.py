@@ -7,10 +7,10 @@ implementation of those controls:
 
   * **Create test cases** tab — mounts it fully editable; the recipe rides
     along with the dataset on save.
-  * **Run evaluation** tab — mounts the SAME widget, loaded from the dataset's
-    saved recipe and rendered FROZEN (`set_enabled(False)`). Its **Unfreeze**
-    lets a single run deviate; the deviation is never written back (the Run
-    tab does not author recipes).
+  * **Run evaluation** tab — mounts the SAME widget loaded from the dataset's
+    saved recipe, with the Case Type radio read-only (it is authored in Create
+    test cases). The rest stays editable until the dataset is frozen; freezing
+    (`set_enabled(False)`) locks the whole recipe and **Unfreeze** reopens it.
 
 SSOT: the metric-group checks + judge panel used to live inline in `run_tab`;
 they moved here so the dataset tab reuses the exact same controls instead of a
@@ -99,8 +99,12 @@ class RecipeForm:
     gate thresholds. Editable everywhere; `set_enabled(False)` freezes it for
     the Run tab's read-only display."""
 
-    def __init__(self, app: GuiApp) -> None:
+    def __init__(self, app: GuiApp, *, case_type_readonly: bool = False) -> None:
         self.app = app
+        # Run tab passes True: the Case Type radio is authored in Create test
+        # cases, so here it is rendered read-only (shown, never editable) —
+        # independent of the freeze state, which locks everything else.
+        self._case_type_readonly = case_type_readonly
         # True while a preset/load writes the controls, so the field on_change
         # handlers don't mistake a programmatic write for a hand-edit and clear
         # the profile.
@@ -133,6 +137,12 @@ class RecipeForm:
                 spacing=12,
             ),
         )
+        # Read-only in the Run tab: display the dataset's Case Type but block
+        # edits (it is owned by Create test cases). The radio's own `disabled`
+        # is independent of the wrapper freeze, so it stays locked even when the
+        # rest of the recipe is unfrozen.
+        if self._case_type_readonly:
+            self.profile_group.disabled = True
         self.group_checks = {
             g: ft.Checkbox(
                 label=g,
@@ -203,10 +213,10 @@ class RecipeForm:
         content = ft.Column(
             [
                 sub_section_header(
-                    "Profile",
+                    "Case Type",
                     trailing=info_icon(
                         self.app,
-                        title="Dataset profile",
+                        title="Case type",
                         text=(
                             "A one-click preset that fills the metric groups + gate "
                             "thresholds below, AND tags the run so the dashboard can "

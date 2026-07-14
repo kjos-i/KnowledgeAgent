@@ -150,8 +150,38 @@ def test_load_rejects_json_scalar(tmp_path):
 def test_case_origin_default_and_values():
     assert EvalCase(id="x", question="q?").origin == "manual"
     assert EvalCase(id="x", question="q?", origin="llm").origin == "llm"
+    assert EvalCase(id="x", question="q?", origin="chat").origin == "chat"
     with pytest.raises(ValidationError):
         EvalCase(id="x", question="q?", origin="bogus")
+
+
+def test_case_chat_provenance_roundtrips(tmp_path):
+    """A chat-sourced case's provenance — origin='chat' + the conversation turns
+    + the router model — persists in the dataset JSON and reloads. Provenance
+    only; never read by scoring."""
+    p = tmp_path / "d.json"
+    case = EvalCase(
+        id="chatcase",
+        question="why did the valve fail?",
+        origin="chat",
+        source_conversation=[
+            {"role": "user", "content": "valve?"},
+            {"role": "assistant", "content": "searching the corpus…"},
+        ],
+        chat_router_model="claude-haiku-4-5",
+    )
+    save_dataset(EvalDataset(cases=[case]), p)
+    loaded = load_dataset(p).cases[0]
+    assert loaded.origin == "chat"
+    assert [t.role for t in loaded.source_conversation] == ["user", "assistant"]
+    assert loaded.source_conversation[0].content == "valve?"
+    assert loaded.chat_router_model == "claude-haiku-4-5"
+
+
+def test_case_chat_provenance_defaults_empty():
+    c = EvalCase(id="x", question="q?")
+    assert c.source_conversation == []
+    assert c.chat_router_model is None
 
 
 def test_save_and_append_roundtrip(tmp_path):

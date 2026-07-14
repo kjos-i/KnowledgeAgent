@@ -247,3 +247,121 @@ async def generate_from_corpus(
     per passage. Live glue over `sample_passages` + `generate_cases`."""
     passages = await sample_passages(n)
     return await generate_cases(passages, model=model, temperature=temperature)
+
+
+class GeneratedGold(BaseModel):
+    """The LLM's gold (answer facts + keywords) for a GIVEN question.
+
+    Unlike `GeneratedCase`, the question is fixed (e.g. a chat router's
+    distilled query) — the LLM only writes the gold FOR it, grounded in the
+    passages that were retrieved for that question. Still a CANDIDATE for human
+    review, not trusted truth (same caveat as `GeneratedCase`)."""
+
+    answer_points: list[str] = Field(
+        default_factory=list,
+        description="The key facts a correct answer to the question must contain.",
+    )
+    keywords: list[str] = Field(
+        default_factory=list,
+        description="A few salient terms that should appear in a correct answer.",
+    )
+
+
+_GOLD_SYSTEM = (
+    "You write the GOLD answer for an evaluation case. You are given a QUESTION "
+    "and the passages that were retrieved for it. Produce:\n"
+    "  - answer_points: the key facts a correct answer to the question must "
+    "contain, grounded ONLY in the passages;\n"
+    "  - keywords: a few salient terms that should appear in a correct answer.\n"
+    "Do NOT invent anything beyond the passages. If the passages don't fully "
+    "answer the question, return only the points they DO support (possibly none)."
+)
+
+
+async def passages_from_sources(
+    chunk_sources: list,
+    *,
+    client: LanceClient | None = None,
+) -> list[Passage]:
+    """Re-fetch the full text of the chunks a chat/search actually cited.
+
+    An `AgentAnswer`'s `chunk_sources` carry only doc_id + chunk_id + an
+    optional short `quote`, not the full chunk text. To ground LLM gold in what
+    the chat really retrieved, re-fetch each cited chunk's text from LanceDB (by
+    doc_id, filtered to the cited chunk_ids), falling back to the citation quote
+    when a chunk can't be re-fetched. Citation order + de-dup preserved. Best
+    effort: a failed re-fetch degrades to the quote, never raises."""
+    if client is None:
+        from knowledge_agent.search.client import get_search_client
+
+        client = get_search_client()
+    # (doc_id, chunk_id) in citation order, de-duped; + quote fallbacks by chunk.
+    order: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    quote_by_chunk: dict[str, str] = {}
+    for cs in chunk_sources or []:
+        doc_id = getattr(cs, "doc_id", None)
+        chunk_id = getattr(cs, "chunk_id", None)
+        if not doc_id or not chunk_id or (doc_id, chunk_id) in seen:
+            continue
+        seen.add((doc_id, chunk_id))
+        order.append((doc_id, chunk_id))
+        quote = getattr(cs, "quote", None)
+        if quote:
+            quote_by_chunk[chunk_id] = quote
+    # Re-fetch full text once per cited doc, keep the cited chunks' text.
+    text_by_chunk: dict[str, str] = {}
+    for doc_id in {d for d, _ in order}:
+        try:
+            for chunk in await client.get_chunks_by_doc_id(doc_id):
+                cid = chunk.get("chunk_id")
+                text = (chunk.get("text") or "").strip()
+                if cid and text:
+                    text_by_chunk[cid] = text
+        except Exception as exc:  # best-effort re-fetch; fall back to the quotes
+            logger.warning("passages_from_sources: re-fetch failed for %s: %r", doc_id, exc)
+    passages: list[Passage] = []
+    for doc_id, chunk_id in order:
+        text = text_by_chunk.get(chunk_id) or quote_by_chunk.get(chunk_id, "")
+        if text.strip():
+            passages.append(Passage(doc_id=doc_id, text=text))
+    return passages
+
+
+async def generate_gold_for_question(
+    question: str,
+    passages: list[Passage],
+    *,
+    model: str | None = None,
+    temperature: float = 0.3,
+    llm: BaseChatModel | None = None,
+) -> GeneratedGold:
+    """Draft the gold (answer_points + keywords) for a GIVEN question from the
+    passages retrieved for it.
+
+    Used when 'Query from chat' is on and the LLM seed fills the gold for the
+    chat's distilled question (rather than inventing a fresh one). `llm` is
+    injectable for tests; None builds one from the active provider. Returns
+    empty lists when the passages don't ground an answer. A network failure
+    raises `EvalGenerationConnectionError` (clear, retryable)."""
+    from knowledge_agent.config import get_settings
+
+    if llm is None:
+        settings = get_settings()
+        model = model or settings.mode_classifier_model
+        llm = get_llm(model, temperature)
+    structured = with_retry(llm.with_structured_output(GeneratedGold))
+    context = "\n\n".join(f"[{p.doc_id}]\n{p.text}" for p in passages if p.text.strip())
+    human = f"QUESTION:\n{question}\n\nRETRIEVED PASSAGES:\n{context or '(none)'}"
+    try:
+        return await structured.ainvoke(
+            [SystemMessage(content=_GOLD_SYSTEM), HumanMessage(content=human)]
+        )
+    except Exception as exc:
+        if _is_connection_error(exc):
+            raise EvalGenerationConnectionError(
+                "Couldn't reach the LLM API — this looks like a network / "
+                "connection problem, not your corpus. Check your internet "
+                "connection (and VPN / proxy / firewall), then try again."
+            ) from exc
+        raise

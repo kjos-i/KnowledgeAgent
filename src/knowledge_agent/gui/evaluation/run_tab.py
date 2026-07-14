@@ -138,7 +138,7 @@ class RunTab:
         # The recipe editor, shared with the Create-test-cases tab. Built here;
         # `_load_dataset_state` sets it read-only vs editable per the dataset's
         # frozen flag on select. A fresh form (no dataset) is editable.
-        self.recipe_form = RecipeForm(self.app)
+        self.recipe_form = RecipeForm(self.app, case_type_readonly=True)
         recipe_body = self.recipe_form.build()
         # "Freeze run settings" — the opt-in next to Run: tick it + Run and the
         # finished run persists frozen=true, locking the recipe onto the
@@ -156,8 +156,9 @@ class RunTab:
             italic=True,
             visible=False,
         )
-        # Unfreeze + the frozen badge live at the TOP (Evaluation cases section),
-        # shown only when the loaded dataset is frozen.
+        # Unfreeze + the frozen badge live at the TOP (Evaluation cases section).
+        # The badge shows only when frozen; Unfreeze is always present, just
+        # disabled (greyed) until the dataset is frozen.
         self.frozen_indicator = ft.Text(
             "\U0001f512 Recipe frozen — read-only",
             size=12,
@@ -169,7 +170,7 @@ class RunTab:
             icon=ft.Icons.LOCK_OPEN,
             tooltip="Unlock the recipe so it can change again (asks to confirm)",
             on_click=self._on_unfreeze_clicked,
-            visible=False,
+            disabled=True,
         )
 
         self.max_cases_field = ft.TextField(
@@ -245,12 +246,9 @@ class RunTab:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     spacing=8,
                 ),
-                section_divider(),
-                # ============ Section: Recipe ============
                 # The dataset's saved recipe (metric groups + judge panel + gate
                 # thresholds + profile). Editable when the dataset is not frozen;
                 # read-only when it is (Unfreeze up top to edit).
-                section_title("Recipe"),
                 recipe_body,
                 section_divider(),
                 # ============ Section: Run options ============
@@ -422,21 +420,30 @@ class RunTab:
         self._apply_frozen_ui()
 
     def _apply_frozen_ui(self) -> None:
-        """Sync the freeze checkbox, Unfreeze button, frozen badge, and the
-        recipe's read-only state to the dataset's status + frozen flag. Frozen ⇒
-        recipe read-only; the freeze checkbox is enabled only when the dataset
-        is final AND not already frozen."""
+        """Sync every run setting to the dataset's status + frozen flag. Frozen
+        ⇒ the whole tab locks read-only (recipe, Max cases, Tracing); the freeze
+        checkbox is enabled only when the dataset is final AND not already
+        frozen; Unfreeze is always present but disabled until frozen."""
         final = self._dataset_status == "final"
         frozen = self._dataset_frozen
         if self.recipe_form is not None:
             self.recipe_form.set_enabled(not frozen)
+        # Freezing greys out all the other run settings too; unfreezing restores
+        # each — the project field falls back to following the tracing toggle.
+        if self.max_cases_field is not None:
+            self.max_cases_field.disabled = frozen
+        if self.trace_check is not None:
+            self.trace_check.disabled = frozen
+        if self._project_row is not None:
+            trace_on = bool(self.trace_check and self.trace_check.value)
+            self._project_row.disabled = frozen or not trace_on
         if self.freeze_check is not None:
             self.freeze_check.value = frozen
             self.freeze_check.disabled = (not final) or frozen
         if self.freeze_hint is not None:
             self.freeze_hint.visible = not final and not frozen
         if self.unfreeze_button is not None:
-            self.unfreeze_button.visible = frozen
+            self.unfreeze_button.disabled = not frozen
         if self.frozen_indicator is not None:
             self.frozen_indicator.visible = frozen
 
