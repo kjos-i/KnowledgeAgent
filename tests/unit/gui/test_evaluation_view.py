@@ -39,7 +39,7 @@ def test_view_tabs_are_tinted(fake_app: MagicMock):
     tab_bar = view.build().content.controls[0]
     by_label = {_tab_label(t): t for t in tab_bar.tabs}
     assert isinstance(by_label["Run Summary"].label, ft.Text)  # tinted view tab
-    assert by_label["Trends"].label.color == ft.Colors.BLUE_400
+    assert by_label["Trends"].label.color == ft.Colors.BLUE_300
     assert by_label["Run evaluation"].label == "Run evaluation"  # plain authoring tab
 
 
