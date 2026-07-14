@@ -197,7 +197,7 @@ DASHBOARD_HEADER_SIZE = 16
 
 
 def dashboard_section_header(text: str) -> ft.Container:
-    """A dashboard body section header (Run Summary / Deep Analysis / Trends /
+    """A dashboard body section header (Run Summary / Run Charts / Trends /
     Metrics Guide) — non-bold, size `DASHBOARD_HEADER_SIZE`, with top padding so
     it doesn't crowd the section above."""
     return ft.Container(

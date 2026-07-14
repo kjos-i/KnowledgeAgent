@@ -1,4 +1,4 @@
-"""Evaluation → Deep Analysis sub-tab — metric balance / spread / correlation.
+"""Evaluation → Run Charts sub-tab — metric balance / spread / correlation.
 
 Left rail: run selector + selected-run details (same rail as Run Summary).
 Body (all native Flet — canvas ships with Flet, no extra deps):
@@ -228,8 +228,8 @@ def _stacked_by_case_chart(
     )
 
 
-class DeepAnalysisTab:
-    """Per-run deep-analysis views (bar-of-means, histogram, correlation)."""
+class RunChartsTab:
+    """Per-run charts (bar-of-means, histogram, correlation)."""
 
     def __init__(self, app: GuiApp, coordinator: EvaluationView) -> None:
         self.app = app
@@ -257,7 +257,7 @@ class DeepAnalysisTab:
             [
                 rail_ctl,
                 ft.Column(
-                    [view_header("Deep Analysis"), self.body],
+                    [view_header("Run Charts"), self.body],
                     expand=True,
                     spacing=8,
                 ),

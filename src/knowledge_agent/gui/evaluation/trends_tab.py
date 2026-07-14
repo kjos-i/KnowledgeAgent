@@ -279,7 +279,7 @@ class TrendsTab:
                 self._chart(header, specs, chrono, x_labels, y_max, _Y_LABELS.get(group, "Score"))
             )
         # Interleave section dividers so the trend charts read as distinct
-        # sections — the same common style as Run Summary / Deep Analysis.
+        # sections — the same common style as Run Summary / Run Charts.
         out: list[ft.Control] = []
         for i, chart in enumerate(charts):
             if i:

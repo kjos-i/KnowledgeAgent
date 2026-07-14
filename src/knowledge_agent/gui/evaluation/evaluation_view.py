@@ -10,7 +10,7 @@ Sub-tabs (fixed order), by display label:
     list + a full-field view of the selected case (editing / Add-Delete /
     capture-from-Search / LLM generation).
   - Run Summary — KPI cards + per-case table for the selected run.
-  - Deep Analysis — metric-balance / distribution / correlation for the run.
+  - Run Charts — metric-balance / distribution / correlation for the run.
   - Trends — run-level metric trends over time (scoped per dataset).
   - Metrics Guide — the metrics reference (info_metrics.md).
 
@@ -29,8 +29,8 @@ from typing import TYPE_CHECKING
 import flet as ft
 
 from knowledge_agent.gui.evaluation.dataset_tab import DatasetTab
-from knowledge_agent.gui.evaluation.deep_analysis_tab import DeepAnalysisTab
 from knowledge_agent.gui.evaluation.metrics_guide_tab import MetricsGuideTab
+from knowledge_agent.gui.evaluation.run_charts_tab import RunChartsTab
 from knowledge_agent.gui.evaluation.run_summary_tab import RunSummaryTab
 from knowledge_agent.gui.evaluation.run_tab import RunTab
 from knowledge_agent.gui.evaluation.trends_tab import TrendsTab
@@ -43,7 +43,7 @@ SUB_TAB_LABELS = (
     "Run evaluation",
     "Create test cases",
     "Run Summary",
-    "Deep Analysis",
+    "Run Charts",
     "Trends",
     "Metrics Guide",
 )
@@ -51,7 +51,7 @@ SUB_TAB_LABELS = (
 # The eval-output (view) tabs — tinted apart from the two authoring tabs, and
 # auto-refreshed on select (they read the shared ledger; the authoring tabs
 # own their own state).
-_VIEW_TABS = frozenset({"Run Summary", "Deep Analysis", "Trends", "Metrics Guide"})
+_VIEW_TABS = frozenset({"Run Summary", "Run Charts", "Trends", "Metrics Guide"})
 
 
 class EvaluationView:
@@ -61,7 +61,7 @@ class EvaluationView:
         self.app = app
         # Shared dashboard selection, read by all four view tabs' left rails
         # (`DashboardRail`) so they stay in step. `selected_run_id` drives the
-        # per-run tabs (Run Summary / Deep Analysis); `selected_dataset` scopes
+        # per-run tabs (Run Summary / Run Charts); `selected_dataset` scopes
         # Trends + narrows the run picker. Set by the rails + the Run tab on
         # completion.
         self.selected_run_id: int | None = None
@@ -70,7 +70,7 @@ class EvaluationView:
         self.run_tab = RunTab(app, coordinator=self)
         self.dataset_tab = DatasetTab(app, coordinator=self)
         self.run_summary_tab = RunSummaryTab(app, coordinator=self)
-        self.deep_analysis_tab = DeepAnalysisTab(app, coordinator=self)
+        self.run_charts_tab = RunChartsTab(app, coordinator=self)
         self.trends_tab = TrendsTab(app, coordinator=self)
         self.metrics_guide_tab = MetricsGuideTab(app, coordinator=self)
 
@@ -94,7 +94,7 @@ class EvaluationView:
                 ft.Container(content=self.run_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.dataset_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.run_summary_tab.build(), padding=8, expand=True),
-                ft.Container(content=self.deep_analysis_tab.build(), padding=8, expand=True),
+                ft.Container(content=self.run_charts_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.trends_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.metrics_guide_tab.build(), padding=8, expand=True),
             ],
@@ -117,7 +117,7 @@ class EvaluationView:
             return
         view_tabs = {
             SUB_TAB_LABELS.index("Run Summary"): self.run_summary_tab,
-            SUB_TAB_LABELS.index("Deep Analysis"): self.deep_analysis_tab,
+            SUB_TAB_LABELS.index("Run Charts"): self.run_charts_tab,
             SUB_TAB_LABELS.index("Trends"): self.trends_tab,
             SUB_TAB_LABELS.index("Metrics Guide"): self.metrics_guide_tab,
         }

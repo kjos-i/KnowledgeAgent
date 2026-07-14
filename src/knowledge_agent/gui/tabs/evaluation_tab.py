@@ -1,6 +1,6 @@
 """Evaluation top tab — dispatches to the full-window EvaluationView.
 
-The real layout (5 sub-tabs: Run / Run Summary / Deep Analysis / Trends /
+The real layout (5 sub-tabs: Run / Run Summary / Run Charts / Trends /
 Metrics Guide) lives in `gui.evaluation.evaluation_view`. This module stays
 thin so the existing `GuiApp` wiring (which constructs `EvaluationTab`)
 doesn't change shape as the sub-tabs grow — same pattern as `LibraryTab`.

@@ -2,7 +2,7 @@
 
 ONE widget — a **Dataset → Run** drill-down + Refresh + a read-only context
 panel (the selected run's recipe + short hash) — mounted identically on Run
-Summary, Deep Analysis, Trends, AND Metrics Guide. Even where a tab's body
+Summary, Run Charts, Trends, AND Metrics Guide. Even where a tab's body
 doesn't consume the selection (Metrics Guide), the column still shows so the
 context is always visible. SSOT: the run/dataset selectors + selected-run
 metadata that used to be copied into each tab live here once.

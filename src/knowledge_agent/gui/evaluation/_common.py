@@ -1,7 +1,7 @@
 """Shared helpers for the Evaluation GUI sub-tabs.
 
 One definition of "which corpus is active" and "its eval ledger", so the Run
-tab (writer) and the Trends / Run Summary / Deep Analysis tabs (readers)
+tab (writer) and the Trends / Run Summary / Run Charts tabs (readers)
 always resolve to the SAME per-corpus `eval_output/` — the folder beside the
 corpus's `lancedb`, which `EvalConfig` derives from `corpus_config_path`. If
 these drifted, the readers would show an empty CWD ledger while runs wrote
