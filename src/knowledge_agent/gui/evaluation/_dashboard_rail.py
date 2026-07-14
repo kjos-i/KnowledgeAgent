@@ -91,7 +91,7 @@ class DashboardRail:
             label="Run", options=[], width=_RAIL_WIDTH - 24, text_size=FIELD_LABEL_SIZE
         )
         self.run_dd.on_select = self._on_run_change
-        refresh_button = ft.TextButton("Refresh", icon=ft.Icons.REFRESH, on_click=self._on_refresh)
+        refresh_button = ft.TextButton("Refresh", on_click=self._on_refresh)
         self.context = ft.Column(controls=[], spacing=2)
         return ft.Container(
             width=_RAIL_WIDTH,

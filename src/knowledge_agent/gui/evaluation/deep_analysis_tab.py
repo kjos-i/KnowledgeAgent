@@ -103,15 +103,20 @@ def _trunc(text: str, n: int) -> str:
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
+# Diverging endpoints as #rrggbb (no hash): red = +1, blue = −1.
+_CORR_POS = "b2182b"
+_CORR_NEG = "2166ac"
+
+
 def _corr_color(r: float) -> str:
-    """Diverging heat colour for a correlation: +1 → red, 0 → near-white,
-    −1 → blue (matching the reference), as a #rrggbb string."""
+    """See-through diverging fill for a correlation, as an ``#aarrggbb`` string:
+    red for positive, blue for negative, with OPACITY = |r|. So r≈0 is fully
+    transparent (the dark app shows through) and ±1 is solid — strong
+    correlations stay bold while weak ones melt into the background."""
     r = max(-1.0, min(1.0, r))
-    white = (240, 240, 240)
-    end = (178, 24, 43) if r >= 0 else (33, 102, 172)
-    t = abs(r)
-    rgb = [int(white[i] + (end[i] - white[i]) * t) for i in range(3)]
-    return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+    base = _CORR_POS if r >= 0 else _CORR_NEG
+    alpha = round(abs(r) * 255)
+    return f"#{alpha:02x}{base}"
 
 
 def _nice_axis(y_max: float, *, integer: bool = False) -> tuple[float, float]:
@@ -633,7 +638,9 @@ class DeepAnalysisTab:
                         alignment=ft.Alignment(0, 0),
                     )
                 )
-        # Colourbar (+1 red → 0 white → −1 blue) on the right.
+        # Colourbar (+1 red → transparent 0 → −1 blue) on the right — opacity
+        # tracks |r| like the cells, so it's see-through at the midpoint. A thin
+        # outline keeps the bar's extent readable where it's fully transparent.
         bar_x = label_w + n * cell_w + bar_gap
         bar_h = n * cell_h
         segs = 24
@@ -648,6 +655,7 @@ class DeepAnalysisTab:
                     paint=_fill(_corr_color(r_val)),
                 )
             )
+        shapes.append(cv.Rect(bar_x, top_pad, 18, bar_h, paint=_stroke(ft.Colors.GREY_700)))
         for frac, tick in ((0.0, "+1"), (0.5, "0"), (1.0, "−1")):
             shapes.append(cv.Text(bar_x + 24, top_pad + frac * bar_h, tick, text_style))
         return cv.Canvas(shapes=shapes, width=width, height=height)
@@ -655,12 +663,14 @@ class DeepAnalysisTab:
     def _corr_cell_style(
         self, key_r: str, key_c: str, diagonal: bool, const: dict[str, float | None]
     ) -> tuple[str, str, str]:
-        """(fill colour, cell text, text colour) for one heatmap cell."""
+        """(fill colour, cell text, text colour) for one heatmap cell. Fills are
+        see-through — opacity tracks |r| (transparent at r≈0) — so text is always
+        light, to read against the dark app or the saturated strong cells."""
         if diagonal:
             return _corr_color(1.0), "1.00", ft.Colors.WHITE
         if const[key_r] is not None or const[key_c] is not None:
             cval = const[key_r] if const[key_r] is not None else const[key_c]
-            return "#e8e8e8", f"= {cval:.2f}", ft.Colors.BLACK
+            return ft.Colors.TRANSPARENT, f"= {cval:.2f}", ft.Colors.GREY_400
         xs, ys = [], []
         for c in self._cases:
             a, b = c.get(key_r), c.get(key_c)
@@ -672,5 +682,5 @@ class DeepAnalysisTab:
         except statistics.StatisticsError:
             r = None
         if r is None:
-            return "#e8e8e8", "—", ft.Colors.BLACK
-        return _corr_color(r), f"{r:.2f}", ft.Colors.WHITE if abs(r) > 0.55 else ft.Colors.BLACK
+            return ft.Colors.TRANSPARENT, "—", ft.Colors.GREY_400
+        return _corr_color(r), f"{r:.2f}", ft.Colors.WHITE if abs(r) > 0.55 else ft.Colors.GREY_300
