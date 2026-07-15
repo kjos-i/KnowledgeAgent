@@ -223,8 +223,9 @@ def test_suite_dropdown_lists_corpus_named_suites(fake_app: MagicMock, tmp_path)
 
 
 def test_selecting_suite_loads_members_and_recipe(fake_app: MagicMock, tmp_path):
-    """Picking a named suite resolves its tagged members + loads the first
-    member's recipe; freeze greys (single-file-only in R5)."""
+    """Picking a named suite resolves its tagged members + loads the shared
+    recipe; freeze is disabled for a DRAFT suite (not final) and the divergence
+    banner stays hidden when members agree."""
     _suite_variant(tmp_path / "vec.json", "c__v", "lancedb_only", ["mode-sweep"])
     _suite_variant(tmp_path / "graph.json", "c__g", "neo4j_only", ["mode-sweep"])
     tab, _ = _run_tab(fake_app)
@@ -235,7 +236,8 @@ def test_selecting_suite_loads_members_and_recipe(fake_app: MagicMock, tmp_path)
     assert tab._suite_name == "mode-sweep"
     assert {p.stem for p in tab._suite_paths} == {"vec", "graph"}
     assert tab._suite_selected() is True
-    assert tab.freeze_check.disabled is True
+    assert tab.freeze_check.disabled is True  # draft members → can't freeze yet
+    assert tab.divergence_warning.visible is False  # members share one recipe
     assert "mode-sweep" in tab.selection_hint.value
 
 
@@ -301,8 +303,86 @@ def test_execute_run_single_branch_calls_run(fake_app: MagicMock):
     coordinator.on_run_complete.assert_called_once_with(7)
 
 
-def _suite_variant(path, cid, mode, suites, *, question="q?"):
-    """A knob-variant dataset tagged into the given named `suites`."""
+def test_freeze_suite_writes_all_members(fake_app: MagicMock, tmp_path):
+    """Freezing a suite (all members final) writes recipe + frozen=true to EVERY
+    member — freeze is enabled because every member is final (R3)."""
+    from knowledge_agent.evaluation.models import load_dataset
+
+    _suite_variant(tmp_path / "vec.json", "c__v", "lancedb_only", ["s"], status="final")
+    _suite_variant(tmp_path / "graph.json", "c__g", "neo4j_only", ["s"], status="final")
+    tab, _ = _run_tab(fake_app)
+    fake_app.gui_config.corpus_config_path = tmp_path / "corpus.toml"
+    tab._refresh_suite_options()
+    tab.suite_dd.value = "s"
+    tab._on_suite_dd_change(MagicMock())
+    assert tab.freeze_check.disabled is False  # all members final → freeze enabled
+    tab._freeze_dataset()
+    for name in ("vec.json", "graph.json"):
+        ds = load_dataset(tmp_path / name)
+        assert ds.frozen is True
+        assert ds.recipe is not None
+    assert tab._dataset_frozen is True
+
+
+def test_unfreeze_suite_clears_all_members(fake_app: MagicMock, tmp_path):
+    """Unfreezing a frozen suite clears frozen on EVERY member (R3)."""
+    from knowledge_agent.evaluation.models import EvalRecipe, load_dataset
+
+    r = EvalRecipe()
+    _suite_variant(
+        tmp_path / "vec.json", "c__v", "lancedb_only", ["s"], status="final", frozen=True, recipe=r
+    )
+    _suite_variant(
+        tmp_path / "graph.json", "c__g", "neo4j_only", ["s"], status="final", frozen=True, recipe=r
+    )
+    tab, _ = _run_tab(fake_app)
+    fake_app.gui_config.corpus_config_path = tmp_path / "corpus.toml"
+    tab._refresh_suite_options()
+    tab.suite_dd.value = "s"
+    tab._on_suite_dd_change(MagicMock())
+    assert tab._dataset_frozen is True  # every member frozen → suite reads frozen
+    assert tab.unfreeze_button.disabled is False
+    tab._do_unfreeze()
+    for name in ("vec.json", "graph.json"):
+        assert load_dataset(tmp_path / name).frozen is False
+    assert tab._dataset_frozen is False
+
+
+def test_divergent_suite_warns_and_confirms(fake_app: MagicMock, tmp_path):
+    """Members with different recipes ⇒ _suite_diverged + the banner shows (R4),
+    and Run routes through a confirm before spending tokens."""
+    from unittest.mock import patch
+
+    from knowledge_agent.evaluation.models import EvalRecipe
+
+    _suite_variant(
+        tmp_path / "vec.json", "c__v", "lancedb_only", ["s"], recipe=EvalRecipe(judge_threshold=0.5)
+    )
+    _suite_variant(
+        tmp_path / "graph.json", "c__g", "neo4j_only", ["s"], recipe=EvalRecipe(judge_threshold=0.9)
+    )
+    tab, _ = _run_tab(fake_app)
+    fake_app.gui_config.corpus_config_path = tmp_path / "corpus.toml"
+    tab._refresh_suite_options()
+    tab.suite_dd.value = "s"
+    tab._on_suite_dd_change(MagicMock())
+    assert tab._suite_diverged is True
+    assert tab.divergence_warning.visible is True
+    # Run on a divergent suite pops a confirm instead of launching straight away.
+    with patch("knowledge_agent.gui.evaluation._common.confirm_dialog") as confirm:
+
+        async def _click():
+            tab._on_run_clicked(MagicMock())
+
+        asyncio.run(_click())
+    confirm.assert_called_once()
+
+
+def _suite_variant(
+    path, cid, mode, suites, *, question="q?", status="draft", frozen=False, recipe=None
+):
+    """A knob-variant dataset tagged into the given named `suites` (optionally
+    final / frozen / with a recipe, for the freeze + divergence tests)."""
     from knowledge_agent.evaluation.models import (
         EvalCase,
         EvalDataset,
@@ -313,6 +393,9 @@ def _suite_variant(path, cid, mode, suites, *, question="q?"):
     save_dataset(
         EvalDataset(
             suites=suites,
+            status=status,
+            frozen=frozen,
+            recipe=recipe,
             cases=[
                 EvalCase(
                     id=cid,

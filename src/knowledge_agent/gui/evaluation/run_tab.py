@@ -68,8 +68,15 @@ class RunTab:
         self.freeze_hint: ft.Text | None = None
         self.unfreeze_button: ft.TextButton | None = None
         self.frozen_indicator: ft.Text | None = None
+        # Shown when the selected SUITE's members carry different recipes (R4) —
+        # hand-edited divergence; the first member's recipe loads + this warns.
+        self.divergence_warning: ft.Text | None = None
+        # Aggregate freeze state of the current selection (a single file, or ALL
+        # members of the selected suite): "final" only when every member is, and
+        # frozen only when every member is. Drives the shared freeze UI.
         self._dataset_status: str = "draft"
         self._dataset_frozen: bool = False
+        self._suite_diverged: bool = False
         self.max_cases_field: ft.TextField | None = None
         self.trace_check: ft.Checkbox | None = None
         self.project_field: ft.TextField | None = None
@@ -187,6 +194,16 @@ class RunTab:
             on_click=self._on_unfreeze_clicked,
             disabled=True,
         )
+        # Warns when a picked suite's members don't share one recipe (R4). The
+        # first member's recipe is loaded; Freeze (which re-writes all members)
+        # re-syncs them. Hidden unless a divergent suite is selected.
+        self.divergence_warning = ft.Text(
+            "⚠ This suite's members have different run settings (likely hand-edited). "
+            "Showing the first member's recipe — Freeze re-syncs all members.",
+            size=12,
+            color=ft.Colors.ORANGE,
+            visible=False,
+        )
 
         self.max_cases_field = ft.TextField(
             width=200,
@@ -272,6 +289,7 @@ class RunTab:
                 sub_section_title("…or a single file"),
                 labeled_field("Dataset", self.dataset_field, trailing=browse_button),
                 self.selection_hint,
+                self.divergence_warning,
                 ft.Row(
                     [self.frozen_indicator, self.unfreeze_button],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -454,16 +472,20 @@ class RunTab:
             pass
         self._dataset_status = status
         self._dataset_frozen = frozen
+        self._suite_diverged = False  # single file — no members to diverge
         if self.recipe_form is not None:
             self.recipe_form.load(recipe)
         self._apply_frozen_ui()
         self._sync_selection_hint()
+        self._sync_divergence_warning()
 
     def _apply_frozen_ui(self) -> None:
-        """Sync every run setting to the dataset's status + frozen flag. Frozen
-        ⇒ the whole tab locks read-only (recipe, Max cases, Tracing); the freeze
-        checkbox is enabled only when the dataset is final AND not already
-        frozen; Unfreeze is always present but disabled until frozen."""
+        """Sync every run setting to the selection's aggregate status + frozen
+        flag (a single file, or ALL members of the selected suite). Frozen ⇒ the
+        whole tab locks read-only (recipe, Max cases, Tracing); the freeze
+        checkbox is enabled only when final AND not already frozen; Unfreeze is
+        always present but disabled until frozen. Freeze acts on the whole scope
+        (1 file or N members), so no suite-specific greying (R3)."""
         final = self._dataset_status == "final"
         frozen = self._dataset_frozen
         if self.recipe_form is not None:
@@ -486,7 +508,6 @@ class RunTab:
             self.unfreeze_button.disabled = not frozen
         if self.frozen_indicator is not None:
             self.frozen_indicator.visible = frozen
-        self._sync_suite_freeze()
 
     # ---- selection: named suite vs single file ----------------------------
 
@@ -551,28 +572,39 @@ class RunTab:
         self.app.page.update()
 
     def _load_suite_state(self, name: str) -> None:
-        """Select the named suite `name`: resolve its members + load its shared
-        recipe into the form. (R5 takes the first member's recipe; R4 will add a
-        divergence warning when members disagree.) Freeze stays single-file-only,
-        so `_sync_suite_freeze` greys it here."""
-        from knowledge_agent.evaluation.models import load_dataset
+        """Select the named suite `name`: resolve its members, compute the suite's
+        AGGREGATE freeze state (final only when EVERY member is; frozen only when
+        every member is), and load the shared recipe into the form. Members should
+        share one recipe (the generator stamps them equal; freeze re-syncs). If a
+        hand-edit made them diverge, the FIRST member's recipe is loaded and the
+        divergence banner shows (R4)."""
+        from knowledge_agent.evaluation.models import compute_recipe_hash, load_dataset
 
         self._suite_name = name
         self._suite_paths = self._members_for_suite(name)
-        first = self._suite_paths[0] if self._suite_paths else None
-        recipe, status = None, "draft"
-        if first is not None:
+        recipes, statuses, frozens = [], [], []
+        for p in self._suite_paths:
             try:
-                ds = load_dataset(first)
-                recipe, status = ds.recipe, ds.status
-            except Exception:  # broad: a bad member just yields the default recipe
-                pass
-        self._dataset_status = status
-        self._dataset_frozen = False  # a suite isn't frozen through this tab (R5)
+                ds = load_dataset(p)
+            except Exception:  # broad: a bad member counts as a default draft
+                recipes.append(None)
+                statuses.append("draft")
+                frozens.append(False)
+                continue
+            recipes.append(ds.recipe)
+            statuses.append(ds.status)
+            frozens.append(ds.frozen)
+        # A suite shares one recipe; >1 distinct hash ⇒ hand-edited divergence.
+        self._suite_diverged = len({compute_recipe_hash(r) for r in recipes}) > 1
+        self._dataset_status = (
+            "final" if statuses and all(s == "final" for s in statuses) else "draft"
+        )
+        self._dataset_frozen = bool(frozens) and all(frozens)
         if self.recipe_form is not None:
-            self.recipe_form.load(recipe)
+            self.recipe_form.load(recipes[0] if recipes else None)
         self._apply_frozen_ui()
         self._sync_selection_hint()
+        self._sync_divergence_warning()
 
     def _sync_selection_hint(self) -> None:
         """One-line summary of the current selection — the suite + its members,
@@ -588,34 +620,41 @@ class RunTab:
         else:
             self.selection_hint.value = ""
 
-    def _sync_suite_freeze(self) -> None:
-        """R5: freeze locks a recipe onto a single dataset, so grey it whenever a
-        named suite is selected. (R3 will replace this with freeze-across-all-
-        members.) Single-file mode leaves the enabled state to `_apply_frozen_ui`.
-        """
-        if self.freeze_check is None:
-            return
+    def _sync_divergence_warning(self) -> None:
+        """Show the divergence banner only for a selected suite whose members
+        carry different recipes (R4)."""
+        if self.divergence_warning is not None:
+            self.divergence_warning.visible = self._suite_name is not None and self._suite_diverged
+
+    def _frozen_scope_paths(self) -> list[Path]:
+        """The files freeze / unfreeze act on: every member of the selected suite,
+        or the single browsed file (empty when nothing is selected)."""
         if self._suite_name is not None:
-            self.freeze_check.value = False
-            self.freeze_check.disabled = True
+            return list(self._suite_paths)
+        if self.dataset_field and self.dataset_field.value:
+            return [Path(self.dataset_field.value)]
+        return []
 
     def _suite_selected(self) -> bool:
         """True when a named suite is selected (→ run_suite over its members)."""
         return self._suite_name is not None and len(self._suite_paths) >= 1
 
     def _on_unfreeze_clicked(self, _e: ft.Event) -> None:
-        """Unfreeze the dataset — a deliberate, confirmed action that clears the
-        frozen flag on disk so the recipe can change again."""
-        if not (self.dataset_field and self.dataset_field.value):
+        """Unfreeze the selection — a deliberate, confirmed action that clears the
+        frozen flag across the scope (a single file, or every member of the
+        selected suite) so the recipe can change again."""
+        paths = self._frozen_scope_paths()
+        if not paths:
             return
         from knowledge_agent.gui.evaluation._common import confirm_dialog
 
+        scope = f"all {len(paths)} suite members" if self._suite_name is not None else "the dataset"
         confirm_dialog(
             self.app,
             title="Unfreeze run settings?",
             message=(
                 "This unlocks the recipe so it can be changed again, and clears "
-                "the frozen state saved on the dataset."
+                f"the frozen state saved on {scope}."
             ),
             confirm_label="Unfreeze",
             on_confirm=self._do_unfreeze,
@@ -624,13 +663,14 @@ class RunTab:
     def _do_unfreeze(self) -> None:
         from knowledge_agent.evaluation.models import load_dataset, save_dataset
 
-        path = Path(self.dataset_field.value) if self.dataset_field else None
-        if path is None:
+        paths = self._frozen_scope_paths()
+        if not paths:
             return
         try:
-            ds = load_dataset(path)
-            ds.frozen = False
-            save_dataset(ds, path)
+            for path in paths:
+                ds = load_dataset(path)
+                ds.frozen = False
+                save_dataset(ds, path)
         except Exception as exc:  # broad: I/O / parse failure → status line
             self._set_status(f"could not unfreeze: {exc}")
             return
@@ -640,27 +680,33 @@ class RunTab:
         self.app.page.update()
 
     def _freeze_dataset(self) -> None:
-        """Persist the current recipe + frozen=true on the dataset — the 'Freeze
-        run settings' opt-in, run after a successful run when the box is ticked.
-        Only a final dataset can be frozen (the checkbox enforces it too)."""
+        """Persist the current recipe + frozen=true across the SELECTED scope's
+        members — the 'Freeze run settings' opt-in, run after a successful run
+        when the box is ticked. One file for a single run, or EVERY member of the
+        selected suite (which also re-syncs any divergent recipes). Only when all
+        are final (the checkbox enforces it too)."""
         from knowledge_agent.evaluation.models import load_dataset, save_dataset
 
-        path = Path(self.dataset_field.value) if self.dataset_field else None
-        if path is None:
+        paths = self._frozen_scope_paths()
+        if not paths:
             return
+        recipe = self.recipe_form.to_recipe() if self.recipe_form else None
         try:
-            ds = load_dataset(path)
-            if ds.status != "final":
-                return  # invariant: only a final dataset can be frozen
-            if self.recipe_form is not None:
-                ds.recipe = self.recipe_form.to_recipe()
-            ds.frozen = True
-            save_dataset(ds, path)
+            for path in paths:
+                ds = load_dataset(path)
+                if ds.status != "final":
+                    return  # invariant: only a final dataset can be frozen
+                if recipe is not None:
+                    ds.recipe = recipe.model_copy(deep=True)
+                ds.frozen = True
+                save_dataset(ds, path)
         except Exception as exc:  # broad: I/O / parse failure → status line
             self._set_status(f"run done, but freeze failed: {exc}")
             return
         self._dataset_frozen = True
+        self._suite_diverged = False  # freeze re-wrote every member identical
         self._apply_frozen_ui()
+        self._sync_divergence_warning()
 
     # ---- tracing ----------------------------------------------------------
 
@@ -766,6 +812,23 @@ class RunTab:
         if self.trace_check and self.trace_check.value and not get_api_key("langsmith"):
             self._set_status("Set a LangSmith API key in Settings → Keys to trace.")
             return
+        # R4: a divergent suite runs the FIRST member's recipe for EVERY member —
+        # make the user acknowledge that before spending tokens.
+        if self._suite_selected() and self._suite_diverged:
+            from knowledge_agent.gui.evaluation._common import confirm_dialog
+
+            confirm_dialog(
+                self.app,
+                title="Members have different run settings",
+                message=(
+                    "This suite's members don't share one recipe (likely "
+                    "hand-edited). The first member's run settings will be used "
+                    "for all of them. Run anyway?"
+                ),
+                confirm_label="Run anyway",
+                on_confirm=lambda: self._spawn(self._execute_run()),
+            )
+            return
         self._spawn(self._execute_run())
 
     async def _execute_run(self) -> None:
@@ -804,19 +867,26 @@ class RunTab:
             logger.exception("eval run failed")
             self._set_busy(False, f"run failed: {exc}")
             return
+        # Opt-in freeze: lock this recipe onto the scope (single file or every
+        # suite member) now the run(s) succeeded (R3).
+        froze = bool(self.freeze_check and self.freeze_check.value)
         if suite:
-            self._set_busy(False, f"done: suite of {len(outcome.results)} runs — opening Compare.")
+            self._set_busy(
+                False,
+                f"done: suite of {len(outcome.results)} runs — opening Compare."
+                + (" Recipe frozen." if froze else ""),
+            )
+            if froze:
+                self._freeze_dataset()
             self.coordinator.on_suite_complete(outcome)
             return
         summary = result.report.get("summary", {})
-        froze = bool(self.freeze_check and self.freeze_check.value)
         self._set_busy(
             False,
             f"done: run {result.run_id} — "
             f"{summary.get('pass_count')}/{summary.get('case_count')} pass."
             + (" Recipe frozen." if froze else ""),
         )
-        # Opt-in freeze: lock this recipe onto the dataset now the run succeeded.
         if froze:
             self._freeze_dataset()
         self.coordinator.on_run_complete(result.run_id)
