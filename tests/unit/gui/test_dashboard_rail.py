@@ -65,7 +65,7 @@ def test_context_shows_recipe_from_run_row(fake_app, tmp_path):
     rail, _, _ = _rail(fake_app, led)
     lines = [c.value for c in rail.context.controls if hasattr(c, "value")]
     joined = " | ".join(lines)
-    assert "Recipe hash: abcdef12" in lines  # 8-char prefix, truncated from the full 16
+    assert "Run settings hash: abcdef12" in lines  # 8-char prefix, truncated from the full 16
     assert "chunk" in joined and "source" in joined  # enabled groups (ledger sorts them)
     assert "m1" in joined  # judge panel
     assert "claude-sonnet-5" in joined  # model

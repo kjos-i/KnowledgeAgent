@@ -251,7 +251,7 @@ class DashboardRail:
             ft.Text("Run Information", weight=ft.FontWeight.BOLD, size=12),
             ft.Text(f"Dataset: {dataset_of(run)}", size=12),
             ft.Text(f"Facts hash: {fhash[:8] if fhash else '—'}", size=12),
-            ft.Text(f"Recipe hash: {rhash[:8] if rhash else '—'}", size=12),
+            ft.Text(f"Run settings hash: {rhash[:8] if rhash else '—'}", size=12),
             ft.Text(f"Groups: {', '.join(groups) if groups else '(none)'}", size=12),
             ft.Text(f"Judges: {', '.join(judges) if judges else '(default)'}", size=12),
         ]
