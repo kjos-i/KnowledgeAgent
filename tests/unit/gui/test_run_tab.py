@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import flet as ft
+
 from knowledge_agent.gui.evaluation.run_tab import RunTab
 
 
@@ -376,6 +378,37 @@ def test_divergent_suite_warns_and_confirms(fake_app: MagicMock, tmp_path):
 
         asyncio.run(_click())
     confirm.assert_called_once()
+
+
+def _preview_tab_labels(tab: RunTab) -> list[str]:
+    """The labels of the case-preview tabs (the TabBar in the right column)."""
+    tabs = tab.case_pane.content
+    assert isinstance(tabs, ft.Tabs)
+    return [t.label for t in tabs.content.controls[0].tabs]
+
+
+def test_case_preview_one_tab_per_suite_member(fake_app: MagicMock, tmp_path):
+    """The right column shows one preview tab per suite member, labelled by its
+    strategy suffix (…__vector → 'vector')."""
+    _suite_variant(tmp_path / "s__vector.json", "c__v", "lancedb_only", ["s"])
+    _suite_variant(tmp_path / "s__graph.json", "c__g", "neo4j_only", ["s"])
+    tab, _ = _run_tab(fake_app)
+    fake_app.gui_config.corpus_config_path = tmp_path / "corpus.toml"
+    tab._refresh_suite_options()
+    tab.suite_dd.value = "s"
+    tab._on_suite_dd_change(MagicMock())
+    assert _preview_tab_labels(tab) == ["graph", "vector"]  # sorted members
+
+
+def test_case_preview_single_file_one_tab(fake_app: MagicMock, tmp_path):
+    """A single file previews as one tab, labelled by its stem."""
+    v = _suite_variant(tmp_path / "solo.json", "c", "lancedb_only", [])
+    tab, _ = _run_tab(fake_app)
+    fake_app.gui_config.corpus_config_path = tmp_path / "corpus.toml"
+    tab.dataset_field.value = str(v)
+    tab._load_dataset_state(v)
+    tab._refresh_case_view()
+    assert _preview_tab_labels(tab) == ["solo"]
 
 
 def _suite_variant(

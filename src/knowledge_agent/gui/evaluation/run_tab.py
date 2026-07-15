@@ -95,8 +95,10 @@ class RunTab:
         # Read-only echoes derived from the ACTIVE corpus — refreshed live on
         # an app-wide corpus switch (see `refresh_active_corpus`).
         self.output_line: ft.Text | None = None
-        # Right column: read-only preview of the selected dataset's cases.
-        self.case_list: ft.Column | None = None
+        # Right column: read-only case preview — a TabBar with one tab per
+        # selected file (each suite member, or the single file), rebuilt on every
+        # selection change. The container holds the current tabs widget.
+        self.case_pane: ft.Container | None = None
         # Selection: EITHER a named suite (the Suite dropdown) OR a single file
         # (Browse) — mutually exclusive, Ingest-style. A suite is the corpus
         # files sharing a named `suites` tag (same facts, swept knobs); the
@@ -356,16 +358,11 @@ class RunTab:
         # "exactly what will run". Populated now + on every dataset change.
         # Read-only (no on_edit/on_delete) keeps runs comparable; how many
         # actually run is the deterministic top-N set by Max cases.
-        self.case_list = ft.Column(
-            controls=self._case_controls(),
-            scroll=ft.ScrollMode.AUTO,
-            expand=True,
-            spacing=6,
-        )
+        self.case_pane = ft.Container(content=self._build_case_tabs(), expand=True)
         left_pane = panel_box(form, width=LEFT_COLUMN_WIDTH)
         right_pane = panel_box(
             ft.Column(
-                [self.case_list],
+                [self.case_pane],
                 expand=True,
                 spacing=8,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
@@ -394,8 +391,11 @@ class RunTab:
                                 self.app,
                                 title="Test cases",
                                 text=(
-                                    "Read-only preview of the selected dataset's "
-                                    "cases — exactly what will run. Max cases runs "
+                                    "Read-only preview of what will run — one tab "
+                                    "per suite member (labelled by its retrieval "
+                                    "strategy), or a single tab for a single file. "
+                                    "The tabs share the same facts; the strategy "
+                                    "label is the knob difference. Max cases runs "
                                     "the first N, top-down; leave it blank to run all."
                                 ),
                             ),
@@ -423,37 +423,72 @@ class RunTab:
 
     # ---- dataset case preview (right column) ------------------------------
 
-    def _case_controls(self) -> list[ft.Control]:
-        """Load the selected dataset's cases as read-only cards (or a hint /
-        error). Best-effort — a bad path shows a message, never raises. In suite
-        mode it previews the first member (R6 will show every member as a tab)."""
-        if self._suite_name is not None and self._suite_paths:
-            path_str = str(self._suite_paths[0])
-        else:
-            path_str = (self.dataset_field.value or "").strip() if self.dataset_field else ""
-        if not path_str:
-            return [
-                ft.Text(
-                    "Pick a suite or a dataset to preview its cases.",
-                    italic=True,
-                    color=ft.Colors.GREY_500,
-                )
-            ]
+    @staticmethod
+    def _member_label(path: Path) -> str:
+        """A short tab label for a preview member — its strategy suffix (a
+        generated member is `<suite>__<strategy>.json`, so `…__vector` → 'vector')
+        when present, else the file stem."""
+        stem = path.stem
+        if "__" in stem:
+            suffix = stem.rsplit("__", 1)[-1]
+            if suffix:
+                return suffix
+        return stem
+
+    def _case_cards_for(self, path: Path) -> list[ft.Control]:
+        """One member's cases as read-only cards (or an inline error). Best-effort
+        — a bad path shows a message, never raises."""
         from knowledge_agent.evaluation.models import load_dataset
 
         try:
-            ds = load_dataset(Path(path_str))
+            ds = load_dataset(path)
         except Exception as exc:  # broad: any parse/IO error → inline message
             return [ft.Text(f"Could not load dataset: {exc}", color=ft.Colors.RED_300)]
-        # detailed=True: no edit form on this tab, so surface every gold field
-        # on the card ("all the information for each case").
+        # detailed=True: no edit form on this tab, so surface every gold field on
+        # the card ("all the information for each case").
         return render_case_cards(ds.cases, detailed=True, empty_hint="This dataset has no cases.")
 
+    def _build_case_tabs(self) -> ft.Control:
+        """The read-only case preview: a TabBar with one tab per selected file —
+        each suite member (labelled by its strategy) or the single file. Nothing
+        selected ⇒ a hint. Rebuilt whole on every selection change."""
+        members = self._selected_paths()
+        if not members:
+            return ft.Column(
+                controls=[
+                    ft.Text(
+                        "Pick a suite or a dataset to preview its cases.",
+                        italic=True,
+                        color=ft.Colors.GREY_500,
+                    )
+                ],
+                expand=True,
+            )
+        bar = ft.TabBar(tabs=[ft.Tab(label=self._member_label(p)) for p in members], secondary=True)
+        bodies = ft.TabBarView(
+            controls=[
+                ft.Column(
+                    controls=self._case_cards_for(p),
+                    scroll=ft.ScrollMode.AUTO,
+                    expand=True,
+                    spacing=6,
+                )
+                for p in members
+            ],
+            expand=True,
+        )
+        return ft.Tabs(
+            length=len(members),
+            selected_index=0,
+            content=ft.Column([bar, bodies], expand=True, spacing=0),
+            expand=True,
+        )
+
     def _refresh_case_view(self) -> None:
-        """Re-render the read-only case preview from the current dataset path."""
-        if self.case_list is None:
+        """Rebuild the per-member case-preview tabs for the current selection."""
+        if self.case_pane is None:
             return
-        self.case_list.controls = self._case_controls()
+        self.case_pane.content = self._build_case_tabs()
         self.app.page.update()
 
     # ---- recipe freeze/unfreeze -------------------------------------------
@@ -626,9 +661,10 @@ class RunTab:
         if self.divergence_warning is not None:
             self.divergence_warning.visible = self._suite_name is not None and self._suite_diverged
 
-    def _frozen_scope_paths(self) -> list[Path]:
-        """The files freeze / unfreeze act on: every member of the selected suite,
-        or the single browsed file (empty when nothing is selected)."""
+    def _selected_paths(self) -> list[Path]:
+        """The dataset files the current selection refers to: every member of the
+        selected suite, or the single browsed file (empty when nothing is
+        selected). Drives BOTH the case preview (a tab each) and freeze/unfreeze."""
         if self._suite_name is not None:
             return list(self._suite_paths)
         if self.dataset_field and self.dataset_field.value:
@@ -643,7 +679,7 @@ class RunTab:
         """Unfreeze the selection — a deliberate, confirmed action that clears the
         frozen flag across the scope (a single file, or every member of the
         selected suite) so the recipe can change again."""
-        paths = self._frozen_scope_paths()
+        paths = self._selected_paths()
         if not paths:
             return
         from knowledge_agent.gui.evaluation._common import confirm_dialog
@@ -663,7 +699,7 @@ class RunTab:
     def _do_unfreeze(self) -> None:
         from knowledge_agent.evaluation.models import load_dataset, save_dataset
 
-        paths = self._frozen_scope_paths()
+        paths = self._selected_paths()
         if not paths:
             return
         try:
@@ -687,7 +723,7 @@ class RunTab:
         are final (the checkbox enforces it too)."""
         from knowledge_agent.evaluation.models import load_dataset, save_dataset
 
-        paths = self._frozen_scope_paths()
+        paths = self._selected_paths()
         if not paths:
             return
         recipe = self.recipe_form.to_recipe() if self.recipe_form else None
