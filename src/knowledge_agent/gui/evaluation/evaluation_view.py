@@ -39,6 +39,7 @@ from knowledge_agent.gui.evaluation.run_tab import RunTab
 from knowledge_agent.gui.evaluation.trends_tab import TrendsTab
 
 if TYPE_CHECKING:
+    from knowledge_agent.evaluation.runner import SuiteRunResult
     from knowledge_agent.gui.app import GuiApp
 
 
@@ -144,4 +145,16 @@ class EvaluationView:
         self.run_summary_tab.refresh()
         if self._tabs is not None:
             self._tabs.selected_index = SUB_TAB_LABELS.index("Run Summary")
+            self.app.page.update()
+
+    def on_suite_complete(self, suite: SuiteRunResult) -> None:
+        """A suite run finished: load its members into the Compare picker + jump
+        to Compare. Each member RunResult contributes its (dataset_name, run_id),
+        so the Compare tab shows the whole sweep side by side."""
+        self.compare_selected = [
+            {"dataset": r.report.get("dataset_name"), "run_id": r.run_id} for r in suite.results
+        ]
+        self.compare_tab.refresh()
+        if self._tabs is not None:
+            self._tabs.selected_index = SUB_TAB_LABELS.index("Compare Datasets")
             self.app.page.update()

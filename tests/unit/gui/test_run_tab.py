@@ -207,6 +207,100 @@ def test_trace_toggle_reveals_warning_and_enables_project(fake_app: MagicMock):
     assert tab._project_row.disabled is False
 
 
+# ---- run scope: single file vs whole suite (step 3) ----
+
+
+def _knob_variant(path, cid, mode, *, question="q?"):
+    """A dataset with one case: `question` + a pinned retrieval mode (a knob
+    sweep member). All required knobs pinned so the file is runnable."""
+    from knowledge_agent.evaluation.models import (
+        EvalCase,
+        EvalDataset,
+        RetrievalSettings,
+        save_dataset,
+    )
+
+    save_dataset(
+        EvalDataset(
+            cases=[
+                EvalCase(
+                    id=cid,
+                    question=question,
+                    expected_sources=["d1"],
+                    retrieval=RetrievalSettings(
+                        retrieval_mode=mode,
+                        num_candidates=100,
+                        rrf_rank_constant=60,
+                        kg_max_rows=50,
+                    ),
+                )
+            ]
+        ),
+        path,
+    )
+    return path
+
+
+def test_suite_members_groups_same_facts(fake_app: MagicMock, tmp_path):
+    """_suite_members returns the corpus files sharing the picked file's facts
+    (same questions+gold, swept knobs) — including the picked one — and just
+    [picked] for a lone (unique-facts) dataset."""
+    vec = _knob_variant(tmp_path / "facts_vector.json", "c__vector", "lancedb_only")
+    graph = _knob_variant(tmp_path / "facts_graph.json", "c__graph", "neo4j_only")
+    _knob_variant(tmp_path / "other.json", "x", "lancedb_only", question="DIFFERENT?")
+    tab, _ = _run_tab(fake_app)
+    fake_app.gui_config.corpus_config_path = tmp_path / "corpus.toml"  # dir = tmp_path
+
+    assert {p.name for p in tab._suite_members(vec)} == {"facts_vector.json", "facts_graph.json"}
+    assert {p.name for p in tab._suite_members(graph)} == {"facts_vector.json", "facts_graph.json"}
+    assert [p.name for p in tab._suite_members(tmp_path / "other.json")] == ["other.json"]
+
+
+def test_run_scope_reflects_suite_members(fake_app: MagicMock, tmp_path):
+    """Loading a dataset with siblings enables 'Whole suite' + names them; a
+    lone dataset disables it and snaps the mode back to single."""
+    vec = _knob_variant(tmp_path / "facts_vector.json", "c__vector", "lancedb_only")
+    _knob_variant(tmp_path / "facts_graph.json", "c__graph", "neo4j_only")
+    lone = _knob_variant(tmp_path / "lone.json", "z", "lancedb_only", question="ONLY?")
+    tab, _ = _run_tab(fake_app)
+    fake_app.gui_config.corpus_config_path = tmp_path / "corpus.toml"
+
+    def _suite_radio():
+        return next(r for r in tab.suite_mode.content.controls if r.value == "suite")
+
+    tab.dataset_field.value = str(vec)
+    tab._load_dataset_state(vec)
+    assert _suite_radio().disabled is False  # ≥2 members → enabled
+    assert "2 files" in tab.suite_hint.value
+
+    tab.suite_mode.value = "suite"
+    tab.dataset_field.value = str(lone)
+    tab._load_dataset_state(lone)
+    assert _suite_radio().disabled is True  # lone → disabled
+    assert tab.suite_mode.value == "single"  # and snapped back
+
+
+def test_execute_run_suite_branch_calls_run_suite_and_opens_compare(fake_app: MagicMock):
+    """With 'Whole suite' selected + ≥2 members, _execute_run calls run_suite
+    with one config per member and hands the outcome to on_suite_complete."""
+    from pathlib import Path
+
+    tab, coordinator = _run_tab(fake_app)
+    tab._suite_paths = [Path("a.json"), Path("b.json")]
+    tab.suite_mode.value = "suite"
+    tab._build_config = MagicMock(side_effect=lambda p=None: f"cfg:{p}")
+    fake_suite = MagicMock(results=[MagicMock(run_id=1), MagicMock(run_id=2)])
+    with patch(
+        "knowledge_agent.evaluation.runner.run_suite",
+        new_callable=AsyncMock,
+        return_value=fake_suite,
+    ) as suite_mock:
+        asyncio.run(tab._execute_run())
+    suite_mock.assert_awaited_once()
+    assert len(suite_mock.await_args.args[0]) == 2  # one config per member
+    coordinator.on_suite_complete.assert_called_once_with(fake_suite)
+
+
 def test_trace_toggle_warns_when_no_langsmith_key(fake_app: MagicMock):
     """Ticking tracing with no LangSmith key set surfaces the hint right away
     — not only when the run is blocked later."""

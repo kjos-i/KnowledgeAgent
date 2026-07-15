@@ -63,3 +63,24 @@ def test_selecting_view_tab_auto_refreshes(fake_app: MagicMock):
 def test_evaluation_view_selected_run_defaults_none(fake_app: MagicMock):
     assert EvaluationView(fake_app).selected_run_id is None
     assert EvaluationView(fake_app).selected_dataset is None
+
+
+def test_on_suite_complete_loads_compare_and_switches(fake_app: MagicMock):
+    """A finished suite loads its members (dataset_name, run_id) into the Compare
+    picker and jumps to the Compare Datasets tab."""
+    view = EvaluationView(fake_app)
+    view.build()
+    view.compare_tab.refresh = MagicMock()
+    suite = MagicMock(
+        results=[
+            MagicMock(run_id=1, report={"dataset_name": "facts_vector"}),
+            MagicMock(run_id=2, report={"dataset_name": "facts_graph"}),
+        ]
+    )
+    view.on_suite_complete(suite)
+    assert view.compare_selected == [
+        {"dataset": "facts_vector", "run_id": 1},
+        {"dataset": "facts_graph", "run_id": 2},
+    ]
+    view.compare_tab.refresh.assert_called_once()
+    assert view._tabs.selected_index == SUB_TAB_LABELS.index("Compare Datasets")

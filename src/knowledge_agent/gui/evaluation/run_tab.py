@@ -88,6 +88,12 @@ class RunTab:
         self.output_line: ft.Text | None = None
         # Right column: read-only preview of the selected dataset's cases.
         self.case_list: ft.Column | None = None
+        # Run scope: run just the picked file, OR its whole SUITE — the corpus
+        # files sharing its facts_hash (same facts, swept knobs). `_suite_paths`
+        # is recomputed on every dataset load; the radio + hint reflect it.
+        self.suite_mode: ft.RadioGroup | None = None
+        self.suite_hint: ft.Text | None = None
+        self._suite_paths: list[Path] = []
 
     def refresh_active_corpus(self) -> None:
         """Update the read-only output-path echo from the current active corpus.
@@ -228,6 +234,22 @@ class RunTab:
         self._project_row = labeled_field("LangSmith project", self.project_field)
         self._project_row.disabled = True
 
+        # Run scope: this file vs the whole suite (siblings sharing facts_hash).
+        # The 'Whole suite' radio is disabled until a dataset with ≥2 members is
+        # loaded (see `_refresh_suite_mode`); the hint spells out the members.
+        self.suite_mode = ft.RadioGroup(
+            value="single",
+            on_change=self._on_suite_mode_change,
+            content=ft.Row(
+                [
+                    ft.Radio(value="single", label="This file"),
+                    ft.Radio(value="suite", label="Whole suite"),
+                ],
+                spacing=12,
+            ),
+        )
+        self.suite_hint = ft.Text("", size=12, color=ft.Colors.GREY_600, italic=True)
+
         self.run_button = ft.Button(
             "Run evaluation",
             icon=ft.Icons.PLAY_ARROW,
@@ -285,6 +307,8 @@ class RunTab:
                 section_divider(),
                 # ============ Section: Run ============
                 section_title("Run"),
+                labeled_field("Run scope", self.suite_mode),
+                self.suite_hint,
                 ft.Row(
                     [self.run_button, self.freeze_check, self.progress],
                     spacing=12,
@@ -361,6 +385,8 @@ class RunTab:
             spacing=12,
             vertical_alignment=ft.CrossAxisAlignment.STRETCH,
         )
+        # No dataset yet → 'Whole suite' disabled, hint blank.
+        self._refresh_suite_mode()
         return ft.Column(
             controls=[header, body],
             expand=True,
@@ -418,6 +444,7 @@ class RunTab:
         if self.recipe_form is not None:
             self.recipe_form.load(recipe)
         self._apply_frozen_ui()
+        self._refresh_suite_mode()
 
     def _apply_frozen_ui(self) -> None:
         """Sync every run setting to the dataset's status + frozen flag. Frozen
@@ -446,6 +473,80 @@ class RunTab:
             self.unfreeze_button.disabled = not frozen
         if self.frozen_indicator is not None:
             self.frozen_indicator.visible = frozen
+
+    # ---- run scope: single file vs whole suite ----------------------------
+
+    def _suite_members(self, picked: Path) -> list[Path]:
+        """The dataset files in the active corpus folder that share `picked`'s
+        facts_hash — the members of its test-dataset suite (same facts, swept
+        knobs). Always includes `picked`; returns just [picked] when it has no
+        siblings. Unparseable / hashless files are skipped."""
+        from knowledge_agent.evaluation.models import compute_facts_hash, load_cases
+        from knowledge_agent.gui.evaluation._common import active_corpus_dir
+
+        def _facts(path: Path) -> str | None:
+            try:
+                return compute_facts_hash(load_cases(path))
+            except Exception:  # broad: a bad file just isn't a suite member
+                return None
+
+        target = _facts(picked)
+        corpus_dir = active_corpus_dir(self.app)
+        if target is None or corpus_dir is None or not corpus_dir.is_dir():
+            return [picked]
+        members = [p for p in sorted(corpus_dir.glob("*.json")) if _facts(p) == target]
+        if not any(p.resolve() == picked.resolve() for p in members):
+            members.append(picked)
+        return members
+
+    def _refresh_suite_mode(self) -> None:
+        """Recompute the current dataset's suite members + reflect them in the
+        run-scope radio/hint. <2 members ⇒ 'Whole suite' is disabled and the
+        mode snaps back to single. Freezing doesn't apply to a suite, so the
+        freeze checkbox greys while 'Whole suite' is selected."""
+        path_str = (self.dataset_field.value or "").strip() if self.dataset_field else ""
+        self._suite_paths = self._suite_members(Path(path_str)) if path_str else []
+        n = len(self._suite_paths)
+        available = n >= 2
+        if self.suite_mode is not None:
+            for radio in self.suite_mode.content.controls:
+                if radio.value == "suite":
+                    radio.disabled = not available
+            if not available:
+                self.suite_mode.value = "single"
+        if self.suite_hint is not None:
+            if available:
+                names = ", ".join(p.stem for p in self._suite_paths)
+                self.suite_hint.value = f"Suite: {n} files with the same facts — {names}"
+            elif path_str:
+                self.suite_hint.value = "No sibling files with the same facts — single-file run."
+            else:
+                self.suite_hint.value = ""
+        self._sync_suite_freeze()
+
+    def _sync_suite_freeze(self) -> None:
+        """Freeze locks a recipe onto ONE dataset, so it's meaningless for a
+        suite run — grey the checkbox while 'Whole suite' is selected. Single
+        mode leaves the enabled state to `_apply_frozen_ui`."""
+        if self.freeze_check is None:
+            return
+        if self.suite_mode is not None and self.suite_mode.value == "suite":
+            self.freeze_check.value = False
+            self.freeze_check.disabled = True
+
+    def _on_suite_mode_change(self, _e: ft.Event | None = None) -> None:
+        # Restore the freeze/enabled baseline, then re-grey freeze if suite.
+        self._apply_frozen_ui()
+        self._sync_suite_freeze()
+        self.app.page.update()
+
+    def _suite_selected(self) -> bool:
+        """True when 'Whole suite' is chosen AND there are ≥2 members to run."""
+        return (
+            self.suite_mode is not None
+            and self.suite_mode.value == "suite"
+            and len(self._suite_paths) >= 2
+        )
 
     def _on_unfreeze_clicked(self, _e: ft.Event) -> None:
         """Unfreeze the dataset — a deliberate, confirmed action that clears the
@@ -612,26 +713,41 @@ class RunTab:
     async def _execute_run(self) -> None:
         from knowledge_agent.evaluation import runner
 
+        suite = self._suite_selected()
+        trace = bool(self.trace_check and self.trace_check.value)
+        project = (self.project_field.value or "").strip() if self.project_field else ""
         try:
-            cfg = self._build_config()
+            # Same recipe/overrides for every member; only the dataset path differs.
+            cfgs = [self._build_config(p) for p in self._suite_paths] if suite else None
+            cfg = None if suite else self._build_config()
         except Exception as exc:  # broad: report any bad form input in the status line
             self._set_status(f"config error: {exc}")
             return
         self._set_busy(True, "starting…")
         if self.progress is not None:
             self.progress.value = 0.0
-        trace = bool(self.trace_check and self.trace_check.value)
-        project = (self.project_field.value or "").strip() if self.project_field else ""
         try:
-            result = await runner.run(
-                cfg,
-                on_progress=self._on_progress,
-                trace=trace,
-                langsmith_project=project or None,
-            )
+            if suite:
+                outcome = await runner.run_suite(
+                    cfgs,
+                    on_run_complete=self._on_suite_progress,
+                    trace=trace,
+                    langsmith_project=project or None,
+                )
+            else:
+                result = await runner.run(
+                    cfg,
+                    on_progress=self._on_progress,
+                    trace=trace,
+                    langsmith_project=project or None,
+                )
         except Exception as exc:  # broad: one failed run must not crash the GUI
             logger.exception("eval run failed")
             self._set_busy(False, f"run failed: {exc}")
+            return
+        if suite:
+            self._set_busy(False, f"done: suite of {len(outcome.results)} runs — opening Compare.")
+            self.coordinator.on_suite_complete(outcome)
             return
         summary = result.report.get("summary", {})
         froze = bool(self.freeze_check and self.freeze_check.value)
@@ -646,7 +762,13 @@ class RunTab:
             self._freeze_dataset()
         self.coordinator.on_run_complete(result.run_id)
 
-    def _build_config(self) -> EvalConfig:
+    def _on_suite_progress(self, done: int, total: int, _result: object) -> None:
+        """Advance the bar per completed member of a suite run (file-level)."""
+        if self.progress is not None:
+            self.progress.value = done / total if total else None
+        self._set_status(f"ran dataset {done}/{total}…")
+
+    def _build_config(self, dataset_path: Path | None = None) -> EvalConfig:
         from knowledge_agent.evaluation.config import load_eval_config
         from knowledge_agent.gui.evaluation._common import active_corpus_config_path
 
@@ -660,8 +782,13 @@ class RunTab:
             overrides["judge_threshold"] = recipe.judge_threshold
             overrides["metadata_match_threshold"] = recipe.metadata_match_threshold
             overrides["required_keyword_threshold"] = recipe.required_keyword_threshold
-        if self.dataset_field and self.dataset_field.value:
-            overrides["dataset_path"] = Path(self.dataset_field.value)
+        # A suite run passes each member's path explicitly; a single run reads
+        # the browsed dataset field. Same recipe/overrides for every member.
+        ds_path = dataset_path
+        if ds_path is None and self.dataset_field and self.dataset_field.value:
+            ds_path = Path(self.dataset_field.value)
+        if ds_path is not None:
+            overrides["dataset_path"] = ds_path
         corpus_path = active_corpus_config_path(self.app)
         if corpus_path:
             overrides["corpus_config_path"] = corpus_path
