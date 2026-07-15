@@ -135,6 +135,7 @@ def build_report(
     dataset_hash: str | None = None,
     facts_hash: str | None = None,
     recipe: EvalRecipe | None = None,
+    suite: str | None = None,
     suite_run_id: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the full report dict (what the ledger + JSON consume).
@@ -176,8 +177,10 @@ def build_report(
         # Filter/grouping tag for the dashboard — never read by scoring or the
         # pass-gate (the gates that ran are in `gate_thresholds` above).
         "recipe_hash": compute_recipe_hash(recipe),
-        # One "run the suite" stamps all its member runs with this shared launch
-        # timestamp; None for a single-file run. Grouping only — never scored.
+        # The named suite this run was executed as (None for a single-file run) +
+        # the shared launch timestamp stamped on all members of one suite run.
+        # Grouping only — never scored.
+        "suite": suite,
         "suite_run_id": suite_run_id,
         "prompts_snapshot": {
             "model_config": prov["model_config"],

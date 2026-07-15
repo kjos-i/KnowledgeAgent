@@ -209,6 +209,11 @@ class DatasetTab:
             tooltip="Start a new empty dataset in the corpus folder",
             on_click=self._on_new_dataset,
         )
+        generate_suite_button = ft.Button(
+            content=centered_label("Generate suite…"),
+            tooltip="Clone this dataset into a knob-sweep suite — one file per retrieval strategy",
+            on_click=self._on_generate_suite,
+        )
         # Status = the whole dataset's authoring state; radios side by side.
         # Dropping to draft clears any frozen lock (frozen requires final).
         self.status_group = ft.RadioGroup(
@@ -420,7 +425,9 @@ class DatasetTab:
                     labeled_field(
                         "Dataset",
                         self.dataset_field,
-                        trailing=ft.Row([browse_button, new_dataset_button], spacing=6),
+                        trailing=ft.Row(
+                            [browse_button, new_dataset_button, generate_suite_button], spacing=6
+                        ),
                     ),
                     labeled_field("Status", self.status_group),
                     ft.Row(
@@ -797,6 +804,93 @@ class DatasetTab:
         self._clear_form()
         self._render_list()
         self._render_preview()
+
+    def _on_generate_suite(self, _e: ft.Event) -> None:
+        """Clone the current dataset into a knob-sweep SUITE — one file per
+        retrieval strategy (same facts, forced knobs), all tagged into a named
+        suite, written to the corpus folder. The current dataset is the master."""
+        from knowledge_agent.evaluation.suite_gen import STRATEGIES
+        from knowledge_agent.gui.evaluation._common import active_corpus_dir
+
+        if self._dataset is None or not self._dataset.cases:
+            self._set_status("Open a dataset with cases first — it's the suite's master facts.")
+            return
+        folder = active_corpus_dir(self.app) or (self._path.parent if self._path else Path.cwd())
+        default = f"{(self._path.stem if self._path else self._dataset.name) or 'suite'}-sweep"
+        name_field = ft.TextField(label="Suite name", value=default)
+        checks = {s: ft.Checkbox(label=s, value=True) for s in STRATEGIES}
+        error = ft.Text("", size=12, color=ft.Colors.RED_300, visible=False)
+
+        def _show_error(msg: str) -> None:
+            error.value = msg
+            error.visible = True
+            self.app.page.update()
+
+        def _cancel(_ev: ft.Event) -> None:
+            self.app.page.pop_dialog()
+
+        def _generate(_ev: ft.Event) -> None:
+            suite = (name_field.value or "").strip()
+            chosen = [s for s, c in checks.items() if c.value]
+            if not suite:
+                _show_error("Enter a suite name.")
+                return
+            if not chosen:
+                _show_error("Pick at least one strategy.")
+                return
+            try:
+                written = self._write_suite(self._dataset, suite, chosen, folder)
+            except Exception as exc:  # broad: bad input / I-O → inline error, dialog stays
+                _show_error(f"could not generate: {exc}")
+                return
+            self.app.page.pop_dialog()
+            self._set_status(
+                f"generated suite “{suite}” — {len(written)} files: {', '.join(written)}"
+            )
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Generate knob-sweep suite"),
+            content=ft.Column(
+                [
+                    ft.Text(
+                        "Clones this dataset's facts into one file per strategy "
+                        "(same gold, different forced knobs), all tagged into the "
+                        "suite. Overwrites files of the same suite name.",
+                        size=12,
+                        color=ft.Colors.GREY_400,
+                    ),
+                    name_field,
+                    ft.Text("Strategies", size=12, weight=ft.FontWeight.BOLD),
+                    ft.Row(list(checks.values()), wrap=True),
+                    error,
+                ],
+                tight=True,
+                width=440,
+                spacing=8,
+            ),
+            actions=[
+                ft.TextButton("Cancel", on_click=_cancel),
+                ft.Button(content="Generate", on_click=_generate),
+            ],
+        )
+        self.app.page.show_dialog(dialog)
+        self.app.page.update()
+
+    def _write_suite(
+        self, master: EvalDataset, suite_name: str, strategies: list[str], folder: Path
+    ) -> list[str]:
+        """Generate + write the suite files to `folder`; return the written
+        filenames. Raises on bad input / I-O (the dialog surfaces it)."""
+        from knowledge_agent.evaluation.models import save_dataset
+        from knowledge_agent.evaluation.suite_gen import generate_suite
+
+        written: list[str] = []
+        for stem, ds in generate_suite(master, suite_name, strategies=strategies):
+            path = folder / f"{stem}.json"
+            save_dataset(ds, path)
+            written.append(path.name)
+        return written
 
     def _load(self, path: Path, *, refresh_page: bool = True) -> None:
         from knowledge_agent.evaluation.models import load_dataset

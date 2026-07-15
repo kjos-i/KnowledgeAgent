@@ -78,6 +78,7 @@ async def run(
     *,
     trace: bool = False,
     langsmith_project: str | None = None,
+    suite: str | None = None,
     suite_run_id: str | None = None,
 ) -> RunResult:
     """Execute one evaluation run end-to-end; return a `RunResult`.
@@ -168,6 +169,7 @@ async def run(
         dataset_hash=dataset_hash,
         facts_hash=facts_hash,
         recipe=dataset.recipe,
+        suite=suite,
         suite_run_id=suite_run_id,
     )
     json_path, csv_path = report_mod.write_report(report, cfg.output_dir)
@@ -180,25 +182,31 @@ async def run_suite(
     cfgs: list[EvalConfig],
     on_run_complete: Callable[[int, int, RunResult], None] | None = None,
     *,
+    suite: str | None = None,
     trace: bool = False,
     langsmith_project: str | None = None,
 ) -> SuiteRunResult:
     """Run every member of a test-dataset suite under ONE shared `suite_run_id`.
 
     Each `cfg` is one suite member — the SAME facts, a DIFFERENT pinned knob
-    setting. All N runs are stamped with a single launch timestamp so the
-    dashboard loads + compares them as one unit. Members run SEQUENTIALLY on
-    purpose: the graph is already concurrent within a run, and back-to-back keeps
-    the machine + code identical across members, so a metric difference between
-    them is attributable to the knob, not to drift. `on_run_complete(done, total,
-    result)` fires as each member finishes so a caller can advance a progress bar.
+    setting. All N runs are stamped with a single launch timestamp (and the
+    `suite` name they were run as) so the dashboard loads + compares them as one
+    unit. Members run SEQUENTIALLY on purpose: the graph is already concurrent
+    within a run, and back-to-back keeps the machine + code identical across
+    members, so a metric difference between them is attributable to the knob, not
+    to drift. `on_run_complete(done, total, result)` fires as each member finishes
+    so a caller can advance a progress bar.
     """
     suite_run_id = datetime.now(UTC).isoformat(timespec="seconds")
     total = len(cfgs)
     results: list[RunResult] = []
     for cfg in cfgs:
         result = await run(
-            cfg, trace=trace, langsmith_project=langsmith_project, suite_run_id=suite_run_id
+            cfg,
+            trace=trace,
+            langsmith_project=langsmith_project,
+            suite=suite,
+            suite_run_id=suite_run_id,
         )
         results.append(result)
         if on_run_complete is not None:

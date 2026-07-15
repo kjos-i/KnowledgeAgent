@@ -251,6 +251,18 @@ def test_facts_hash_order_independent():
     assert compute_facts_hash([a, b]) == compute_facts_hash([b, a])
 
 
+def test_dataset_suites_roundtrip_and_excluded_from_hash(tmp_path):
+    """A dataset's `suites` membership (multi-valued) round-trips through
+    save/load and does NOT move the content hash — it's header-only, so tagging a
+    file into suites can't change its facts identity."""
+    cases = [EvalCase(id="a", question="q?")]
+    p = tmp_path / "d.json"
+    save_dataset(EvalDataset(suites=["mode-sweep", "topk-sweep"], cases=cases), p)
+    loaded = load_dataset(p)
+    assert loaded.suites == ["mode-sweep", "topk-sweep"]
+    assert compute_dataset_hash(loaded.cases) == compute_dataset_hash(cases)
+
+
 # ---- recipe (C2) ----
 
 

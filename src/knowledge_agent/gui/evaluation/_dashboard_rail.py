@@ -62,8 +62,10 @@ def dataset_of(run: dict[str, Any]) -> str:
 
 
 def _suite_key(run: dict[str, Any]) -> str:
-    """The run's suite identity — its `facts_hash`, or the legacy sentinel."""
-    return run.get("facts_hash") or _NO_SUITE
+    """The run's suite identity for grouping — the named `suite` it was executed
+    as, else its `facts_hash` (fallback auto-grouping for untagged / legacy
+    runs), else the legacy sentinel."""
+    return run.get("suite") or run.get("facts_hash") or _NO_SUITE
 
 
 def _run_label(run: dict[str, Any]) -> str:
@@ -151,15 +153,18 @@ class DashboardRail:
         self._sync_controls()
 
     def _suites(self) -> list[tuple[str, str]]:
-        """The distinct suites in the corpus as (key, label). A suite groups the
-        runs sharing a `facts_hash` (same facts, swept knobs); its label lists the
-        member dataset names. Legacy runs with no facts_hash fall under one
-        '(no suite)' group. Order follows first appearance (list_runs is newest
-        first)."""
+        """The distinct suites in the corpus as (key, label). A NAMED suite (runs
+        executed under a `suite` tag) is labelled by its name; an untagged group
+        (fallback: runs sharing a `facts_hash`) is labelled by its member dataset
+        names. Legacy runs with neither fall under one '(no suite)' group. Order
+        follows first appearance (list_runs is newest first)."""
         order: list[str] = []
         members: dict[str, list[str]] = {}
+        named: set[str] = set()
         for r in self._runs:
             key = _suite_key(r)
+            if r.get("suite"):
+                named.add(key)
             d = dataset_of(r)
             if key not in members:
                 members[key] = []
@@ -168,6 +173,9 @@ class DashboardRail:
                 members[key].append(d)
         out: list[tuple[str, str]] = []
         for key in order:
+            if key in named:
+                out.append((key, key))  # the human suite name
+                continue
             names = ", ".join(members[key])
             if len(names) > 40:
                 names = names[:39] + "…"

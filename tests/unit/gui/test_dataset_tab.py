@@ -516,6 +516,23 @@ def test_recipe_loaded_from_dataset(fake_app, tmp_path):
     assert tab.recipe_form.threshold_fields["judge_threshold"].value == "0.9"
 
 
+def test_write_suite_generates_tagged_files(fake_app, tmp_path):
+    """_write_suite clones the master into one tagged file per chosen strategy —
+    each loadable, suffixed, and carrying the suite tag + forced knobs."""
+    from knowledge_agent.evaluation.models import EvalCase, EvalDataset, load_dataset
+
+    tab = _tab(fake_app)
+    master = EvalDataset(
+        name="escrt", cases=[EvalCase(id="c1", question="q?", expected_sources=["d1"])]
+    )
+    written = tab._write_suite(master, "escrt-sweep", ["vector", "graph"], tmp_path)
+    assert set(written) == {"escrt-sweep__vector.json", "escrt-sweep__graph.json"}
+    ds = load_dataset(tmp_path / "escrt-sweep__vector.json")
+    assert ds.suites == ["escrt-sweep"]
+    assert ds.cases[0].id == "c1__vector"
+    assert ds.cases[0].retrieval.retrieval_mode == "lancedb_only"
+
+
 def _frozen_file(tmp_path):
     """A final + frozen one-case dataset with a recipe; return its path."""
     from knowledge_agent.evaluation.models import EvalDataset, EvalRecipe, save_dataset

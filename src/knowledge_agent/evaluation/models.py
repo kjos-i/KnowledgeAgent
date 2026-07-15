@@ -365,6 +365,19 @@ class EvalDataset(BaseModel):
             "from `compute_dataset_hash`."
         ),
     )
+    suites: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The named suites this dataset belongs to. A suite is a knob-sweep — "
+            "files that share the SAME facts under different pinned knobs (e.g. "
+            "'escrt-mode-sweep'). A dataset can belong to SEVERAL suites (the same "
+            "knob-config file can be the baseline of two sweeps), so this is a "
+            "list. Empty = not explicitly grouped: the Run tab + dashboard then "
+            "fall back to facts_hash auto-grouping. MEMBERSHIP only — a single "
+            "RUN records which one suite it was executed as (the ledger `suite` "
+            "column). Header-only, so it's excluded from `compute_dataset_hash`."
+        ),
+    )
     cases: list[EvalCase] = Field(default_factory=list)
 
     @model_validator(mode="after")

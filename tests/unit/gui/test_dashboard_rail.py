@@ -129,6 +129,22 @@ def test_suite_scopes_datasets(fake_app, tmp_path):
     assert {o.key for o in rail.dataset_dd.options} == {"vec", "graph"}
 
 
+def test_named_suite_groups_by_name(fake_app, tmp_path):
+    """Runs stamped with a `suite` name group under that name (not facts_hash),
+    and the dropdown is labelled by the name."""
+    led = EvalLedger(tmp_path / "l.db")
+    r1 = _report("vec", "2026-07-01T09:00:00")
+    r1["suite"] = "mode-sweep"
+    r2 = _report("graph", "2026-07-02T09:00:00")
+    r2["suite"] = "mode-sweep"
+    led.save_run(r1)
+    led.save_run(r2)
+    rail, coord, _ = _rail(fake_app, led)
+    assert coord.selected_suite == "mode-sweep"  # keyed by the suite NAME
+    assert [(o.key, o.text) for o in rail.suite_dd.options] == [("mode-sweep", "mode-sweep")]
+    assert {o.key for o in rail.dataset_dd.options} == {"vec", "graph"}
+
+
 def test_selected_run_survives_refresh(fake_app, tmp_path):
     """Picking an older run then refreshing keeps it — refresh must not snap to
     the newest run (the reported bug)."""

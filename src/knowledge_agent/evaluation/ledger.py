@@ -83,12 +83,16 @@ _RUNS_TRAILING: list[tuple[str, str]] = [
     ("recipe_hash", "TEXT"),
     # Suite model (added 2026-07-15). `facts_hash` = SHA-256 of the cases' gold
     # content only (knobs + id EXCLUDED) → the identity SHARED by every member of
-    # a test-dataset suite (twin of `dataset_hash`, which is per-file). Groups the
-    # files that carry the same facts. `suite_run_id` = a shared launch timestamp
-    # stamped on all N runs of one "run the suite", so the dashboard loads +
-    # compares them as one unit; NULL for single-file runs. PROVENANCE / GROUPING
-    # ONLY — never read by scoring or the pass-gate.
+    # a test-dataset suite (twin of `dataset_hash`, which is per-file); the
+    # facts_hash-based fallback grouping when a run has no `suite`. `suite` = the
+    # NAMED suite this run was executed as (single; the dataset's `suites` list is
+    # multi-valued membership, but one run runs one suite) — the dashboard's
+    # primary grouping. `suite_run_id` = a shared launch timestamp stamped on all
+    # N runs of one "run the suite", so the dashboard loads + compares them as one
+    # unit; NULL for single-file runs. PROVENANCE / GROUPING ONLY — never read by
+    # scoring or the pass-gate.
     ("facts_hash", "TEXT"),
+    ("suite", "TEXT"),
     ("suite_run_id", "TEXT"),
 ]
 
@@ -211,6 +215,7 @@ class EvalLedger:
             "judge_models": json.dumps(report.get("judge_models", [])),
             "recipe_hash": report.get("recipe_hash"),
             "facts_hash": report.get("facts_hash"),
+            "suite": report.get("suite"),
             "suite_run_id": report.get("suite_run_id"),
         }
         for avg_key, _ in run_sql_columns():

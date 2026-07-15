@@ -150,7 +150,9 @@ def test_run_suite_shares_one_id_across_members(tmp_path, monkeypatch):
     seen: list[tuple[int, int]] = []
     suite = asyncio.run(
         RN.run_suite(
-            [cfg_v, cfg_g], on_run_complete=lambda done, total, _r: seen.append((done, total))
+            [cfg_v, cfg_g],
+            on_run_complete=lambda done, total, _r: seen.append((done, total)),
+            suite="mode-sweep",
         )
     )
 
@@ -161,10 +163,11 @@ def test_run_suite_shares_one_id_across_members(tmp_path, monkeypatch):
     with sqlite3.connect(out / "eval_ledger.db") as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT suite_run_id, facts_hash, dataset_hash FROM eval_runs ORDER BY run_id"
+            "SELECT suite, suite_run_id, facts_hash, dataset_hash FROM eval_runs ORDER BY run_id"
         ).fetchall()
-    # one shared suite_run_id across both members
+    # one shared suite_run_id + suite name across both members
     assert rows[0]["suite_run_id"] == rows[1]["suite_run_id"] == suite.suite_run_id
+    assert rows[0]["suite"] == rows[1]["suite"] == "mode-sweep"
     # same facts -> same facts_hash; different knobs -> different dataset_hash
     assert rows[0]["facts_hash"] == rows[1]["facts_hash"]
     assert rows[0]["dataset_hash"] != rows[1]["dataset_hash"]
