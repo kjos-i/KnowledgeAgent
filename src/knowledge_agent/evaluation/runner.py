@@ -104,6 +104,7 @@ async def run(
     from knowledge_agent.evaluation.models import (
         compute_dataset_hash,
         compute_facts_hash,
+        compute_knob_hash,
         load_dataset,
         validate_dataset,
     )
@@ -136,6 +137,9 @@ async def run(
     # shared by every member that carries the same facts. Same full-dataset scope
     # as dataset_hash (before max_cases truncation).
     facts_hash = compute_facts_hash(cases)
+    # knob_hash = per-case retrieval knobs only → what tells two suite members
+    # apart (same facts, different knobs). Same full-dataset scope.
+    knob_hash = compute_knob_hash(cases)
     if cfg.max_cases is not None:
         cases = cases[: cfg.max_cases]
     corpus_config = _load_corpus_config(cfg)
@@ -168,6 +172,7 @@ async def run(
         run_timestamp,
         dataset_hash=dataset_hash,
         facts_hash=facts_hash,
+        knob_hash=knob_hash,
         recipe=dataset.recipe,
         suite=suite,
         suite_run_id=suite_run_id,

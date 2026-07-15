@@ -134,6 +134,7 @@ def build_report(
     *,
     dataset_hash: str | None = None,
     facts_hash: str | None = None,
+    knob_hash: str | None = None,
     recipe: EvalRecipe | None = None,
     suite: str | None = None,
     suite_run_id: str | None = None,
@@ -141,12 +142,13 @@ def build_report(
     """Assemble the full report dict (what the ledger + JSON consume).
 
     `dataset_hash` (a SHA-256 of the scored dataset's cases) + `facts_hash` (a
-    SHA-256 of the gold content only, shared across a suite) are recorded as run
-    provenance next to `git_commit` — so a trend view can tell when the gold
-    itself changed. `recipe` (the dataset's saved recipe, if any) contributes
-    `recipe_hash` (its fingerprint — the twin of dataset_hash, so a run records
-    WHICH recipe it ran under). `suite_run_id` groups the members of one suite
-    execution.
+    SHA-256 of the gold content only, shared across a suite) + `knob_hash` (a
+    SHA-256 of the per-case retrieval knobs only, what tells suite members apart)
+    are recorded as run provenance next to `git_commit` — so a trend view can
+    tell when the gold or the knobs changed. `recipe` (the dataset's saved
+    recipe, if any) contributes `recipe_hash` (its fingerprint — the twin of
+    dataset_hash, so a run records WHICH recipe it ran under). `suite_run_id`
+    groups the members of one suite execution.
     """
     # Lazy imports: keep report's import path free of the judge module's
     # (potentially heavy) deps for the non-judge surfaces that import report.
@@ -169,6 +171,10 @@ def build_report(
         # Suite identity: the gold-content hash SHARED by every member of a
         # test-dataset suite (twin of dataset_hash, which is per-file).
         "facts_hash": facts_hash,
+        # Knob identity: the per-case retrieval-settings hash — what tells two
+        # suite members apart (same facts, different knobs). facts_hash ⊕
+        # knob_hash ≈ dataset_hash.
+        "knob_hash": knob_hash,
         "git_commit": prov["git_commit"],
         "llm_provider": model_config.get("llm_provider"),
         "synthesizer_model": model_config.get("synthesizer_model"),

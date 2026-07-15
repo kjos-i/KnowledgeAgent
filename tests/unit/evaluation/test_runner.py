@@ -163,13 +163,16 @@ def test_run_suite_shares_one_id_across_members(tmp_path, monkeypatch):
     with sqlite3.connect(out / "eval_ledger.db") as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT suite, suite_run_id, facts_hash, dataset_hash FROM eval_runs ORDER BY run_id"
+            "SELECT suite, suite_run_id, facts_hash, knob_hash, dataset_hash "
+            "FROM eval_runs ORDER BY run_id"
         ).fetchall()
     # one shared suite_run_id + suite name across both members
     assert rows[0]["suite_run_id"] == rows[1]["suite_run_id"] == suite.suite_run_id
     assert rows[0]["suite"] == rows[1]["suite"] == "mode-sweep"
-    # same facts -> same facts_hash; different knobs -> different dataset_hash
+    # same facts -> same facts_hash; different knobs -> different knob_hash AND
+    # dataset_hash (facts_hash ⊕ knob_hash ≈ dataset_hash)
     assert rows[0]["facts_hash"] == rows[1]["facts_hash"]
+    assert rows[0]["knob_hash"] != rows[1]["knob_hash"]
     assert rows[0]["dataset_hash"] != rows[1]["dataset_hash"]
 
 

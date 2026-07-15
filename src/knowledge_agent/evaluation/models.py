@@ -489,6 +489,26 @@ def compute_facts_hash(cases: list[EvalCase]) -> str:
     return hashlib.sha256("\n".join(items).encode("utf-8")).hexdigest()
 
 
+def compute_knob_hash(cases: list[EvalCase]) -> str:
+    """A stable SHA-256 fingerprint of the cases' RETRIEVAL KNOBS only — each
+    case's `retrieval` settings (mode / search mode / top_k / tuning knobs), with
+    the facts and everything else EXCLUDED.
+
+    The counterpart to `compute_facts_hash`: facts_hash says "same questions +
+    gold", knob_hash says "same retrieval settings". Together they are what tells
+    two suite MEMBERS apart — same facts, same run-settings, DIFFERENT knobs (one
+    forced to vector, one to graph…). Always defined: a case whose knobs are all
+    defaults hashes to a deterministic "defaults" value; a pinned / swept knob
+    moves it. Order-independent (cases sorted) and key-order-independent (sorted
+    keys), so it moves only when a knob changes — not when a case is reordered or
+    its facts edited. Contrast `compute_dataset_hash` (facts + knobs + id, unique
+    per file) and `compute_facts_hash` (gold only, shared across a suite):
+    conceptually `facts_hash ⊕ knob_hash ≈ dataset_hash`.
+    """
+    items = sorted(json.dumps(c.retrieval.model_dump(mode="json"), sort_keys=True) for c in cases)
+    return hashlib.sha256("\n".join(items).encode("utf-8")).hexdigest()
+
+
 def compute_recipe_hash(recipe: EvalRecipe | None) -> str | None:
     """A stable SHA-256 fingerprint of a dataset's recipe, or None when the
     dataset has no recipe.

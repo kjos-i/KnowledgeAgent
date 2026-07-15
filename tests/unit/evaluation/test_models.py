@@ -15,6 +15,7 @@ from knowledge_agent.evaluation.models import (
     append_case,
     compute_dataset_hash,
     compute_facts_hash,
+    compute_knob_hash,
     compute_recipe_hash,
     load_cases,
     load_dataset,
@@ -249,6 +250,41 @@ def test_facts_hash_order_independent():
     a = EvalCase(id="a", question="q1?")
     b = EvalCase(id="b", question="q2?")
     assert compute_facts_hash([a, b]) == compute_facts_hash([b, a])
+
+
+def test_knob_hash_tells_members_apart():
+    """knob_hash = the per-case retrieval knobs only — the twin of facts_hash. Two
+    cases with the SAME facts but DIFFERENT knobs share a facts_hash yet get
+    DIFFERENT knob_hashes (what tells suite members apart); flipping the gold
+    leaves knob_hash unchanged."""
+    base = EvalCase(
+        id="q1__vector",
+        question="q1?",
+        expected_sources=["d1"],
+        retrieval={"retrieval_mode": "lancedb_only", "top_k": 5},
+    )
+    sibling = EvalCase(
+        id="q1__graph",
+        question="q1?",
+        expected_sources=["d1"],
+        retrieval={"retrieval_mode": "neo4j_only", "top_k": 20},
+    )
+    kb = compute_knob_hash([base])
+    assert len(kb) == 64
+    # same facts, different knobs -> SAME facts_hash, DIFFERENT knob_hash
+    assert compute_facts_hash([base]) == compute_facts_hash([sibling])
+    assert compute_knob_hash([sibling]) != kb
+    # editing only the gold leaves the knobs (and knob_hash) untouched
+    regold = base.model_copy(update={"expected_sources": ["d2"]})
+    assert compute_knob_hash([regold]) == kb
+    # default knobs are deterministic (always defined, never empty)
+    assert len(compute_knob_hash([EvalCase(id="x", question="q?")])) == 64
+
+
+def test_knob_hash_order_independent():
+    a = EvalCase(id="a", question="q1?", retrieval={"top_k": 5})
+    b = EvalCase(id="b", question="q2?", retrieval={"top_k": 9})
+    assert compute_knob_hash([a, b]) == compute_knob_hash([b, a])
 
 
 def test_dataset_suites_roundtrip_and_excluded_from_hash(tmp_path):

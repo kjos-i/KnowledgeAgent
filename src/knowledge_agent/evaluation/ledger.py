@@ -92,6 +92,11 @@ _RUNS_TRAILING: list[tuple[str, str]] = [
     # unit; NULL for single-file runs. PROVENANCE / GROUPING ONLY — never read by
     # scoring or the pass-gate.
     ("facts_hash", "TEXT"),
+    # `knob_hash` (added 2026-07-15) = SHA-256 of the per-case retrieval knobs
+    # only — the twin of facts_hash that tells two suite members apart (same
+    # facts, swept knobs). facts_hash ⊕ knob_hash ≈ dataset_hash. PROVENANCE /
+    # DISPLAY ONLY — shown in the rail's three-hash panel; never scored.
+    ("knob_hash", "TEXT"),
     ("suite", "TEXT"),
     ("suite_run_id", "TEXT"),
 ]
@@ -215,6 +220,7 @@ class EvalLedger:
             "judge_models": json.dumps(report.get("judge_models", [])),
             "recipe_hash": report.get("recipe_hash"),
             "facts_hash": report.get("facts_hash"),
+            "knob_hash": report.get("knob_hash"),
             "suite": report.get("suite"),
             "suite_run_id": report.get("suite_run_id"),
         }

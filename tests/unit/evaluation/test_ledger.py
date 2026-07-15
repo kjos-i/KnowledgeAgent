@@ -186,10 +186,12 @@ def test_save_run_persists_facts_hash_and_suite_run_id(tmp_path):
     led = EvalLedger(tmp_path / "l.db")
     report = _report()
     report["facts_hash"] = "f" * 64
+    report["knob_hash"] = "k" * 64
     report["suite_run_id"] = "2026-07-15T10:00:00+00:00"
     led.save_run(report)
     run = led.list_runs()[0]
     assert run["facts_hash"] == "f" * 64
+    assert run["knob_hash"] == "k" * 64
     assert run["suite_run_id"] == "2026-07-15T10:00:00+00:00"
 
 
@@ -222,6 +224,7 @@ def test_save_run_filter_columns_default_when_absent(tmp_path):
         assert json.loads(run["judge_models"]) == []
         assert run["recipe_hash"] is None
         assert run["facts_hash"] is None
+        assert run["knob_hash"] is None
         assert run["suite_run_id"] is None
         case = conn.execute("SELECT * FROM eval_cases LIMIT 1").fetchone()
         assert case["origin"] is None  # _report()'s cases have no origin

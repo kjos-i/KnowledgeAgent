@@ -24,6 +24,7 @@ def _report(dataset: str, run_ts: str, facts: str = "sharedfacts") -> dict:
         "gate_thresholds": {"judge_threshold": 0.5},
         "judge_models": ["m1"],
         "recipe_hash": "abcdef1234567890",  # pragma: allowlist secret (fake test hash)
+        "knob_hash": "9876543210fedcba",  # pragma: allowlist secret (fake test hash)
         "llm_provider": "anthropic",
         "synthesizer_model": "claude-sonnet-5",
         "summary": {"case_count": 3, "pass_count": 2, "pass_rate": 0.66},
@@ -66,6 +67,7 @@ def test_context_shows_recipe_from_run_row(fake_app, tmp_path):
     lines = [c.value for c in rail.context.controls if hasattr(c, "value")]
     joined = " | ".join(lines)
     assert "Run settings hash: abcdef12" in lines  # 8-char prefix, truncated from the full 16
+    assert "Knobs hash: 98765432" in lines  # the three-hash story: facts / knobs / run-settings
     assert "chunk" in joined and "source" in joined  # enabled groups (ledger sorts them)
     assert "m1" in joined  # judge panel
     assert "claude-sonnet-5" in joined  # model

@@ -247,10 +247,14 @@ class DashboardRail:
         judges = _parse(run.get("judge_models")) or []
         rhash = run.get("recipe_hash")
         fhash = run.get("facts_hash")
+        khash = run.get("knob_hash")
+        # Three-hash provenance story: facts (the gold) / knobs (the retrieval
+        # settings that tell suite members apart) / run-settings (the recipe).
         lines: list[ft.Control] = [
             ft.Text("Run Information", weight=ft.FontWeight.BOLD, size=12),
             ft.Text(f"Dataset: {dataset_of(run)}", size=12),
             ft.Text(f"Facts hash: {fhash[:8] if fhash else '—'}", size=12),
+            ft.Text(f"Knobs hash: {khash[:8] if khash else '—'}", size=12),
             ft.Text(f"Run settings hash: {rhash[:8] if rhash else '—'}", size=12),
             ft.Text(f"Groups: {', '.join(groups) if groups else '(none)'}", size=12),
             ft.Text(f"Judges: {', '.join(judges) if judges else '(default)'}", size=12),
