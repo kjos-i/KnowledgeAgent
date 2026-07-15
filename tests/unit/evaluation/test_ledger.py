@@ -143,7 +143,7 @@ def test_save_run_persists_filter_columns(tmp_path):
 
 def test_save_run_persists_source_conversation(tmp_path):
     """A chat-sourced case's conversation is snapshotted into eval_cases as JSON
-    (display only — so Run Summary → Answer Detail can show it) and round-trips
+    (display only — so Run Summary → Case Details can show it) and round-trips
     via get_run_cases. A case with no conversation stores [] (not NULL / error)."""
     led = EvalLedger(tmp_path / "l.db")
     report = _report()
@@ -161,6 +161,27 @@ def test_save_run_persists_source_conversation(tmp_path):
     assert json.loads(cases[1]["source_conversation"]) == []  # absent → empty list
 
 
+def test_save_run_persists_case_settings(tmp_path):
+    """A case's retrieval settings are snapshotted into eval_cases as JSON
+    (display only — so Run Summary → Case Details can show them) and round-trip
+    via get_run_cases. A case with no settings stores NULL (not "{}" / error)."""
+    led = EvalLedger(tmp_path / "l.db")
+    report = _report()
+    report["results"][0]["case_settings"] = {
+        "retrieval_mode": "lancedb_only",
+        "top_k": 8,
+        "num_candidates": None,  # unpinned → global
+    }
+    # results[1] carries no case_settings key → stored as NULL.
+    led.save_run(report)
+    cases = led.get_run_cases(led.list_runs()[0]["run_id"])
+    settings = json.loads(cases[0]["case_settings"])
+    assert settings["retrieval_mode"] == "lancedb_only"
+    assert settings["top_k"] == 8
+    assert settings["num_candidates"] is None
+    assert cases[1]["case_settings"] is None  # absent → NULL
+
+
 def test_save_run_filter_columns_default_when_absent(tmp_path):
     """A bare / legacy report (no filter keys) stores NULL / empty-JSON, not
     an error — save_run reads the new keys defensively."""
@@ -176,6 +197,7 @@ def test_save_run_filter_columns_default_when_absent(tmp_path):
         assert run["recipe_hash"] is None
         case = conn.execute("SELECT * FROM eval_cases LIMIT 1").fetchone()
         assert case["origin"] is None  # _report()'s cases have no origin
+        assert case["case_settings"] is None  # absent → NULL (not "{}")
 
 
 def test_save_run_persists_per_metric_n(tmp_path):

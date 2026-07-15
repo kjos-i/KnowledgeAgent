@@ -211,7 +211,7 @@ class RunSummaryTab:
             section_divider(),
             self._metric_scores_by_case(cases),
             section_divider(),
-            self._answer_detail(cases),
+            self._case_details(cases),
         ]
 
     def _overview_row(self, run: dict[str, Any], prev_run: dict[str, Any] | None) -> ft.Control:
@@ -818,11 +818,12 @@ class RunSummaryTab:
             self._chart_host.content = self._draw_metric_chart(self._cases)
             self.app.page.update()
 
-    def _answer_detail(self, cases: list[dict[str, Any]]) -> ft.Control:
+    def _case_details(self, cases: list[dict[str, Any]]) -> ft.Control:
         """Per-case expandable panels: the question, the expected answer (the
-        run's joined `expected_answer_points`), the agent's answer, and quick
-        stats (judge score, latency, Hit@k). Expected + agent answers render as
-        markdown so an embedded Evidence section (headings, lists) formats."""
+        run's joined `expected_answer_points`), the agent's answer, quick stats
+        (judge score, latency, Hit@k), and the Case Settings the case ran under
+        (its retrieval knobs). Expected + agent answers render as markdown so an
+        embedded Evidence section (headings, lists) formats."""
         from knowledge_agent.evaluation.registry import metric_fmts
 
         if not cases:
@@ -856,6 +857,11 @@ class RunSummaryTab:
                     ),
                 ),
             ]
+            # The per-case retrieval settings this case ran under (NULL for runs
+            # predating the ledger column → block omitted).
+            settings = self._case_settings_block(c.get("case_settings"))
+            if settings is not None:
+                detail_controls.append(settings)
             # For origin="chat" cases only: show the conversation that produced
             # the question (provenance, snapshotted into the ledger at run time).
             conversation = self._conversation_block(c.get("source_conversation"))
@@ -874,7 +880,33 @@ class RunSummaryTab:
                     ],
                 )
             )
-        return ft.Column([self._section_header("Answer Detail"), *tiles], spacing=4)
+        return ft.Column([self._section_header("Case Details"), *tiles], spacing=4)
+
+    @staticmethod
+    def _case_settings_block(raw: Any) -> ft.Control | None:
+        """The per-case retrieval settings this case ran under, or None when the
+        run predates the ledger's `case_settings` column (old rows store NULL).
+        `raw` is the ledger's JSON string (a `RetrievalSettings` dump); each knob
+        is shown as a label/value cell. A nullable tuning knob left unpinned
+        (None) fell back to the live global setting, shown as 'global'."""
+        if not raw:
+            return None
+        try:
+            settings = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(settings, dict) or not settings:
+            return None
+        cells = [
+            RunSummaryTab._stat(
+                key.replace("_", " ").capitalize(),
+                "global" if value is None else str(value),
+            )
+            for key, value in settings.items()
+        ]
+        return RunSummaryTab._labeled_box(
+            "Case Settings", ft.Row(cells, wrap=True, spacing=28, run_spacing=10)
+        )
 
     @staticmethod
     def _conversation_block(raw: Any) -> ft.Control | None:

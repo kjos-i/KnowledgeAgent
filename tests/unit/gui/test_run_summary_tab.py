@@ -220,7 +220,26 @@ def test_conversation_block_none_when_empty_or_invalid():
     )
 
 
-def test_answer_detail_shows_conversation_only_for_chat_case(fake_app: MagicMock):
+def test_case_settings_block_renders_knobs():
+    """The block shows each stored knob as a label/value cell; a None (unpinned)
+    tuning knob reads 'global', and its label is prettified from the field name."""
+    raw = json.dumps({"retrieval_mode": "lancedb_only", "top_k": 8, "num_candidates": None})
+    block = RunSummaryTab._case_settings_block(raw)
+    assert block is not None
+    texts = _text_values(block)
+    assert "Case Settings" in texts
+    assert "Retrieval mode" in texts and "lancedb_only" in texts
+    assert "Top k" in texts and "8" in texts
+    assert "global" in texts  # None knob → "global"
+
+
+def test_case_settings_block_none_when_empty_or_invalid():
+    assert RunSummaryTab._case_settings_block(None) is None
+    assert RunSummaryTab._case_settings_block("{}") is None  # no knobs
+    assert RunSummaryTab._case_settings_block("not json") is None  # unparseable
+
+
+def test_case_details_shows_conversation_only_for_chat_case(fake_app: MagicMock):
     tab = RunSummaryTab(fake_app, coordinator=MagicMock(compare_kind="fact", compare_selected=[]))
     tab.build()
     cases = [
@@ -239,7 +258,7 @@ def test_answer_detail_shows_conversation_only_for_chat_case(fake_app: MagicMock
             "source_conversation": "[]",
         },
     ]
-    tiles = tab._answer_detail(cases).controls[1:]  # after the "Answer Detail" header
+    tiles = tab._case_details(cases).controls[1:]  # after the "Case Details" header
     assert any("Conversation (chat)" in s for s in _text_values(tiles[0]))  # chat case
     assert not any("Conversation (chat)" in s for s in _text_values(tiles[1]))  # non-chat
 

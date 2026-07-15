@@ -133,7 +133,7 @@ class ConversationTurn(BaseModel):
 
     Provenance only — kept so the exchange behind a chat-sourced case stays
     visible (in the dataset JSON and, snapshotted at run time, under Run
-    Summary → Answer Detail). Never read by scoring or the pass-gate.
+    Summary → Case Details). Never read by scoring or the pass-gate.
     """
 
     role: str = Field(description="Who spoke: 'user', 'assistant', or 'system'.")
@@ -208,7 +208,7 @@ class EvalCase(BaseModel):
             "For origin='chat' cases: the chat turns that produced the distilled "
             "question, kept as provenance. Empty otherwise. Ignored by scoring "
             "and the pass-gate (like `notes`); snapshotted into the ledger at run "
-            "time so it shows under Run Summary → Answer Detail."
+            "time so it shows under Run Summary → Case Details."
         ),
     )
     chat_router_model: str | None = Field(

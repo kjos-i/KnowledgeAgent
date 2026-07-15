@@ -98,9 +98,15 @@ _CASES_TRAILING: list[tuple[str, str]] = [
     # Case provenance: manual / llm / search / chat (added 2026-07-13). FILTER
     # ONLY — lets the dashboard compare origins; never read by scoring.
     ("origin", "TEXT"),
+    # Per-case retrieval settings this case ran under (added 2026-07-14): the
+    # RetrievalSettings dump (mode / search mode / top_k / tuning knobs), so Run
+    # Summary → Case Details shows exactly how each case was retrieved. JSON
+    # dict; NULL for runs recorded before this column existed. DISPLAY ONLY —
+    # never read by scoring or the pass-gate.
+    ("case_settings", "TEXT"),
     # Chat provenance for origin="chat" cases: the conversation turns that
     # produced the distilled question, snapshotted at run time so Run Summary →
-    # Answer Detail can show it. JSON list of {role, content}. DISPLAY ONLY —
+    # Case Details can show it. JSON list of {role, content}. DISPLAY ONLY —
     # never read by scoring or the pass-gate.
     ("source_conversation", "TEXT"),
 ]
@@ -215,6 +221,7 @@ class EvalLedger:
                     "expected_output": case.get("expected_output"),
                     "errors": json.dumps(case.get("errors", [])),
                     "origin": case.get("origin"),
+                    "case_settings": _json_or_none(case.get("case_settings")),
                     "source_conversation": json.dumps(case.get("source_conversation") or []),
                 }
                 for col, _ in case_sql_columns():

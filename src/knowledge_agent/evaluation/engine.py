@@ -173,6 +173,10 @@ async def evaluate_case(
         "category": case.category,
         "question": case.question,
         "origin": case.origin,
+        # The per-case retrieval settings this case ran under (mode / search
+        # mode / top_k / tuning knobs), snapshotted so Run Summary → Case
+        # Details can show exactly how each case was retrieved. Display only.
+        "case_settings": case.retrieval.model_dump(mode="json"),
         # Chat provenance (origin="chat"): as plain dicts so the ledger can JSON
         # it. Display only — never scored.
         "source_conversation": [t.model_dump() for t in case.source_conversation],

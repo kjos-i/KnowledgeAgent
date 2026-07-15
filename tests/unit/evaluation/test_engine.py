@@ -60,7 +60,7 @@ def test_evaluate_case_records_origin(monkeypatch):
 
 def test_evaluate_case_records_source_conversation(monkeypatch):
     """A chat case's conversation flows into the result dict as plain dicts, so
-    the ledger can JSON-snapshot it for Answer Detail. Display only, never scored."""
+    the ledger can JSON-snapshot it for Case Details. Display only, never scored."""
     case = EvalCase(
         id="c1",
         question="why did the valve fail?",
@@ -83,6 +83,16 @@ def test_evaluate_case_source_conversation_empty_for_non_chat(monkeypatch):
     _patch_run(monkeypatch, _run(answer="x"))
     result = asyncio.run(E.evaluate_case(case, None, EvalConfig()))
     assert result["source_conversation"] == []
+
+
+def test_evaluate_case_records_case_settings(monkeypatch):
+    """The case's retrieval settings flow into the result dict as a plain dict so
+    the ledger can JSON-snapshot them for Case Details. Display only."""
+    case = EvalCase(id="c1", question="q?", retrieval={"retrieval_mode": "neo4j_only", "top_k": 9})
+    _patch_run(monkeypatch, _run(answer="x"))
+    result = asyncio.run(E.evaluate_case(case, None, EvalConfig()))
+    assert result["case_settings"]["retrieval_mode"] == "neo4j_only"
+    assert result["case_settings"]["top_k"] == 9
 
 
 def test_evaluate_case_review_on_disallowed_keyword(monkeypatch):
