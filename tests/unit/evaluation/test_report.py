@@ -166,3 +166,27 @@ def test_write_report_creates_json_and_csv(tmp_path, monkeypatch):
 
 def test_filename_stamp():
     assert RP._filename_stamp("2026-07-05T10:00:00") == "20260705100000"
+
+
+def test_write_report_names_by_dataset_avoids_suite_collision(tmp_path, monkeypatch):
+    """Two suite members sharing a run timestamp write DISTINCT files (named by
+    dataset), and a same-name same-timestamp re-run gets a uniqueness suffix — so
+    no per-member report is silently overwritten."""
+    monkeypatch.setattr(
+        RP, "capture_provenance", lambda: {"git_commit": None, "model_config": {}, "prompts": {}}
+    )
+
+    def _rep(name):
+        r = RP.build_report(EvalConfig(), _results(), "2026-07-05T10:00:00")
+        r["dataset_name"] = name
+        return r
+
+    # same timestamp, different datasets -> two distinct, dataset-named files
+    j1, c1 = RP.write_report(_rep("facts_vector"), tmp_path)
+    j2, c2 = RP.write_report(_rep("facts_graph"), tmp_path)
+    assert j1 != j2 and c1 != c2
+    assert "facts_vector" in j1.name and "facts_graph" in j2.name
+    # same timestamp AND same dataset -> uniqueness counter keeps it distinct
+    j3, _ = RP.write_report(_rep("facts_vector"), tmp_path)
+    assert j3 != j1 and j3.exists() and j1.exists()
+    assert len(list(tmp_path.glob("eval_report_*.json"))) == 3

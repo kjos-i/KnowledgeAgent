@@ -199,12 +199,36 @@ def _filename_stamp(run_timestamp: str) -> str:
     return re.sub(r"[^0-9]", "", run_timestamp)[:14] or "unknown"
 
 
+def _dataset_slug(dataset_name: Any) -> str:
+    """A filename-safe `_<dataset>` fragment for the report name (empty when the
+    run has no dataset name). Keeps a SUITE's per-member reports from colliding
+    when two members finish in the same second (same timestamp)."""
+    safe = re.sub(r"[^0-9A-Za-z._-]+", "-", str(dataset_name or "").strip()).strip("-")
+    return f"_{safe}" if safe else ""
+
+
+def _unique_stem(output_dir: Path, base: str) -> str:
+    """`base`, or `base_2` / `base_3` … so neither the .json nor the .csv for
+    this run overwrites an existing report (guards the rare same-dataset,
+    same-second re-run, where the timestamp + name alone aren't unique)."""
+    stem, n = base, 1
+    while (output_dir / f"eval_report_{stem}.json").exists() or (
+        output_dir / f"eval_summary_{stem}.csv"
+    ).exists():
+        n += 1
+        stem = f"{base}_{n}"
+    return stem
+
+
 def write_report(report: dict[str, Any], output_dir: Path) -> tuple[Path, Path]:
-    """Write `eval_report_<ts>.json` + `eval_summary_<ts>.csv`; return paths."""
+    """Write `eval_report_<ts>_<dataset>.json` + `eval_summary_<ts>_<dataset>.csv`;
+    return paths. The dataset name (+ a uniqueness counter) keeps a suite's
+    per-member reports distinct even when they share a run timestamp."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    stamp = _filename_stamp(report["run_timestamp"])
-    json_path = output_dir / f"eval_report_{stamp}.json"
-    csv_path = output_dir / f"eval_summary_{stamp}.csv"
+    base = _filename_stamp(report["run_timestamp"]) + _dataset_slug(report.get("dataset_name"))
+    stem = _unique_stem(output_dir, base)
+    json_path = output_dir / f"eval_report_{stem}.json"
+    csv_path = output_dir / f"eval_summary_{stem}.csv"
     json_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
     _write_csv(csv_path, report["results"])
     return json_path, csv_path
