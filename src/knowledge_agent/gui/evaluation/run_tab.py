@@ -30,6 +30,8 @@ from knowledge_agent.gui._styles import (
     section_divider,
     section_title,
     sub_section_header,
+    sub_section_title,
+    thin_rule,
 )
 from knowledge_agent.gui._widgets.info_icon import info_icon
 from knowledge_agent.gui.config_store import get_api_key
@@ -88,15 +90,15 @@ class RunTab:
         self.output_line: ft.Text | None = None
         # Right column: read-only preview of the selected dataset's cases.
         self.case_list: ft.Column | None = None
-        # Run scope: run just the picked file, OR its whole SUITE. A suite is the
-        # corpus files sharing a named `suites` tag (same facts, swept knobs); a
-        # file can be in several, so `suite_select` picks which when there's more
-        # than one. Files with NO tag fall back to facts_hash auto-grouping (an
-        # unnamed suite). `_suite_paths` (members) + `_suite_name` are recomputed
-        # on every dataset load / suite pick; the radio + hint reflect them.
-        self.suite_mode: ft.RadioGroup | None = None
-        self.suite_select: ft.Dropdown | None = None
-        self.suite_hint: ft.Text | None = None
+        # Selection: EITHER a named suite (the Suite dropdown) OR a single file
+        # (Browse) — mutually exclusive, Ingest-style. A suite is the corpus
+        # files sharing a named `suites` tag (same facts, swept knobs); the
+        # dropdown lists every such name in the corpus, and picking one runs its
+        # members together (run_suite). Browsing a file runs that one file
+        # (run). `_suite_name` is the selected suite (None ⇒ single-file mode);
+        # `_suite_paths` its members. Both recomputed on every selection change.
+        self.suite_dd: ft.Dropdown | None = None
+        self.selection_hint: ft.Text | None = None
         self._suite_paths: list[Path] = []
         self._suite_name: str | None = None
 
@@ -112,6 +114,8 @@ class RunTab:
 
         if self.output_line is not None:
             self.output_line.value = f"Results save to: {active_output_dir(self.app)}"
+        # The named suites belong to the corpus, so re-scan them on a switch.
+        self._refresh_suite_options()
 
     # ---- build ------------------------------------------------------------
 
@@ -239,25 +243,14 @@ class RunTab:
         self._project_row = labeled_field("LangSmith project", self.project_field)
         self._project_row.disabled = True
 
-        # Run scope: this file vs the whole suite (siblings sharing facts_hash).
-        # The 'Whole suite' radio is disabled until a dataset with ≥2 members is
-        # loaded (see `_refresh_suite_mode`); the hint spells out the members.
-        self.suite_mode = ft.RadioGroup(
-            value="single",
-            on_change=self._on_suite_mode_change,
-            content=ft.Row(
-                [
-                    ft.Radio(value="single", label="This file"),
-                    ft.Radio(value="suite", label="Whole suite"),
-                ],
-                spacing=12,
-            ),
-        )
-        # Which suite to run — shown only when the picked file belongs to more
-        # than one named suite (a file can be a member of several).
-        self.suite_select = ft.Dropdown(label="Suite", options=[], width=260, visible=False)
-        self.suite_select.on_select = self._on_suite_select_change
-        self.suite_hint = ft.Text("", size=12, color=ft.Colors.GREY_600, italic=True)
+        # Suite dropdown — the corpus's named suites (scanned from files' `suites`
+        # tags). Picking one runs its members together; disabled when the corpus
+        # has none. Fires on_select (Flet 0.85), NOT on_change.
+        self.suite_dd = ft.Dropdown(label="Suite", options=[], width=260)
+        self.suite_dd.on_select = self._on_suite_dd_change
+        # One-line summary of what's currently selected (suite + members, or the
+        # single file). Sits under the two fields.
+        self.selection_hint = ft.Text("", size=12, color=ft.Colors.GREY_600, italic=True)
 
         self.run_button = ft.Button(
             "Run evaluation",
@@ -270,8 +263,15 @@ class RunTab:
         form = ft.Column(
             controls=[
                 # ============ Section: Evaluation cases ============
+                # Pick EITHER a named suite OR a single file (mutually exclusive,
+                # Ingest-style "…or…"). The choice decides suite vs single run.
                 section_title("Evaluation cases"),
+                sub_section_title("Run a suite"),
+                labeled_field("Suite", self.suite_dd),
+                thin_rule(),
+                sub_section_title("…or a single file"),
                 labeled_field("Dataset", self.dataset_field, trailing=browse_button),
+                self.selection_hint,
                 ft.Row(
                     [self.frozen_indicator, self.unfreeze_button],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -315,10 +315,9 @@ class RunTab:
                 self._project_row,
                 section_divider(),
                 # ============ Section: Run ============
+                # Scope (suite vs single) comes from the selection at the top, so
+                # one button runs whichever is set.
                 section_title("Run"),
-                labeled_field("Run scope", self.suite_mode),
-                self.suite_select,
-                self.suite_hint,
                 ft.Row(
                     [self.run_button, self.freeze_check, self.progress],
                     spacing=12,
@@ -395,8 +394,8 @@ class RunTab:
             spacing=12,
             vertical_alignment=ft.CrossAxisAlignment.STRETCH,
         )
-        # No dataset yet → 'Whole suite' disabled, hint blank.
-        self._refresh_suite_mode()
+        # Populate the Suite dropdown from the active corpus's named suites.
+        self._refresh_suite_options()
         return ft.Column(
             controls=[header, body],
             expand=True,
@@ -408,12 +407,16 @@ class RunTab:
 
     def _case_controls(self) -> list[ft.Control]:
         """Load the selected dataset's cases as read-only cards (or a hint /
-        error). Best-effort — a bad path shows a message, never raises."""
-        path_str = (self.dataset_field.value or "").strip() if self.dataset_field else ""
+        error). Best-effort — a bad path shows a message, never raises. In suite
+        mode it previews the first member (R6 will show every member as a tab)."""
+        if self._suite_name is not None and self._suite_paths:
+            path_str = str(self._suite_paths[0])
+        else:
+            path_str = (self.dataset_field.value or "").strip() if self.dataset_field else ""
         if not path_str:
             return [
                 ft.Text(
-                    "Pick a dataset to preview its cases.",
+                    "Pick a suite or a dataset to preview its cases.",
                     italic=True,
                     color=ft.Colors.GREY_500,
                 )
@@ -454,7 +457,7 @@ class RunTab:
         if self.recipe_form is not None:
             self.recipe_form.load(recipe)
         self._apply_frozen_ui()
-        self._refresh_suite_mode()
+        self._sync_selection_hint()
 
     def _apply_frozen_ui(self) -> None:
         """Sync every run setting to the dataset's status + frozen flag. Frozen
@@ -483,30 +486,9 @@ class RunTab:
             self.unfreeze_button.disabled = not frozen
         if self.frozen_indicator is not None:
             self.frozen_indicator.visible = frozen
+        self._sync_suite_freeze()
 
-    # ---- run scope: single file vs whole suite ----------------------------
-
-    def _facts_siblings(self, picked: Path) -> list[Path]:
-        """Corpus files sharing `picked`'s facts_hash — the FALLBACK suite for a
-        file with no explicit `suites` tag (same facts, swept knobs). Always
-        includes `picked`; unparseable / hashless files are skipped."""
-        from knowledge_agent.evaluation.models import compute_facts_hash, load_cases
-        from knowledge_agent.gui.evaluation._common import active_corpus_dir
-
-        def _facts(path: Path) -> str | None:
-            try:
-                return compute_facts_hash(load_cases(path))
-            except Exception:  # broad: a bad file just isn't a suite member
-                return None
-
-        target = _facts(picked)
-        corpus_dir = active_corpus_dir(self.app)
-        if target is None or corpus_dir is None or not corpus_dir.is_dir():
-            return [picked]
-        members = [p for p in sorted(corpus_dir.glob("*.json")) if _facts(p) == target]
-        if not any(p.resolve() == picked.resolve() for p in members):
-            members.append(picked)
-        return members
+    # ---- selection: named suite vs single file ----------------------------
 
     @staticmethod
     def _dataset_suites(path: Path) -> list[str]:
@@ -519,6 +501,19 @@ class RunTab:
         except Exception:  # broad: a bad file has no suites
             return []
 
+    def _corpus_suites(self) -> list[str]:
+        """Every named suite declared across the active corpus's dataset files —
+        the sorted union of their `suites` tags. Backs the Suite dropdown."""
+        from knowledge_agent.gui.evaluation._common import active_corpus_dir
+
+        corpus_dir = active_corpus_dir(self.app)
+        if corpus_dir is None or not corpus_dir.is_dir():
+            return []
+        names: set[str] = set()
+        for p in corpus_dir.glob("*.json"):
+            names.update(self._dataset_suites(p))
+        return sorted(names)
+
     def _members_for_suite(self, tag: str) -> list[Path]:
         """Corpus files whose `suites` header contains `tag` — the members of that
         named suite. Sorted for a stable run order."""
@@ -529,91 +524,84 @@ class RunTab:
             return []
         return [p for p in sorted(corpus_dir.glob("*.json")) if tag in self._dataset_suites(p)]
 
-    def _refresh_suite_mode(self) -> None:
-        """Recompute the 'whole suite' target for the current dataset. If the file
-        declares explicit `suites`, the Suite picker lists them and the members
-        are the files tagged with the chosen one; otherwise the suite is the
-        file's facts_hash siblings (an unnamed suite). <2 members ⇒ 'Whole suite'
-        is disabled + the mode snaps back to single. Freeze doesn't apply to a
-        suite, so it greys while 'Whole suite' is selected."""
-        path_str = (self.dataset_field.value or "").strip() if self.dataset_field else ""
-        picked = Path(path_str) if path_str else None
-        tags = self._dataset_suites(picked) if picked else []
-        if self.suite_select is not None:
-            self.suite_select.visible = len(tags) > 1  # only when there's a choice
-            self.suite_select.options = [ft.DropdownOption(key=t, text=t) for t in tags]
-            if self.suite_select.value not in tags:
-                self.suite_select.value = tags[0] if tags else None
-        if picked is None:
-            self._suite_name, self._suite_paths = None, []
-        elif tags:
-            self._suite_name = self.suite_select.value if self.suite_select else tags[0]
-            self._suite_paths = self._members_for_suite(self._suite_name)
-            if not any(p.resolve() == picked.resolve() for p in self._suite_paths):
-                self._suite_paths.append(picked)
-        else:
-            self._suite_name = None
-            self._suite_paths = self._facts_siblings(picked)
-        self._sync_suite_hint(picked)
-        self._sync_suite_radio()
-        self._sync_suite_freeze()
-
-    def _sync_suite_radio(self) -> None:
-        """Enable 'Whole suite' only when there are ≥2 members; else snap to single."""
-        available = len(self._suite_paths) >= 2
-        if self.suite_mode is not None:
-            for radio in self.suite_mode.content.controls:
-                if radio.value == "suite":
-                    radio.disabled = not available
-            if not available:
-                self.suite_mode.value = "single"
-
-    def _sync_suite_hint(self, picked: Path | None) -> None:
-        """Spell out what 'Whole suite' will run for the current selection."""
-        if self.suite_hint is None:
+    def _refresh_suite_options(self) -> None:
+        """Repopulate the Suite dropdown from the active corpus's named suites
+        (called on build + corpus switch). Disabled when the corpus has none;
+        drops a selection the corpus no longer offers."""
+        if self.suite_dd is None:
             return
-        n = len(self._suite_paths)
-        if picked is None:
-            self.suite_hint.value = ""
-        elif n >= 2:
-            names = ", ".join(p.stem for p in self._suite_paths)
-            label = f"suite “{self._suite_name}”" if self._suite_name else "same-facts files"
-            self.suite_hint.value = f"Whole suite = {n} {label}: {names}"
-        elif self._suite_name:
-            self.suite_hint.value = (
-                f"Suite “{self._suite_name}” has only this file — single-file run."
-            )
-        else:
-            self.suite_hint.value = "No sibling files with the same facts — single-file run."
+        suites = self._corpus_suites()
+        self.suite_dd.options = [ft.DropdownOption(key=s, text=s) for s in suites]
+        self.suite_dd.disabled = not suites
+        if self._suite_name is not None and self._suite_name not in suites:
+            self._suite_name, self._suite_paths = None, []
+            self.suite_dd.value = None
+            self._sync_selection_hint()
+            self._apply_frozen_ui()
 
-    def _on_suite_select_change(self, _e: ft.Event) -> None:
-        # Recompute the members for the newly chosen suite tag.
-        self._refresh_suite_mode()
+    def _on_suite_dd_change(self, _e: ft.Event) -> None:
+        """A named suite was picked → clear the single-file field (mutually
+        exclusive) and load the suite's members + shared recipe."""
+        if self.suite_dd is None or not self.suite_dd.value:
+            return
+        if self.dataset_field is not None:
+            self.dataset_field.value = ""  # mutual exclusion
+        self._load_suite_state(self.suite_dd.value)
+        self._refresh_case_view()
         self.app.page.update()
 
+    def _load_suite_state(self, name: str) -> None:
+        """Select the named suite `name`: resolve its members + load its shared
+        recipe into the form. (R5 takes the first member's recipe; R4 will add a
+        divergence warning when members disagree.) Freeze stays single-file-only,
+        so `_sync_suite_freeze` greys it here."""
+        from knowledge_agent.evaluation.models import load_dataset
+
+        self._suite_name = name
+        self._suite_paths = self._members_for_suite(name)
+        first = self._suite_paths[0] if self._suite_paths else None
+        recipe, status = None, "draft"
+        if first is not None:
+            try:
+                ds = load_dataset(first)
+                recipe, status = ds.recipe, ds.status
+            except Exception:  # broad: a bad member just yields the default recipe
+                pass
+        self._dataset_status = status
+        self._dataset_frozen = False  # a suite isn't frozen through this tab (R5)
+        if self.recipe_form is not None:
+            self.recipe_form.load(recipe)
+        self._apply_frozen_ui()
+        self._sync_selection_hint()
+
+    def _sync_selection_hint(self) -> None:
+        """One-line summary of the current selection — the suite + its members,
+        or the single file, or blank when nothing is picked."""
+        if self.selection_hint is None:
+            return
+        if self._suite_name is not None:
+            names = ", ".join(p.stem for p in self._suite_paths)
+            n = len(self._suite_paths)
+            self.selection_hint.value = f"Suite “{self._suite_name}” — {n} member(s): {names}"
+        elif self.dataset_field and self.dataset_field.value:
+            self.selection_hint.value = f"Single file: {Path(self.dataset_field.value).name}"
+        else:
+            self.selection_hint.value = ""
+
     def _sync_suite_freeze(self) -> None:
-        """Freeze locks a recipe onto ONE dataset, so it's meaningless for a
-        suite run — grey the checkbox while 'Whole suite' is selected. Single
-        mode leaves the enabled state to `_apply_frozen_ui`."""
+        """R5: freeze locks a recipe onto a single dataset, so grey it whenever a
+        named suite is selected. (R3 will replace this with freeze-across-all-
+        members.) Single-file mode leaves the enabled state to `_apply_frozen_ui`.
+        """
         if self.freeze_check is None:
             return
-        if self.suite_mode is not None and self.suite_mode.value == "suite":
+        if self._suite_name is not None:
             self.freeze_check.value = False
             self.freeze_check.disabled = True
 
-    def _on_suite_mode_change(self, _e: ft.Event | None = None) -> None:
-        # Restore the freeze/enabled baseline, then re-grey freeze if suite.
-        self._apply_frozen_ui()
-        self._sync_suite_freeze()
-        self.app.page.update()
-
     def _suite_selected(self) -> bool:
-        """True when 'Whole suite' is chosen AND there are ≥2 members to run."""
-        return (
-            self.suite_mode is not None
-            and self.suite_mode.value == "suite"
-            and len(self._suite_paths) >= 2
-        )
+        """True when a named suite is selected (→ run_suite over its members)."""
+        return self._suite_name is not None and len(self._suite_paths) >= 1
 
     def _on_unfreeze_clicked(self, _e: ft.Event) -> None:
         """Unfreeze the dataset — a deliberate, confirmed action that clears the
@@ -759,6 +747,9 @@ class RunTab:
             return
         if files and files[0].path and self.dataset_field is not None:
             self.dataset_field.value = files[0].path
+            if self.suite_dd is not None:
+                self.suite_dd.value = None  # mutual exclusion
+            self._suite_name, self._suite_paths = None, []
             self._load_dataset_state(Path(files[0].path))
             self._refresh_case_view()
             self.app.page.update()
@@ -769,8 +760,8 @@ class RunTab:
         if not (self.recipe_form and self.recipe_form.any_group_selected()):
             self._set_status("Select at least one metric group.")
             return
-        if not (self.dataset_field and self.dataset_field.value):
-            self._set_status("Select a dataset.")
+        if not self._suite_selected() and not (self.dataset_field and self.dataset_field.value):
+            self._set_status("Select a suite or a dataset file.")
             return
         if self.trace_check and self.trace_check.value and not get_api_key("langsmith"):
             self._set_status("Set a LangSmith API key in Settings → Keys to trace.")

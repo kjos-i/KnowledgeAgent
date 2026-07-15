@@ -207,87 +207,69 @@ def test_trace_toggle_reveals_warning_and_enables_project(fake_app: MagicMock):
     assert tab._project_row.disabled is False
 
 
-# ---- run scope: single file vs whole suite (step 3) ----
+# ---- selection: named suite vs single file (R5) ----
 
 
-def _knob_variant(path, cid, mode, *, question="q?"):
-    """A dataset with one case: `question` + a pinned retrieval mode (a knob
-    sweep member). All required knobs pinned so the file is runnable."""
-    from knowledge_agent.evaluation.models import (
-        EvalCase,
-        EvalDataset,
-        RetrievalSettings,
-        save_dataset,
-    )
-
-    save_dataset(
-        EvalDataset(
-            cases=[
-                EvalCase(
-                    id=cid,
-                    question=question,
-                    expected_sources=["d1"],
-                    retrieval=RetrievalSettings(
-                        retrieval_mode=mode,
-                        num_candidates=100,
-                        rrf_rank_constant=60,
-                        kg_max_rows=50,
-                    ),
-                )
-            ]
-        ),
-        path,
-    )
-    return path
-
-
-def test_facts_siblings_groups_same_facts(fake_app: MagicMock, tmp_path):
-    """_facts_siblings (the fallback suite for untagged files) returns the corpus
-    files sharing the picked file's facts (same questions+gold, swept knobs) —
-    including the picked one — and just [picked] for a lone (unique-facts) file."""
-    vec = _knob_variant(tmp_path / "facts_vector.json", "c__vector", "lancedb_only")
-    graph = _knob_variant(tmp_path / "facts_graph.json", "c__graph", "neo4j_only")
-    _knob_variant(tmp_path / "other.json", "x", "lancedb_only", question="DIFFERENT?")
+def test_suite_dropdown_lists_corpus_named_suites(fake_app: MagicMock, tmp_path):
+    """The Suite dropdown offers every named suite across the corpus's files (the
+    sorted union of their `suites` tags); an empty corpus disables it."""
+    _suite_variant(tmp_path / "vec.json", "c__v", "lancedb_only", ["mode-sweep"])
+    _suite_variant(tmp_path / "graph.json", "c__g", "neo4j_only", ["mode-sweep", "kg-sweep"])
     tab, _ = _run_tab(fake_app)
     fake_app.gui_config.corpus_config_path = tmp_path / "corpus.toml"  # dir = tmp_path
+    tab._refresh_suite_options()
+    assert {o.key for o in tab.suite_dd.options} == {"kg-sweep", "mode-sweep"}
+    assert tab.suite_dd.disabled is False
 
-    assert {p.name for p in tab._facts_siblings(vec)} == {"facts_vector.json", "facts_graph.json"}
-    assert {p.name for p in tab._facts_siblings(graph)} == {"facts_vector.json", "facts_graph.json"}
-    assert [p.name for p in tab._facts_siblings(tmp_path / "other.json")] == ["other.json"]
 
-
-def test_run_scope_reflects_suite_members(fake_app: MagicMock, tmp_path):
-    """Loading a dataset with siblings enables 'Whole suite' + names them; a
-    lone dataset disables it and snaps the mode back to single."""
-    vec = _knob_variant(tmp_path / "facts_vector.json", "c__vector", "lancedb_only")
-    _knob_variant(tmp_path / "facts_graph.json", "c__graph", "neo4j_only")
-    lone = _knob_variant(tmp_path / "lone.json", "z", "lancedb_only", question="ONLY?")
+def test_selecting_suite_loads_members_and_recipe(fake_app: MagicMock, tmp_path):
+    """Picking a named suite resolves its tagged members + loads the first
+    member's recipe; freeze greys (single-file-only in R5)."""
+    _suite_variant(tmp_path / "vec.json", "c__v", "lancedb_only", ["mode-sweep"])
+    _suite_variant(tmp_path / "graph.json", "c__g", "neo4j_only", ["mode-sweep"])
     tab, _ = _run_tab(fake_app)
     fake_app.gui_config.corpus_config_path = tmp_path / "corpus.toml"
+    tab._refresh_suite_options()
+    tab.suite_dd.value = "mode-sweep"
+    tab._on_suite_dd_change(MagicMock())
+    assert tab._suite_name == "mode-sweep"
+    assert {p.stem for p in tab._suite_paths} == {"vec", "graph"}
+    assert tab._suite_selected() is True
+    assert tab.freeze_check.disabled is True
+    assert "mode-sweep" in tab.selection_hint.value
 
-    def _suite_radio():
-        return next(r for r in tab.suite_mode.content.controls if r.value == "suite")
 
-    tab.dataset_field.value = str(vec)
-    tab._load_dataset_state(vec)
-    assert _suite_radio().disabled is False  # ≥2 members → enabled
-    assert "Whole suite = 2" in tab.suite_hint.value
-
-    tab.suite_mode.value = "suite"
-    tab.dataset_field.value = str(lone)
-    tab._load_dataset_state(lone)
-    assert _suite_radio().disabled is True  # lone → disabled
-    assert tab.suite_mode.value == "single"  # and snapped back
+def test_suite_and_file_mutually_exclusive(fake_app: MagicMock, tmp_path):
+    """Selecting a suite clears the file field; selecting a file clears the
+    suite — the two are mutually exclusive."""
+    v = _suite_variant(tmp_path / "vec.json", "c__v", "lancedb_only", ["mode-sweep"])
+    _suite_variant(tmp_path / "graph.json", "c__g", "neo4j_only", ["mode-sweep"])
+    tab, _ = _run_tab(fake_app)
+    fake_app.gui_config.corpus_config_path = tmp_path / "corpus.toml"
+    tab._refresh_suite_options()
+    # pick a suite -> the file field empties
+    tab.suite_dd.value = "mode-sweep"
+    tab._on_suite_dd_change(MagicMock())
+    assert (tab.dataset_field.value or "") == ""
+    # now pick a single file (the picker tail) -> the suite clears
+    tab.dataset_field.value = str(v)
+    tab.suite_dd.value = None
+    tab._suite_name, tab._suite_paths = None, []
+    tab._load_dataset_state(v)
+    assert tab._suite_name is None
+    assert tab._suite_selected() is False
+    assert "Single file: vec.json" in tab.selection_hint.value
 
 
 def test_execute_run_suite_branch_calls_run_suite_and_opens_compare(fake_app: MagicMock):
-    """With 'Whole suite' selected + ≥2 members, _execute_run calls run_suite
-    with one config per member and hands the outcome to on_suite_complete."""
+    """A selected named suite makes _execute_run call run_suite with one config
+    per member, thread the suite name through, and hand the outcome to
+    on_suite_complete."""
     from pathlib import Path
 
     tab, coordinator = _run_tab(fake_app)
+    tab._suite_name = "mode-sweep"
     tab._suite_paths = [Path("a.json"), Path("b.json")]
-    tab.suite_mode.value = "suite"
     tab._build_config = MagicMock(side_effect=lambda p=None: f"cfg:{p}")
     fake_suite = MagicMock(results=[MagicMock(run_id=1), MagicMock(run_id=2)])
     with patch(
@@ -298,7 +280,25 @@ def test_execute_run_suite_branch_calls_run_suite_and_opens_compare(fake_app: Ma
         asyncio.run(tab._execute_run())
     suite_mock.assert_awaited_once()
     assert len(suite_mock.await_args.args[0]) == 2  # one config per member
+    assert suite_mock.await_args.kwargs["suite"] == "mode-sweep"  # named suite threaded through
     coordinator.on_suite_complete.assert_called_once_with(fake_suite)
+
+
+def test_execute_run_single_branch_calls_run(fake_app: MagicMock):
+    """With a single file (no suite) selected, _execute_run calls run — NOT
+    run_suite — and hands the run_id to on_run_complete."""
+    tab, coordinator = _run_tab(fake_app)
+    tab.dataset_field.value = "single.json"  # no suite selected
+    tab._build_config = MagicMock(return_value="cfg")
+    fake_result = MagicMock(run_id=7, report={"summary": {"pass_count": 1, "case_count": 1}})
+    with patch(
+        "knowledge_agent.evaluation.runner.run",
+        new_callable=AsyncMock,
+        return_value=fake_result,
+    ) as run_mock:
+        asyncio.run(tab._execute_run())
+    run_mock.assert_awaited_once()
+    coordinator.on_run_complete.assert_called_once_with(7)
 
 
 def _suite_variant(path, cid, mode, suites, *, question="q?"):
@@ -332,46 +332,24 @@ def _suite_variant(path, cid, mode, suites, *, question="q?"):
     return path
 
 
-def test_whole_suite_uses_explicit_tag(fake_app: MagicMock, tmp_path):
-    """A file tagged into a named suite runs THAT suite's tagged members, and the
-    suite name flows into run_suite."""
-    v = _suite_variant(tmp_path / "vec.json", "c__v", "lancedb_only", ["mode-sweep"])
-    _suite_variant(tmp_path / "graph.json", "c__g", "neo4j_only", ["mode-sweep"])
-    tab, _ = _run_tab(fake_app)
-    fake_app.gui_config.corpus_config_path = tmp_path / "corpus.toml"
-    tab.dataset_field.value = str(v)
-    tab._load_dataset_state(v)
-    assert tab._suite_name == "mode-sweep"
-    assert {p.stem for p in tab._suite_paths} == {"vec", "graph"}
-
-    tab.suite_mode.value = "suite"
-    tab._build_config = MagicMock(side_effect=lambda p=None: f"cfg:{p}")
-    with patch(
-        "knowledge_agent.evaluation.runner.run_suite",
-        new_callable=AsyncMock,
-        return_value=MagicMock(results=[MagicMock(run_id=1)]),
-    ) as suite_mock:
-        asyncio.run(tab._execute_run())
-    assert suite_mock.await_args.kwargs["suite"] == "mode-sweep"  # named suite threaded through
-
-
-def test_multi_suite_picker_rescopes_members(fake_app: MagicMock, tmp_path):
-    """A file in several suites shows the Suite picker; switching it re-scopes the
-    'whole suite' members to that tag."""
-    m = _suite_variant(tmp_path / "m.json", "c__m", "lancedb_only", ["sweepA", "sweepB"])
+def test_dropdown_rescopes_members_per_tag(fake_app: MagicMock, tmp_path):
+    """The corpus Suite dropdown lists every tag; picking each scopes the members
+    to the files carrying that tag (a file can be in several suites)."""
+    _suite_variant(tmp_path / "m.json", "c__m", "lancedb_only", ["sweepA", "sweepB"])
     _suite_variant(tmp_path / "a2.json", "c__a", "neo4j_only", ["sweepA"])
     _suite_variant(tmp_path / "b2.json", "c__b", "parallel_fused", ["sweepB"])
     tab, _ = _run_tab(fake_app)
     fake_app.gui_config.corpus_config_path = tmp_path / "corpus.toml"
-    tab.dataset_field.value = str(m)
-    tab._load_dataset_state(m)
-    assert tab.suite_select.visible is True
-    assert {o.key for o in tab.suite_select.options} == {"sweepA", "sweepB"}
-    assert tab._suite_name == "sweepA"  # first tag by default
+    tab._refresh_suite_options()
+    assert {o.key for o in tab.suite_dd.options} == {"sweepA", "sweepB"}
+    # pick sweepA -> m + a2
+    tab.suite_dd.value = "sweepA"
+    tab._on_suite_dd_change(MagicMock())
+    assert tab._suite_name == "sweepA"
     assert {p.stem for p in tab._suite_paths} == {"m", "a2"}
-    # switch to sweepB → m + b2
-    tab.suite_select.value = "sweepB"
-    tab._on_suite_select_change(MagicMock())
+    # switch to sweepB -> m + b2
+    tab.suite_dd.value = "sweepB"
+    tab._on_suite_dd_change(MagicMock())
     assert tab._suite_name == "sweepB"
     assert {p.stem for p in tab._suite_paths} == {"m", "b2"}
 
