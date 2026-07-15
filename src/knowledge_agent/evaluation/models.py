@@ -38,14 +38,6 @@ RetrievalMode = Literal[
 LanceDbSearchMode = Literal["hybrid", "fts", "vector"]
 CaseOrigin = Literal["manual", "llm", "search", "chat"]
 DatasetStatus = Literal["draft", "final"]
-DatasetKind = Literal["fact", "knob", "router"]
-"""What KIND of thing a dataset measures — a one-click profile that fills the
-recipe AND is the filter tag (a word, not a boolean):
-  - fact:   answer quality. Judge ON, gates strict. The default kind.
-  - knob:   retrieval-parameter sweeps. Judge OFF (cost), gates relaxed —
-            you read the metric curves, not pass/fail.
-  - router: mode-routing regression. Checks the classifier picks the right leg.
-"""
 
 
 class RetrievalSettings(BaseModel):
@@ -298,18 +290,15 @@ class EvalRecipe(BaseModel):
     `compute_recipe_hash` fingerprints it (the twin of the dataset hash), so a
     run records WHICH recipe it used and can detect a later re-save. Field
     defaults mirror `EvalConfig` — a fresh recipe == the harness defaults.
+
+    NOTE: there is deliberately no "dataset kind" (fact/knob) here. Judge-on/off
+    and gate strictness ARE the recipe (`enabled_groups` + thresholds); whether a
+    run is a quality/regression run or a knob-profiling run is a RUN choice, not a
+    property of the dataset. Knob sweeps are modelled as a SUITE of files that
+    share the same facts but pin different retrieval knobs (see
+    `compute_facts_hash`).
     """
 
-    dataset_kind: DatasetKind | None = Field(
-        default=None,
-        description=(
-            "Dataset profile (fact / knob / router) — a one-click preset that "
-            "fills the rest of this recipe AND is the run's filter tag. None = "
-            "unset / custom recipe. PROVENANCE ONLY: it groups/compares runs in "
-            "the dashboard and is never read by scoring or the pass-gate — only "
-            "the gate thresholds below gate."
-        ),
-    )
     enabled_groups: list[str] = Field(
         default_factory=lambda: sorted(DEFAULT_ENABLED_GROUPS),
         description="Metric groups this dataset runs under (see ALL_TOGGLE_GROUPS).",
@@ -445,6 +434,45 @@ def compute_dataset_hash(cases: list[EvalCase]) -> str:
     so trend comparisons can tell when the gold shifted underneath them.
     """
     items = sorted(json.dumps(c.model_dump(mode="json"), sort_keys=True) for c in cases)
+    return hashlib.sha256("\n".join(items).encode("utf-8")).hexdigest()
+
+
+# The gold-content fields that define a case's FACTS — everything a case tests,
+# with `id`, retrieval knobs, notes, category, and origin deliberately left out.
+_FACTS_FIELDS: tuple[str, ...] = (
+    "question",
+    "expected_sources",
+    "expected_chunks",
+    "required_keywords",
+    "disallowed_keywords",
+    "expected_answer_points",
+    "expected_entities",
+    "expected_mode",
+    "user_cypher",
+)
+
+
+def compute_facts_hash(cases: list[EvalCase]) -> str:
+    """A stable SHA-256 fingerprint of the cases' GOLD CONTENT only — the
+    question plus every expected_* / gold field, with `id`, retrieval knobs,
+    notes, category, and origin EXCLUDED (see `_FACTS_FIELDS`).
+
+    This is the SUITE identity. The members of a test-dataset suite carry the
+    SAME facts but different per-case knobs — and strategy-suffixed ids like
+    `case1__vector` vs `case1__graph` — so a knob- AND id-independent hash is
+    what makes those files recognisable as one suite (and lets the Run tab
+    auto-detect siblings). Order-independent (cases sorted) and
+    key-order-independent (sorted keys), so it moves only when the questions or
+    gold change — not when a knob is swept or a case is renamed/reordered.
+    Contrast `compute_dataset_hash`, which hashes the WHOLE case (knobs + id
+    included) and so is unique per file.
+    """
+
+    def _gold(case: EvalCase) -> str:
+        dumped = case.model_dump(mode="json")
+        return json.dumps({f: dumped.get(f) for f in _FACTS_FIELDS}, sort_keys=True)
+
+    items = sorted(_gold(c) for c in cases)
     return hashlib.sha256("\n".join(items).encode("utf-8")).hexdigest()
 
 

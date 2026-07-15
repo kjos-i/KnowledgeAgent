@@ -1,9 +1,8 @@
-"""Tests for the shared RecipeForm widget (the EvalRecipe controls: profile +
-metric groups + judge panel + gate thresholds).
+"""Tests for the shared RecipeForm widget (the EvalRecipe controls: metric
+groups + judge panel + gate thresholds).
 
-Built statically — no page render. Covers the profile presets, the hand-edit →
-Custom rule, the load()/to_recipe() round-trip, freeze, and the judge panel
-(which moved here from run_tab).
+Built statically — no page render. Covers the load()/to_recipe() round-trip,
+freeze, and the judge panel (which moved here from run_tab).
 """
 
 from __future__ import annotations
@@ -22,68 +21,15 @@ def _form(fake_app: MagicMock) -> RecipeForm:
 
 
 def test_defaults_match_harness(fake_app: MagicMock):
-    """A fresh form == the harness defaults: source/chunk/kg on, judge off, no
-    profile (Custom), default thresholds."""
+    """A fresh form == the harness defaults: source/chunk/kg on, judge off,
+    default thresholds."""
     r = _form(fake_app).to_recipe()
     assert set(r.enabled_groups) == {"source", "chunk", "kg"}
-    assert r.dataset_kind is None
     assert (r.judge_threshold, r.metadata_match_threshold, r.required_keyword_threshold) == (
         0.5,
         0.8,
         0.5,
     )
-
-
-def test_fact_profile_preset(fake_app: MagicMock):
-    """Fact = judge ON, gates at the harness defaults, tagged fact."""
-    rf = _form(fake_app)
-    rf.profile_group.value = "fact"
-    rf._on_profile_change(MagicMock())
-    r = rf.to_recipe()
-    assert r.dataset_kind == "fact"
-    assert set(r.enabled_groups) == {"source", "chunk", "kg", "judge"}
-    assert (r.judge_threshold, r.metadata_match_threshold, r.required_keyword_threshold) == (
-        0.5,
-        0.8,
-        0.5,
-    )
-
-
-def test_knob_profile_preset(fake_app: MagicMock):
-    """Knob = judge OFF, every gate at 0 (read the curves), tagged knob."""
-    rf = _form(fake_app)
-    rf.profile_group.value = "knob"
-    rf._on_profile_change(MagicMock())
-    r = rf.to_recipe()
-    assert r.dataset_kind == "knob"
-    assert "judge" not in r.enabled_groups
-    assert (r.judge_threshold, r.metadata_match_threshold, r.required_keyword_threshold) == (
-        0.0,
-        0.0,
-        0.0,
-    )
-
-
-def test_group_edit_clears_profile_to_custom(fake_app: MagicMock):
-    """Toggling a metric group by hand drops the profile back to Custom."""
-    rf = _form(fake_app)
-    rf.profile_group.value = "fact"
-    rf._on_profile_change(MagicMock())
-    assert rf.profile_group.value == "fact"
-    rf.group_checks["chunk"].value = False
-    rf._on_group_change(MagicMock())
-    assert rf.profile_group.value is None
-    assert rf.to_recipe().dataset_kind is None
-
-
-def test_threshold_edit_clears_profile_to_custom(fake_app: MagicMock):
-    """Editing a threshold by hand also drops the profile to Custom."""
-    rf = _form(fake_app)
-    rf.profile_group.value = "knob"
-    rf._on_profile_change(MagicMock())
-    rf.threshold_fields["judge_threshold"].value = "0.7"
-    rf._on_threshold_change(MagicMock())
-    assert rf.profile_group.value is None
 
 
 def test_load_round_trip(fake_app: MagicMock):
@@ -91,7 +37,6 @@ def test_load_round_trip(fake_app: MagicMock):
     rf = _form(fake_app)
     rf.load(
         EvalRecipe(
-            dataset_kind="fact",
             enabled_groups=["source", "judge"],
             judge_models=["m1", "m2"],
             judge_threshold=0.6,
@@ -99,7 +44,6 @@ def test_load_round_trip(fake_app: MagicMock):
             required_keyword_threshold=0.4,
         )
     )
-    assert rf.profile_group.value == "fact"
     assert rf.group_checks["source"].value is True
     assert rf.group_checks["chunk"].value is False
     assert rf.group_checks["judge"].value is True
@@ -118,11 +62,10 @@ def test_load_round_trip(fake_app: MagicMock):
 def test_load_none_gives_defaults(fake_app: MagicMock):
     """load(None) resets a dirtied form to the harness defaults."""
     rf = _form(fake_app)
-    rf.profile_group.value = "knob"
-    rf._on_profile_change(MagicMock())
+    rf.group_checks["judge"].value = True  # dirty it
+    rf.threshold_fields["judge_threshold"].value = "0.9"
     rf.load(None)
     r = rf.to_recipe()
-    assert r.dataset_kind is None
     assert set(r.enabled_groups) == {"source", "chunk", "kg"}
     assert r.judge_threshold == 0.5
 
@@ -162,42 +105,12 @@ def test_judge_fallback_hint_toggles(fake_app: MagicMock):
     assert rf.judge_fallback_hint.visible is False
 
 
-def test_adding_judge_keeps_profile(fake_app: MagicMock):
-    """The judge PANEL is independent of the profile — adding a judge does NOT
-    drop Fact/Knob to Custom (only groups + thresholds do)."""
-    rf = _form(fake_app)
-    rf.profile_group.value = "fact"
-    rf._on_profile_change(MagicMock())
-    rf.judge_dropdown.value = "model-a"
-    rf._on_add_judge_clicked(MagicMock())
-    assert rf.profile_group.value == "fact"
-
-
 def test_set_enabled_freezes_and_unfreezes(fake_app: MagicMock):
     rf = _form(fake_app)
     rf.set_enabled(False)
     assert rf._wrapper.disabled is True
     rf.set_enabled(True)
     assert rf._wrapper.disabled is False
-
-
-def test_case_type_readonly_stays_locked_when_unfrozen(fake_app: MagicMock):
-    """The Run tab mounts the form with case_type_readonly=True: the Case Type
-    radio is disabled independent of the wrapper freeze — it stays locked even
-    after set_enabled(True) unfreezes the rest. It still shows the loaded value
-    and writes it back unchanged. A default mount leaves the radio editable."""
-    fake_app.gui_config.llm_provider = "anthropic"
-    ro = RecipeForm(fake_app, case_type_readonly=True)
-    ro.build()
-    assert ro.profile_group.disabled is True  # Case Type read-only...
-    assert ro._wrapper.disabled is False  # ...the rest editable
-    ro.set_enabled(True)  # unfreeze the rest
-    assert ro.profile_group.disabled is True  # STILL locked (owned by Create test cases)
-    ro.load(EvalRecipe(dataset_kind="knob"))
-    assert ro.profile_group.value == "knob"  # displays the loaded value
-    assert ro.to_recipe().dataset_kind == "knob"  # writes it back unchanged
-
-    assert not _form(fake_app).profile_group.disabled  # default mount → editable
 
 
 def test_any_group_selected(fake_app: MagicMock):

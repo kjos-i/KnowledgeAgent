@@ -1,25 +1,26 @@
 """Shared recipe editor — the `EvalRecipe` controls, mounted by BOTH eval tabs.
 
 A dataset's *recipe* is its canonical "how to run me": which metric groups
-run, the judge panel, and the three gate thresholds — plus a one-click
-**profile** (Fact / Knob) that fills the rest. This widget is the single
+run, the judge panel, and the three gate thresholds. This widget is the single
 implementation of those controls:
 
   * **Create test cases** tab — mounts it fully editable; the recipe rides
     along with the dataset on save.
   * **Run evaluation** tab — mounts the SAME widget loaded from the dataset's
-    saved recipe, with the Case Type radio read-only (it is authored in Create
-    test cases). The rest stays editable until the dataset is frozen; freezing
+    saved recipe. It stays editable until the dataset is frozen; freezing
     (`set_enabled(False)`) locks the whole recipe and **Unfreeze** reopens it.
 
 SSOT: the metric-group checks + judge panel used to live inline in `run_tab`;
 they moved here so the dataset tab reuses the exact same controls instead of a
 parallel copy. `to_recipe()` / `load()` are the two conversion points.
 
-PROVENANCE-ONLY, never scored: the profile (`dataset_kind`) is a filter tag
-carried into the ledger so runs can be grouped/compared — it never changes how
-a case is scored or gated. The gate thresholds DO gate (they feed `EvalConfig`
-at run time); the profile does not.
+Whether a run measures answer QUALITY (judge on, gates strict) or PROFILES
+retrieval knobs (judge off, gates at 0 so you read the metric curves) is
+expressed directly here via the metric groups + thresholds — it is a RUN
+choice, not a dataset "kind". Knob sweeps are modelled as a SUITE of files that
+share the same facts but pin different retrieval knobs (see
+`compute_facts_hash`). The gate thresholds DO gate — they feed `EvalConfig` at
+run time.
 """
 
 from __future__ import annotations
@@ -51,32 +52,6 @@ _THRESHOLDS: tuple[tuple[str, float], ...] = (
     ("required_keyword_threshold", 0.5),
 )
 
-# One-click dataset profiles → the recipe they fill. Custom = no profile
-# (dataset_kind=None): whatever the curator set by hand.
-#   fact — answer quality: judge ON, gates at the harness defaults.
-#   knob — retrieval-parameter sweeps: judge OFF (cost), every gate at 0 so
-#          nothing passes/fails and you read the metric curves instead.
-# The profile fills only the metric groups + thresholds; it never touches the
-# judge PANEL (that stays the curator's choice).
-_PROFILES: dict[str, dict] = {
-    "fact": {
-        "groups": ("source", "chunk", "kg", "judge"),
-        "thresholds": {
-            "judge_threshold": 0.5,
-            "metadata_match_threshold": 0.8,
-            "required_keyword_threshold": 0.5,
-        },
-    },
-    "knob": {
-        "groups": ("source", "chunk", "kg"),
-        "thresholds": {
-            "judge_threshold": 0.0,
-            "metadata_match_threshold": 0.0,
-            "required_keyword_threshold": 0.0,
-        },
-    },
-}
-
 
 def _fmt(value: float) -> str:
     """A threshold's field text — trims trailing zeros (0.5, 0.8, 0)."""
@@ -95,22 +70,13 @@ def _unit_float(raw: str | None, default: float) -> float:
 
 
 class RecipeForm:
-    """The `EvalRecipe` controls: profile + metric groups + judge panel +
-    gate thresholds. Editable everywhere; `set_enabled(False)` freezes it for
-    the Run tab's read-only display."""
+    """The `EvalRecipe` controls: metric groups + judge panel + gate
+    thresholds. Editable everywhere; `set_enabled(False)` freezes it for the
+    Run tab's read-only display."""
 
-    def __init__(self, app: GuiApp, *, case_type_readonly: bool = False) -> None:
+    def __init__(self, app: GuiApp) -> None:
         self.app = app
-        # Run tab passes True: the Case Type radio is authored in Create test
-        # cases, so here it is rendered read-only (shown, never editable) —
-        # independent of the freeze state, which locks everything else.
-        self._case_type_readonly = case_type_readonly
-        # True while a preset/load writes the controls, so the field on_change
-        # handlers don't mistake a programmatic write for a hand-edit and clear
-        # the profile.
-        self._applying = False
         # controls (built in build())
-        self.profile_group: ft.RadioGroup | None = None
         self.group_checks: dict[str, ft.Checkbox] = {}
         self.threshold_fields: dict[str, ft.TextField] = {}
         # judge panel (moved verbatim from run_tab — SSOT)
@@ -126,23 +92,6 @@ class RecipeForm:
     # ---- build ------------------------------------------------------------
 
     def build(self) -> ft.Control:
-        # Profile radios — Fact / Knob, plus none-selected = Custom. Picking one
-        # fills the groups + thresholds below; hand-editing any of those drops
-        # the selection back to Custom (`_mark_custom`).
-        self.profile_group = ft.RadioGroup(
-            value=None,
-            on_change=self._on_profile_change,
-            content=ft.Row(
-                [ft.Radio(value="fact", label="Fact"), ft.Radio(value="knob", label="Knob")],
-                spacing=12,
-            ),
-        )
-        # Read-only in the Run tab: display the dataset's Case Type but block
-        # edits (it is owned by Create test cases). The radio's own `disabled`
-        # is independent of the wrapper freeze, so it stays locked even when the
-        # rest of the recipe is unfrozen.
-        if self._case_type_readonly:
-            self.profile_group.disabled = True
         self.group_checks = {
             g: ft.Checkbox(
                 label=g,
@@ -152,12 +101,7 @@ class RecipeForm:
             for g in _GROUPS
         }
         self.threshold_fields = {
-            name: ft.TextField(
-                value=_fmt(default),
-                width=90,
-                dense=True,
-                on_change=self._on_threshold_change,
-            )
+            name: ft.TextField(value=_fmt(default), width=90, dense=True)
             for name, default in _THRESHOLDS
         }
 
@@ -212,23 +156,6 @@ class RecipeForm:
 
         content = ft.Column(
             [
-                sub_section_header(
-                    "Case Type",
-                    trailing=info_icon(
-                        self.app,
-                        title="Case type",
-                        text=(
-                            "A one-click preset that fills the metric groups + gate "
-                            "thresholds below, AND tags the run so the dashboard can "
-                            "group/compare by it. Fact = answer quality (judge on, "
-                            "gates strict). Knob = retrieval sweeps (judge off, gates "
-                            "at 0 so you read the curves). Edit any field by hand and "
-                            "it becomes Custom. The tag never changes how a case is "
-                            "scored — only the thresholds do."
-                        ),
-                    ),
-                ),
-                self.profile_group,
                 sub_section_header("Metric groups"),
                 ft.Row([self.group_checks[g] for g in _GROUPS], wrap=True),
                 self.judge_section,
@@ -242,8 +169,8 @@ class RecipeForm:
                             "judge score, the metadata (source) match rate, and the "
                             "required-keyword hit rate each need to clear its "
                             "threshold. Set a threshold to 0 to stop it gating (a "
-                            "Knob run does this to read metric curves without "
-                            "pass/fail)."
+                            "knob-profiling run does this to read metric curves "
+                            "without pass/fail)."
                         ),
                     ),
                 ),
@@ -263,32 +190,24 @@ class RecipeForm:
 
     def load(self, recipe: EvalRecipe | None) -> None:
         """Populate the controls from `recipe` (None → a fresh default recipe).
-        Pure — no page.update; the caller flushes. Wrapped in `_applying` so
-        the writes don't trip the hand-edit → Custom logic."""
+        Pure — no page.update; the caller flushes."""
         from knowledge_agent.evaluation.models import EvalRecipe
 
         r = recipe or EvalRecipe()
-        self._applying = True
-        if self.profile_group is not None:
-            self.profile_group.value = r.dataset_kind  # None → Custom
         for g, cb in self.group_checks.items():
             cb.value = g in r.enabled_groups
         self.judge_models = list(r.judge_models)
         for name, default in _THRESHOLDS:
             self.threshold_fields[name].value = _fmt(getattr(r, name, default))
-        self._applying = False
         self._refresh_judge_list()
         self._sync_judge_grey()
 
     def to_recipe(self) -> EvalRecipe:
-        """Build an `EvalRecipe` from the current controls. `dataset_kind` is
-        the selected profile (None = Custom); it is provenance only."""
+        """Build an `EvalRecipe` from the current controls."""
         from knowledge_agent.evaluation.models import EvalRecipe
 
-        kind = (self.profile_group.value or None) if self.profile_group else None
         groups = [g for g in _GROUPS if self.group_checks[g].value]
         return EvalRecipe(
-            dataset_kind=kind,
             enabled_groups=groups,
             judge_models=list(self.judge_models),
             judge_threshold=_unit_float(self.threshold_fields["judge_threshold"].value, 0.5),
@@ -312,38 +231,11 @@ class RecipeForm:
         """True when at least one metric group is ticked (a run needs one)."""
         return any(cb.value for cb in self.group_checks.values())
 
-    # ---- profile presets --------------------------------------------------
-
-    def _on_profile_change(self, _e: ft.Event | None = None) -> None:
-        """Apply the picked profile's preset to the groups + thresholds. The
-        judge panel is left alone. Programmatic writes are guarded so they
-        don't immediately clear the very profile we just applied."""
-        kind = self.profile_group.value if self.profile_group else None
-        preset = _PROFILES.get(kind or "")
-        if preset:
-            self._applying = True
-            for g, cb in self.group_checks.items():
-                cb.value = g in preset["groups"]
-            for name, value in preset["thresholds"].items():
-                self.threshold_fields[name].value = _fmt(value)
-            self._applying = False
-            self._sync_judge_grey()
-        self.app.page.update()
-
-    def _mark_custom(self) -> None:
-        """A hand-edit to a preset-controlled field (a group check or a
-        threshold) drops the profile selection to Custom (dataset_kind=None).
-        No-op while a preset/load is writing the controls."""
-        if not self._applying and self.profile_group is not None:
-            self.profile_group.value = None
+    # ---- metric groups ----------------------------------------------------
 
     def _on_group_change(self, _e: ft.Event | None = None) -> None:
+        # Toggling the judge group greys / reveals the judge panel below it.
         self._sync_judge_grey()
-        self._mark_custom()
-        self.app.page.update()
-
-    def _on_threshold_change(self, _e: ft.Event | None = None) -> None:
-        self._mark_custom()
         self.app.page.update()
 
     # ---- judge panel (moved from run_tab) ---------------------------------
@@ -387,8 +279,7 @@ class RecipeForm:
 
     def _on_add_judge_clicked(self, _e: ft.Event) -> None:
         """Move the picked model into the judge list (dedup), then clear the
-        picker for the next add. The panel is independent of the profile, so
-        this does not drop the profile to Custom."""
+        picker for the next add."""
         if self.judge_dropdown is None:
             return
         name = (self.judge_dropdown.value or "").strip()

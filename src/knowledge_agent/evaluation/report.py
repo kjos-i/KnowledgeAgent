@@ -133,16 +133,19 @@ def build_report(
     run_timestamp: str,
     *,
     dataset_hash: str | None = None,
+    facts_hash: str | None = None,
     recipe: EvalRecipe | None = None,
+    suite_run_id: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the full report dict (what the ledger + JSON consume).
 
-    `dataset_hash` (a SHA-256 of the scored dataset's cases) is recorded as
-    run provenance next to `git_commit` — so a trend view can tell when the
-    gold itself changed between runs. `recipe` (the dataset's saved recipe, if
-    any) contributes two more provenance keys: `dataset_kind` (the fact/knob/
-    router profile — a filter tag) and `recipe_hash` (its fingerprint — the
-    twin of dataset_hash, so a run records WHICH recipe it ran under).
+    `dataset_hash` (a SHA-256 of the scored dataset's cases) + `facts_hash` (a
+    SHA-256 of the gold content only, shared across a suite) are recorded as run
+    provenance next to `git_commit` — so a trend view can tell when the gold
+    itself changed. `recipe` (the dataset's saved recipe, if any) contributes
+    `recipe_hash` (its fingerprint — the twin of dataset_hash, so a run records
+    WHICH recipe it ran under). `suite_run_id` groups the members of one suite
+    execution.
     """
     # Lazy imports: keep report's import path free of the judge module's
     # (potentially heavy) deps for the non-judge surfaces that import report.
@@ -162,15 +165,20 @@ def build_report(
         "dataset_name": cfg.dataset_path.stem if cfg.dataset_path else None,
         "corpus_name": (cfg.corpus_config_path.parent.name if cfg.corpus_config_path else None),
         "dataset_hash": dataset_hash,
+        # Suite identity: the gold-content hash SHARED by every member of a
+        # test-dataset suite (twin of dataset_hash, which is per-file).
+        "facts_hash": facts_hash,
         "git_commit": prov["git_commit"],
         "llm_provider": model_config.get("llm_provider"),
         "synthesizer_model": model_config.get("synthesizer_model"),
         "judge_models": judge_models,
         # Dataset-recipe provenance (None when the dataset has no saved recipe).
-        # Filter/grouping tags for the dashboard — never read by scoring or the
+        # Filter/grouping tag for the dashboard — never read by scoring or the
         # pass-gate (the gates that ran are in `gate_thresholds` above).
-        "dataset_kind": recipe.dataset_kind if recipe is not None else None,
         "recipe_hash": compute_recipe_hash(recipe),
+        # One "run the suite" stamps all its member runs with this shared launch
+        # timestamp; None for a single-file run. Grouping only — never scored.
+        "suite_run_id": suite_run_id,
         "prompts_snapshot": {
             "model_config": prov["model_config"],
             "prompts": prov["prompts"],

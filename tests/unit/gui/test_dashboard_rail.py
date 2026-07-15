@@ -22,7 +22,6 @@ def _report(dataset: str, run_ts: str) -> dict:
         "enabled_groups": ["source", "chunk"],
         "gate_thresholds": {"judge_threshold": 0.5},
         "judge_models": ["m1"],
-        "dataset_kind": "fact",
         "recipe_hash": "abcdef1234567890",  # pragma: allowlist secret (fake test hash)
         "llm_provider": "anthropic",
         "synthesizer_model": "claude-sonnet-5",
@@ -35,7 +34,6 @@ def _rail(fake_app, led, **coord_kw):
     state = {
         "selected_run_id": None,
         "selected_dataset": None,
-        "compare_kind": "fact",
         "compare_selected": [],
         **coord_kw,
     }
@@ -67,7 +65,6 @@ def test_context_shows_recipe_from_run_row(fake_app, tmp_path):
     lines = [c.value for c in rail.context.controls if hasattr(c, "value")]
     joined = " | ".join(lines)
     assert "Recipe hash: abcdef12" in lines  # 8-char prefix, truncated from the full 16
-    assert "fact" in joined  # dataset_kind
     assert "chunk" in joined and "source" in joined  # enabled groups (ledger sorts them)
     assert "m1" in joined  # judge panel
     assert "claude-sonnet-5" in joined  # model

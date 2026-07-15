@@ -14,6 +14,7 @@ from knowledge_agent.evaluation.models import (
     RetrievalSettings,
     append_case,
     compute_dataset_hash,
+    compute_facts_hash,
     compute_recipe_hash,
     load_cases,
     load_dataset,
@@ -216,6 +217,40 @@ def test_dataset_hash_is_content_addressed():
     assert compute_dataset_hash([a2, b]) != h
 
 
+def test_facts_hash_is_the_suite_identity():
+    """facts_hash = the SUITE identity: identical for cases with the same gold
+    but different retrieval knobs AND different (strategy-suffixed) ids, so a
+    knob-sweep's member files hash to one suite. It moves only when the gold
+    itself changes."""
+    base = EvalCase(
+        id="q1__vector",
+        question="q1?",
+        expected_sources=["d1"],
+        retrieval={"retrieval_mode": "lancedb_only", "top_k": 5},
+    )
+    # same facts, swept knob + strategy-suffixed id -> SAME facts_hash
+    sibling = EvalCase(
+        id="q1__graph",
+        question="q1?",
+        expected_sources=["d1"],
+        retrieval={"retrieval_mode": "neo4j_only", "top_k": 20},
+    )
+    h = compute_facts_hash([base])
+    assert len(h) == 64
+    assert compute_facts_hash([sibling]) == h
+    # ...while dataset_hash (facts + knobs + id) DOES separate the two files
+    assert compute_dataset_hash([base]) != compute_dataset_hash([sibling])
+    # editing the gold moves facts_hash
+    edited = EvalCase(id="q1__vector", question="q1?", expected_sources=["d2"])
+    assert compute_facts_hash([edited]) != h
+
+
+def test_facts_hash_order_independent():
+    a = EvalCase(id="a", question="q1?")
+    b = EvalCase(id="b", question="q2?")
+    assert compute_facts_hash([a, b]) == compute_facts_hash([b, a])
+
+
 # ---- recipe (C2) ----
 
 
@@ -226,19 +261,17 @@ def test_recipe_defaults_mirror_evalconfig():
     assert r.metadata_match_threshold == 0.8
     assert r.required_keyword_threshold == 0.5
     assert r.judge_models == []
-    assert r.dataset_kind is None
 
 
 def test_recipe_roundtrips_on_the_dataset_header(tmp_path):
     p = tmp_path / "gold.json"
     ds = EvalDataset(
-        recipe=EvalRecipe(dataset_kind="knob", enabled_groups=["source"], judge_threshold=0.9),
+        recipe=EvalRecipe(enabled_groups=["source"], judge_threshold=0.9),
         cases=[EvalCase(id="a", question="q?")],
     )
     save_dataset(ds, p)
     loaded = load_dataset(p)
     assert loaded.recipe is not None
-    assert loaded.recipe.dataset_kind == "knob"
     assert loaded.recipe.enabled_groups == ["source"]
     assert loaded.recipe.judge_threshold == 0.9
 
@@ -249,23 +282,18 @@ def test_recipe_is_excluded_from_the_dataset_hash():
     cases = [EvalCase(id="a", question="q?")]
     bare = compute_dataset_hash(EvalDataset(cases=cases).cases)
     with_recipe = compute_dataset_hash(
-        EvalDataset(recipe=EvalRecipe(dataset_kind="fact", judge_threshold=0.1), cases=cases).cases
+        EvalDataset(recipe=EvalRecipe(judge_threshold=0.1), cases=cases).cases
     )
     assert bare == with_recipe
 
 
 def test_recipe_hash_none_when_absent_and_content_addressed():
     assert compute_recipe_hash(None) is None
-    h = compute_recipe_hash(EvalRecipe(dataset_kind="fact"))
+    h = compute_recipe_hash(EvalRecipe(judge_threshold=0.5))
     assert len(h) == 64
     # a value change moves it; the same content re-hashes identically
-    assert compute_recipe_hash(EvalRecipe(dataset_kind="knob")) != h
-    assert compute_recipe_hash(EvalRecipe(dataset_kind="fact")) == h
-
-
-def test_recipe_rejects_unknown_dataset_kind():
-    with pytest.raises(ValidationError):
-        EvalRecipe(dataset_kind="bogus")  # type: ignore[arg-type]
+    assert compute_recipe_hash(EvalRecipe(judge_threshold=0.9)) != h
+    assert compute_recipe_hash(EvalRecipe(judge_threshold=0.5)) == h
 
 
 # ---- per-case tuning knobs: defaults + conditional-required validation ----

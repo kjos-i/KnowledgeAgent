@@ -1041,8 +1041,8 @@ class DatasetTab:
         """Copy the dataset-level header controls (status + recipe) onto the
         in-memory dataset so the next `save_dataset` persists them. Called by
         every save path — the header rides along with any dataset write, the
-        same way a case edit does. The recipe is run config + a provenance tag
-        (dataset_kind); it never changes how a case is scored."""
+        same way a case edit does. The recipe is run config (metric groups,
+        judge panel, gate thresholds); it never changes how a case is scored."""
         if self._dataset is None:
             return
         if self.status_group is not None:

@@ -1,16 +1,15 @@
 """Evaluation → Compare Datasets sub-tab — several datasets' runs side by side.
 
 The picker lives in the **shared `DashboardRail`** (the "Compare Datasets"
-section: Fact/Knob + a dataset add-list with a run dropdown each), so every
-dashboard tab shows the identical left column. This tab's BODY reads that
-picker's state off the coordinator (`compare_selected`) and renders the
-comparison: a metric × run table (the first dataset is the baseline, the
-others show a ± delta vs it, the best run per metric in bold) plus grouped
-bars per score group.
+section: a dataset add-list with a run dropdown each), so every dashboard tab
+shows the identical left column. This tab's BODY reads that picker's state off
+the coordinator (`compare_selected`) and renders the comparison: a metric × run
+table (the first dataset is the baseline, the others show a ± delta vs it, the
+best run per metric in bold) plus grouped bars per score group.
 
-ONE kind per comparison — Fact and Knob produce different metric sets, so
-mixing them isn't meaningful; the rail's kind selector enforces it, and a
-comparability banner flags when the selected runs used different recipes.
+A comparability banner flags when the selected runs used different recipes.
+(Step-4 rework will re-scope this tab to the members of one suite-run — same
+facts, swept knobs — which is the properly comparable case.)
 
 Run-level `avg_*` columns are read straight from each run row — no in-GUI
 aggregation. `RunSummaryTab._fmt` / `._delta` are reused from Run Summary

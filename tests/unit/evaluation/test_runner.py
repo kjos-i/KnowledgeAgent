@@ -97,6 +97,79 @@ def test_end_to_end_with_stubbed_graph(tmp_path, monkeypatch):
     assert stored_hash == report["dataset_hash"]  # persisted to the ledger
 
 
+def test_run_suite_shares_one_id_across_members(tmp_path, monkeypatch):
+    """run_suite runs each member (same facts, swept knobs) and stamps them all
+    with ONE shared suite_run_id — so members share a facts_hash but differ by
+    dataset_hash, and on_run_complete fires once per member, in order."""
+
+    async def fake_run_case(case, corpus_config):
+        return CaseRun(
+            question=case.question,
+            answer="a",
+            retrieved_texts=["x"],
+            retrieved_doc_ids=["d1"],
+            retrieved_chunk_ids=["c1"],
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_seconds=0.1,
+        )
+
+    monkeypatch.setattr(E, "run_case", fake_run_case)
+    monkeypatch.setattr(
+        RP, "capture_provenance", lambda: {"git_commit": None, "model_config": {}, "prompts": {}}
+    )
+    out = tmp_path / "out"
+
+    def _member(name, cid, mode):
+        path = tmp_path / name
+        path.write_text(
+            json.dumps(
+                [
+                    {
+                        "id": cid,
+                        "question": "q?",
+                        "expected_chunks": ["x"],
+                        # pin every knob either leg needs so validate_dataset passes
+                        "retrieval": {
+                            "retrieval_mode": mode,
+                            "num_candidates": 100,
+                            "rrf_rank_constant": 60,
+                            "kg_max_rows": 50,
+                        },
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return load_eval_config(dataset_path=path, output_dir=out)
+
+    cfg_v = _member("facts_vector.json", "q__vector", "lancedb_only")
+    cfg_g = _member("facts_graph.json", "q__graph", "neo4j_only")
+
+    seen: list[tuple[int, int]] = []
+    suite = asyncio.run(
+        RN.run_suite(
+            [cfg_v, cfg_g], on_run_complete=lambda done, total, _r: seen.append((done, total))
+        )
+    )
+
+    assert isinstance(suite, RN.SuiteRunResult)
+    assert len(suite.results) == 2
+    assert seen == [(1, 2), (2, 2)]  # progress fired per member, in order
+
+    with sqlite3.connect(out / "eval_ledger.db") as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT suite_run_id, facts_hash, dataset_hash FROM eval_runs ORDER BY run_id"
+        ).fetchall()
+    # one shared suite_run_id across both members
+    assert rows[0]["suite_run_id"] == rows[1]["suite_run_id"] == suite.suite_run_id
+    # same facts -> same facts_hash; different knobs -> different dataset_hash
+    assert rows[0]["facts_hash"] == rows[1]["facts_hash"]
+    assert rows[0]["dataset_hash"] != rows[1]["dataset_hash"]
+
+
 def test_run_refuses_when_no_dataset_selected(tmp_path):
     """No dataset set (the harness has no baked-in default) → run aborts with a
     clear error before anything runs."""

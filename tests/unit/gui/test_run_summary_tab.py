@@ -50,17 +50,12 @@ def _report() -> dict:
 
 
 def test_run_summary_builds(fake_app: MagicMock):
-    assert (
-        RunSummaryTab(
-            fake_app, coordinator=MagicMock(compare_kind="fact", compare_selected=[])
-        ).build()
-        is not None
-    )
+    assert RunSummaryTab(fake_app, coordinator=MagicMock(compare_selected=[])).build() is not None
 
 
 def test_refresh_empty_ledger_shows_empty_state(fake_app: MagicMock, tmp_path):
     led = EvalLedger(tmp_path / "l.db")
-    tab = RunSummaryTab(fake_app, coordinator=MagicMock(compare_kind="fact", compare_selected=[]))
+    tab = RunSummaryTab(fake_app, coordinator=MagicMock(compare_selected=[]))
     tab.build()
     with patch("knowledge_agent.gui.evaluation._common.active_eval_ledger", return_value=led):
         tab.refresh()
@@ -70,7 +65,7 @@ def test_refresh_empty_ledger_shows_empty_state(fake_app: MagicMock, tmp_path):
 def test_refresh_renders_selected_run(fake_app: MagicMock, tmp_path):
     led = EvalLedger(tmp_path / "l.db")
     led.save_run(_report())
-    coordinator = MagicMock(compare_kind="fact", compare_selected=[])
+    coordinator = MagicMock(compare_selected=[])
     coordinator.selected_run_id = None
     tab = RunSummaryTab(fake_app, coordinator=coordinator)
     tab.build()
@@ -90,7 +85,7 @@ def test_refresh_with_two_runs_renders_delta_pills(fake_app: MagicMock, tmp_path
     r2 = _report()
     r2["summary"] = {"case_count": 2, "pass_count": 2, "pass_rate": 1.0, "avg_hit_at_k": 1.0}
     led.save_run(r2)
-    coordinator = MagicMock(compare_kind="fact", compare_selected=[])
+    coordinator = MagicMock(compare_selected=[])
     coordinator.selected_run_id = None
     tab = RunSummaryTab(fake_app, coordinator=coordinator)
     tab.build()
@@ -118,7 +113,7 @@ def test_sort_by_orders_and_flips_on_repeat_click(fake_app: MagicMock, tmp_path)
     on the same column flips the direction."""
     led = EvalLedger(tmp_path / "l.db")
     led.save_run(_report())  # c1: hit_at_k=1.0, c2: hit_at_k=0.0
-    coordinator = MagicMock(compare_kind="fact", compare_selected=[])
+    coordinator = MagicMock(compare_selected=[])
     coordinator.selected_run_id = None
     tab = RunSummaryTab(fake_app, coordinator=coordinator)
     tab.build()
@@ -133,7 +128,7 @@ def test_sort_by_orders_and_flips_on_repeat_click(fake_app: MagicMock, tmp_path)
 def test_sorted_cases_keeps_not_evaluated_last(fake_app: MagicMock):
     """Rows with no value for the sort column (not evaluated) sort last in both
     directions."""
-    tab = RunSummaryTab(fake_app, coordinator=MagicMock(compare_kind="fact", compare_selected=[]))
+    tab = RunSummaryTab(fake_app, coordinator=MagicMock(compare_selected=[]))
     tab._cases = [
         {"case_id": "a", "mrr": 0.5},
         {"case_id": "b", "mrr": None},
@@ -151,7 +146,7 @@ def test_metric_scores_chart_defaults_all_and_filters(fake_app: MagicMock, tmp_p
     every metric swaps the chart for a 'select at least one' note."""
     led = EvalLedger(tmp_path / "l.db")
     led.save_run(_report())  # c1/c2 have hit_at_k values
-    coordinator = MagicMock(compare_kind="fact", compare_selected=[])
+    coordinator = MagicMock(compare_selected=[])
     coordinator.selected_run_id = None
     tab = RunSummaryTab(fake_app, coordinator=coordinator)
     tab.build()
@@ -240,7 +235,7 @@ def test_case_settings_block_none_when_empty_or_invalid():
 
 
 def test_case_details_shows_conversation_only_for_chat_case(fake_app: MagicMock):
-    tab = RunSummaryTab(fake_app, coordinator=MagicMock(compare_kind="fact", compare_selected=[]))
+    tab = RunSummaryTab(fake_app, coordinator=MagicMock(compare_selected=[]))
     tab.build()
     cases = [
         {
@@ -275,7 +270,7 @@ def test_metric_cell_color_is_direction_aware(fake_app: MagicMock):
         for m in R.METRICS
         if m.sql_column and m.group not in ("tokens", "latency") and m.fmt != "d"
     }
-    tab = RunSummaryTab(fake_app, coordinator=MagicMock(compare_kind="fact", compare_selected=[]))
+    tab = RunSummaryTab(fake_app, coordinator=MagicMock(compare_selected=[]))
 
     def color(val: object, col: str) -> str:
         return tab._metric_cell(val, col, fmts, banded, directions).content.color
@@ -303,7 +298,7 @@ def test_refresh_renders_n_line_when_present(fake_app: MagicMock, tmp_path):
     report = _report()
     report["summary"]["n_hit_at_k"] = 2
     led.save_run(report)
-    coordinator = MagicMock(compare_kind="fact", compare_selected=[])
+    coordinator = MagicMock(compare_selected=[])
     coordinator.selected_run_id = None
     tab = RunSummaryTab(fake_app, coordinator=coordinator)
     tab.build()

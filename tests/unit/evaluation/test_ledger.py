@@ -119,7 +119,6 @@ def test_save_run_persists_filter_columns(tmp_path):
             "llm_provider": "anthropic",
             "synthesizer_model": "claude-sonnet-5",
             "judge_models": ["claude-haiku-4-5", "claude-opus-4-8"],
-            "dataset_kind": "fact",
             "recipe_hash": "cafe" * 16,
         }
     )
@@ -134,7 +133,6 @@ def test_save_run_persists_filter_columns(tmp_path):
         assert run["llm_provider"] == "anthropic"
         assert run["synthesizer_model"] == "claude-sonnet-5"
         assert json.loads(run["judge_models"]) == ["claude-haiku-4-5", "claude-opus-4-8"]
-        assert run["dataset_kind"] == "fact"
         assert run["recipe_hash"] == "cafe" * 16
         cases = conn.execute("SELECT * FROM eval_cases ORDER BY case_id").fetchall()
         assert cases[0]["origin"] == "search"
@@ -182,6 +180,35 @@ def test_save_run_persists_case_settings(tmp_path):
     assert cases[1]["case_settings"] is None  # absent → NULL
 
 
+def test_save_run_persists_facts_hash_and_suite_run_id(tmp_path):
+    """The suite identity (facts_hash) + the shared launch id (suite_run_id)
+    round-trip onto the run row."""
+    led = EvalLedger(tmp_path / "l.db")
+    report = _report()
+    report["facts_hash"] = "f" * 64
+    report["suite_run_id"] = "2026-07-15T10:00:00+00:00"
+    led.save_run(report)
+    run = led.list_runs()[0]
+    assert run["facts_hash"] == "f" * 64
+    assert run["suite_run_id"] == "2026-07-15T10:00:00+00:00"
+
+
+def test_get_suite_run_groups_members(tmp_path):
+    """get_suite_run returns exactly the runs sharing a suite_run_id (the members
+    of one suite execution), and [] for an unknown id."""
+    led = EvalLedger(tmp_path / "l.db")
+    sid = "2026-07-15T10:00:00+00:00"
+    for _ in range(2):  # two members of one suite-run
+        r = _report()
+        r["suite_run_id"] = sid
+        led.save_run(r)
+    led.save_run(_report())  # an unrelated single-file run (no suite_run_id)
+    members = led.get_suite_run(sid)
+    assert len(members) == 2
+    assert {m["suite_run_id"] for m in members} == {sid}
+    assert led.get_suite_run("nope") == []
+
+
 def test_save_run_filter_columns_default_when_absent(tmp_path):
     """A bare / legacy report (no filter keys) stores NULL / empty-JSON, not
     an error — save_run reads the new keys defensively."""
@@ -193,8 +220,9 @@ def test_save_run_filter_columns_default_when_absent(tmp_path):
         assert run["dataset_name"] is None
         assert run["synthesizer_model"] is None
         assert json.loads(run["judge_models"]) == []
-        assert run["dataset_kind"] is None
         assert run["recipe_hash"] is None
+        assert run["facts_hash"] is None
+        assert run["suite_run_id"] is None
         case = conn.execute("SELECT * FROM eval_cases LIMIT 1").fetchone()
         assert case["origin"] is None  # _report()'s cases have no origin
         assert case["case_settings"] is None  # absent → NULL (not "{}")

@@ -20,16 +20,13 @@ _LEDGER = "knowledge_agent.gui.evaluation._common.active_eval_ledger"
 
 
 def _coord() -> SimpleNamespace:
-    return SimpleNamespace(
-        selected_run_id=None, selected_dataset=None, compare_kind="fact", compare_selected=[]
-    )
+    return SimpleNamespace(selected_run_id=None, selected_dataset=None, compare_selected=[])
 
 
-def _report(dataset: str, kind: str, hit: float, recipe_hash: str = "r1") -> dict:
+def _report(dataset: str, hit: float, recipe_hash: str = "r1") -> dict:
     return {
         "run_timestamp": "2026-07-05T10:00:00",
         "dataset_path": dataset,
-        "dataset_kind": kind,
         "recipe_hash": recipe_hash,
         "git_commit": None,
         "prompts_snapshot": {},
@@ -52,8 +49,8 @@ def test_compare_tab_builds(fake_app):
 
 def test_compare_renders_table_for_two_datasets(fake_app, tmp_path):
     led = EvalLedger(tmp_path / "l.db")
-    led.save_run(_report("alpha.json", "fact", 0.5))
-    led.save_run(_report("beta.json", "fact", 1.0))
+    led.save_run(_report("alpha.json", 0.5))
+    led.save_run(_report("beta.json", 1.0))
     coord = _coord()
     tab = CompareDatasetsTab(fake_app, coordinator=coord)
     tab.build()
@@ -69,7 +66,7 @@ def test_compare_renders_table_for_two_datasets(fake_app, tmp_path):
 
 def test_compare_needs_two_datasets(fake_app, tmp_path):
     led = EvalLedger(tmp_path / "l.db")
-    led.save_run(_report("alpha.json", "fact", 0.5))
+    led.save_run(_report("alpha.json", 0.5))
     coord = _coord()
     tab = CompareDatasetsTab(fake_app, coordinator=coord)
     tab.build()
@@ -79,21 +76,18 @@ def test_compare_needs_two_datasets(fake_app, tmp_path):
     assert "at least 2" in tab.body.controls[0].value
 
 
-def test_compare_kind_filter_scopes_datasets(fake_app, tmp_path):
-    """Only datasets of the selected kind are offered; switching kind clears the
-    selection (Fact and Knob aren't comparable)."""
+def test_compare_offers_all_corpus_datasets(fake_app, tmp_path):
+    """The picker offers every dataset in the corpus (no fact/knob scoping) and
+    adding two of them selects both."""
     led = EvalLedger(tmp_path / "l.db")
-    led.save_run(_report("factset.json", "fact", 0.5))
-    led.save_run(_report("knobset.json", "knob", 0.5))
+    led.save_run(_report("alpha.json", 0.5))
+    led.save_run(_report("beta.json", 0.5))
     coord = _coord()
     tab = CompareDatasetsTab(fake_app, coordinator=coord)
     tab.build()
     with patch(_LEDGER, return_value=led):
         tab.refresh()
-        assert [o.key for o in tab.rail.compare_dataset_dd.options] == ["factset"]  # fact only
-        _add(tab, "factset")
-        assert len(coord.compare_selected) == 1
-        tab.rail.compare_kind_group.value = "knob"
-        tab.rail._on_compare_kind_change(MagicMock())
-        assert coord.compare_selected == []  # cleared on kind switch
-        assert [o.key for o in tab.rail.compare_dataset_dd.options] == ["knobset"]  # knob only
+        assert sorted(o.key for o in tab.rail.compare_dataset_dd.options) == ["alpha", "beta"]
+        _add(tab, "alpha")
+        _add(tab, "beta")
+    assert {s["dataset"] for s in coord.compare_selected} == {"alpha", "beta"}

@@ -63,18 +63,17 @@ def _saved(tmp_path, name, **kw):
 
 
 def test_load_state_editable_when_not_frozen(fake_app: MagicMock, tmp_path):
-    """A non-frozen dataset loads with the recipe EDITABLE — except Case Type,
-    which is always read-only in Run. Max cases + Tracing are editable, the
-    freeze checkbox is enabled, and Unfreeze is present but greyed out."""
+    """A non-frozen dataset loads with the recipe EDITABLE. Max cases + Tracing
+    are editable, the freeze checkbox is enabled, and Unfreeze is present but
+    greyed out."""
     from knowledge_agent.evaluation.models import EvalRecipe
 
-    p = _saved(tmp_path, "final.json", status="final", recipe=EvalRecipe(dataset_kind="knob"))
+    p = _saved(tmp_path, "final.json", status="final", recipe=EvalRecipe(enabled_groups=["source"]))
     tab, _ = _run_tab(fake_app)
     tab.dataset_field.value = str(p)
     tab._load_dataset_state(p)
-    assert tab.recipe_form.profile_group.value == "knob"  # recipe loaded
+    assert tab.recipe_form.group_checks["source"].value is True  # recipe loaded
     assert tab.recipe_form._wrapper.disabled is False  # editable (not frozen)
-    assert tab.recipe_form.profile_group.disabled is True  # Case Type read-only in Run
     assert tab.max_cases_field.disabled is False  # editable (not frozen)
     assert tab.trace_check.disabled is False
     assert tab.freeze_check.disabled is False  # final + not frozen → can freeze
@@ -98,9 +97,7 @@ def test_frozen_dataset_loads_readonly(fake_app: MagicMock, tmp_path):
     badge shown."""
     from knowledge_agent.evaluation.models import EvalRecipe
 
-    p = _saved(
-        tmp_path, "frozen.json", status="final", frozen=True, recipe=EvalRecipe(dataset_kind="fact")
-    )
+    p = _saved(tmp_path, "frozen.json", status="final", frozen=True, recipe=EvalRecipe())
     tab, _ = _run_tab(fake_app)
     tab.dataset_field.value = str(p)
     tab._load_dataset_state(p)
@@ -117,9 +114,7 @@ def test_unfreeze_persists_frozen_false(fake_app: MagicMock, tmp_path):
     """_do_unfreeze clears the frozen flag on disk and re-enables the recipe."""
     from knowledge_agent.evaluation.models import EvalRecipe, load_dataset
 
-    p = _saved(
-        tmp_path, "frozen.json", status="final", frozen=True, recipe=EvalRecipe(dataset_kind="fact")
-    )
+    p = _saved(tmp_path, "frozen.json", status="final", frozen=True, recipe=EvalRecipe())
     tab, _ = _run_tab(fake_app)
     tab.dataset_field.value = str(p)
     tab._load_dataset_state(p)
@@ -134,7 +129,7 @@ def test_freeze_on_run_persists(fake_app: MagicMock, tmp_path):
     """Ticking 'Freeze run settings' + a successful run persists frozen=true."""
     from knowledge_agent.evaluation.models import EvalRecipe, load_dataset
 
-    p = _saved(tmp_path, "final.json", status="final", recipe=EvalRecipe(dataset_kind="knob"))
+    p = _saved(tmp_path, "final.json", status="final", recipe=EvalRecipe())
     tab, _ = _run_tab(fake_app)
     tab.dataset_field.value = str(p)
     tab._load_dataset_state(p)

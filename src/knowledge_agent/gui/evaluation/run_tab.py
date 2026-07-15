@@ -138,7 +138,7 @@ class RunTab:
         # The recipe editor, shared with the Create-test-cases tab. Built here;
         # `_load_dataset_state` sets it read-only vs editable per the dataset's
         # frozen flag on select. A fresh form (no dataset) is editable.
-        self.recipe_form = RecipeForm(self.app, case_type_readonly=True)
+        self.recipe_form = RecipeForm(self.app)
         recipe_body = self.recipe_form.build()
         # "Freeze run settings" — the opt-in next to Run: tick it + Run and the
         # finished run persists frozen=true, locking the recipe onto the
@@ -651,10 +651,7 @@ class RunTab:
         from knowledge_agent.gui.evaluation._common import active_corpus_config_path
 
         # The (possibly deviated) recipe on the form drives the run's metric
-        # groups, judge panel, and the three gate thresholds. dataset_kind is
-        # NOT read here — it's provenance the runner stamps from the dataset's
-        # SAVED recipe, so the ledger records which canonical recipe this run
-        # is associated with even when the form deviated.
+        # groups, judge panel, and the three gate thresholds.
         recipe = self.recipe_form.to_recipe() if self.recipe_form else None
         overrides: dict = {}
         if recipe is not None:

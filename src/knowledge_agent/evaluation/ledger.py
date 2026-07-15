@@ -66,20 +66,30 @@ _RUNS_TRAILING: list[tuple[str, str]] = [
     # Filter columns (added 2026-07-13). Lifted out of prompts_snapshot /
     # derived from the run's paths so the dashboard can query runs by model /
     # dataset / corpus without parsing JSON. Add-only migration extends old
-    # DBs (existing rows get NULL). `dataset_kind` + `recipe_hash` join here
-    # with workstream C2 (the dataset recipe), which is their source.
+    # DBs (existing rows get NULL). `recipe_hash` joins here with workstream C2
+    # (the dataset recipe), which is its source.
     ("dataset_name", "TEXT"),
     ("corpus_name", "TEXT"),
     ("llm_provider", "TEXT"),
     ("synthesizer_model", "TEXT"),
     ("judge_models", "TEXT"),  # JSON list — the judge panel that actually ran
-    # Dataset-recipe provenance (C2): the profile tag + the recipe fingerprint
-    # (twin of dataset_hash). NULL when the dataset carries no saved recipe.
-    # PROVENANCE / FILTER ONLY — the dashboard groups + compares runs by these;
-    # they are NEVER read by scoring or the pass-gate (the run's actual gate
-    # thresholds live in `gate_thresholds`).
-    ("dataset_kind", "TEXT"),
+    # Dataset-recipe provenance (C2): the recipe fingerprint (twin of
+    # dataset_hash). NULL when the dataset carries no saved recipe. PROVENANCE /
+    # FILTER ONLY — the dashboard groups + compares runs by it; NEVER read by
+    # scoring or the pass-gate (the run's actual gate thresholds live in
+    # `gate_thresholds`). (An older `dataset_kind` fact/knob column was retired
+    # 2026-07-15 — see the suite model / `facts_hash` below; it lingers, unused,
+    # in DBs created before then.)
     ("recipe_hash", "TEXT"),
+    # Suite model (added 2026-07-15). `facts_hash` = SHA-256 of the cases' gold
+    # content only (knobs + id EXCLUDED) → the identity SHARED by every member of
+    # a test-dataset suite (twin of `dataset_hash`, which is per-file). Groups the
+    # files that carry the same facts. `suite_run_id` = a shared launch timestamp
+    # stamped on all N runs of one "run the suite", so the dashboard loads +
+    # compares them as one unit; NULL for single-file runs. PROVENANCE / GROUPING
+    # ONLY — never read by scoring or the pass-gate.
+    ("facts_hash", "TEXT"),
+    ("suite_run_id", "TEXT"),
 ]
 
 _CASES_PREAMBLE: list[tuple[str, str]] = [
@@ -199,8 +209,9 @@ class EvalLedger:
             "llm_provider": report.get("llm_provider"),
             "synthesizer_model": report.get("synthesizer_model"),
             "judge_models": json.dumps(report.get("judge_models", [])),
-            "dataset_kind": report.get("dataset_kind"),
             "recipe_hash": report.get("recipe_hash"),
+            "facts_hash": report.get("facts_hash"),
+            "suite_run_id": report.get("suite_run_id"),
         }
         for avg_key, _ in run_sql_columns():
             run_row[avg_key] = summary.get(avg_key)
@@ -261,6 +272,18 @@ class EvalLedger:
             rows = conn.execute(
                 "SELECT * FROM eval_cases WHERE run_id = ? ORDER BY case_row_id",
                 (int(run_id),),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_suite_run(self, suite_run_id: str) -> list[dict[str, Any]]:
+        """The member runs of one suite execution (those sharing `suite_run_id`),
+        oldest first — empty when there's no such suite-run. Backs the Compare
+        tab, which overlays a suite-run's members (same facts, swept knobs)."""
+        with closing(self._connect()) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM eval_runs WHERE suite_run_id = ? ORDER BY run_id",
+                (str(suite_run_id),),
             ).fetchall()
             return [dict(row) for row in rows]
 

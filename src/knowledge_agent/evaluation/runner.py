@@ -54,6 +54,16 @@ class RunResult:
     run_id: int
 
 
+@dataclass(slots=True)
+class SuiteRunResult:
+    """Outcome of one suite execution — the shared `suite_run_id` (launch
+    timestamp) plus each member's `RunResult`, in run order. Returned by
+    `run_suite` so the GUI can hop to Compare scoped to this suite-run."""
+
+    suite_run_id: str
+    results: list[RunResult]
+
+
 def _load_corpus_config(cfg: EvalConfig) -> CorpusConfig | None:
     if cfg.corpus_config_path is None:
         return None
@@ -68,6 +78,7 @@ async def run(
     *,
     trace: bool = False,
     langsmith_project: str | None = None,
+    suite_run_id: str | None = None,
 ) -> RunResult:
     """Execute one evaluation run end-to-end; return a `RunResult`.
 
@@ -91,6 +102,7 @@ async def run(
     from knowledge_agent.evaluation.ledger import EvalLedger
     from knowledge_agent.evaluation.models import (
         compute_dataset_hash,
+        compute_facts_hash,
         load_dataset,
         validate_dataset,
     )
@@ -101,7 +113,7 @@ async def run(
             "(GUI: Browse in the corpus folder; CLI: --dataset / KA_EVAL_DATASET)."
         )
     # Load the FULL dataset (header + cases): the header carries the recipe
-    # whose `dataset_kind` + `recipe_hash` are stamped as run provenance.
+    # whose `recipe_hash` is stamped as run provenance.
     dataset = load_dataset(cfg.dataset_path)
     cases = dataset.cases
     # Refuse up-front (before spending tokens) if any case leaves a required
@@ -119,6 +131,10 @@ async def run(
     # Hash the FULL dataset (before max_cases truncation / any filter) — the
     # fingerprint is the dataset's identity, independent of how many ran.
     dataset_hash = compute_dataset_hash(cases)
+    # facts_hash = gold content only (knobs + id excluded) → the suite identity,
+    # shared by every member that carries the same facts. Same full-dataset scope
+    # as dataset_hash (before max_cases truncation).
+    facts_hash = compute_facts_hash(cases)
     if cfg.max_cases is not None:
         cases = cases[: cfg.max_cases]
     corpus_config = _load_corpus_config(cfg)
@@ -146,12 +162,48 @@ async def run(
 
     run_timestamp = datetime.now(UTC).isoformat(timespec="seconds")
     report = report_mod.build_report(
-        cfg, results, run_timestamp, dataset_hash=dataset_hash, recipe=dataset.recipe
+        cfg,
+        results,
+        run_timestamp,
+        dataset_hash=dataset_hash,
+        facts_hash=facts_hash,
+        recipe=dataset.recipe,
+        suite_run_id=suite_run_id,
     )
     json_path, csv_path = report_mod.write_report(report, cfg.output_dir)
     run_id = EvalLedger(cfg.ledger_path).save_run(report)
 
     return RunResult(report=report, json_path=json_path, csv_path=csv_path, run_id=run_id)
+
+
+async def run_suite(
+    cfgs: list[EvalConfig],
+    on_run_complete: Callable[[int, int, RunResult], None] | None = None,
+    *,
+    trace: bool = False,
+    langsmith_project: str | None = None,
+) -> SuiteRunResult:
+    """Run every member of a test-dataset suite under ONE shared `suite_run_id`.
+
+    Each `cfg` is one suite member — the SAME facts, a DIFFERENT pinned knob
+    setting. All N runs are stamped with a single launch timestamp so the
+    dashboard loads + compares them as one unit. Members run SEQUENTIALLY on
+    purpose: the graph is already concurrent within a run, and back-to-back keeps
+    the machine + code identical across members, so a metric difference between
+    them is attributable to the knob, not to drift. `on_run_complete(done, total,
+    result)` fires as each member finishes so a caller can advance a progress bar.
+    """
+    suite_run_id = datetime.now(UTC).isoformat(timespec="seconds")
+    total = len(cfgs)
+    results: list[RunResult] = []
+    for cfg in cfgs:
+        result = await run(
+            cfg, trace=trace, langsmith_project=langsmith_project, suite_run_id=suite_run_id
+        )
+        results.append(result)
+        if on_run_complete is not None:
+            on_run_complete(len(results), total, result)
+    return SuiteRunResult(suite_run_id=suite_run_id, results=results)
 
 
 def _print_summary(result: RunResult) -> None:

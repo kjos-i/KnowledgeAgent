@@ -487,15 +487,15 @@ def test_recipe_saved_with_dataset(fake_app, tmp_path):
     tab._on_new(MagicMock())
     tab.f["id"].value = "c1"
     tab.f["question"].value = "q?"
-    # Pick the Knob profile on the recipe form (judge off, gates at 0).
-    tab.recipe_form.profile_group.value = "knob"
-    tab.recipe_form._on_profile_change(MagicMock())
+    # Turn the judge group off on the recipe form (a knob-profiling recipe).
+    tab.recipe_form.group_checks["judge"].value = False
+    tab.recipe_form.group_checks["source"].value = True
     tab._on_save_case(MagicMock())
 
     ds = load_dataset(p)
     assert ds.recipe is not None
-    assert ds.recipe.dataset_kind == "knob"
     assert "judge" not in ds.recipe.enabled_groups
+    assert "source" in ds.recipe.enabled_groups
 
 
 def test_recipe_loaded_from_dataset(fake_app, tmp_path):
@@ -505,14 +505,14 @@ def test_recipe_loaded_from_dataset(fake_app, tmp_path):
     p = tmp_path / "r.json"
     save_dataset(
         EvalDataset(
-            recipe=EvalRecipe(dataset_kind="fact", judge_threshold=0.9),
+            recipe=EvalRecipe(enabled_groups=["source", "judge"], judge_threshold=0.9),
             cases=[EvalCase(id="c", question="q?")],
         ),
         p,
     )
     tab = _tab(fake_app)
     tab._load(p)
-    assert tab.recipe_form.profile_group.value == "fact"
+    assert tab.recipe_form.group_checks["judge"].value is True
     assert tab.recipe_form.threshold_fields["judge_threshold"].value == "0.9"
 
 
@@ -525,7 +525,7 @@ def _frozen_file(tmp_path):
         EvalDataset(
             status="final",
             frozen=True,
-            recipe=EvalRecipe(dataset_kind="fact"),
+            recipe=EvalRecipe(),
             cases=[EvalCase(id="c", question="q?")],
         ),
         p,

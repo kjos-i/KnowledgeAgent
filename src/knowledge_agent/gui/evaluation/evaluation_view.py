@@ -73,7 +73,6 @@ class EvaluationView:
         # Compare Datasets picker state — shared across every rail instance (the
         # Compare section lives on the shared DashboardRail); only the Compare
         # tab's body consumes it. compare_selected = [{"dataset", "run_id"}, ...].
-        self.compare_kind: str = "fact"
         self.compare_selected: list[dict[str, Any]] = []
         self._tabs: ft.Tabs | None = None
         self.run_tab = RunTab(app, coordinator=self)
