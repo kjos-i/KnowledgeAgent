@@ -65,22 +65,21 @@ def test_evaluation_view_selected_run_defaults_none(fake_app: MagicMock):
     assert EvaluationView(fake_app).selected_dataset is None
 
 
-def test_on_suite_complete_loads_compare_and_switches(fake_app: MagicMock):
-    """A finished suite loads its members (dataset_name, run_id) into the Compare
-    picker and jumps to the Compare Datasets tab."""
+def test_on_suite_complete_points_cascade_and_switches(fake_app: MagicMock):
+    """A finished suite points the shared cascade at it (suite + a member run) and
+    jumps to the Compare Datasets tab, which reads the run's suite_run_id."""
     view = EvaluationView(fake_app)
     view.build()
     view.compare_tab.refresh = MagicMock()
     suite = MagicMock(
         results=[
-            MagicMock(run_id=1, report={"dataset_name": "facts_vector"}),
-            MagicMock(run_id=2, report={"dataset_name": "facts_graph"}),
+            MagicMock(run_id=1, report={"dataset_name": "facts_vector", "facts_hash": "fh"}),
+            MagicMock(run_id=2, report={"dataset_name": "facts_graph", "facts_hash": "fh"}),
         ]
     )
     view.on_suite_complete(suite)
-    assert view.compare_selected == [
-        {"dataset": "facts_vector", "run_id": 1},
-        {"dataset": "facts_graph", "run_id": 2},
-    ]
+    assert view.selected_suite == "fh"
+    assert view.selected_dataset == "facts_vector"
+    assert view.selected_run_id == 1  # first member drives Compare via its suite_run_id
     view.compare_tab.refresh.assert_called_once()
     assert view._tabs.selected_index == SUB_TAB_LABELS.index("Compare Datasets")

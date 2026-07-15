@@ -1,24 +1,28 @@
-"""The shared left column for the four Evaluation dashboard tabs.
+"""The shared left column for the five Evaluation dashboard tabs.
 
 ONE widget — the shared left column for EVERY dashboard tab (Run Summary, Run
 Charts, Compare Datasets, Trends, Metrics Guide), so the column is IDENTICAL
-everywhere. Sections top→bottom: Refresh · "Run summary & charts" (Dataset →
-Run drill-down + a read-only run-info panel) · "Compare Datasets" (the
-multi-dataset picker). Each tab's BODY consumes only the sections relevant to
-it (e.g. only the Compare tab reads the Compare picker). SSOT: the selectors +
-selected-run metadata live here once.
+everywhere. It is a **Suite → Dataset → Run** cascade + Refresh + a read-only
+run-info panel:
 
-A control can only mount in one place, so each tab holds its OWN `DashboardRail`
-instance; they share state through the coordinator (`selected_dataset` +
-`selected_run_id` for the run picker; `compare_selected` for the Compare
-picker) and re-sync from it on `refresh()`. The host tab passes
-`on_change`, fired when any selection changes or Refresh is pressed, so it can
-re-render its own body from the shared state.
+  - **Suite** — a group of dataset files sharing a `facts_hash` (the same facts,
+    swept knobs). Picking one scopes the Dataset list to that suite's members.
+  - **Dataset** — one member file. Scopes the Run picker + Trends (by that
+    dataset's `dataset_hash`).
+  - **Run** — one run of the selected dataset. Drives Run Summary / Run Charts,
+    and — via its `suite_run_id` — Compare (that suite execution's members).
+
+Each tab's BODY consumes only what it needs; the selectors + selected-run
+metadata live here once (SSOT). A control can only mount in one place, so each
+tab holds its OWN `DashboardRail` instance; they share state through the
+coordinator (`selected_suite` / `selected_dataset` / `selected_run_id`) and
+re-sync from it on `refresh()`. The host tab passes `on_change`, fired when any
+selection changes or Refresh is pressed, so it re-renders its own body.
 
 The context panel reads the RUN's row in the ledger — the immutable snapshot of
-what that run actually used (groups, thresholds, judges, `recipe_hash`) — NOT
-the (mutable) dataset JSON, so it stays accurate even after the dataset is
-edited or deleted.
+what that run actually used (groups, thresholds, judges, hashes) — NOT the
+(mutable) dataset JSON, so it stays accurate even after the dataset is edited or
+deleted.
 """
 
 from __future__ import annotations
@@ -43,6 +47,9 @@ if TYPE_CHECKING:
     from knowledge_agent.gui.evaluation.evaluation_view import EvaluationView
 
 _RAIL_WIDTH = 280
+# The suite key for legacy runs recorded before facts_hash existed (NULL). A
+# real facts_hash is 64 hex chars, so this sentinel never collides.
+_NO_SUITE = "∅"
 
 
 def dataset_of(run: dict[str, Any]) -> str:
@@ -52,6 +59,11 @@ def dataset_of(run: dict[str, Any]) -> str:
     if name:
         return str(name)
     return Path(run.get("dataset_path") or "").stem or "?"
+
+
+def _suite_key(run: dict[str, Any]) -> str:
+    """The run's suite identity — its `facts_hash`, or the legacy sentinel."""
+    return run.get("facts_hash") or _NO_SUITE
 
 
 def _run_label(run: dict[str, Any]) -> str:
@@ -70,7 +82,7 @@ def _parse(raw: Any) -> Any:
 
 
 class DashboardRail:
-    """Shared Dataset→Run selector + Refresh + read-only recipe/hash context."""
+    """Shared Suite→Dataset→Run selector + Refresh + read-only run context."""
 
     def __init__(
         self, app: GuiApp, coordinator: EvaluationView, *, on_change: Callable[[], None]
@@ -78,23 +90,23 @@ class DashboardRail:
         self.app = app
         self.coordinator = coordinator
         self._on_change = on_change
+        self.suite_dd: ft.Dropdown | None = None
         self.dataset_dd: ft.Dropdown | None = None
         self.run_dd: ft.Dropdown | None = None
         self.context: ft.Column | None = None
         self._runs: list[dict[str, Any]] = []
-        # Compare Datasets section controls. Its state lives on the coordinator
-        # (compare_selected) so every tab's rail instance stays in step; only the
-        # Compare tab's body consumes it.
-        self.compare_dataset_dd: ft.Dropdown | None = None
-        self.compare_list: ft.Column | None = None
 
     # ---- build ------------------------------------------------------------
 
     def build(self) -> ft.Control:
         # Flet 0.85's Dropdown fires `on_select` (NOT on_change) — wiring
-        # on_change silently never fires, so a picked run/dataset would be lost
-        # and the next refresh would snap back to the newest. Mirror the app's
-        # other Dropdowns (corpus selector, dataset-tab dropdowns).
+        # on_change silently never fires, so a picked value would be lost and the
+        # next refresh would snap back to the newest. Mirror the app's other
+        # Dropdowns (corpus selector, dataset-tab dropdowns).
+        self.suite_dd = ft.Dropdown(
+            label="Suite", options=[], width=_RAIL_WIDTH - 24, text_size=FIELD_LABEL_SIZE
+        )
+        self.suite_dd.on_select = self._on_suite_change
         self.dataset_dd = ft.Dropdown(
             label="Dataset", options=[], width=_RAIL_WIDTH - 24, text_size=FIELD_LABEL_SIZE
         )
@@ -113,11 +125,11 @@ class DashboardRail:
             content=ft.Column(
                 controls=[
                     refresh_button,
-                    sub_section_header("Run summary & charts"),
+                    sub_section_header("Selection"),
+                    self.suite_dd,
                     self.dataset_dd,
                     self.run_dd,
                     self.context,
-                    *self._build_compare_section(),
                 ],
                 spacing=8,
                 scroll=ft.ScrollMode.AUTO,
@@ -133,33 +145,64 @@ class DashboardRail:
         return active_eval_ledger(self.app)
 
     def refresh(self) -> None:
-        """Reload runs from the active corpus's ledger + sync the dropdowns and
+        """Reload runs from the active corpus's ledger + sync the cascade and
         context to the shared selection. Safe before any run exists."""
         self._runs = self._ledger().list_runs()
         self._sync_controls()
 
-    def _datasets(self) -> list[str]:
-        out: list[str] = []
+    def _suites(self) -> list[tuple[str, str]]:
+        """The distinct suites in the corpus as (key, label). A suite groups the
+        runs sharing a `facts_hash` (same facts, swept knobs); its label lists the
+        member dataset names. Legacy runs with no facts_hash fall under one
+        '(no suite)' group. Order follows first appearance (list_runs is newest
+        first)."""
+        order: list[str] = []
+        members: dict[str, list[str]] = {}
         for r in self._runs:
+            key = _suite_key(r)
             d = dataset_of(r)
-            if d not in out:
-                out.append(d)
+            if key not in members:
+                members[key] = []
+                order.append(key)
+            if d not in members[key]:
+                members[key].append(d)
+        out: list[tuple[str, str]] = []
+        for key in order:
+            names = ", ".join(members[key])
+            if len(names) > 40:
+                names = names[:39] + "…"
+            out.append((key, f"(no suite) {names}" if key == _NO_SUITE else names))
         return out
 
     def _sync_controls(self) -> None:
-        """Populate the dropdowns from the loaded runs, honouring the shared
-        selection (falling back to the newest dataset / run), then render the
-        context panel for the selected run."""
-        if self.dataset_dd is None or self.run_dd is None:
+        """Populate the Suite → Dataset → Run cascade from the loaded runs,
+        honouring the shared selection (a selected run's suite/dataset win, else
+        fall back to the newest), then render the context for the selected run."""
+        if self.suite_dd is None or self.dataset_dd is None or self.run_dd is None:
             return
-        datasets = self._datasets()
-        self.dataset_dd.options = [ft.DropdownOption(key=d, text=d) for d in datasets]
-        # If a run is already selected (e.g. just finished, or user-picked), its
-        # dataset wins — so a fresh run shows even if the filter pointed
-        # elsewhere. Otherwise honour the dataset filter, falling back to newest.
         sel_run = next(
             (r for r in self._runs if r["run_id"] == self.coordinator.selected_run_id), None
         )
+        # ---- Suite ----
+        suites = self._suites()
+        suite_keys = [k for k, _ in suites]
+        self.suite_dd.options = [ft.DropdownOption(key=k, text=t) for k, t in suites]
+        if sel_run is not None:
+            suite_key = _suite_key(sel_run)
+        else:
+            suite_key = self.coordinator.selected_suite
+            if suite_key not in suite_keys:
+                suite_key = suite_keys[0] if suite_keys else None
+        self.coordinator.selected_suite = suite_key
+        self.suite_dd.value = suite_key
+        suite_runs = [r for r in self._runs if _suite_key(r) == suite_key]
+        # ---- Dataset (scoped to the suite's members) ----
+        datasets: list[str] = []
+        for r in suite_runs:
+            d = dataset_of(r)
+            if d not in datasets:
+                datasets.append(d)
+        self.dataset_dd.options = [ft.DropdownOption(key=d, text=d) for d in datasets]
         if sel_run is not None:
             ds = dataset_of(sel_run)
         else:
@@ -168,8 +211,8 @@ class DashboardRail:
                 ds = datasets[0] if datasets else None
         self.coordinator.selected_dataset = ds
         self.dataset_dd.value = ds
-        # Runs scoped to the selected dataset (list_runs is newest-first).
-        runs = [r for r in self._runs if dataset_of(r) == ds]
+        # ---- Run (scoped to the dataset) ----
+        runs = [r for r in suite_runs if dataset_of(r) == ds]
         self.run_dd.options = [
             ft.DropdownOption(key=str(r["run_id"]), text=_run_label(r)) for r in runs
         ]
@@ -180,7 +223,6 @@ class DashboardRail:
         self.coordinator.selected_run_id = run_id
         self.run_dd.value = str(run_id) if run_id is not None else None
         self._render_context(self._ledger().get_run(run_id) if run_id is not None else None)
-        self._sync_compare()
 
     def _render_context(self, run: dict[str, Any] | None) -> None:
         """The read-only recipe panel for the selected run — sourced from the
@@ -196,9 +238,11 @@ class DashboardRail:
         thresholds = _parse(run.get("gate_thresholds")) or {}
         judges = _parse(run.get("judge_models")) or []
         rhash = run.get("recipe_hash")
+        fhash = run.get("facts_hash")
         lines: list[ft.Control] = [
             ft.Text("Run Information", weight=ft.FontWeight.BOLD, size=12),
             ft.Text(f"Dataset: {dataset_of(run)}", size=12),
+            ft.Text(f"Facts hash: {fhash[:8] if fhash else '—'}", size=12),
             ft.Text(f"Recipe hash: {rhash[:8] if rhash else '—'}", size=12),
             ft.Text(f"Groups: {', '.join(groups) if groups else '(none)'}", size=12),
             ft.Text(f"Judges: {', '.join(judges) if judges else '(default)'}", size=12),
@@ -211,6 +255,16 @@ class DashboardRail:
         self.context.controls = lines
 
     # ---- handlers ---------------------------------------------------------
+
+    def _on_suite_change(self, _e: ft.Event) -> None:
+        if self.suite_dd is None:
+            return
+        self.coordinator.selected_suite = self.suite_dd.value
+        self.coordinator.selected_dataset = None  # re-pick within the new suite
+        self.coordinator.selected_run_id = None
+        self._sync_controls()
+        self.app.page.update()
+        self._on_change()
 
     def _on_dataset_change(self, _e: ft.Event) -> None:
         if self.dataset_dd is None:
@@ -230,128 +284,5 @@ class DashboardRail:
 
     def _on_refresh(self, _e: ft.Event) -> None:
         self.refresh()
-        self.app.page.update()
-        self._on_change()
-
-    # ---- Compare Datasets section -----------------------------------------
-
-    def _build_compare_section(self) -> list[ft.Control]:
-        """The Compare Datasets picker — shown on every rail, but only the
-        Compare tab's body reads it. Dataset dropdown + Add → a row per added
-        dataset with its own run dropdown + remove ✕. State lives on the
-        coordinator so all rail instances stay in step. (Step-4 rework will
-        replace this with the Suite → Dataset → Run cascade.)"""
-        self.compare_dataset_dd = ft.Dropdown(
-            label="Dataset", options=[], width=_RAIL_WIDTH - 24, text_size=FIELD_LABEL_SIZE
-        )
-        add_btn = ft.TextButton("Add dataset", icon=ft.Icons.ADD, on_click=self._on_compare_add)
-        self.compare_list = ft.Column(controls=[], spacing=6)
-        return [
-            sub_section_header("Compare Datasets"),
-            self.compare_dataset_dd,
-            add_btn,
-            self.compare_list,
-        ]
-
-    def _runs_for_dataset(self, ds: str) -> list[dict[str, Any]]:
-        """Runs for a dataset (newest first — `list_runs` is newest-first)."""
-        return [r for r in self._runs if dataset_of(r) == ds]
-
-    def _compare_available_datasets(self) -> list[str]:
-        """Distinct dataset names in the corpus (all of them — the Compare picker
-        no longer scopes by fact/knob kind)."""
-        out: list[str] = []
-        for r in self._runs:
-            d = dataset_of(r)
-            if d not in out:
-                out.append(d)
-        return out
-
-    def _sync_compare(self) -> None:
-        """Sync the Compare picker to the coordinator state + loaded runs: prune
-        stale selections, repopulate the Add dropdown (this kind's not-yet-added
-        datasets), rebuild the per-dataset run rows."""
-        if self.compare_dataset_dd is None:
-            return
-        valid_ids = {r["run_id"] for r in self._runs}
-        for sel in self.coordinator.compare_selected:
-            if sel["run_id"] not in valid_ids:
-                runs = self._runs_for_dataset(sel["dataset"])
-                sel["run_id"] = runs[0]["run_id"] if runs else None
-        self.coordinator.compare_selected = [
-            s for s in self.coordinator.compare_selected if self._runs_for_dataset(s["dataset"])
-        ]
-        chosen = {s["dataset"] for s in self.coordinator.compare_selected}
-        available = [d for d in self._compare_available_datasets() if d not in chosen]
-        self.compare_dataset_dd.options = [ft.DropdownOption(key=d, text=d) for d in available]
-        if self.compare_dataset_dd.value not in available:
-            self.compare_dataset_dd.value = available[0] if available else None
-        self._rebuild_compare_list()
-
-    def _rebuild_compare_list(self) -> None:
-        """One row per added dataset: name + remove ✕, and its run dropdown."""
-        if self.compare_list is None:
-            return
-        rows: list[ft.Control] = []
-        for sel in self.coordinator.compare_selected:
-            ds = sel["dataset"]
-            runs = self._runs_for_dataset(ds)
-            run_dd = ft.Dropdown(
-                options=[ft.DropdownOption(key=str(r["run_id"]), text=_run_label(r)) for r in runs],
-                value=str(sel["run_id"]) if sel["run_id"] is not None else None,
-                width=_RAIL_WIDTH - 40,
-                text_size=FIELD_LABEL_SIZE,
-            )
-            run_dd.on_select = lambda e, d=ds: self._on_compare_run_change(d, e)
-            remove = ft.IconButton(
-                icon=ft.Icons.CLOSE,
-                icon_size=16,
-                tooltip="Remove",
-                on_click=lambda e, d=ds: self._on_compare_remove(d),
-            )
-            rows.append(
-                ft.Column(
-                    [
-                        ft.Row(
-                            [ft.Text(ds, size=12, weight=ft.FontWeight.BOLD, expand=True), remove],
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            spacing=0,
-                        ),
-                        run_dd,
-                    ],
-                    spacing=2,
-                )
-            )
-        self.compare_list.controls = rows or [
-            ft.Text("No datasets added yet.", size=12, italic=True, color=ft.Colors.GREY_500)
-        ]
-
-    def _on_compare_add(self, _e: ft.Event) -> None:
-        if self.compare_dataset_dd is None or not self.compare_dataset_dd.value:
-            return
-        ds = self.compare_dataset_dd.value
-        if any(s["dataset"] == ds for s in self.coordinator.compare_selected):
-            return
-        runs = self._runs_for_dataset(ds)
-        self.coordinator.compare_selected.append(
-            {"dataset": ds, "run_id": runs[0]["run_id"] if runs else None}
-        )
-        self._sync_compare()
-        self.app.page.update()
-        self._on_change()
-
-    def _on_compare_run_change(self, ds: str, e: ft.Event) -> None:
-        val = e.control.value
-        for sel in self.coordinator.compare_selected:
-            if sel["dataset"] == ds:
-                sel["run_id"] = int(val) if val else None
-                break
-        self._on_change()
-
-    def _on_compare_remove(self, ds: str) -> None:
-        self.coordinator.compare_selected = [
-            s for s in self.coordinator.compare_selected if s["dataset"] != ds
-        ]
-        self._sync_compare()
         self.app.page.update()
         self._on_change()

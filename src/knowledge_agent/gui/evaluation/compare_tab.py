@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 import flet as ft
 
 from knowledge_agent.gui._styles import dashboard_section_header, section_divider
-from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail
+from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail, dataset_of
 from knowledge_agent.gui.evaluation.run_summary_tab import RunSummaryTab
 from knowledge_agent.gui.views._frame import view_header
 
@@ -37,8 +37,10 @@ _BAR_W = 120  # grouped-bar track width
 
 
 class CompareDatasetsTab:
-    """Compare several datasets' runs (one kind at a time) side by side. The
-    picker is the shared rail's Compare Datasets section; this owns the body."""
+    """Compare the members of ONE suite execution side by side. The shared rail's
+    cascade selects a run; this tab shows every run sharing that run's
+    `suite_run_id` (the same facts under swept knobs) as a metric × run table +
+    grouped bars. Body-only — the rail owns the selectors."""
 
     def __init__(self, app: GuiApp, coordinator: EvaluationView) -> None:
         self.app = app
@@ -54,8 +56,8 @@ class CompareDatasetsTab:
         self.body = ft.Column(
             [
                 ft.Text(
-                    "Add at least 2 datasets to compare — use the Compare Datasets "
-                    "section in the left column.",
+                    "Select a run from a suite execution to compare its members — "
+                    "run a suite from the Run tab (Run scope → Whole suite).",
                     italic=True,
                 )
             ],
@@ -80,7 +82,7 @@ class CompareDatasetsTab:
         return active_eval_ledger(self.app)
 
     def refresh(self) -> None:
-        """Reload the rail (runs + the Compare picker) then render the body."""
+        """Reload the rail (runs + cascade selection) then render the body."""
         if self.rail is not None:
             self.rail.refresh()
         self._render_body()
@@ -88,21 +90,27 @@ class CompareDatasetsTab:
     def _render_body(self) -> None:
         if self.body is None:
             return
-        chosen = [s for s in self.coordinator.compare_selected if s["run_id"] is not None]
-        if len(chosen) < 2:
+        ledger = self._ledger()
+        run_id = self.coordinator.selected_run_id
+        selected = ledger.get_run(run_id) if run_id is not None else None
+        suite_run_id = selected.get("suite_run_id") if selected else None
+        if suite_run_id is None:
             self.body.controls = [
                 ft.Text(
-                    "Add at least 2 datasets (each with a run) to compare — use the "
-                    "Compare Datasets section in the left column.",
+                    "Select a run from a suite execution — Compare shows that "
+                    "suite-run's members (same facts, swept knobs) side by side. "
+                    "Run a suite from the Run tab (Run scope → Whole suite).",
                     italic=True,
                 )
             ]
             self.app.page.update()
             return
-        by_id = {r["run_id"]: r for r in self._ledger().list_runs()}
-        cols = [(s["dataset"], by_id[s["run_id"]]) for s in chosen if s["run_id"] in by_id]
+        # Every run stamped with this suite_run_id = the members of one execution.
+        cols = [(dataset_of(r), r) for r in ledger.get_suite_run(suite_run_id)]
         if len(cols) < 2:
-            self.body.controls = [ft.Text("Selected runs not found — press Refresh.", italic=True)]
+            self.body.controls = [
+                ft.Text("This suite-run has fewer than 2 members to compare.", italic=True)
+            ]
             self.app.page.update()
             return
         controls: list[ft.Control] = []
@@ -118,9 +126,10 @@ class CompareDatasetsTab:
     # ---- comparison rendering ---------------------------------------------
 
     def _comparability_banner(self, cols: list[tuple[str, dict[str, Any]]]) -> ft.Control | None:
-        """Warn when the selected runs used different recipes — same kind, but a
-        different hash means different thresholds / judges / enabled groups, so
-        some metrics may not line up. None when every hash matches."""
+        """Warn when the compared runs used different recipes — a different
+        recipe_hash means different thresholds / judges / enabled groups, so some
+        metrics may not line up. None when every hash matches (the normal case:
+        a suite runs all its members under one recipe)."""
         hashes = {(run.get("recipe_hash") or "—") for _, run in cols}
         if len(hashes) <= 1:
             return None

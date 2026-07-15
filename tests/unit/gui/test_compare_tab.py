@@ -1,15 +1,16 @@
 """Tests for the Evaluation Compare Datasets sub-tab.
 
-The picker now lives in the shared `DashboardRail` (Compare section), keyed off
-coordinator state — so these drive the rail's compare controls and check the
-tab's body renders the table + grouped bars (catches any Flet API error).
+Compare shows the members of ONE suite execution — every run sharing the
+selected run's `suite_run_id`. These seed a tmp ledger with a suite-run (two
+runs sharing a suite_run_id), point the coordinator at a member run, and check
+the body renders the table + grouped bars (catches any Flet API error).
 `_ledger` is patched to a tmp DB.
 """
 
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import flet as ft
 
@@ -20,14 +21,17 @@ _LEDGER = "knowledge_agent.gui.evaluation._common.active_eval_ledger"
 
 
 def _coord() -> SimpleNamespace:
-    return SimpleNamespace(selected_run_id=None, selected_dataset=None, compare_selected=[])
+    return SimpleNamespace(selected_suite=None, selected_dataset=None, selected_run_id=None)
 
 
-def _report(dataset: str, hit: float, recipe_hash: str = "r1") -> dict:
+def _report(dataset: str, hit: float, *, suite_run_id: str | None = None) -> dict:
     return {
         "run_timestamp": "2026-07-05T10:00:00",
-        "dataset_path": dataset,
-        "recipe_hash": recipe_hash,
+        "dataset_path": f"{dataset}.json",
+        "dataset_name": dataset,
+        "facts_hash": "fh",
+        "suite_run_id": suite_run_id,
+        "recipe_hash": "r1",
         "git_commit": None,
         "prompts_snapshot": {},
         "enabled_groups": ["source"],
@@ -37,57 +41,35 @@ def _report(dataset: str, hit: float, recipe_hash: str = "r1") -> dict:
     }
 
 
-def _add(tab: CompareDatasetsTab, dataset: str) -> None:
-    """Add a dataset via the rail's Compare picker (as a click would)."""
-    tab.rail.compare_dataset_dd.value = dataset
-    tab.rail._on_compare_add(MagicMock())
-
-
 def test_compare_tab_builds(fake_app):
     assert CompareDatasetsTab(fake_app, coordinator=_coord()).build() is not None
 
 
-def test_compare_renders_table_for_two_datasets(fake_app, tmp_path):
+def test_compare_renders_members_of_suite_run(fake_app, tmp_path):
+    """Pointing at a member run renders the whole suite-run (its members share a
+    suite_run_id) as a table + grouped bars."""
     led = EvalLedger(tmp_path / "l.db")
-    led.save_run(_report("alpha.json", 0.5))
-    led.save_run(_report("beta.json", 1.0))
+    led.save_run(_report("vec", 0.5, suite_run_id="s1"))  # run 1
+    led.save_run(_report("graph", 1.0, suite_run_id="s1"))  # run 2 — same suite-run
     coord = _coord()
+    coord.selected_run_id = 1  # a member run
     tab = CompareDatasetsTab(fake_app, coordinator=coord)
     tab.build()
     with patch(_LEDGER, return_value=led):
         tab.refresh()
-        _add(tab, "alpha")
-        _add(tab, "beta")
-    assert len(coord.compare_selected) == 2
     # Table + divider + bars — not the single italic guard message.
     assert len(tab.body.controls) >= 2
     assert not isinstance(tab.body.controls[0], ft.Text)
 
 
-def test_compare_needs_two_datasets(fake_app, tmp_path):
+def test_compare_needs_a_suite_run(fake_app, tmp_path):
+    """A single-file run (no suite_run_id) can't be compared — shows guidance."""
     led = EvalLedger(tmp_path / "l.db")
-    led.save_run(_report("alpha.json", 0.5))
+    led.save_run(_report("solo", 0.5))  # suite_run_id=None
     coord = _coord()
+    coord.selected_run_id = 1
     tab = CompareDatasetsTab(fake_app, coordinator=coord)
     tab.build()
     with patch(_LEDGER, return_value=led):
         tab.refresh()
-        _add(tab, "alpha")
-    assert "at least 2" in tab.body.controls[0].value
-
-
-def test_compare_offers_all_corpus_datasets(fake_app, tmp_path):
-    """The picker offers every dataset in the corpus (no fact/knob scoping) and
-    adding two of them selects both."""
-    led = EvalLedger(tmp_path / "l.db")
-    led.save_run(_report("alpha.json", 0.5))
-    led.save_run(_report("beta.json", 0.5))
-    coord = _coord()
-    tab = CompareDatasetsTab(fake_app, coordinator=coord)
-    tab.build()
-    with patch(_LEDGER, return_value=led):
-        tab.refresh()
-        assert sorted(o.key for o in tab.rail.compare_dataset_dd.options) == ["alpha", "beta"]
-        _add(tab, "alpha")
-        _add(tab, "beta")
-    assert {s["dataset"] for s in coord.compare_selected} == {"alpha", "beta"}
+    assert "suite execution" in tab.body.controls[0].value

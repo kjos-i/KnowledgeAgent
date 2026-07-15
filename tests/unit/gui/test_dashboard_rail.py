@@ -1,5 +1,5 @@
-"""Tests for the shared dashboard rail (Dataset→Run drill-down + read-only
-recipe/hash context). Seeds a tmp ledger and patches `active_eval_ledger`.
+"""Tests for the shared dashboard rail (Suite→Dataset→Run cascade + read-only
+run context). Seeds a tmp ledger and patches `active_eval_ledger`.
 """
 
 from __future__ import annotations
@@ -13,11 +13,12 @@ from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail
 _LEDGER = "knowledge_agent.gui.evaluation._common.active_eval_ledger"
 
 
-def _report(dataset: str, run_ts: str) -> dict:
+def _report(dataset: str, run_ts: str, facts: str = "sharedfacts") -> dict:
     return {
         "run_timestamp": run_ts,
         "dataset_path": f"{dataset}.json",
         "dataset_name": dataset,
+        "facts_hash": facts,  # the suite key (same facts across a suite's members)
         "prompts_snapshot": {},
         "enabled_groups": ["source", "chunk"],
         "gate_thresholds": {"judge_threshold": 0.5},
@@ -32,9 +33,9 @@ def _report(dataset: str, run_ts: str) -> dict:
 
 def _rail(fake_app, led, **coord_kw):
     state = {
+        "selected_suite": None,
         "selected_run_id": None,
         "selected_dataset": None,
-        "compare_selected": [],
         **coord_kw,
     }
     coord = SimpleNamespace(**state)
@@ -105,6 +106,27 @@ def test_dropdowns_wired_to_on_select(fake_app, tmp_path):
     # equal by (__self__, __func__).
     assert rail.run_dd.on_select == rail._on_run_change
     assert rail.dataset_dd.on_select == rail._on_dataset_change
+    assert rail.suite_dd.on_select == rail._on_suite_change
+
+
+def test_suite_scopes_datasets(fake_app, tmp_path):
+    """The Suite dropdown groups runs by facts_hash; selecting a suite scopes the
+    Dataset list to that suite's members."""
+    led = EvalLedger(tmp_path / "l.db")
+    led.save_run(_report("vec", "2026-07-01T09:00:00", facts="factsA"))
+    led.save_run(_report("graph", "2026-07-02T09:00:00", facts="factsA"))
+    led.save_run(_report("other", "2026-07-03T09:00:00", facts="factsB"))  # newest
+    rail, coord, _ = _rail(fake_app, led)
+    # newest run (other / factsB) auto-selected → suite factsB, its one member
+    assert coord.selected_suite == "factsB"
+    assert {o.key for o in rail.dataset_dd.options} == {"other"}
+    assert {o.key for o in rail.suite_dd.options} == {"factsA", "factsB"}
+    # switch to suite factsA → its two members appear
+    rail.suite_dd.value = "factsA"
+    with patch(_LEDGER, return_value=led):
+        rail._on_suite_change(MagicMock())
+    assert coord.selected_suite == "factsA"
+    assert {o.key for o in rail.dataset_dd.options} == {"vec", "graph"}
 
 
 def test_selected_run_survives_refresh(fake_app, tmp_path):

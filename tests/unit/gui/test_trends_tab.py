@@ -1,8 +1,8 @@
 """Tests for the Evaluation Trends sub-tab.
 
-Seeds 2+ runs sharing one recipe hash and refreshes — this exercises the
-flet.canvas line-chart construction (catches any canvas API error) + the
-recipe-hash scoping + the <2-runs guard. `_ledger` is patched to a tmp DB.
+Seeds 2+ runs of one dataset (sharing a dataset_hash) and refreshes — this
+exercises the flet.canvas line-chart construction (catches any canvas API error)
++ the dataset-hash scoping + the <2-runs guard. `_ledger` is patched to a tmp DB.
 """
 
 from __future__ import annotations
@@ -15,15 +15,18 @@ from knowledge_agent.evaluation.ledger import EvalLedger
 from knowledge_agent.gui.evaluation.trends_tab import TrendsTab
 
 
-def _report(dataset: str, hit: float, recipe_hash: str = "recipe-abc") -> dict:
+def _report(dataset: str, hit: float, dataset_hash: str = "dh-abc") -> dict:
     return {
         "run_timestamp": "2026-07-05T10:00:00",
         "dataset_path": dataset,
+        "dataset_name": dataset,
+        "dataset_hash": dataset_hash,
+        "facts_hash": "fh",
         "git_commit": None,
         "prompts_snapshot": {},
         "enabled_groups": ["source"],
         "gate_thresholds": {},
-        "recipe_hash": recipe_hash,
+        "recipe_hash": "recipe-abc",
         "summary": {"case_count": 2, "pass_count": 1, "pass_rate": 0.5, "avg_hit_at_k": hit},
         "results": [
             {"id": "c1", "category": "", "status": "PASS", "errors": [], "hit_at_k": hit},
@@ -32,13 +35,13 @@ def _report(dataset: str, hit: float, recipe_hash: str = "recipe-abc") -> dict:
 
 
 def test_trends_builds(fake_app):
-    assert TrendsTab(fake_app, coordinator=MagicMock(compare_selected=[])).build() is not None
+    assert TrendsTab(fake_app, coordinator=MagicMock(selected_suite=None)).build() is not None
 
 
 def test_trends_needs_two_runs(fake_app, tmp_path):
     led = EvalLedger(tmp_path / "l.db")
     led.save_run(_report("escrt_bootstrap.json", 1.0))
-    coordinator = MagicMock(compare_selected=[])
+    coordinator = MagicMock(selected_suite=None)
     coordinator.selected_run_id = None
     tab = TrendsTab(fake_app, coordinator=coordinator)
     tab.build()
@@ -51,7 +54,7 @@ def test_trends_renders_charts_for_two_runs(fake_app, tmp_path):
     led = EvalLedger(tmp_path / "l.db")
     led.save_run(_report("escrt_bootstrap.json", 0.5))
     led.save_run(_report("escrt_bootstrap.json", 1.0))
-    coordinator = MagicMock(compare_selected=[])
+    coordinator = MagicMock(selected_suite=None)
     coordinator.selected_run_id = None
     tab = TrendsTab(fake_app, coordinator=coordinator)
     tab.build()

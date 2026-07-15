@@ -26,7 +26,7 @@ its internal layout; no shared splitter.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import flet as ft
 
@@ -64,17 +64,17 @@ class EvaluationView:
 
     def __init__(self, app: GuiApp) -> None:
         self.app = app
-        # Shared dashboard selection, read by all four view tabs' left rails
-        # (`DashboardRail`) so they stay in step. `selected_run_id` drives the
-        # per-run tabs (Run Summary / Run Charts); `selected_dataset` scopes
-        # Trends + narrows the run picker. Set by the rails + the Run tab on
-        # completion.
-        self.selected_run_id: int | None = None
+        # Shared dashboard selection, read by all five view tabs' left rails
+        # (`DashboardRail`) so they stay in step. The rail is a Suite → Dataset →
+        # Run cascade: `selected_suite` (a facts_hash) scopes the dataset list to
+        # one suite's members; `selected_dataset` narrows the run picker + scopes
+        # Trends (by that dataset's dataset_hash); `selected_run_id` drives the
+        # per-run tabs (Run Summary / Run Charts) AND — via its suite_run_id —
+        # Compare (the members of that suite execution). Set by the rails + the
+        # Run tab on completion.
+        self.selected_suite: str | None = None
         self.selected_dataset: str | None = None
-        # Compare Datasets picker state — shared across every rail instance (the
-        # Compare section lives on the shared DashboardRail); only the Compare
-        # tab's body consumes it. compare_selected = [{"dataset", "run_id"}, ...].
-        self.compare_selected: list[dict[str, Any]] = []
+        self.selected_run_id: int | None = None
         self._tabs: ft.Tabs | None = None
         self.run_tab = RunTab(app, coordinator=self)
         self.dataset_tab = DatasetTab(app, coordinator=self)
@@ -148,12 +148,14 @@ class EvaluationView:
             self.app.page.update()
 
     def on_suite_complete(self, suite: SuiteRunResult) -> None:
-        """A suite run finished: load its members into the Compare picker + jump
-        to Compare. Each member RunResult contributes its (dataset_name, run_id),
-        so the Compare tab shows the whole sweep side by side."""
-        self.compare_selected = [
-            {"dataset": r.report.get("dataset_name"), "run_id": r.run_id} for r in suite.results
-        ]
+        """A suite run finished: point the shared cascade at it (its suite + a
+        member run) and jump to Compare, which shows that suite-run's members
+        side by side (via the selected run's suite_run_id)."""
+        if suite.results:
+            first = suite.results[0]
+            self.selected_suite = first.report.get("facts_hash")
+            self.selected_dataset = first.report.get("dataset_name")
+            self.selected_run_id = first.run_id
         self.compare_tab.refresh()
         if self._tabs is not None:
             self._tabs.selected_index = SUB_TAB_LABELS.index("Compare Datasets")
