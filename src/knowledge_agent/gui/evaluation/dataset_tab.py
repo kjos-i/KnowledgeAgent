@@ -695,7 +695,6 @@ class DatasetTab:
                             self.gen_button,
                             ft.Text("nr. of cases:", size=14, color=ft.Colors.GREY_300),
                             self.gen_count,
-                            ft.Text("Generator:", size=14, color=ft.Colors.GREY_300),
                             self.gen_mode_radio,
                             self.gen_spinner,
                         ],
