@@ -1,10 +1,11 @@
 """Handler tests for the CorpusConfigEditor's per-corpus Embedding section.
 
 Provider + model are staged to the in-memory CorpusConfig (written to
-corpus.toml at Ingest); `embedding_dims` is DERIVED from them. The Voyage
-rate is GLOBAL — written straight to GuiConfig, not staged. A provider
+corpus.toml at Ingest); `embedding_dims` is DERIVED from them. A provider
 switch that would strand existing chunks at a mismatched vector dim
 hard-confirms first (the dim guard the deleted Settings tab used to own).
+(The global Voyage request-rate cap moved to the LLMs tab — see
+test_llm_tab.)
 """
 
 from __future__ import annotations
@@ -85,29 +86,3 @@ def test_provider_change_dim_mismatch_confirms_before_applying(fake_app):
         ed._on_embedding_provider_changed(MagicMock())
     fake_app.page.show_dialog.assert_called_once()
     assert ed._corpus_config.embedding_provider == "voyage"  # unchanged pending confirm
-
-
-def test_voyage_rate_row_visible_only_for_voyage(fake_app):
-    ed_voyage = _editor(fake_app)
-    ed_voyage._refresh_voyage_rate_visibility()
-    assert ed_voyage.voyage_rate_row.visible is True
-
-    ed_openai = _editor(fake_app, _openai_cfg())
-    ed_openai._refresh_voyage_rate_visibility()
-    assert ed_openai.voyage_rate_row.visible is False
-
-
-def test_voyage_rate_blur_writes_global_gui_config(fake_app):
-    """The Voyage rate is global — it writes GuiConfig + bridges JUST the
-    rate (never the per-corpus provider/model)."""
-    ed = _editor(fake_app)
-    ed.voyage_rate_field.value = "5"
-    with (
-        patch(f"{_EDITOR}.save_config") as save,
-        patch(f"{_EDITOR}.apply_voyage_rate_to_env") as rate_bridge,
-        patch(f"{_EDITOR}.reset_after_key_change"),
-    ):
-        ed._on_voyage_rate_blur(MagicMock())
-    assert fake_app.gui_config.voyage_requests_per_second == 5.0
-    save.assert_called_once()
-    rate_bridge.assert_called_once()

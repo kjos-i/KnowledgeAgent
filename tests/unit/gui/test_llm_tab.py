@@ -93,6 +93,44 @@ def test_installed_providers_display_empty_state():
     assert "No LLM providers installed" in tab.installed_providers_box.content.value
 
 
+# ---- rate limits (includes the Voyage embedder) ----
+
+
+def test_rate_limit_fields_span_llm_providers_plus_voyage():
+    """The rate-limit section covers the four LLM providers AND the Voyage
+    embedder (its native client honours a cap). Voyage is embedding-only, so
+    it never appears in the LLM installed-providers list."""
+    tab = _tab()
+    assert set(tab.rate_limit_fields) == {
+        "anthropic",
+        "openai",
+        "google",
+        "ollama",
+        "voyage",
+    }
+    tab._installed_state = dict.fromkeys(("anthropic", "openai", "google", "ollama"), True)
+    tab._sync_installed_providers_display()
+    assert "voyage" not in tab.installed_providers_box.content.value.lower()
+
+
+def test_voyage_rate_blur_commits_and_bridges():
+    """Editing the Voyage rate writes GuiConfig and bridges it via
+    apply_voyage_rate_to_env (its own helper, alongside apply_llm_to_env)."""
+    from knowledge_agent.gui.settings import llm_tab
+
+    tab = _tab()
+    tab.rate_limit_fields["voyage"].value = "5"
+    with (
+        patch.object(llm_tab, "save_config"),
+        patch.object(llm_tab, "apply_llm_to_env"),
+        patch.object(llm_tab, "apply_voyage_rate_to_env") as rate_bridge,
+        patch.object(llm_tab, "reset_after_key_change"),
+    ):
+        tab.on_rate_limit_blur("voyage")
+    assert tab.app.gui_config.voyage_requests_per_second == 5.0
+    rate_bridge.assert_called_once()
+
+
 # ---- temperature-slider greying (sampling-free models) ----
 
 

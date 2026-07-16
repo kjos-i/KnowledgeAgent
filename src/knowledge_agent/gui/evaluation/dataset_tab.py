@@ -438,13 +438,18 @@ class DatasetTab:
                     # the row beneath (three trailing buttons used to squash the
                     # field to a sliver).
                     labeled_field("Dataset", self.dataset_field),
-                    ft.Row([browse_button, new_dataset_button], spacing=6),
-                    # Freeze/unfreeze (Run-tab style) under the Dataset field —
-                    # badge only when frozen, Unfreeze always shown but greyed
-                    # until then. The run settings it locks are edited on the Run
+                    # Browse / New dataset + the freeze affordance (Run-tab style)
+                    # on ONE row: Unfreeze sits right of New dataset (always shown,
+                    # greyed until frozen) and the frozen badge trails it (visible
+                    # only when frozen). The run settings it locks live on the Run
                     # tab.
                     ft.Row(
-                        [self.frozen_indicator, self.unfreeze_button],
+                        [
+                            browse_button,
+                            new_dataset_button,
+                            self.unfreeze_button,
+                            self.frozen_indicator,
+                        ],
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         spacing=8,
                     ),

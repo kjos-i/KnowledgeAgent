@@ -36,7 +36,7 @@ def test_build_returns_view_retrieval_llm_subtabs(fake_app: MagicMock):
     ctl = panel.build()
     assert isinstance(ctl, ft.Tabs)
     assert ctl.length == len(SUB_TAB_LABELS) == 3
-    assert SUB_TAB_LABELS == ("View", "Retrieval", "LLM")
+    assert SUB_TAB_LABELS == ("View", "Retrieval", "LLMs")
     assert panel.current_mode == MODE_LATEST
 
 

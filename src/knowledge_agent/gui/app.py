@@ -228,7 +228,7 @@ class GuiApp:
         )
         manage = ft.IconButton(
             icon=ft.Icons.SETTINGS,
-            tooltip="Manage corpora",
+            tooltip="Selected corpus",
             on_click=self._open_manage_dialog,
         )
         return dropdown, manage
@@ -247,7 +247,7 @@ class GuiApp:
             self.select_corpus(self.corpus_dropdown.value)
 
     def _open_manage_dialog(self, e: ft.Event) -> None:
-        """Open the 'Manage corpora' dialog: the active corpus's read-only
+        """Open the 'Selected corpus' dialog: the active corpus's read-only
         card (notes #34 — paths, layers, extractor, chunking, **embedder +
         LLM**) plus Rename / Relocate / Remove / Refresh.
 
@@ -262,7 +262,7 @@ class GuiApp:
 
         def _act(handler):
             async def _run(ev: ft.Event) -> None:
-                self.page.pop_dialog()  # close Manage before the action's own dialog
+                self.page.pop_dialog()  # close this dialog before the action's own dialog
                 result = handler(ev)
                 if asyncio.iscoroutine(result):  # on_relocate_clicked is async
                     await result
@@ -297,19 +297,35 @@ class GuiApp:
         )
         dialog = ft.AlertDialog(
             modal=True,
-            title=ft.Text("Manage corpora"),
-            content=ft.Container(
+            # Title carries an always-visible Close (X): the read-only card can
+            # be tall, so the bottom `actions` Close could scroll out of reach —
+            # this X in the fixed title bar is always clickable.
+            title=ft.Row(
+                controls=[
+                    ft.Text("Selected corpus"),
+                    ft.IconButton(
+                        icon=ft.Icons.CLOSE,
+                        tooltip="Close",
+                        on_click=lambda _c: self.page.pop_dialog(),
+                    ),
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            # Content is a scrolling Column (NOT wrapped in a height-less
+            # Container) so Material bounds it to the viewport and it scrolls
+            # internally, keeping the title + actions on-screen. Matches the
+            # documents_view Edit dialog, which is why that one closes fine.
+            content=ft.Column(
                 width=520,
-                content=ft.Column(
-                    tight=True,
-                    scroll=ft.ScrollMode.AUTO,
-                    spacing=10,
-                    controls=[
-                        build_corpus_card(self),
-                        ft.Divider(),
-                        buttons,
-                    ],
-                ),
+                tight=True,
+                scroll=ft.ScrollMode.AUTO,
+                spacing=10,
+                controls=[
+                    build_corpus_card(self),
+                    ft.Divider(),
+                    buttons,
+                ],
             ),
             actions=[ft.TextButton("Close", on_click=lambda _c: self.page.pop_dialog())],
         )

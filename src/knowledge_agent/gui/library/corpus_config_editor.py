@@ -53,7 +53,6 @@ from pydantic import ValidationError
 from knowledge_agent.config import (
     Settings,
     get_settings,
-    reset_after_key_change,
 )
 from knowledge_agent.embedder_lifecycle import (
     EMBEDDER_PROVIDER_REGISTRY,
@@ -74,11 +73,6 @@ from knowledge_agent.gui._styles import (
     sub_section_header,
 )
 from knowledge_agent.gui._widgets.info_icon import info_icon
-from knowledge_agent.gui.config_store import (
-    ConfigError,
-    apply_voyage_rate_to_env,
-    save_config,
-)
 from knowledge_agent.gui.library.create_new_dataset import _write_corpus_toml
 from knowledge_agent.gui.library.session_state import load_session, update_draft
 from knowledge_agent.gui.settings.llm_tab import model_options
@@ -281,14 +275,12 @@ class CorpusConfigEditor:
         # ----- Embedding (per-corpus; provider/model/dims) -----
         # The embedder is corpus-bound (LanceDB pins the vector dim at
         # ingest). Provider + model write to corpus.toml (staged);
-        # embedding_dims is DERIVED from them (not a raw field). The Voyage
-        # rate is GLOBAL (account throughput) — badged so, written straight
-        # to GuiConfig, not staged. Install/Uninstall live in the Installs
-        # tab; this is the CHOICE of which installed embedder the corpus uses.
+        # embedding_dims is DERIVED from them (not a raw field). Install/
+        # Uninstall live in the Installs tab; this is the CHOICE of which
+        # installed embedder the corpus uses. (The global Voyage request-rate
+        # cap lives in the LLMs tab's rate-limits section, not here.)
         self.embedding_provider_dropdown: ft.Dropdown | None = None
         self.embedding_model_field: ft.Dropdown | None = None
-        self.voyage_rate_field: ft.TextField | None = None
-        self.voyage_rate_row: ft.Container | None = None
 
         # ----- Entity extraction -----
         # Multi-extractor (priority-ordered union): `_selected_extractors`
@@ -804,7 +796,7 @@ class CorpusConfigEditor:
             ),
         )
 
-        # ----- Embedding (per-corpus provider + model; global Voyage rate) -----
+        # ----- Embedding (per-corpus provider + model) -----
         self.embedding_provider_dropdown = ft.Dropdown(
             value="voyage",
             options=[
@@ -831,26 +823,6 @@ class CorpusConfigEditor:
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
             on_blur=self._on_embedding_model_blur,
-        )
-        self.voyage_rate_field = ft.TextField(
-            value="",
-            hint_text="(empty = no limit)",
-            border=ft.InputBorder.OUTLINE,
-            border_color=FRAME_BORDER_COLOR,
-            bgcolor=PANEL_BG,
-            on_blur=self._on_voyage_rate_blur,
-            tooltip=(
-                "Voyage uses its native (non-LangChain) client, so its rate "
-                "limit lives here. GLOBAL — an account-throughput cap shared "
-                "by every corpus, not a per-corpus value."
-            ),
-        )
-        # Voyage rate row is only shown when the corpus's provider is Voyage
-        # (the other providers have no rate knob here). Visibility toggled by
-        # `_refresh_voyage_rate_visibility`.
-        self.voyage_rate_row = ft.Container(
-            padding=ft.Padding.symmetric(vertical=6),
-            content=labeled_field("Voyage requests/sec (global)", self.voyage_rate_field),
         )
 
         # ----- Cross-doc thresholds -----
@@ -1051,8 +1023,7 @@ class CorpusConfigEditor:
                         "is destructive (requires a Re-embed).\n\n"
                         "Install / uninstall providers in the Installs tab. "
                         "The vector dimension is derived from the provider + "
-                        "model (not a raw field). The Voyage rate limit is "
-                        "global — an account cap shared by every corpus.",
+                        "model (not a raw field).",
                     ),
                     subtitle=self.embedding_subtitle,
                     controls=[
@@ -1064,7 +1035,6 @@ class CorpusConfigEditor:
                             padding=ft.Padding.symmetric(vertical=6),
                             content=labeled_field("Embedding model", self.embedding_model_field),
                         ),
-                        self.voyage_rate_row,
                     ],
                 ),
                 # ---- Section 4: Entities (L6) ----
@@ -1355,7 +1325,7 @@ class CorpusConfigEditor:
             self.min_figure_bytes_field.value = str(cfg.min_figure_bytes)
         if self.optimize_indexes_checkbox is not None:
             self.optimize_indexes_checkbox.value = cfg.optimize_indexes_per_ingest
-        # Embedding (per-corpus provider + model; Voyage rate is global).
+        # Embedding (per-corpus provider + model).
         if self.embedding_provider_dropdown is not None:
             self.embedding_provider_dropdown.value = cfg.embedding_provider
         if self.embedding_model_field is not None:
@@ -1364,10 +1334,6 @@ class CorpusConfigEditor:
                 for m in EMBEDDING_AVAILABLE_MODELS.get(cfg.embedding_provider, ())
             ]
             self.embedding_model_field.value = cfg.embedding_model
-        if self.voyage_rate_field is not None:
-            rate = self.app.gui_config.voyage_requests_per_second
-            self.voyage_rate_field.value = "" if rate is None else str(rate)
-        self._refresh_voyage_rate_visibility()
         # Entities (L6) per-corpus fields. Pickers span every installed provider;
         # a stored bare/legacy model is normalized to a composite ref so it
         # matches an option and dispatches explicitly.
@@ -2408,13 +2374,6 @@ class CorpusConfigEditor:
 
     # ----- Embedding (per-corpus) field handlers --------------------------
 
-    def _refresh_voyage_rate_visibility(self) -> None:
-        """Show the Voyage rate row only when the corpus uses Voyage (the
-        other providers have no rate knob here)."""
-        if self.voyage_rate_row is None or self._corpus_config is None:
-            return
-        self.voyage_rate_row.visible = self._corpus_config.embedding_provider == "voyage"
-
     def _on_embedding_provider_changed(self, e: ft.Event) -> None:
         """Switch the corpus's embedding provider (staged to corpus.toml).
 
@@ -2482,7 +2441,6 @@ class CorpusConfigEditor:
             for m in EMBEDDING_AVAILABLE_MODELS.get(new_provider, ())
         ]
         self.embedding_model_field.value = new_model
-        self._refresh_voyage_rate_visibility()
         self._after_mutation()
 
     def _revert_embedding_provider(self, provider: str) -> None:
@@ -2510,45 +2468,6 @@ class CorpusConfigEditor:
             update={"embedding_model": raw, "embedding_dims": dims},
         )
         self._after_mutation()
-
-    def _on_voyage_rate_blur(self, e: ft.Event) -> None:
-        """Persist the Voyage rate — GLOBAL (GuiConfig), NOT staged to
-        corpus.toml. Writes GuiConfig + bridges JUST the rate to env (never
-        the per-corpus provider/model, which the active-corpus bridge owns).
-        """
-        if self.voyage_rate_field is None:
-            return
-        raw = (self.voyage_rate_field.value or "").strip()
-        current = self.app.gui_config.voyage_requests_per_second
-        if not raw:
-            new_value: float | None = None
-        else:
-            try:
-                new_value = float(raw)
-                if new_value <= 0:
-                    raise ValueError("must be positive")
-            except (ValueError, TypeError):
-                self.voyage_rate_field.value = "" if current is None else str(current)
-                self.app.page.update()
-                return
-        if new_value == current:
-            return
-        self.app.gui_config.voyage_requests_per_second = new_value
-        try:
-            save_config(self.app.gui_config)
-        except ConfigError as exc:
-            self.app.gui_config.voyage_requests_per_second = current
-            self.voyage_rate_field.value = "" if current is None else str(current)
-            if self.status is not None:
-                self.status.value = f"could not save: {exc}"
-            self.app.page.update()
-            return
-        apply_voyage_rate_to_env(self.app.gui_config)
-        try:
-            reset_after_key_change()
-        except Exception as exc:
-            logger.warning("reset_after_key_change failed: %r", exc)
-        self.app.page.update()
 
     def _show_embedding_confirm(
         self,

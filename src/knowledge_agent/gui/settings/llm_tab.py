@@ -41,6 +41,7 @@ from knowledge_agent.gui._widgets.info_icon import info_icon, section_header
 from knowledge_agent.gui.config_store import (
     ConfigError,
     apply_llm_to_env,
+    apply_voyage_rate_to_env,
     save_config,
 )
 from knowledge_agent.gui.views._frame import view_header
@@ -66,6 +67,12 @@ logger = logging.getLogger(__name__)
 # because they're the most common starting choices; Google + Ollama
 # after.
 _PROVIDER_ORDER: tuple[str, ...] = ("anthropic", "openai", "google", "ollama")
+
+# Rate limits also cover the Voyage embedder — its native (non-LangChain)
+# client honours a requests/sec cap. Voyage is embedding-only, so it belongs
+# in the rate-limit section but NOT in the LLM "Installed providers" list;
+# hence a separate tuple that appends it to the LLM providers.
+_RATE_LIMIT_PROVIDERS: tuple[str, ...] = (*_PROVIDER_ORDER, "voyage")
 
 
 # Curated model menus for the per-node model dropdowns here AND the
@@ -251,8 +258,9 @@ class LlmTab:
             # temperature (the backend omits it for those models anyway).
             self._sync_temp_enabled(node_name)
 
-        # Rate-limit fields. Empty = None (limiter disabled).
-        for provider in _PROVIDER_ORDER:
+        # Rate-limit fields. Empty = None (limiter disabled). Spans the LLM
+        # providers + the Voyage embedder (see _RATE_LIMIT_PROVIDERS).
+        for provider in _RATE_LIMIT_PROVIDERS:
             current = getattr(cfg, f"{provider}_requests_per_second")
             self.rate_limit_fields[provider] = ft.TextField(
                 value="" if current is None else str(current),
@@ -303,7 +311,7 @@ class LlmTab:
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             spacing=10,
             controls=[
-                view_header("LLM"),
+                view_header("LLMs"),
                 # ---- Installed providers -------------------------------
                 section_header(
                     self.app,
@@ -321,11 +329,28 @@ class LlmTab:
                 ),
                 self.ollama_daemon_status,
                 section_divider(),
-                # ---- Per-node models + temperatures --------------------
+                # ---- Models + temperatures -----------------------------
                 section_header(
                     self.app,
-                    "Per-node models + temperatures",
+                    "Select LLM models and temperatures",
                     "Query-time nodes only. Ingest-time extractor models live in the Library tab.",
+                ),
+                # Chat router leads the list — it's the first model to run on a
+                # query (the GUI-only conversational layer above retrieval). The
+                # (i) explains its role, since the node name alone doesn't.
+                self._render_node_block(
+                    "chat_router",
+                    info=(
+                        "Chat router",
+                        "The conversational layer above the retrieval graph: it "
+                        "reads the running conversation, decides when to search, "
+                        "and distils a clean, self-contained query from what "
+                        "you've said (resolving 'it' / 'those' / earlier context) "
+                        "before handing off to retrieval. It's a stand-in for a "
+                        "future supervisor agent, so it lives in the GUI, not the "
+                        "backend graph. A cheap, fast model is usually enough — "
+                        "routing is a light task.",
+                    ),
                 ),
                 *[
                     self._render_node_block(n)
@@ -337,42 +362,17 @@ class LlmTab:
                     )
                 ],
                 section_divider(),
-                # ---- Chat router (GUI-only conversational layer) -------
-                ft.Row(
-                    controls=[
-                        ft.Text("Chat router", weight=ft.FontWeight.BOLD),
-                        info_icon(
-                            self.app,
-                            title="Chat router",
-                            text=(
-                                "The conversational layer above the retrieval "
-                                "graph: it reads the running conversation, "
-                                "decides when to search, and distils a clean, "
-                                "self-contained query from what you've said "
-                                "(resolving 'it' / 'those' / earlier context) "
-                                "before handing off to retrieval. It's a "
-                                "stand-in for a future supervisor agent, so it "
-                                "lives in the GUI, not the backend graph. A "
-                                "cheap, fast model is usually enough - routing "
-                                "is a light task."
-                            ),
-                        ),
-                    ],
-                    spacing=4,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                self._render_node_block("chat_router"),
-                section_divider(),
                 # ---- Rate limits + retries -----------------------------
                 section_header(
                     self.app,
                     "Per-provider rate limits + retries",
                     "Leave blank for no limit. Useful when your provider tier "
-                    "rate-limits below your concurrent fan-out.",
+                    "rate-limits below your concurrent fan-out. Includes the "
+                    "Voyage embedder (a global cap, applied at ingest).",
                 ),
                 *[
                     labeled_field(f"{p} requests/sec", self.rate_limit_fields[p])
-                    for p in _PROVIDER_ORDER
+                    for p in _RATE_LIMIT_PROVIDERS
                 ],
                 labeled_field("LLM max retries (1-10)", self.max_retries_field),
                 # ---- Shared status text --------------------------------
@@ -392,6 +392,9 @@ class LlmTab:
             self.app.page.update()
             return False
         apply_llm_to_env(self.app.gui_config)
+        # The Voyage embedder rate lives in this tab's rate-limit section too,
+        # but it bridges via its own helper (not apply_llm_to_env).
+        apply_voyage_rate_to_env(self.app.gui_config)
         try:
             reset_after_key_change()
         except Exception as exc:
@@ -484,12 +487,24 @@ class LlmTab:
 
     # ----- Provider row builder --------------------------------------------
 
-    def _render_node_block(self, node_name: str) -> ft.Control:
+    def _render_node_block(
+        self, node_name: str, *, info: tuple[str, str] | None = None
+    ) -> ft.Control:
         """One node's model dropdown + temperature slider, stacked (model on
-        its own line, temperature below it — matches the extractor layout)."""
+        its own line, temperature below it — matches the extractor layout).
+
+        `info` (title, text) tacks an (i) help icon onto the model row — used
+        for the chat-router node, whose role isn't obvious from its name."""
+        model_trailing = (
+            info_icon(self.app, title=info[0], text=info[1]) if info is not None else None
+        )
         return ft.Column(
             controls=[
-                labeled_field(f"{node_name} model", self.node_model_fields[node_name]),
+                labeled_field(
+                    f"{node_name} model",
+                    self.node_model_fields[node_name],
+                    trailing=model_trailing,
+                ),
                 labeled_field(
                     f"{node_name} temperature",
                     self.node_temp_sliders[node_name],

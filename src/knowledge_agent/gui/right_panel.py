@@ -43,11 +43,11 @@ if TYPE_CHECKING:
 MODE_LATEST = "latest"
 MODE_FILE = "file"
 
-SUB_TAB_LABELS = ("View", "Retrieval", "LLM")
+SUB_TAB_LABELS = ("View", "Retrieval", "LLMs")
 
 
 class RightPanel:
-    """Right column of the Search tab — View / Retrieval / LLM sub-tabs."""
+    """Right column of the Search tab — View / Retrieval / LLMs sub-tabs."""
 
     def __init__(self, app: GuiApp) -> None:
         self.app = app
