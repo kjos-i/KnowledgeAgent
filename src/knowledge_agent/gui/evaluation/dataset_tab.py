@@ -59,7 +59,7 @@ from knowledge_agent.gui._widgets.retrieval_form import (
     query_mode_to_knobs,
     store_forced_by_mode,
 )
-from knowledge_agent.gui.evaluation._case_view import case_card, render_case_cards
+from knowledge_agent.gui.evaluation._case_view import render_case_cards
 from knowledge_agent.gui.settings.llm_tab import model_options
 from knowledge_agent.llm_factory import parse_model_ref, supports_temperature
 
@@ -150,11 +150,16 @@ class DatasetTab:
         self.gen_model_dropdown: ft.Dropdown | None = None
         self.gen_temp_slider: ft.Slider | None = None
         self.gen_temp_value_text: ft.Text | None = None
-        # Right column: live preview of the form + its two commit buttons. Only
-        # one is live at a time — Add for a new case, Update for an existing one.
-        self.preview_holder: ft.Container | None = None
+        # Right column: two commit buttons. Only one is live at a time — Add for
+        # a new case, Update for an existing one (Add is also grayed in suite mode).
         self.add_button: ft.Button | None = None
         self.update_button: ft.Button | None = None
+        # Suite-mode widgets (601) — created in build(); referenced by handlers.
+        self.generate_suite_check: ft.Checkbox | None = None
+        self.suite_panel: ft.Container | None = None
+        self.suite_members_list: ft.Column | None = None
+        self.suite_name_field: ft.TextField | None = None
+        self.suite_status: ft.Text | None = None
         # form field widgets (created in build)
         self.f: dict[str, ft.Control] = {}
         # "Query from chat" toggle: when on, a seeded case takes its QUESTION from
@@ -173,6 +178,9 @@ class DatasetTab:
         self._chat_router_model: str | None = None
         # Pending debounced preview refresh (cancelled + replaced on each edit).
         self._preview_task: asyncio.Task | None = None
+        # Suite mode: the knob-sets assembled for a Generate-suite run, each a
+        # (label, RetrievalSettings) — from the premade dropdowns or the form.
+        self._suite_members: list[tuple[str, RetrievalSettings]] = []
 
     # ---- build ------------------------------------------------------------
 
@@ -182,6 +190,7 @@ class DatasetTab:
             DatasetStatus,
             RetrievalMode,
         )
+        from knowledge_agent.evaluation.suite_gen import PRESET_GROUPS, STRATEGY_LABELS
 
         origins = list(typing.get_args(CaseOrigin))
         statuses = list(typing.get_args(DatasetStatus))
@@ -205,11 +214,6 @@ class DatasetTab:
             content=centered_label("New dataset"),
             tooltip="Start a new empty dataset in the corpus folder",
             on_click=self._on_new_dataset,
-        )
-        generate_suite_button = ft.Button(
-            content=centered_label("Generate suite…"),
-            tooltip="Clone this dataset into a knob-sweep suite — one file per retrieval strategy",
-            on_click=self._on_generate_suite,
         )
         # Status = the whole dataset's authoring state; radios side by side.
         # Dropping to draft clears any frozen lock (frozen requires final).
@@ -414,18 +418,107 @@ class DatasetTab:
             spacing=8,
         )
 
-        # Right column: the live preview card + its two commit buttons. Both
-        # route through _on_save_case; the disabled state (set in _render_preview)
-        # gates which applies, and _selected drives append-vs-overwrite.
-        self.preview_holder = ft.Container()
-        self.add_button = ft.Button("Add case", icon=ft.Icons.ADD, on_click=self._on_save_case)
+        # Right column: two commit buttons. Both route through _on_save_case; the
+        # disabled state (set in _sync_commit_buttons) gates which applies, and
+        # _selected drives append-vs-overwrite. Add is also grayed in suite mode.
+        self.add_button = ft.Button(
+            "Add single case", icon=ft.Icons.ADD, on_click=self._on_save_case
+        )
         self.update_button = ft.Button(
             "Update case", icon=ft.Icons.SAVE, on_click=self._on_save_case
         )
         refresh_button = ft.Button(
             "Refresh",
-            tooltip="Refresh the preview from the form",
-            on_click=self._on_refresh_preview,
+            tooltip="Reload the dataset from disk and refresh the case list",
+            on_click=self._on_refresh,
+        )
+
+        # ----- Suite mode (601): assemble a knob-sweep suite -----
+        # The checkbox reveals the suite panel + grays "Add single case": in suite
+        # mode you add the shared facts via "Add Information and Fact" (the form's
+        # Info + Fact → a case) and assemble the knob-sets below. Generate then
+        # clones those facts once per knob-set.
+        self.generate_suite_check = ft.Checkbox(
+            label="Generate suite", value=False, on_change=self._on_suite_toggled
+        )
+        self.add_info_fact_button = ft.Button(
+            "Add Information and Fact",
+            icon=ft.Icons.ADD,
+            tooltip="Add the form's Information + Fact as a case (a shared suite fact)",
+            on_click=self._on_save_case,
+        )
+        # Two premade dropdowns (Hybrid / KG groups) — picking one drops it into
+        # the knob-set list (read-only), like adding a judge to the judge panel.
+        self.hybrid_preset_dd = ft.Dropdown(
+            options=[
+                ft.DropdownOption(key=k, text=STRATEGY_LABELS[k]) for k in PRESET_GROUPS["Hybrid"]
+            ],
+            on_select=lambda _e: self._add_preset_member(self.hybrid_preset_dd),
+        )
+        self.kg_preset_dd = ft.Dropdown(
+            options=[
+                ft.DropdownOption(key=k, text=STRATEGY_LABELS[k]) for k in PRESET_GROUPS["KG"]
+            ],
+            on_select=lambda _e: self._add_preset_member(self.kg_preset_dd),
+        )
+        self.add_from_form_button = ft.Button(
+            "Add from form",
+            icon=ft.Icons.ADD,
+            tooltip="Add the left form's current retrieval settings as a knob-set",
+            on_click=self._on_add_form_member,
+        )
+        self.suite_members_list = ft.Column(spacing=2)
+        self.suite_name_field = ft.TextField(hint_text="e.g. escrt-sweep")
+        self.suite_status = ft.Text("", size=12, color=ft.Colors.GREY_500, italic=True)
+        self.suite_generate_button = ft.Button(
+            "Generate suite", icon=ft.Icons.PLAY_ARROW, on_click=self._on_generate_suite_clicked
+        )
+        self.suite_panel = ft.Container(
+            visible=False,
+            padding=12,
+            border=ft.Border.all(1, FRAME_BORDER_COLOR),
+            border_radius=4,
+            content=ft.Column(
+                spacing=8,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                controls=[
+                    sub_section_header("Suite facts"),
+                    ft.Text(
+                        "Facts are this dataset's cases — add each from the form:",
+                        size=12,
+                        color=ft.Colors.GREY_400,
+                    ),
+                    self.add_info_fact_button,
+                    sub_section_header("Retrieval knob-sets"),
+                    ft.Row(
+                        [
+                            ft.Column(
+                                [
+                                    ft.Text("Hybrid preset", size=12, color=ft.Colors.GREY_400),
+                                    self.hybrid_preset_dd,
+                                ],
+                                spacing=2,
+                                expand=1,
+                            ),
+                            ft.Column(
+                                [
+                                    ft.Text("KG preset", size=12, color=ft.Colors.GREY_400),
+                                    self.kg_preset_dd,
+                                ],
+                                spacing=2,
+                                expand=1,
+                            ),
+                        ],
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.END,
+                    ),
+                    self.add_from_form_button,
+                    self.suite_members_list,
+                    labeled_field("Suite name", self.suite_name_field),
+                    self.suite_generate_button,
+                    self.suite_status,
+                ],
+            ),
         )
 
         # LEFT: dataset file + metadata + the case-edit form, in flat sections.
@@ -454,9 +547,6 @@ class DatasetTab:
                         spacing=8,
                     ),
                     labeled_field("Status", self.status_group),
-                    # Derive a knob-sweep suite from THIS dataset. Interim spot —
-                    # kept off the file-selection row; final home still TBD.
-                    ft.Row([generate_suite_button], spacing=6),
                     section_divider(),
                     # ============ Section: Progress ============
                     section_title("Progress"),
@@ -525,15 +615,19 @@ class DatasetTab:
             ),
             width=LEFT_COLUMN_WIDTH,
         )
-        # RIGHT: live preview + commit on top, the full case list below. The
-        # whole column scrolls so the preview leads and the list follows.
+        # RIGHT: commit buttons + the suite toggle/panel on top, the full case
+        # list below. The form itself is the preview now (no separate card).
         right_pane = panel_box(
             ft.Column(
                 [
-                    # ============ Section: Preview ============
-                    section_title("Preview"),
-                    self.preview_holder,
-                    ft.Row([refresh_button, self.add_button, self.update_button], spacing=8),
+                    # ============ Section: Commit / suite ============
+                    ft.Row(
+                        [refresh_button, self.update_button, self.add_button],
+                        spacing=8,
+                        wrap=True,
+                    ),
+                    self.generate_suite_check,
+                    self.suite_panel,
                     section_divider(),
                     # ============ Section: In this dataset ============
                     section_title("In this dataset"),
@@ -697,29 +791,25 @@ class DatasetTab:
         self.app.page.update()
 
     def _render_preview(self) -> None:
-        """Fill the right-column preview card from the current form state, and
-        label the commit button Add (new) or Update (editing an existing)."""
-        if self.preview_holder is not None:
-            try:
-                content: ft.Control = case_card(self._read_form(lenient=True), 0, detailed=True)
-            except Exception:  # broad: a half-typed form must never break the preview
-                content = ft.Text(
-                    "Fill the form to preview a case.", italic=True, color=ft.Colors.GREY_500
-                )
-            self.preview_holder.content = content
-        # Exactly one commit button is live: Add for a new case, Update when an
-        # existing case is loaded; the other greys out.
+        """Sync the commit buttons (the live preview was removed — the form
+        itself shows the case). Exactly one is live: Add for a new case, Update
+        when editing an existing one. Add is ALSO grayed in suite mode — you
+        build a suite via the panel, not the per-case Add."""
         editing = self._selected is not None
+        suite = self.generate_suite_check is not None and bool(self.generate_suite_check.value)
         if self.add_button is not None:
-            self.add_button.disabled = editing
+            self.add_button.disabled = editing or suite
         if self.update_button is not None:
             self.update_button.disabled = not editing
 
-    def _on_refresh_preview(self, _e: ft.Event | None = None) -> None:
-        """Force an immediate preview re-render from the current form (it also
-        updates live/debounced as you type; this is the manual refresh)."""
-        self._render_preview()
-        self.app.page.update()
+    def _on_refresh(self, _e: ft.Event | None = None) -> None:
+        """Reload the current dataset from disk and refresh the case list — picks
+        up external edits + regenerated suite files. No-op without a saved file."""
+        if self._path is not None and self._path.exists():
+            self._load(self._path)
+        else:
+            self._render_list()
+            self.app.page.update()
 
     def _loop_running(self) -> bool:
         try:
@@ -822,81 +912,132 @@ class DatasetTab:
         self._render_list()
         self._render_preview()
 
-    def _on_generate_suite(self, _e: ft.Event) -> None:
-        """Clone the current dataset into a knob-sweep SUITE — one file per
-        retrieval strategy (same facts, forced knobs), all tagged into a named
-        suite, written to the corpus folder. The current dataset is the master."""
-        from knowledge_agent.evaluation.suite_gen import (
-            STRATEGIES,
-            STRATEGY_LABELS,
-            strategy_members,
-        )
+    # ---- suite mode (601) -------------------------------------------------
+
+    def _on_suite_toggled(self, _e: ft.Event) -> None:
+        """Reveal/hide the suite panel; suite mode also grays "Add single case"
+        (you build the suite via the panel, not per-case Add)."""
+        on = self.generate_suite_check is not None and bool(self.generate_suite_check.value)
+        if self.suite_panel is not None:
+            self.suite_panel.visible = on
+        if on:
+            self._render_suite_members()
+        self._render_preview()  # re-syncs Add/Update (suite grays Add)
+        self.app.page.update()
+
+    def _add_preset_member(self, dropdown: ft.Dropdown) -> None:
+        """A premade preset was picked → append it to the knob-set list (keyed by
+        its slug so filenames stay clean; deduped), then clear the dropdown so
+        the next pick fires again. The nice label is shown at render time."""
+        from knowledge_agent.evaluation.suite_gen import STRATEGIES
+
+        key = dropdown.value
+        dropdown.value = None
+        if key in STRATEGIES and not any(k == key for k, _ in self._suite_members):
+            self._suite_members.append((key, STRATEGIES[key].model_copy()))
+            self._render_suite_members()
+        self.app.page.update()
+
+    def _on_add_form_member(self, _e: ft.Event) -> None:
+        """Capture the left form's current retrieval settings as a custom knob-set."""
+        try:
+            settings = self._read_form(lenient=True).retrieval
+        except Exception as exc:  # broad: a half-typed form shouldn't crash the add
+            self._set_suite_status(f"could not read the form's retrieval settings: {exc}")
+            return
+        n = sum(1 for label, _ in self._suite_members if label.startswith("custom-")) + 1
+        self._suite_members.append((f"custom-{n}", settings.model_copy()))
+        self._render_suite_members()
+        self.app.page.update()
+
+    def _remove_suite_member(self, index: int) -> None:
+        if 0 <= index < len(self._suite_members):
+            del self._suite_members[index]
+            self._render_suite_members()
+            self.app.page.update()
+
+    @staticmethod
+    def _knob_summary(settings: RetrievalSettings) -> str:
+        """A compact read-only description of a knob-set for its list line."""
+        parts = [settings.retrieval_mode]
+        if settings.retrieval_mode != "neo4j_only":
+            parts.append(settings.lancedb_search_mode)
+            if settings.use_mmr:
+                parts.append("MMR")
+        parts.append(f"k{settings.top_k}")
+        return " · ".join(parts)
+
+    def _render_suite_members(self) -> None:
+        """Re-render the knob-set list — one line each: label + read-only settings
+        summary + remove (mirrors the judge-panel judge list). A preset's key is
+        shown via its nice `STRATEGY_LABELS` text; a custom knob-set as-is."""
+        from knowledge_agent.evaluation.suite_gen import STRATEGY_LABELS
+
+        if self.suite_members_list is None:
+            return
+        if not self._suite_members:
+            self.suite_members_list.controls = [
+                ft.Text(
+                    "No knob-sets yet — pick a preset or add one from the form.",
+                    size=12,
+                    italic=True,
+                    color=ft.Colors.GREY_500,
+                )
+            ]
+            return
+        self.suite_members_list.controls = [
+            ft.Row(
+                [
+                    ft.Icon(ft.Icons.CIRCLE, size=6, color=ft.Colors.GREY_500),
+                    ft.Text(STRATEGY_LABELS.get(label, label), size=12, color=ft.Colors.GREY_200),
+                    ft.Text(
+                        self._knob_summary(settings),
+                        size=12,
+                        color=ft.Colors.GREY_500,
+                        italic=True,
+                        expand=True,
+                    ),
+                    ft.IconButton(
+                        icon=ft.Icons.CLOSE,
+                        icon_size=16,
+                        tooltip="Remove this knob-set",
+                        on_click=lambda _e, i=idx: self._remove_suite_member(i),
+                    ),
+                ],
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=6,
+            )
+            for idx, (label, settings) in enumerate(self._suite_members)
+        ]
+
+    def _set_suite_status(self, msg: str) -> None:
+        if self.suite_status is not None:
+            self.suite_status.value = msg
+            self.app.page.update()
+
+    def _on_generate_suite_clicked(self, _e: ft.Event) -> None:
+        """Generate the suite: clone the dataset's cases (the shared facts) once
+        per assembled knob-set, writing one file each to the corpus folder."""
         from knowledge_agent.gui.evaluation._common import active_corpus_dir
 
         if self._dataset is None or not self._dataset.cases:
-            self._set_status("Open a dataset with cases first — it's the suite's master facts.")
+            self._set_suite_status("Add at least one fact first (Add Information and Fact).")
+            return
+        suite = (self.suite_name_field.value or "").strip() if self.suite_name_field else ""
+        if not suite:
+            self._set_suite_status("Enter a suite name.")
+            return
+        if not self._suite_members:
+            self._set_suite_status("Add at least one knob-set (a preset or from the form).")
             return
         folder = active_corpus_dir(self.app) or (self._path.parent if self._path else Path.cwd())
-        default = f"{(self._path.stem if self._path else self._dataset.name) or 'suite'}-sweep"
-        name_field = ft.TextField(label="Suite name", value=default)
-        checks = {s: ft.Checkbox(label=STRATEGY_LABELS[s], value=True) for s in STRATEGIES}
-        error = ft.Text("", size=12, color=ft.Colors.RED_300, visible=False)
-
-        def _show_error(msg: str) -> None:
-            error.value = msg
-            error.visible = True
-            self.app.page.update()
-
-        def _cancel(_ev: ft.Event) -> None:
-            self.app.page.pop_dialog()
-
-        def _generate(_ev: ft.Event) -> None:
-            suite = (name_field.value or "").strip()
-            chosen = [s for s, c in checks.items() if c.value]
-            if not suite:
-                _show_error("Enter a suite name.")
-                return
-            if not chosen:
-                _show_error("Pick at least one strategy.")
-                return
-            try:
-                written = self._write_suite(self._dataset, suite, strategy_members(chosen), folder)
-            except Exception as exc:  # broad: bad input / I-O → inline error, dialog stays
-                _show_error(f"could not generate: {exc}")
-                return
-            self.app.page.pop_dialog()
-            self._set_status(
-                f"generated suite “{suite}” — {len(written)} files: {', '.join(written)}"
-            )
-
-        dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Text("Generate knob-sweep suite"),
-            content=ft.Column(
-                [
-                    ft.Text(
-                        "Clones this dataset's facts into one file per strategy "
-                        "(same gold, different forced knobs), all tagged into the "
-                        "suite. Overwrites files of the same suite name.",
-                        size=12,
-                        color=ft.Colors.GREY_400,
-                    ),
-                    name_field,
-                    ft.Text("Strategies", size=12, weight=ft.FontWeight.BOLD),
-                    ft.Row(list(checks.values()), wrap=True),
-                    error,
-                ],
-                tight=True,
-                width=440,
-                spacing=8,
-            ),
-            actions=[
-                ft.TextButton("Cancel", on_click=_cancel),
-                ft.Button(content="Generate", on_click=_generate),
-            ],
-        )
-        self.app.page.show_dialog(dialog)
-        self.app.page.update()
+        try:
+            written = self._write_suite(self._dataset, suite, list(self._suite_members), folder)
+        except Exception as exc:  # broad: bad input / I-O → inline suite status
+            self._set_suite_status(f"could not generate: {exc}")
+            return
+        self._set_suite_status(f"generated {len(written)} file(s): {', '.join(written)}")
+        self._set_status(f"generated suite “{suite}” — {len(written)} files")
 
     def _write_suite(
         self,

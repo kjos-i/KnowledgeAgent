@@ -592,3 +592,79 @@ def test_new_knobs_round_trip(fake_app, tmp_path):
     assert rs.rrf_rank_constant == 45
     assert rs.use_mmr is True
     assert rs.mmr_lambda == 0.7
+
+
+# ---- suite mode (601) ----
+
+
+def test_suite_toggle_reveals_panel_and_grays_add(fake_app):
+    tab = _tab(fake_app)
+    assert tab.suite_panel.visible is False
+    tab.generate_suite_check.value = True
+    tab._on_suite_toggled(MagicMock())
+    assert tab.suite_panel.visible is True
+    assert tab.add_button.disabled is True  # suite mode grays "Add single case"
+    tab.generate_suite_check.value = False
+    tab._on_suite_toggled(MagicMock())
+    assert tab.suite_panel.visible is False
+    assert tab.add_button.disabled is False
+
+
+def test_add_preset_member_appends_and_dedups(fake_app):
+    tab = _tab(fake_app)
+    tab.hybrid_preset_dd.value = "vector"
+    tab._add_preset_member(tab.hybrid_preset_dd)
+    assert [label for label, _ in tab._suite_members] == ["vector"]  # keyed by slug
+    assert tab.hybrid_preset_dd.value is None  # cleared so the next pick re-fires
+    tab.hybrid_preset_dd.value = "vector"  # same preset again → dedup
+    tab._add_preset_member(tab.hybrid_preset_dd)
+    assert [label for label, _ in tab._suite_members] == ["vector"]
+    tab.kg_preset_dd.value = "kg_only"  # a KG preset appends
+    tab._add_preset_member(tab.kg_preset_dd)
+    assert [label for label, _ in tab._suite_members] == ["vector", "kg_only"]
+
+
+def test_add_from_form_member_captures_and_remove(fake_app):
+    from knowledge_agent.evaluation.models import RetrievalSettings
+
+    tab = _tab(fake_app)
+    tab._on_add_form_member(MagicMock())
+    assert len(tab._suite_members) == 1
+    label, settings = tab._suite_members[0]
+    assert label == "custom-1"
+    assert isinstance(settings, RetrievalSettings)
+    tab._remove_suite_member(0)
+    assert tab._suite_members == []
+
+
+def test_generate_suite_from_panel_writes_files(fake_app, tmp_path):
+    from knowledge_agent.evaluation.models import EvalCase, EvalDataset
+
+    tab = _tab(fake_app)
+    tab._dataset = EvalDataset(
+        name="escrt", cases=[EvalCase(id="c1", question="q?", expected_sources=["d1"])]
+    )
+    tab._path = tmp_path / "escrt.json"
+    tab.suite_name_field.value = "escrt-sweep"
+    tab.hybrid_preset_dd.value = "vector"
+    tab._add_preset_member(tab.hybrid_preset_dd)
+    with patch("knowledge_agent.gui.evaluation._common.active_corpus_dir", return_value=tmp_path):
+        tab._on_generate_suite_clicked(MagicMock())
+    written = tmp_path / "escrt-sweep__vector.json"
+    assert written.exists()
+    ds = load_dataset(written)
+    assert ds.suites == ["escrt-sweep"]
+    assert ds.cases[0].id == "c1__vector"
+
+
+def test_generate_suite_needs_a_knob_set(fake_app, tmp_path):
+    """Generate with no knob-sets is a guarded no-op (inline suite status)."""
+    from knowledge_agent.evaluation.models import EvalCase, EvalDataset
+
+    tab = _tab(fake_app)
+    tab._dataset = EvalDataset(cases=[EvalCase(id="c1", question="q?")])
+    tab._path = tmp_path / "escrt.json"
+    tab.suite_name_field.value = "sweep"
+    tab._on_generate_suite_clicked(MagicMock())
+    assert "knob-set" in tab.suite_status.value
+    assert not list(tmp_path.glob("sweep__*.json"))  # nothing written
