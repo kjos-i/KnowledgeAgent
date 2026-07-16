@@ -5,13 +5,12 @@ description + rows + Divider between sections). No ExpansionTiles —
 the user needs to see every install target at a glance to decide
 what's next.
 
-Global-config header, then five install sections (top → bottom):
+Five install sections (top → bottom). Each carries its OWN download-location
+row(s) under its header — there is no separate "global locations" block; a
+location sits next to the installs that use it:
 
-  0. **Global download locations** — the editable `ontology_downloads_dir`
-     path (+ Browse), plus read-only echoes of the effective location, the
-     HF Hub cache (extractor weights), and the Ollama models dir. Shared
-     across every corpus.
-  1. **LLM providers** — 4 rows. Install / Uninstall each LLM adapter's pip
+  1. **LLM providers** — 4 rows, under a read-only "Ollama models" location
+     (where pulled local LLMs land). Install / Uninstall each LLM adapter's pip
      package (wraps `install_llm_provider_execute` /
      `uninstall_llm_provider_execute`). The active-LLM choice lives in
      Search → LLM.
@@ -23,7 +22,8 @@ Global-config header, then five install sections (top → bottom):
      `install_parser_extra_execute` / `uninstall_parser_extra_execute`.
      Whisper weights auto-download inside Docling on first ingest use
      — disclosed in the row text rather than fought upstream.
-  4. **Entity extractors** — 4 rows. Status = compound (pip package +
+  4. **Entity extractors** — 4 rows, under a read-only "HF Hub cache"
+     location (where downloaded weights land). Status = compound (pip package +
      pinned weights on disk). Two independent axes:
        - `Install`/`Uninstall` — pip package (wraps
          `install_extractor_execute` / `uninstall_extractor_execute`).
@@ -31,8 +31,10 @@ Global-config header, then five install sections (top → bottom):
          (wraps `download_extractor_weights_execute` /
          `delete_extractor_weights_execute`).
      Disk size for downloaded weights shown in the status chip.
-  5. **Ontologies** — 18 rows. Status = disk state (whether the
-     source file has been downloaded to `ontology_downloads_dir`),
+  5. **Ontologies** — 18 rows, under the editable `ontology_downloads_dir`
+     location (+ Browse + effective-path echo; the ONE editable location,
+     shared across corpora, blank = backend default). Status = disk state
+     (whether the source file has been downloaded to `ontology_downloads_dir`),
      with size in bytes when present. Neo4j node writes are NOT
      managed here — they happen automatically during ingest when a
      corpus with the ontology enabled runs. One button axis:
@@ -410,63 +412,12 @@ class InstallsTab:
             # tab's bulk_ops surface where node writes belong.
             self._sync_ontology_state()
 
-        controls: list[ft.Control] = [
-            # ---- Global paths --------------------------------------
-            section_header(
-                self.app,
-                "Global download locations",
-                "Where each install target keeps its files. The first is "
-                "editable — the other two are managed by their libraries "
-                "(HF Hub / Ollama) and shown for reference.",
-            ),
-            # ontology_downloads_dir — editable + Browse
-            labeled_field(
-                "ontology_downloads_dir",
-                self.downloads_dir_field,
-                trailing=self.downloads_dir_browse_button,
-            ),
-            # Effective ontology location — read-only echo (shows the backend
-            # default when the field above is blank).
-            ft.Row(
-                spacing=6,
-                controls=[
-                    ft.Text(
-                        "Effective location:",
-                        size=12,
-                        color=ft.Colors.GREY_400,
-                        width=280,
-                    ),
-                    self.effective_downloads_display,
-                ],
-            ),
-            # HF hub cache dir — read-only display
-            ft.Row(
-                spacing=6,
-                controls=[
-                    ft.Text(
-                        "HF Hub cache (extractor weights):",
-                        size=12,
-                        color=ft.Colors.GREY_400,
-                        width=280,
-                    ),
-                    self.hf_hub_display,
-                ],
-            ),
-            # Ollama models dir — read-only display
-            ft.Row(
-                spacing=6,
-                controls=[
-                    ft.Text(
-                        "Ollama models (local LLMs):",
-                        size=12,
-                        color=ft.Colors.GREY_400,
-                        width=280,
-                    ),
-                    self.ollama_models_display,
-                ],
-            ),
-            section_divider(),
-        ]
+        # Each section carries its OWN download-location row(s) under its header
+        # (no separate "Global download locations" block): the editable
+        # ontology_downloads_dir + effective echo under Ontologies, the HF Hub
+        # cache under Entity extractors, the Ollama models dir under LLM providers
+        # — so a location sits next to the installs that use it.
+        controls: list[ft.Control] = []
 
         # ---- LLM providers (4) -------------------------------------
         controls.append(
@@ -479,6 +430,10 @@ class InstallsTab:
                 "the Ollama daemon status lives). The active LLM can't be "
                 "uninstalled — switch it there first.",
             )
+        )
+        # Where Ollama keeps pulled local-LLM models — read-only (library-owned).
+        controls.append(
+            self._location_row("Ollama models (local LLMs):", self.ollama_models_display)
         )
         for name in _LLM_PROVIDER_ORDER:
             controls.append(
@@ -560,6 +515,10 @@ class InstallsTab:
                 "extraction raises if weights are missing.",
             )
         )
+        # Where downloaded extractor weights land — read-only (HF-hub-owned).
+        controls.append(
+            self._location_row("HF Hub cache (extractor weights):", self.hf_hub_display)
+        )
         for name in _EXTRACTOR_ORDER:
             display = EXTRACTOR_REGISTRY[name]["display_name"]
             ext_prov = EXTRACTOR_REGISTRY[name].get("provenance")
@@ -588,6 +547,16 @@ class InstallsTab:
                 "downloading is safe (no schema change).",
             )
         )
+        # Where ontology source files download to — the ONE editable location
+        # (blank = backend default), with a read-only echo of the effective path.
+        controls.append(
+            labeled_field(
+                "ontology_downloads_dir",
+                self.downloads_dir_field,
+                trailing=self.downloads_dir_browse_button,
+            )
+        )
+        controls.append(self._location_row("Effective location:", self.effective_downloads_display))
         for name in _ONTOLOGY_ORDER:
             ont_prov = ONTOLOGY_REGISTRY.get(name, {}).get("provenance")
             controls.append(
@@ -642,6 +611,16 @@ class InstallsTab:
                 link_slot,
                 *buttons,
             ],
+        )
+
+    @staticmethod
+    def _location_row(label: str, display: ft.Text) -> ft.Control:
+        """A read-only 'Label: <path>' echo of a section's download location —
+        the shared shape for the HF-hub, Ollama, and effective-ontology paths,
+        each now sitting under the section it belongs to."""
+        return ft.Row(
+            spacing=6,
+            controls=[ft.Text(label, size=12, color=ft.Colors.GREY_400, width=280), display],
         )
 
     # ----- state sync ------------------------------------------------------
