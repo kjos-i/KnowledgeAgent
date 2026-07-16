@@ -47,8 +47,9 @@ if TYPE_CHECKING:
     from knowledge_agent.gui.evaluation.evaluation_view import EvaluationView
 
 _RAIL_WIDTH = 280
-# The suite key for legacy runs recorded before facts_hash existed (NULL). A
-# real facts_hash is 64 hex chars, so this sentinel never collides.
+# Grouping key for every run NOT executed as a named suite — single-file runs
+# and legacy rows alike. Suite is a by-name concept (R7), so anything without a
+# `suite` name falls in this one "— No suite —" bucket.
 _NO_SUITE = "∅"
 
 
@@ -62,10 +63,11 @@ def dataset_of(run: dict[str, Any]) -> str:
 
 
 def _suite_key(run: dict[str, Any]) -> str:
-    """The run's suite identity for grouping — the named `suite` it was executed
-    as, else its `facts_hash` (fallback auto-grouping for untagged / legacy
-    runs), else the legacy sentinel."""
-    return run.get("suite") or run.get("facts_hash") or _NO_SUITE
+    """The run's suite for grouping — the named `suite` it was executed as, else
+    the '— No suite —' sentinel. Suite is a by-name concept (R7): a single-file
+    or legacy run belongs to no suite, so it groups under the sentinel rather
+    than by facts_hash."""
+    return run.get("suite") or _NO_SUITE
 
 
 def _run_label(run: dict[str, Any]) -> str:
@@ -153,34 +155,18 @@ class DashboardRail:
         self._sync_controls()
 
     def _suites(self) -> list[tuple[str, str]]:
-        """The distinct suites in the corpus as (key, label). A NAMED suite (runs
-        executed under a `suite` tag) is labelled by its name; an untagged group
-        (fallback: runs sharing a `facts_hash`) is labelled by its member dataset
-        names. Legacy runs with neither fall under one '(no suite)' group. Order
-        follows first appearance (list_runs is newest first)."""
+        """The distinct suites among the corpus's runs as (key, label): each NAMED
+        suite by its name, plus a single '— No suite —' bucket for every run not
+        executed as a named suite (single-file / legacy). Order follows first
+        appearance (list_runs is newest first)."""
         order: list[str] = []
-        members: dict[str, list[str]] = {}
-        named: set[str] = set()
+        seen: set[str] = set()
         for r in self._runs:
             key = _suite_key(r)
-            if r.get("suite"):
-                named.add(key)
-            d = dataset_of(r)
-            if key not in members:
-                members[key] = []
+            if key not in seen:
+                seen.add(key)
                 order.append(key)
-            if d not in members[key]:
-                members[key].append(d)
-        out: list[tuple[str, str]] = []
-        for key in order:
-            if key in named:
-                out.append((key, key))  # the human suite name
-                continue
-            names = ", ".join(members[key])
-            if len(names) > 40:
-                names = names[:39] + "…"
-            out.append((key, f"(no suite) {names}" if key == _NO_SUITE else names))
-        return out
+        return [(k, "— No suite —" if k == _NO_SUITE else k) for k in order]
 
     def _sync_controls(self) -> None:
         """Populate the Suite → Dataset → Run cascade from the loaded runs,
@@ -233,8 +219,10 @@ class DashboardRail:
         self._render_context(self._ledger().get_run(run_id) if run_id is not None else None)
 
     def _render_context(self, run: dict[str, Any] | None) -> None:
-        """The read-only recipe panel for the selected run — sourced from the
-        run's ledger row (what it actually used), not the dataset JSON."""
+        """The read-only info panel for the selected run — sourced from the run's
+        ledger row (what it actually used), not the dataset JSON. Split into three
+        sections, each anchored by one of the three hashes: Suite (facts hash),
+        Dataset (knobs hash), Run (run-settings hash)."""
         if self.context is None:
             return
         if run is None:
@@ -245,19 +233,38 @@ class DashboardRail:
         groups = _parse(run.get("enabled_groups")) or []
         thresholds = _parse(run.get("gate_thresholds")) or {}
         judges = _parse(run.get("judge_models")) or []
-        rhash = run.get("recipe_hash")
-        fhash = run.get("facts_hash")
-        khash = run.get("knob_hash")
-        # Three-hash provenance story: facts (the gold) / knobs (the retrieval
-        # settings that tell suite members apart) / run-settings (the recipe).
+
+        def _hash(h: Any) -> str:
+            return h[:8] if h else "—"
+
+        def _header(text: str) -> ft.Text:
+            return ft.Text(text, weight=ft.FontWeight.BOLD, size=12)
+
+        # Judge panel: the resolved models that ran; "(off)" when the judge group
+        # wasn't run; "(default)" for a legacy run that didn't record the panel.
+        if "judge" not in groups:
+            judge_line = "(off)"
+        elif judges:
+            judge_line = ", ".join(judges)
+        else:
+            judge_line = "(default)"
+
         lines: list[ft.Control] = [
-            ft.Text("Run Information", weight=ft.FontWeight.BOLD, size=12),
+            # ---- Suite (facts hash = the suite identity) ----
+            _header("Suite Information"),
+            ft.Text(f"Suite: {run.get('suite') or '— No suite —'}", size=12),
+            ft.Text(f"Facts hash: {_hash(run.get('facts_hash'))}", size=12),
+            ft.Container(height=6),
+            # ---- Dataset (knobs hash = what tells suite members apart) ----
+            _header("Dataset Information"),
             ft.Text(f"Dataset: {dataset_of(run)}", size=12),
-            ft.Text(f"Facts hash: {fhash[:8] if fhash else '—'}", size=12),
-            ft.Text(f"Knobs hash: {khash[:8] if khash else '—'}", size=12),
-            ft.Text(f"Run settings hash: {rhash[:8] if rhash else '—'}", size=12),
-            ft.Text(f"Groups: {', '.join(groups) if groups else '(none)'}", size=12),
-            ft.Text(f"Judges: {', '.join(judges) if judges else '(default)'}", size=12),
+            ft.Text(f"Knobs hash: {_hash(run.get('knob_hash'))}", size=12),
+            ft.Container(height=6),
+            # ---- Run (run-settings hash = the recipe that scored it) ----
+            _header("Run Information"),
+            ft.Text(f"Run settings hash: {_hash(run.get('recipe_hash'))}", size=12),
+            ft.Text(f"Metric groups: {', '.join(groups) if groups else '(none)'}", size=12),
+            ft.Text(f"Judge panel: {judge_line}", size=12),
         ]
         lines += [ft.Text(f"{k}: {v}", size=12) for k, v in thresholds.items()]
         lines.append(ft.Text(f"Cases: {run.get('case_count')}", size=12))

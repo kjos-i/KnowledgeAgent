@@ -20,7 +20,7 @@ def _report(dataset: str, run_ts: str, facts: str = "sharedfacts") -> dict:
         "dataset_name": dataset,
         "facts_hash": facts,  # the suite key (same facts across a suite's members)
         "prompts_snapshot": {},
-        "enabled_groups": ["source", "chunk"],
+        "enabled_groups": ["source", "chunk", "judge"],
         "gate_thresholds": {"judge_threshold": 0.5},
         "judge_models": ["m1"],
         "recipe_hash": "abcdef1234567890",  # pragma: allowlist secret (fake test hash)
@@ -66,10 +66,17 @@ def test_context_shows_recipe_from_run_row(fake_app, tmp_path):
     rail, _, _ = _rail(fake_app, led)
     lines = [c.value for c in rail.context.controls if hasattr(c, "value")]
     joined = " | ".join(lines)
+    # three sections, each anchored by one hash
+    assert "Suite Information" in lines
+    assert "Dataset Information" in lines
+    assert "Run Information" in lines
+    assert "Suite: — No suite —" in lines  # no `suite` name on this run
     assert "Run settings hash: abcdef12" in lines  # 8-char prefix, truncated from the full 16
     assert "Knobs hash: 98765432" in lines  # the three-hash story: facts / knobs / run-settings
+    # relabels
+    assert any(v.startswith("Metric groups:") for v in lines)
     assert "chunk" in joined and "source" in joined  # enabled groups (ledger sorts them)
-    assert "m1" in joined  # judge panel
+    assert "Judge panel: m1" in lines  # judge in groups + panel recorded
     assert "claude-sonnet-5" in joined  # model
 
 
@@ -111,24 +118,20 @@ def test_dropdowns_wired_to_on_select(fake_app, tmp_path):
     assert rail.suite_dd.on_select == rail._on_suite_change
 
 
-def test_suite_scopes_datasets(fake_app, tmp_path):
-    """The Suite dropdown groups runs by facts_hash; selecting a suite scopes the
-    Dataset list to that suite's members."""
+def test_unnamed_runs_group_as_no_suite(fake_app, tmp_path):
+    """Runs not executed as a NAMED suite (single-file / legacy) all collapse into
+    one '— No suite —' bucket, regardless of facts_hash; the Dataset list then
+    spans all of them. (Suite is a by-name concept — no facts_hash pseudo-suites.)
+    """
     led = EvalLedger(tmp_path / "l.db")
     led.save_run(_report("vec", "2026-07-01T09:00:00", facts="factsA"))
     led.save_run(_report("graph", "2026-07-02T09:00:00", facts="factsA"))
-    led.save_run(_report("other", "2026-07-03T09:00:00", facts="factsB"))  # newest
-    rail, coord, _ = _rail(fake_app, led)
-    # newest run (other / factsB) auto-selected → suite factsB, its one member
-    assert coord.selected_suite == "factsB"
-    assert {o.key for o in rail.dataset_dd.options} == {"other"}
-    assert {o.key for o in rail.suite_dd.options} == {"factsA", "factsB"}
-    # switch to suite factsA → its two members appear
-    rail.suite_dd.value = "factsA"
-    with patch(_LEDGER, return_value=led):
-        rail._on_suite_change(MagicMock())
-    assert coord.selected_suite == "factsA"
-    assert {o.key for o in rail.dataset_dd.options} == {"vec", "graph"}
+    led.save_run(_report("other", "2026-07-03T09:00:00", facts="factsB"))
+    rail, _, _ = _rail(fake_app, led)
+    # no `suite` name on any run → ONE bucket, labelled "— No suite —"
+    assert [o.text for o in rail.suite_dd.options] == ["— No suite —"]
+    # all datasets appear under the single no-suite bucket
+    assert {o.key for o in rail.dataset_dd.options} == {"vec", "graph", "other"}
 
 
 def test_named_suite_groups_by_name(fake_app, tmp_path):
