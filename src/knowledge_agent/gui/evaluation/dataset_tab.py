@@ -148,9 +148,9 @@ class DatasetTab:
         # One "LLM" generate button (602): drafts `gen_count` cases into the form
         # buffer (was two buttons — Generate one / multiple).
         self.gen_button: ft.Control | None = None
-        # Lazy (default) vs Advanced generator toggle (602): Advanced grounds each
+        # Lazy (default) vs Advanced generator radios (602): Advanced grounds each
         # case in the whole doc + the knowledge graph (hybrid AND KG cases).
-        self.advanced_check: ft.Checkbox | None = None
+        self.gen_mode_radio: ft.RadioGroup | None = None
         # Spinner shown beside the LLM button while its calls run.
         self.gen_spinner: ft.ProgressRing | None = None
         # LLM model + temperature used for case generation.
@@ -256,15 +256,28 @@ class DatasetTab:
         self.gen_button = ft.TextButton(
             "LLM", icon=ft.Icons.AUTO_AWESOME, on_click=self._on_generate
         )
-        # Lazy (off) → one chunk per doc; Advanced (on) → whole-doc + knowledge-
-        # graph grounding, writing both hybrid and KG cases (602).
-        self.advanced_check = ft.Checkbox(
-            label="Advanced",
-            value=False,
-            tooltip=(
-                "Off (Lazy): one text chunk per document — fast, basic coverage. "
-                "On (Advanced): grounds each case in the whole document + the "
-                "knowledge graph, writing both text (hybrid) and graph (KG) cases."
+        # Lazy → one chunk per doc (fast); Advanced → whole-doc + knowledge-graph
+        # grounding, writing both hybrid and KG cases (602).
+        self.gen_mode_radio = ft.RadioGroup(
+            value="lazy",
+            content=ft.Row(
+                [
+                    ft.Radio(
+                        value="lazy",
+                        label="Lazy",
+                        tooltip="One text chunk per document — fast, basic coverage.",
+                    ),
+                    ft.Radio(
+                        value="advanced",
+                        label="Advanced",
+                        tooltip=(
+                            "Whole-document + knowledge-graph grounding; writes "
+                            "both text (hybrid) and graph (KG) cases."
+                        ),
+                    ),
+                ],
+                spacing=8,
+                tight=True,
             ),
         )
         # Orthogonal to the three seeds: when on, a seeded case's QUESTION is the
@@ -682,7 +695,8 @@ class DatasetTab:
                             self.gen_button,
                             ft.Text("nr. of cases:", size=14, color=ft.Colors.GREY_300),
                             self.gen_count,
-                            self.advanced_check,
+                            ft.Text("Generator:", size=14, color=ft.Colors.GREY_300),
+                            self.gen_mode_radio,
                             self.gen_spinner,
                         ],
                         wrap=True,
@@ -1923,7 +1937,7 @@ class DatasetTab:
             generate_from_corpus,
         )
 
-        advanced = bool(self.advanced_check and self.advanced_check.value)
+        advanced = self.gen_mode_radio is not None and self.gen_mode_radio.value == "advanced"
         self._set_busy(self.gen_button, self.gen_spinner, True)
         kind = "advanced" if advanced else "quick"
         self._set_status(f"drafting {n} {kind} candidate case(s) from the active corpus…")

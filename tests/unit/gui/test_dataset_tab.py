@@ -370,7 +370,7 @@ async def test_advanced_toggle_dispatches_to_generate_advanced(fake_app, tmp_pat
     p = tmp_path / "adv.json"
     tab = _tab(fake_app, p)
     tab.gen_model_dropdown.value = "some-model"
-    tab.advanced_check.value = True
+    tab.gen_mode_radio.value = "advanced"
     tab.gen_count.value = "2"
     adv = EvalCase(id="adv-00-x", question="Q?", origin="llm")
     with (
