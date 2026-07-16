@@ -494,8 +494,10 @@ class DatasetTab:
         self.update_button = ft.Button(
             "Update case", icon=ft.Icons.SAVE, on_click=self._on_save_case
         )
-        refresh_button = ft.Button(
-            "Refresh",
+        # Icon-only (frees ~60px) so Refresh + Update + Add + the suite toggle
+        # all fit on one line at typical widths without clipping (613).
+        refresh_button = ft.IconButton(
+            ft.Icons.REFRESH,
             tooltip="Reload the dataset from disk and refresh the case list",
             on_click=self._on_refresh,
         )
