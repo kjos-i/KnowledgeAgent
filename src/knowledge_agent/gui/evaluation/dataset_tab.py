@@ -633,16 +633,17 @@ class DatasetTab:
                         self.dataset_field,
                         trailing=ft.Row([browse_button, new_dataset_button], spacing=8, tight=True),
                     ),
-                    labeled_field("Status", self.status_group),
-                    # The freeze affordance (Run-tab style) on its own line under
-                    # the Status radios, right-aligned: Unfreeze (always shown,
-                    # greyed until frozen) + the frozen badge (visible only when
-                    # frozen). The run settings it locks live on the Run tab.
-                    ft.Row(
-                        [self.unfreeze_button, self.frozen_indicator],
-                        alignment=ft.MainAxisAlignment.END,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        spacing=8,
+                    # Unfreeze (+ frozen badge) trail the Status radios on their
+                    # line: always shown, greyed until frozen; the run settings it
+                    # locks live on the Run tab.
+                    labeled_field(
+                        "Status",
+                        self.status_group,
+                        trailing=ft.Row(
+                            [self.unfreeze_button, self.frozen_indicator],
+                            spacing=8,
+                            tight=True,
+                        ),
                     ),
                     section_divider(),
                     # ============ Section: Progress ============
