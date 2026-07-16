@@ -444,7 +444,7 @@ class DatasetTab:
             label="Generate suite", value=False, on_change=self._on_suite_toggled
         )
         self.add_info_fact_button = ft.Button(
-            "Add Information and Fact",
+            "Add Info and Fact",
             icon=ft.Icons.ADD,
             tooltip="Add the form's Information + Fact as a case (a shared suite fact)",
             on_click=self._on_save_case,
@@ -452,33 +452,23 @@ class DatasetTab:
         # Two premade dropdowns (Hybrid / KG groups) — picking one drops it into
         # the knob-set list (read-only), like adding a judge to the judge panel.
         # Each preset picker gets the app-standard outlined box (a bare Flet
-        # Dropdown has no border) so it matches the rest of the layout (614).
-        # A leading blank option (key "") carries the default prompt text —
-        # Flet 0.85's Dropdown rejects `hint_text`, so the placeholder rides an
-        # option that `value=""` selects; `_add_preset_member` ignores the ""
-        # key and resets to it, so the prompt returns after each pick.
+        # Dropdown has no border) + a fixed width so the pickers and "Add from
+        # form" stay grouped rather than stretching apart on a wide window (614).
         self.hybrid_preset_dd = apply_input_box(
             ft.Dropdown(
-                value="",
+                width=300,
                 options=[
-                    ft.DropdownOption(key="", text="Add a hybrid preset…"),
-                    *(
-                        ft.DropdownOption(key=k, text=STRATEGY_LABELS[k])
-                        for k in PRESET_GROUPS["Hybrid"]
-                    ),
+                    ft.DropdownOption(key=k, text=STRATEGY_LABELS[k])
+                    for k in PRESET_GROUPS["Hybrid"]
                 ],
                 on_select=lambda _e: self._add_preset_member(self.hybrid_preset_dd),
             )
         )
         self.kg_preset_dd = apply_input_box(
             ft.Dropdown(
-                value="",
+                width=300,
                 options=[
-                    ft.DropdownOption(key="", text="Add a KG preset…"),
-                    *(
-                        ft.DropdownOption(key=k, text=STRATEGY_LABELS[k])
-                        for k in PRESET_GROUPS["KG"]
-                    ),
+                    ft.DropdownOption(key=k, text=STRATEGY_LABELS[k]) for k in PRESET_GROUPS["KG"]
                 ],
                 on_select=lambda _e: self._add_preset_member(self.kg_preset_dd),
             )
@@ -504,41 +494,34 @@ class DatasetTab:
                 spacing=8,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                 controls=[
-                    # Suite name sits at the top of the box (613).
-                    labeled_field("Suite name", self.suite_name_field),
-                    # Top sub-section: a plain bold title (no leading rule) with
-                    # its explanatory note behind an (i), and its "Add" button on
-                    # the same line (613/614). Title+(i) stay tight in an inner
-                    # row; the button trails them.
-                    ft.Row(
-                        [
-                            ft.Row(
-                                [
-                                    sub_section_title("Case information and facts"),
-                                    info_icon(
-                                        self.app,
-                                        title="Case information and facts",
-                                        text=(
-                                            "The suite's facts are this dataset's "
-                                            "cases. Add each from the form with "
-                                            "'Add Information and Fact'; Generate "
-                                            "then clones every fact once per "
-                                            "retrieval knob-set below."
-                                        ),
+                    # Suite name at the top, with "Add Info and Fact" (+ its help
+                    # (i)) to the RIGHT of the field — that button seeds each
+                    # shared suite fact from the form (613/614).
+                    labeled_field(
+                        "Suite name",
+                        self.suite_name_field,
+                        trailing=ft.Row(
+                            [
+                                self.add_info_fact_button,
+                                info_icon(
+                                    self.app,
+                                    title="Case information and facts",
+                                    text=(
+                                        "The suite's facts are this dataset's "
+                                        "cases. Add each from the form with 'Add "
+                                        "Info and Fact'; Generate then clones "
+                                        "every fact once per retrieval knob-set "
+                                        "below."
                                     ),
-                                ],
-                                spacing=4,
-                                tight=True,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            ),
-                            self.add_info_fact_button,
-                        ],
-                        spacing=8,
-                        wrap=True,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ),
+                            ],
+                            spacing=4,
+                            tight=True,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
                     ),
-                    # Second sub-section keeps its rule as a real separator.
-                    sub_section_header("Retrieval settings"),
+                    # Plain title — no dividing rule inside the suite box (613).
+                    sub_section_title("Retrieval settings"),
                     # Both preset pickers + "Add from form" share one row (614),
                     # bottom-aligned so the button lines up with the dropdowns.
                     ft.Row(
@@ -549,7 +532,6 @@ class DatasetTab:
                                     self.hybrid_preset_dd,
                                 ],
                                 spacing=2,
-                                expand=1,
                             ),
                             ft.Column(
                                 [
@@ -557,7 +539,6 @@ class DatasetTab:
                                     self.kg_preset_dd,
                                 ],
                                 spacing=2,
-                                expand=1,
                             ),
                             self.add_from_form_button,
                         ],
@@ -673,7 +654,8 @@ class DatasetTab:
             ft.Column(
                 [
                     # ============ Section: Commit / suite ============
-                    # The suite toggle rides the commit-button row (613).
+                    # The suite toggle rides the commit-button row, kept on ONE
+                    # line (no wrap) so it never drops below the buttons (613).
                     ft.Row(
                         [
                             refresh_button,
@@ -682,7 +664,6 @@ class DatasetTab:
                             self.generate_suite_check,
                         ],
                         spacing=8,
-                        wrap=True,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     self.suite_panel,
@@ -990,7 +971,7 @@ class DatasetTab:
         from knowledge_agent.evaluation.suite_gen import STRATEGIES
 
         key = dropdown.value
-        dropdown.value = ""  # back to the placeholder prompt, not blank
+        dropdown.value = None  # clear so the next pick re-fires
         if key in STRATEGIES and not any(k == key for k, _ in self._suite_members):
             self._suite_members.append((key, STRATEGIES[key].model_copy()))
             self._render_suite_members()

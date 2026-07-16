@@ -610,23 +610,12 @@ def test_suite_toggle_reveals_panel_and_grays_add(fake_app):
     assert tab.add_button.disabled is False
 
 
-def test_preset_dropdowns_start_on_a_default_prompt(fake_app):
-    """Each preset picker starts on a blank (key="") option carrying prompt
-    text — Flet 0.85's Dropdown has no hint_text, so the field shows guidance
-    rather than an empty box."""
-    tab = _tab(fake_app)
-    for dd, word in ((tab.hybrid_preset_dd, "hybrid"), (tab.kg_preset_dd, "KG")):
-        assert dd.value == ""
-        assert dd.options[0].key == ""
-        assert word in dd.options[0].text
-
-
 def test_add_preset_member_appends_and_dedups(fake_app):
     tab = _tab(fake_app)
     tab.hybrid_preset_dd.value = "vector"
     tab._add_preset_member(tab.hybrid_preset_dd)
     assert [label for label, _ in tab._suite_members] == ["vector"]  # keyed by slug
-    assert tab.hybrid_preset_dd.value == ""  # back to the placeholder prompt, re-fires
+    assert tab.hybrid_preset_dd.value is None  # cleared so the next pick re-fires
     tab.hybrid_preset_dd.value = "vector"  # same preset again → dedup
     tab._add_preset_member(tab.hybrid_preset_dd)
     assert [label for label, _ in tab._suite_members] == ["vector"]
