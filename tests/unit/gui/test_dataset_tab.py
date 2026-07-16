@@ -109,6 +109,9 @@ def test_new_case_saves_to_file(fake_app, tmp_path):
     assert ds.status == "final"  # status header rode along (name field dropped)
     assert [c.id for c in ds.cases] == ["brandnew"]
     assert ds.cases[0].required_keywords == ["alpha", "beta"]  # lines → list
+    assert tab._selected is None  # added, not left selected as if still editing
+    assert tab.add_button.disabled is False  # back in new-case mode
+    assert tab.update_button.disabled is True
 
 
 def test_edit_selected_case_persists(fake_app, tmp_path):

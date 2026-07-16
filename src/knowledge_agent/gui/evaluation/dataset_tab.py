@@ -1820,7 +1820,10 @@ class DatasetTab:
             verb = "updated"
         else:
             self._dataset.cases.append(case)
-            self._selected = len(self._dataset.cases) - 1
+            # Don't leave the just-added case selected — after an Add you're back
+            # in new-case mode (Add live, Update grey), not editing what you just
+            # added (which looked like the row was still in edit).
+            self._selected = None
             verb = "added"
         try:
             save_dataset(self._dataset, path)
