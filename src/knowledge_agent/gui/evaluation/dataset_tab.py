@@ -9,7 +9,7 @@ Right column = two stacked sections:
   * **Preview** — a live card mirroring the left form (debounced) with the
     **Add case / Update case** commit button beneath it. Nothing is written
     until you commit.
-  * **In this dataset** — the dataset's cases as cards; click one to load it
+  * **Dataset cases** — the dataset's cases as cards; click one to load it
     into the form (commit becomes **Update**), or delete it on the card.
 
 Dataset files are chosen by **Browse** (opens in the active corpus's folder)
@@ -48,6 +48,7 @@ from knowledge_agent.gui._styles import (
     sub_section_header,
     sub_section_title,
 )
+from knowledge_agent.gui._widgets.info_icon import info_icon
 from knowledge_agent.gui._widgets.retrieval_form import (
     DEFAULT_VALUES,
     RetrievalControls,
@@ -482,14 +483,43 @@ class DatasetTab:
                 spacing=8,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                 controls=[
-                    sub_section_header("Suite facts"),
-                    ft.Text(
-                        "Facts are this dataset's cases — add each from the form:",
-                        size=12,
-                        color=ft.Colors.GREY_400,
+                    # Suite name sits at the top of the box (613).
+                    labeled_field("Suite name", self.suite_name_field),
+                    # Top sub-section: a plain bold title (no leading rule) with
+                    # its explanatory note behind an (i), and its "Add" button on
+                    # the same line (613/614). Title+(i) stay tight in an inner
+                    # row; the button trails them.
+                    ft.Row(
+                        [
+                            ft.Row(
+                                [
+                                    sub_section_title("Case information and facts", bold=True),
+                                    info_icon(
+                                        self.app,
+                                        title="Case information and facts",
+                                        text=(
+                                            "The suite's facts are this dataset's "
+                                            "cases. Add each from the form with "
+                                            "'Add Information and Fact'; Generate "
+                                            "then clones every fact once per "
+                                            "retrieval knob-set below."
+                                        ),
+                                    ),
+                                ],
+                                spacing=4,
+                                tight=True,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            self.add_info_fact_button,
+                        ],
+                        spacing=8,
+                        wrap=True,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-                    self.add_info_fact_button,
-                    sub_section_header("Retrieval knob-sets"),
+                    # Second sub-section keeps its rule as a real separator.
+                    sub_section_header("Retrieval settings"),
+                    # Both preset pickers + "Add from form" share one row (614),
+                    # bottom-aligned so the button lines up with the dropdowns.
                     ft.Row(
                         [
                             ft.Column(
@@ -508,13 +538,14 @@ class DatasetTab:
                                 spacing=2,
                                 expand=1,
                             ),
+                            self.add_from_form_button,
                         ],
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.END,
                     ),
-                    self.add_from_form_button,
+                    # The assembled knob-sets, one read-only line each (614 heading).
+                    sub_section_title("Selected settings for datasets in suite"),
                     self.suite_members_list,
-                    labeled_field("Suite name", self.suite_name_field),
                     self.suite_generate_button,
                     self.suite_status,
                 ],
@@ -621,16 +652,22 @@ class DatasetTab:
             ft.Column(
                 [
                     # ============ Section: Commit / suite ============
+                    # The suite toggle rides the commit-button row (613).
                     ft.Row(
-                        [refresh_button, self.update_button, self.add_button],
+                        [
+                            refresh_button,
+                            self.update_button,
+                            self.add_button,
+                            self.generate_suite_check,
+                        ],
                         spacing=8,
                         wrap=True,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-                    self.generate_suite_check,
                     self.suite_panel,
                     section_divider(),
-                    # ============ Section: In this dataset ============
-                    section_title("In this dataset"),
+                    # ============ Section: Dataset cases ============
+                    section_title("Dataset cases"),
                     self.case_list,
                 ],
                 scroll=ft.ScrollMode.AUTO,
