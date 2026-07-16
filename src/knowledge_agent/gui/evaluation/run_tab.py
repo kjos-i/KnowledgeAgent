@@ -45,6 +45,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Sentinel key for the single non-selectable "No suites created yet" placeholder
+# shown in the Suite dropdown when the corpus has no named suites. The on_select
+# handler ignores it, so it can be seen but never chosen.
+_NO_SUITES_SENTINEL = "__no_suites__"
+
 
 class RunTab:
     """Run-configuration + trigger sub-tab."""
@@ -263,9 +268,12 @@ class RunTab:
         self._project_row.disabled = True
 
         # Suite dropdown — the corpus's named suites (scanned from files' `suites`
-        # tags). Picking one runs its members together; disabled when the corpus
-        # has none. Fires on_select (Flet 0.85), NOT on_change.
-        self.suite_dd = ft.Dropdown(label="Suite", options=[], width=260)
+        # tags). Picking one runs its members together. No floating label (the
+        # labeled_field caption supplies "Suite"); the hint shows when nothing is
+        # picked (the single-file case). Always enabled, so it keeps its box; an
+        # empty corpus shows a non-selectable placeholder in the menu. Fires
+        # on_select (Flet 0.85), NOT on_change.
+        self.suite_dd = ft.Dropdown(options=[], width=260, hint_text="No suite selected")
         self.suite_dd.on_select = self._on_suite_dd_change
         # One-line summary of what's currently selected (suite + members, or the
         # single file). Sits under the two fields.
@@ -582,13 +590,21 @@ class RunTab:
 
     def _refresh_suite_options(self) -> None:
         """Repopulate the Suite dropdown from the active corpus's named suites
-        (called on build + corpus switch). Disabled when the corpus has none;
-        drops a selection the corpus no longer offers."""
+        (called on build + corpus switch). Always enabled so it reads as a real
+        (bordered) field; when the corpus has no suites, the menu holds a single
+        non-selectable "No suites created yet" item. Drops a selection the corpus
+        no longer offers."""
         if self.suite_dd is None:
             return
         suites = self._corpus_suites()
-        self.suite_dd.options = [ft.DropdownOption(key=s, text=s) for s in suites]
-        self.suite_dd.disabled = not suites
+        if suites:
+            self.suite_dd.options = [ft.DropdownOption(key=s, text=s) for s in suites]
+        else:
+            # No suites yet — a single placeholder that can be seen but not chosen
+            # (the on_select handler ignores its sentinel key).
+            self.suite_dd.options = [
+                ft.DropdownOption(key=_NO_SUITES_SENTINEL, text="No suites created yet")
+            ]
         if self._suite_name is not None and self._suite_name not in suites:
             self._suite_name, self._suite_paths = None, []
             self.suite_dd.value = None
@@ -597,8 +613,13 @@ class RunTab:
 
     def _on_suite_dd_change(self, _e: ft.Event) -> None:
         """A named suite was picked → clear the single-file field (mutually
-        exclusive) and load the suite's members + shared recipe."""
+        exclusive) and load the suite's members + shared recipe. The "No suites
+        created yet" placeholder is non-selectable, so ignore its sentinel."""
         if self.suite_dd is None or not self.suite_dd.value:
+            return
+        if self.suite_dd.value == _NO_SUITES_SENTINEL:
+            self.suite_dd.value = None  # placeholder — not a real choice
+            self.app.page.update()
             return
         if self.dataset_field is not None:
             self.dataset_field.value = ""  # mutual exclusion

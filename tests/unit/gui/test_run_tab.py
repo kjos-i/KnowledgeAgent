@@ -214,7 +214,7 @@ def test_trace_toggle_reveals_warning_and_enables_project(fake_app: MagicMock):
 
 def test_suite_dropdown_lists_corpus_named_suites(fake_app: MagicMock, tmp_path):
     """The Suite dropdown offers every named suite across the corpus's files (the
-    sorted union of their `suites` tags); an empty corpus disables it."""
+    sorted union of their `suites` tags); the field is always enabled."""
     _suite_variant(tmp_path / "vec.json", "c__v", "lancedb_only", ["mode-sweep"])
     _suite_variant(tmp_path / "graph.json", "c__g", "neo4j_only", ["mode-sweep", "kg-sweep"])
     tab, _ = _run_tab(fake_app)
@@ -222,6 +222,26 @@ def test_suite_dropdown_lists_corpus_named_suites(fake_app: MagicMock, tmp_path)
     tab._refresh_suite_options()
     assert {o.key for o in tab.suite_dd.options} == {"kg-sweep", "mode-sweep"}
     assert tab.suite_dd.disabled is False
+
+
+def test_suite_dropdown_empty_shows_non_selectable_placeholder(fake_app: MagicMock, tmp_path):
+    """No suites in the corpus → the dropdown stays enabled (keeps its box) with a
+    single non-selectable "No suites created yet" item; choosing it is a no-op and
+    leaves the field on "No suite selected"."""
+    from knowledge_agent.gui.evaluation.run_tab import _NO_SUITES_SENTINEL
+
+    tab, _ = _run_tab(fake_app)
+    fake_app.gui_config.corpus_config_path = tmp_path / "corpus.toml"  # empty dir
+    tab._refresh_suite_options()
+    assert tab.suite_dd.disabled is False
+    assert tab.suite_dd.hint_text == "No suite selected"
+    assert [o.text for o in tab.suite_dd.options] == ["No suites created yet"]
+    # selecting the placeholder does nothing — no suite gets picked, value resets
+    tab.suite_dd.value = _NO_SUITES_SENTINEL
+    tab._on_suite_dd_change(MagicMock())
+    assert tab._suite_name is None
+    assert tab._suite_selected() is False
+    assert tab.suite_dd.value is None
 
 
 def test_selecting_suite_loads_members_and_recipe(fake_app: MagicMock, tmp_path):
