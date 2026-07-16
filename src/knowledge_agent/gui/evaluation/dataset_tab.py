@@ -758,8 +758,9 @@ class DatasetTab:
             ft.Column(
                 [
                     # ============ Section: Commit / suite ============
-                    # The suite toggle rides the commit-button row, kept on ONE
-                    # line (no wrap) so it never drops below the buttons (613).
+                    # The suite toggle rides the commit-button row: one line when
+                    # wide, wrapping when narrow so nothing is clipped off the
+                    # right edge (613).
                     ft.Row(
                         [
                             refresh_button,
@@ -768,6 +769,7 @@ class DatasetTab:
                             self.generate_suite_check,
                         ],
                         spacing=8,
+                        wrap=True,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     self.suite_panel,
