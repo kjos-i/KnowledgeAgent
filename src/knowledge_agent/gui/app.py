@@ -749,19 +749,15 @@ class GuiApp:
         # by index through a shared `length`). The M3 chrome enforces a
         # ~46 px floor on Tab.height — accepted as the right cost for
         # native accessibility / keyboard nav / indicator animation.
-        # The utility cluster (Installs / Keys / Settings / Info — global config
-        # + reference) gets an INDIGO_200 label tint so it reads as distinct from
-        # the work surfaces (Search / Library / Evaluation), the same device the
-        # eval dashboard uses to set its view sub-tabs apart.
         tab_bar = ft.TabBar(
             tabs=[
                 ft.Tab(label="Search"),
                 ft.Tab(label="Library"),
                 ft.Tab(label="Evaluation"),
-                ft.Tab(label=ft.Text("Installs", color=ft.Colors.BLUE_300)),
-                ft.Tab(label=ft.Text("Keys", color=ft.Colors.BLUE_300)),
-                ft.Tab(label=ft.Text("Settings", color=ft.Colors.BLUE_300)),
-                ft.Tab(label=ft.Text("Info", color=ft.Colors.BLUE_300)),
+                ft.Tab(label="Installs"),
+                ft.Tab(label="Keys"),
+                ft.Tab(label="Settings"),
+                ft.Tab(label="Info"),
             ],
         )
         tab_bodies = ft.TabBarView(

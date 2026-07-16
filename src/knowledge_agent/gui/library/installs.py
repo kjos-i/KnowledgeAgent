@@ -14,11 +14,15 @@ location sits next to the installs that use it:
      package (wraps `install_llm_provider_execute` /
      `uninstall_llm_provider_execute`). The active-LLM choice lives in
      Search → LLM.
-  2. **Embedding providers** — 4 rows. Install / Uninstall each embedder's
+  2. **Embedding providers** — 4 rows, under a read-only "HuggingFace models"
+     location (the shared HF Hub cache; only the HF embedder downloads locally,
+     the other three are remote APIs). Install / Uninstall each embedder's
      pip adapter (wraps `install_embedder_provider_execute` /
      `uninstall_embedder_provider_execute`). The active-embedder choice
      lives in the Embedding settings.
-  3. **Parsers** — 2 rows. Pip install/uninstall wired to
+  3. **Parsers** — 2 rows, under a read-only "Whisper weights" location (the
+     shared HF Hub cache, where Docling drops Whisper Turbo on first ASR
+     ingest). Pip install/uninstall wired to
      `install_parser_extra_execute` / `uninstall_parser_extra_execute`.
      Whisper weights auto-download inside Docling on first ingest use
      — disclosed in the row text rather than fought upstream.
@@ -124,6 +128,13 @@ logger = logging.getLogger(__name__)
 
 _ONTOLOGY_ORDER: tuple[str, ...] = tuple(_ONTOLOGY_DISPLAY.keys())
 _EXTRACTOR_ORDER: tuple[str, ...] = tuple(EXTRACTOR_REGISTRY.keys())
+# Extractors that actually have an install action. The bundled "llm" adapter is
+# excluded from the install list — it ships in the base package and runs on
+# whatever LLM provider you install (LLM providers section) with the model you
+# pick in Ingest, so there's nothing to install for it here.
+_INSTALLABLE_EXTRACTOR_ORDER: tuple[str, ...] = tuple(
+    n for n in _EXTRACTOR_ORDER if not EXTRACTOR_REGISTRY[n].get("bundled")
+)
 _PARSER_ORDER: tuple[str, ...] = tuple(PARSER_LIFECYCLE_REGISTRY.keys())
 _EMBEDDER_PROVIDER_ORDER: tuple[str, ...] = ("voyage", "openai", "google", "huggingface")
 _LLM_PROVIDER_ORDER: tuple[str, ...] = ("anthropic", "openai", "google", "ollama")
@@ -255,8 +266,13 @@ class InstallsTab:
         # field is blank), so a blank field isn't an invisible location.
         self.effective_downloads_display: ft.Text | None = None
         # HF hub + Ollama models dirs — read-only. Third-party libraries
-        # own these locations; GUI just displays.
+        # own these locations; GUI just displays. The HF Hub cache is shared —
+        # extractor weights, the HF embedder's models, and Whisper Turbo all
+        # land there — so each of those sections gets its OWN display (a Flet
+        # control can't appear twice in the tree), all fed one resolved value.
         self.hf_hub_display: ft.Text | None = None
+        self.embedder_hf_hub_display: ft.Text | None = None
+        self.whisper_hf_hub_display: ft.Text | None = None
         self.ollama_models_display: ft.Text | None = None
 
         self._first_build = True
@@ -294,6 +310,10 @@ class InstallsTab:
             size=12,
             color=ft.Colors.GREY_300,
         )
+        # Same HF Hub cache path, echoed under Embedding providers (HF embedder
+        # models) and Parsers (Whisper Turbo) — separate controls, one value.
+        self.embedder_hf_hub_display = ft.Text("(checking…)", size=12, color=ft.Colors.GREY_300)
+        self.whisper_hf_hub_display = ft.Text("(checking…)", size=12, color=ft.Colors.GREY_300)
         self.ollama_models_display = ft.Text(
             "(checking…)",
             size=12,
@@ -320,8 +340,9 @@ class InstallsTab:
             )
 
         # Extractor: 4 buttons per row (install/uninstall + download/delete),
-        # flipped by visibility based on compound state.
-        for name in _EXTRACTOR_ORDER:
+        # flipped by visibility based on compound state. Only installable
+        # extractors get rows (the bundled LLM adapter is excluded).
+        for name in _INSTALLABLE_EXTRACTOR_ORDER:
             self.extractor_status_texts[name] = ft.Text(
                 "(checking…)",
                 size=12,
@@ -433,7 +454,7 @@ class InstallsTab:
         )
         # Where Ollama keeps pulled local-LLM models — read-only (library-owned).
         controls.append(
-            self._location_row("Ollama models (local LLMs):", self.ollama_models_display)
+            self._location_row("Stored on disk (Ollama models):", self.ollama_models_display)
         )
         for name in _LLM_PROVIDER_ORDER:
             controls.append(
@@ -444,6 +465,7 @@ class InstallsTab:
                         self.llm_provider_install_buttons[name],
                         self.llm_provider_uninstall_buttons[name],
                     ),
+                    source_url=LLM_PROVIDER_REGISTRY[name]["provenance"].source_url,
                 )
             )
         controls.append(section_divider())
@@ -459,6 +481,11 @@ class InstallsTab:
                 "embedder can't be uninstalled — switch it there first.",
             )
         )
+        # Only the HuggingFace embedder downloads models locally (Voyage / OpenAI
+        # / Google are remote APIs); they land in the shared HF Hub cache.
+        controls.append(
+            self._location_row("Stored on disk (HuggingFace models):", self.embedder_hf_hub_display)
+        )
         for name in _EMBEDDER_PROVIDER_ORDER:
             controls.append(
                 self._simple_row(
@@ -468,6 +495,7 @@ class InstallsTab:
                         self.embedder_provider_install_buttons[name],
                         self.embedder_provider_uninstall_buttons[name],
                     ),
+                    source_url=EMBEDDER_PROVIDER_REGISTRY[name]["provenance"].source_url,
                 )
             )
         controls.append(section_divider())
@@ -483,6 +511,11 @@ class InstallsTab:
                 "first ingest use — not managed here. AST-aware code parsing "
                 "ships its tree-sitter grammars inside the pip wheel.",
             )
+        )
+        # Whisper Turbo weights land in the shared HF Hub cache (Docling fetches
+        # them on first ASR ingest); the code parser ships its grammars in-wheel.
+        controls.append(
+            self._location_row("Stored on disk (Whisper weights):", self.whisper_hf_hub_display)
         )
         for name in _PARSER_ORDER:
             display = PARSER_LIFECYCLE_REGISTRY[name]["display_name"]
@@ -504,22 +537,23 @@ class InstallsTab:
             )
         controls.append(section_divider())
 
-        # ---- Entity extractors (4) ---------------------------------
+        # ---- Entity extractors (3) ---------------------------------
         controls.append(
             section_header(
                 self.app,
-                "Entity extractors (4)",
-                "L6 adapters. LLM is bundled. GLiNER / GLiNER-BioMed / HunFlair2 "
-                "need BOTH the pip extras (adapter library) AND their pinned "
-                "model weights downloaded. No auto-download at first inference — "
-                "extraction raises if weights are missing.",
+                "Entity extractors (3)",
+                "L6 NER adapters: GLiNER / GLiNER-BioMed / HunFlair2 need BOTH the "
+                "pip extras (adapter library) AND their pinned model weights "
+                "downloaded. No auto-download at first inference — extraction raises "
+                "if weights are missing. (LLM-based extraction isn't listed here — it "
+                "uses your installed LLM provider; pick the model in Ingest.)",
             )
         )
         # Where downloaded extractor weights land — read-only (HF-hub-owned).
         controls.append(
-            self._location_row("HF Hub cache (extractor weights):", self.hf_hub_display)
+            self._location_row("Stored on disk (extractor weights):", self.hf_hub_display)
         )
-        for name in _EXTRACTOR_ORDER:
+        for name in _INSTALLABLE_EXTRACTOR_ORDER:
             display = EXTRACTOR_REGISTRY[name]["display_name"]
             ext_prov = EXTRACTOR_REGISTRY[name].get("provenance")
             controls.append(
@@ -556,7 +590,9 @@ class InstallsTab:
                 trailing=self.downloads_dir_browse_button,
             )
         )
-        controls.append(self._location_row("Effective location:", self.effective_downloads_display))
+        controls.append(
+            self._location_row("Stored on disk (ontology files):", self.effective_downloads_display)
+        )
         for name in _ONTOLOGY_ORDER:
             ont_prov = ONTOLOGY_REGISTRY.get(name, {}).get("provenance")
             controls.append(
@@ -616,8 +652,9 @@ class InstallsTab:
     @staticmethod
     def _location_row(label: str, display: ft.Text) -> ft.Control:
         """A read-only 'Label: <path>' echo of a section's download location —
-        the shared shape for the HF-hub, Ollama, and effective-ontology paths,
-        each now sitting under the section it belongs to."""
+        the shared shape for every "Stored on disk (…)" row (Ollama models, the
+        HF Hub cache under Embedding / Parsers / Extractors, and the effective
+        ontology dir), each sitting under the section it belongs to."""
         return ft.Row(
             spacing=6,
             controls=[ft.Text(label, size=12, color=ft.Colors.GREY_400, width=280), display],
@@ -643,12 +680,18 @@ class InstallsTab:
             self.effective_downloads_display.value = (
                 str(effective) if effective is not None else "(could not resolve)"
             )
-        if self.hf_hub_display is not None:
-            hf = _resolve_hf_hub_cache_dir()
-            if hf is None:
-                self.hf_hub_display.value = "(huggingface_hub not installed)"
-            else:
-                self.hf_hub_display.value = str(hf)
+        # One HF Hub cache path feeds all three read-only echoes (extractor
+        # weights, HF embedder models, Whisper Turbo) — resolve once, set each
+        # (distinct controls, one value; a control can't be shared in the tree).
+        hf = _resolve_hf_hub_cache_dir()
+        hf_text = "(huggingface_hub not installed)" if hf is None else str(hf)
+        for disp in (
+            self.hf_hub_display,
+            self.embedder_hf_hub_display,
+            self.whisper_hf_hub_display,
+        ):
+            if disp is not None:
+                disp.value = hf_text
         if self.ollama_models_display is not None:
             self.ollama_models_display.value = str(_resolve_ollama_models_dir())
 
@@ -731,10 +774,11 @@ class InstallsTab:
         self._safe_update()
 
     def _sync_extractor_state(self) -> None:
-        """Compound state (pip + weights) drives status chip + button flip."""
-        for name in _EXTRACTOR_ORDER:
+        """Compound state (pip + weights) drives status chip + button flip. Only
+        installable extractors are shown (the bundled LLM adapter is excluded
+        from the list), so there's no bundled-case handling here."""
+        for name in _INSTALLABLE_EXTRACTOR_ORDER:
             entry = EXTRACTOR_REGISTRY[name]
-            bundled = bool(entry.get("bundled"))
             pip_installed = self._safe_bool(entry.get("is_installed_fn"))
             provenance = entry.get("provenance")
             has_weights_concept = provenance is not None
@@ -748,10 +792,7 @@ class InstallsTab:
             delete_btn = self.extractor_delete_buttons[name]
 
             # Status chip.
-            if bundled:
-                status_text.value = "bundled (always available)"
-                status_text.color = ft.Colors.GREY_400
-            elif pip_installed and (not has_weights_concept or weights_present):
+            if pip_installed and (not has_weights_concept or weights_present):
                 size_clause = f" ({_fmt_bytes(weights_bytes)})" if has_weights_concept else ""
                 status_text.value = f"✓ ready — pip + weights{size_clause}"
                 status_text.color = ft.Colors.GREEN_300
@@ -766,12 +807,6 @@ class InstallsTab:
             else:
                 status_text.value = "○ not installed (pip + weights both needed)"
                 status_text.color = ft.Colors.GREY_400
-
-            # Buttons. Bundled hides all four (nothing to do).
-            if bundled:
-                for b in (install_btn, uninstall_btn, download_btn, delete_btn):
-                    b.visible = False
-                continue
 
             install_btn.visible = not pip_installed
             uninstall_btn.visible = pip_installed
