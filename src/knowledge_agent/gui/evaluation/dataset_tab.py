@@ -654,15 +654,19 @@ class DatasetTab:
                     section_divider(),
                     # ============ Section: Add cases ============
                     section_title("Add cases"),
-                    # The three seeds share one row — + Case form, From last
-                    # search, and the LLM button with its nr.-of-cases field
-                    # (602: one LLM button; count 1 → a page, N → a batch).
+                    # + Case form / From last search on the first row; the LLM
+                    # button + its nr.-of-cases field on the row below (602: one
+                    # LLM button; count 1 → a page, N → a batch).
                     sub_section_title("Generate new case by"),
                     self.from_chat_check,
                     ft.Row(
+                        [new_case_button, capture_button],
+                        wrap=True,
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Row(
                         [
-                            new_case_button,
-                            capture_button,
                             self.gen_button,
                             ft.Text("nr. of cases:", size=14, color=ft.Colors.GREY_300),
                             self.gen_count,
