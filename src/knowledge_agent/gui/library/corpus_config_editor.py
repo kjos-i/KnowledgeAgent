@@ -51,7 +51,6 @@ import flet as ft
 from pydantic import ValidationError
 
 from knowledge_agent.config import (
-    PROVIDER_NODE_DEFAULTS,
     Settings,
     get_settings,
     reset_after_key_change,
@@ -82,7 +81,7 @@ from knowledge_agent.gui.config_store import (
 )
 from knowledge_agent.gui.library.create_new_dataset import _write_corpus_toml
 from knowledge_agent.gui.library.session_state import load_session, update_draft
-from knowledge_agent.gui.settings.llm_tab import LLM_AVAILABLE_MODELS
+from knowledge_agent.gui.settings.llm_tab import model_options
 from knowledge_agent.kg.corpus_config import (
     CorpusConfig,
     CrossDocConfig,
@@ -97,7 +96,7 @@ from knowledge_agent.kg.schema import (
     MAIN_LABELS,
     SUB_LABEL_TO_MAIN,
 )
-from knowledge_agent.llm_factory import supports_temperature
+from knowledge_agent.llm_factory import parse_model_ref, supports_temperature, to_model_ref
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -572,13 +571,13 @@ class CorpusConfigEditor:
         # Dropdown with per-provider curated menu (typed override allowed
         # for off-menu models) + Slider + readout — mirrors the Settings
         # LLM tab pattern.
-        provider_options = [
-            ft.DropdownOption(key=m, text=m)
-            for m in LLM_AVAILABLE_MODELS.get(self.app.gui_config.llm_provider, ())
-        ]
+        # Model pickers span every installed provider; the options are filled +
+        # the value normalized to a composite ref on corpus load (see
+        # `_populate_controls` → `_sync_extractor_model_options`), so each starts
+        # empty — no hardcoded provider default.
         self.entity_extractor_model_field = ft.Dropdown(
-            value=PROVIDER_NODE_DEFAULTS["anthropic"]["entity_extractor"],
-            options=list(provider_options),
+            value="",
+            options=[],
             editable=True,
             enable_filter=True,
             border=ft.InputBorder.OUTLINE,
@@ -603,8 +602,8 @@ class CorpusConfigEditor:
 
         # ----- Triples (L8) LLM adapter — model + temperature -----
         self.triples_extractor_model_field = ft.Dropdown(
-            value=PROVIDER_NODE_DEFAULTS["anthropic"]["triples_extractor"],
-            options=list(provider_options),
+            value="",
+            options=[],
             editable=True,
             enable_filter=True,
             border=ft.InputBorder.OUTLINE,
@@ -1369,9 +1368,15 @@ class CorpusConfigEditor:
             rate = self.app.gui_config.voyage_requests_per_second
             self.voyage_rate_field.value = "" if rate is None else str(rate)
         self._refresh_voyage_rate_visibility()
-        # Entities (L6) per-corpus fields.
+        # Entities (L6) per-corpus fields. Pickers span every installed provider;
+        # a stored bare/legacy model is normalized to a composite ref so it
+        # matches an option and dispatches explicitly.
+        self._sync_extractor_model_options()
+        _model_fallback = self.app.gui_config.llm_provider
         if self.entity_extractor_model_field is not None:
-            self.entity_extractor_model_field.value = cfg.entity_extractor_model
+            self.entity_extractor_model_field.value = to_model_ref(
+                cfg.entity_extractor_model, _model_fallback
+            )
         if self.entity_extractor_temperature_slider is not None:
             self.entity_extractor_temperature_slider.value = cfg.entity_extractor_temperature
         if self.entity_extractor_temperature_readout is not None:
@@ -1380,7 +1385,9 @@ class CorpusConfigEditor:
             )
         # Triples (L8) per-corpus fields.
         if self.triples_extractor_model_field is not None:
-            self.triples_extractor_model_field.value = cfg.triples_extractor_model
+            self.triples_extractor_model_field.value = to_model_ref(
+                cfg.triples_extractor_model, _model_fallback
+            )
         if self.triples_extractor_temperature_slider is not None:
             self.triples_extractor_temperature_slider.value = cfg.triples_extractor_temperature
         if self.triples_extractor_temperature_readout is not None:
@@ -2169,12 +2176,21 @@ class CorpusConfigEditor:
         if self.entity_types_mode_radio is not None:
             self.entity_types_mode_radio.visible = gliner_on
 
+    def _sync_extractor_model_options(self) -> None:
+        """Fill the entity + triples model pickers with every installed
+        provider's models (deferred to corpus load — the options need install
+        state, not available at control-construction time)."""
+        opts = model_options()
+        for field in (self.entity_extractor_model_field, self.triples_extractor_model_field):
+            if field is not None:
+                field.options = list(opts)
+
     def _sync_extractor_temp_enabled(self) -> None:
         """Grey out each extractor's temperature slider when its selected
         model doesn't accept a temperature (e.g. Opus 4.8). The backend
         omits temperature for those models regardless — this just makes the
-        no-op visible. Provider is the active global LLM provider."""
-        provider = self.app.gui_config.llm_provider
+        no-op visible. The provider comes from each model's 'provider:model'
+        ref (a bare legacy value falls back to the global provider)."""
         cfg = self._corpus_config
         pairs = (
             (
@@ -2188,9 +2204,12 @@ class CorpusConfigEditor:
                 self.triples_extractor_temperature_readout,
             ),
         )
-        for model, slider, readout in pairs:
+        for ref, slider, readout in pairs:
             if slider is None:
                 continue
+            provider, model = parse_model_ref(ref)
+            if provider is None:
+                provider = self.app.gui_config.llm_provider
             takes_temp = supports_temperature(provider, model)
             slider.disabled = not takes_temp
             slider.tooltip = None if takes_temp else f"{model} ignores temperature"

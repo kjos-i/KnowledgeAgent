@@ -1,6 +1,6 @@
 """LLM-based triple extractor for L8 (typed entity-to-entity relations).
 
-Per-chunk Anthropic-Haiku call. Reads chunk text + the L6 entity
+Per-chunk LLM call. Reads chunk text + the L6 entity
 vocabulary mined from this chunk, and emits triples constrained to
 that vocabulary and to the 15 fixed predicates in
 `schema.TRIPLE_PREDICATE_RELS`.
@@ -28,9 +28,9 @@ design rationale):
     flow through from the L6 entity vocabulary unchanged - whatever
     L6 returned (GENE, DISEASE, PERSON, ...) is what the LLM uses.
 
-Cost (Haiku at 2026 pricing): one call per chunk. Input ~1000-1500
-tokens (system prompt + chunk + entity vocab). Output small. ~$0.05-
-$0.10 per 200-chunk paper. Same order as L6.
+Cost: one call per chunk. Input ~1000-1500 tokens (system prompt +
+chunk + entity vocab), output small — per-chunk cost tracks the
+configured provider/model's input price. Same order as L6.
 
 Defensive policies:
   - Triples referencing keys not in the chunk's L6 vocab are dropped
@@ -46,7 +46,7 @@ from pydantic import BaseModel, Field
 
 from knowledge_agent.kg.schema import TRIPLE_PREDICATE_RELS
 from knowledge_agent.kg.triples_writes import ExtractedTriple
-from knowledge_agent.llm_factory import get_llm as _get_llm
+from knowledge_agent.llm_factory import get_llm_ref as _get_llm
 from knowledge_agent.llm_factory import with_retry as _with_retry
 
 # ---------------------------------------------------------------------------

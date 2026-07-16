@@ -1,21 +1,25 @@
-"""Search → LLM sub-tab — active provider + query-time node models + rates.
+"""Search → LLM sub-tab — installed providers + query-time node models + rates.
 
 Layout (top to bottom):
 
-  1. Active provider — radio group, only INSTALLED providers shown.
+  1. Installed providers — read-only list of installed adapters. There is no
+     single "active" provider any more; a model is chosen per node (below)
+     from ANY installed provider and stored as a 'provider:model' ref.
   2. Ollama — base URL + daemon-reachable status.
   3. Per-node models + temperatures — model Dropdown + temperature
      Slider for each of: mode_classifier, query_builder,
      cypher_builder, synthesizer. Plus a separate "Chat router" row
-     for the GUI-only chat-router model + temperature.
+     for the GUI-only chat-router model + temperature. Each picker offers
+     every installed provider's models (see `available_models`).
   4. Per-provider rate limits + retries — 4 Optional[float] fields
      + llm_max_retries int.
 
 Provider Install / Uninstall moved to the Installs tab (the global install
-surface). This tab reads install-state (per-provider `is_installed_fn`) only
-to build the active-provider radio — installed providers are selectable.
-Ollama daemon reachability is async — probed in a background task that updates
-the Ollama daemon-status line (in the Ollama section) when it completes.
+surface). This tab reads install-state (per-provider `is_installed_fn`) to
+show which providers are installed and to build the per-node model-picker
+options. Ollama daemon reachability is async — probed in a background task
+that updates the Ollama daemon-status line (in the Ollama section) when it
+completes.
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
-from knowledge_agent.config import PROVIDER_NODE_DEFAULTS, reset_after_key_change
+from knowledge_agent.config import reset_after_key_change
 from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     PANEL_BG,
@@ -40,7 +44,12 @@ from knowledge_agent.gui.config_store import (
     save_config,
 )
 from knowledge_agent.gui.views._frame import view_header
-from knowledge_agent.llm_factory import supports_temperature
+from knowledge_agent.llm_factory import (
+    format_model_ref,
+    parse_model_ref,
+    supports_temperature,
+    to_model_ref,
+)
 from knowledge_agent.llm_lifecycle import (
     LLM_PROVIDER_REGISTRY,
     _ollama_daemon_is_reachable,
@@ -84,12 +93,36 @@ LLM_AVAILABLE_MODELS: dict[str, tuple[str, ...]] = {
 }
 
 
-_QUERY_NODES: tuple[str, ...] = (
-    "mode_classifier",
-    "query_builder",
-    "cypher_builder",
-    "synthesizer",
-)
+def available_models() -> list[tuple[str, str]]:
+    """Every (provider, model) offered across INSTALLED providers — the option
+    source for every model picker now that a choice carries its own provider.
+
+    A provider's models appear only when its adapter is pip-installed (probed
+    via the lifecycle `is_installed_fn`), so the pickers naturally span exactly
+    the providers the user has set up. Shared by the per-node pickers here and
+    (from Phase 4) the corpus extractor/triples, judge-panel, and generator
+    pickers, so "pick any model from any installed provider" is one list.
+    """
+    out: list[tuple[str, str]] = []
+    for provider in _PROVIDER_ORDER:
+        entry = LLM_PROVIDER_REGISTRY[provider]
+        try:
+            installed = bool(entry["is_installed_fn"]())
+        except Exception as exc:  # broad: a flaky probe must not break the picker
+            logger.warning("is_installed_fn(%s) failed: %r", provider, exc)
+            installed = False
+        if installed:
+            out.extend((provider, m) for m in LLM_AVAILABLE_MODELS.get(provider, ()))
+    return out
+
+
+def model_options() -> list[ft.DropdownOption]:
+    """`available_models()` as picker options: key = the stored 'provider:model'
+    ref, text = a readable 'provider — model' label."""
+    return [
+        ft.DropdownOption(key=format_model_ref(p, m), text=f"{p} — {m}")
+        for p, m in available_models()
+    ]
 
 
 class LlmTab:
@@ -102,13 +135,13 @@ class LlmTab:
         self._bg_tasks: set[asyncio.Task] = set()
         self.status: ft.Text | None = None
 
-        # Active provider radio — rebuilt on first show + on install change.
-        self.active_provider_radio: ft.RadioGroup | None = None
-        self.active_provider_container: ft.Container | None = None
+        # Installed-providers display box — filled on first show + on install
+        # change (read-only; install/uninstall live in the Installs tab). There
+        # is no single "active provider" any more — a model is picked per node.
+        self.installed_providers_box: ft.Container | None = None
 
         # Adapter-installed bool per provider (from `is_installed_fn`) — read
-        # to build the active-provider radio. Install / Uninstall live in the
-        # Installs tab now.
+        # to build the installed-providers display + the model-picker options.
         self._installed_state: dict[str, bool] = {}
         # Ollama daemon reachability (separate from adapter-installed) —
         # probed async + shown in the Ollama section below.
@@ -137,9 +170,9 @@ class LlmTab:
         cfg = self.app.gui_config
         self.status = ft.Text("", size=12, color=ft.Colors.GREY_400)
 
-        # Active provider radio — populated on first build once we know
+        # Installed-providers display — populated on first build once we know
         # the install state.
-        self.active_provider_container = ft.Container(
+        self.installed_providers_box = ft.Container(
             content=ft.Text(
                 "(checking install state...)",
                 size=12,
@@ -172,9 +205,12 @@ class LlmTab:
         # can also type any model name as an override (covers off-menu
         # / future models without a code edit). on_blur fires for both
         # paths (typed text + menu pick).
-        provider_options = [
-            ft.DropdownOption(key=m, text=m) for m in LLM_AVAILABLE_MODELS.get(cfg.llm_provider, ())
-        ]
+        # Model pickers span EVERY installed provider — a choice is stored as a
+        # 'provider:model' ref. Options need install state, so they're filled on
+        # first show (`_sync_model_options`); here each starts empty with its
+        # value normalized to a composite ref (a legacy bare value is wrapped
+        # with the global provider so it matches an option + dispatches
+        # explicitly).
         for node_name, default_temp in (
             ("mode_classifier", cfg.mode_classifier_temperature),
             ("query_builder", cfg.query_builder_temperature),
@@ -185,9 +221,11 @@ class LlmTab:
             # in its own "Chat router" section below (not the node loop).
             ("chat_router", cfg.chat_router_temperature),
         ):
+            ref = self._node_ref(node_name)
+            setattr(cfg, f"{node_name}_model", ref)  # in-memory migrate bare → composite
             self.node_model_fields[node_name] = ft.Dropdown(
-                value=getattr(cfg, f"{node_name}_model"),
-                options=list(provider_options),
+                value=ref,
+                options=[],
                 editable=True,
                 enable_filter=True,
                 border=ft.InputBorder.OUTLINE,
@@ -243,7 +281,8 @@ class LlmTab:
         if self._first_build:
             self._first_build = False
             self._sync_installed_state()
-            self._sync_active_provider_radio()
+            self._sync_installed_providers_display()
+            self._sync_model_options()
             self._sync_ollama_daemon_status()
             # Async daemon probe — skip when there's no running loop
             # (test env). Live GUI always has one running. Loop-check
@@ -265,13 +304,14 @@ class LlmTab:
             spacing=10,
             controls=[
                 view_header("LLM"),
-                # ---- Active provider -----------------------------------
+                # ---- Installed providers -------------------------------
                 section_header(
                     self.app,
-                    "Active provider",
-                    "Switching is immediate. Install / Uninstall providers in the Installs tab.",
+                    "Installed providers",
+                    "Install / uninstall providers in the Installs tab. Pick a "
+                    "model — from any installed provider — for each node below.",
                 ),
-                self.active_provider_container,
+                self.installed_providers_box,
                 section_divider(),
                 # ---- Ollama --------------------------------------------
                 section_header(self.app, "Ollama"),
@@ -411,41 +451,36 @@ class LlmTab:
             self.ollama_daemon_status.value = "probing daemon…"
             self.ollama_daemon_status.color = ft.Colors.GREY_400
 
-    def _sync_active_provider_radio(self) -> None:
-        """Rebuild the radio group from currently-installed providers."""
-        if self.active_provider_container is None:
+    def _sync_installed_providers_display(self) -> None:
+        """Show which providers are installed (read-only). A model is chosen per
+        node below, from any installed provider — there's no single 'active'
+        one. Install / uninstall live in the Installs tab."""
+        if self.installed_providers_box is None:
             return
         installed = [p for p in _PROVIDER_ORDER if self._installed_state.get(p)]
         if not installed:
-            self.active_provider_container.content = ft.Text(
-                "No providers installed yet — pick one below and click "
-                "Install when slice 4 ships the dialogs.",
+            self.installed_providers_box.content = ft.Text(
+                "No LLM providers installed yet — install one in the Installs tab.",
                 size=12,
                 color=ft.Colors.AMBER_300,
                 italic=True,
             )
             return
-        current = self.app.gui_config.llm_provider
-        # If the stored active provider isn't installed, default to the
-        # first installed one — keeps the radio coherent. Don't write
-        # to GuiConfig here; let the user click to confirm.
-        radio_value = current if current in installed else installed[0]
-        self.active_provider_radio = ft.RadioGroup(
-            value=radio_value,
-            on_change=self.on_active_provider_changed,
-            content=ft.Row(
-                controls=[
-                    ft.Radio(
-                        value=p,
-                        label=LLM_PROVIDER_REGISTRY[p]["display_name"],
-                    )
-                    for p in installed
-                ],
-                spacing=16,
-                wrap=True,
-            ),
-        )
-        self.active_provider_container.content = self.active_provider_radio
+        names = ", ".join(LLM_PROVIDER_REGISTRY[p]["display_name"] for p in installed)
+        self.installed_providers_box.content = ft.Text(names, size=12, color=ft.Colors.GREY_200)
+
+    def _sync_model_options(self) -> None:
+        """Fill every node picker's options from the installed providers' models
+        (deferred to first show — the options need install state)."""
+        options = model_options()
+        for field in self.node_model_fields.values():
+            field.options = list(options)
+
+    def _node_ref(self, node_name: str) -> str:
+        """The node's stored model as a composite 'provider:model' ref — a legacy
+        bare value wrapped with the global provider (see `to_model_ref`)."""
+        stored = getattr(self.app.gui_config, f"{node_name}_model", "") or ""
+        return to_model_ref(stored, self.app.gui_config.llm_provider)
 
     # ----- Provider row builder --------------------------------------------
 
@@ -465,69 +500,6 @@ class LlmTab:
         )
 
     # ----- Handlers --------------------------------------------------------
-
-    def on_active_provider_changed(self, e: ft.Event) -> None:
-        """Switch the active provider AND refresh the 4 model dropdowns.
-
-        Per-provider model defaults come from
-        `config.PROVIDER_NODE_DEFAULTS[provider]` — the single source for
-        "which model each call site uses for this provider." We copy them
-        into GuiConfig + the dropdown values + repopulate the dropdown
-        options to the new provider's curated menu.
-
-        Without this refresh, switching from Anthropic → OpenAI would
-        leave `cypher_builder_model="claude-sonnet-4-6"` (nonsense to
-        OpenAI's API) until the user noticed + hand-edited it. The
-        auto-update protects new users from a broken-state misclick.
-        """
-        if self.active_provider_radio is None:
-            return
-        new_value = self.active_provider_radio.value
-        if new_value == self.app.gui_config.llm_provider:
-            return
-        # Snapshot previous state for rollback on save failure.
-        previous_provider = self.app.gui_config.llm_provider
-        previous_models = {n: getattr(self.app.gui_config, f"{n}_model") for n in _QUERY_NODES}
-        self.app.gui_config.llm_provider = new_value  # type: ignore[assignment]
-        # Copy the new provider's default models into GuiConfig.
-        defaults = PROVIDER_NODE_DEFAULTS[new_value]
-        for node in _QUERY_NODES:
-            setattr(self.app.gui_config, f"{node}_model", defaults[node])
-        # Chat router is GUI-only (not one of the six backend call sites), but
-        # it's the same cheap routing tier as mode_classifier — so it borrows
-        # that node's default from the single source (config), rather than
-        # owning a second copy or reading the menu's first item.
-        router_default = PROVIDER_NODE_DEFAULTS[new_value]["mode_classifier"]
-        previous_router_model = self.app.gui_config.chat_router_model
-        self.app.gui_config.chat_router_model = router_default
-        if not self._commit(f"active LLM provider: {new_value}"):
-            # Rollback both the provider AND the model fields.
-            self.app.gui_config.llm_provider = previous_provider
-            for node, prev_model in previous_models.items():
-                setattr(self.app.gui_config, f"{node}_model", prev_model)
-            self.app.gui_config.chat_router_model = previous_router_model
-            self.active_provider_radio.value = previous_provider
-            self.app.page.update()
-            return
-        # Repopulate each dropdown's options + reset its visible value
-        # to the new provider's default.
-        new_options = [
-            ft.DropdownOption(key=m, text=m) for m in LLM_AVAILABLE_MODELS.get(new_value, ())
-        ]
-        for node in _QUERY_NODES:
-            dropdown = self.node_model_fields.get(node)
-            if dropdown is None:
-                continue
-            dropdown.options = list(new_options)
-            dropdown.value = defaults[node]
-        router_dropdown = self.node_model_fields.get("chat_router")
-        if router_dropdown is not None:
-            router_dropdown.options = list(new_options)
-            router_dropdown.value = router_default
-        # New provider/model per node → re-evaluate temp-slider greying.
-        for node_name in self.node_temp_sliders:
-            self._sync_temp_enabled(node_name)
-        self.app.page.update()
 
     def on_ollama_url_blur(self, e: ft.Event) -> None:
         if self.ollama_url_field is None:
@@ -578,8 +550,9 @@ class LlmTab:
         value_text = self.node_temp_value_texts.get(node_name)
         if slider is None:
             return
-        provider = self.app.gui_config.llm_provider
-        model = getattr(self.app.gui_config, f"{node_name}_model", "")
+        provider, model = parse_model_ref(getattr(self.app.gui_config, f"{node_name}_model", ""))
+        if provider is None:  # a legacy bare value → the global fallback provider
+            provider = self.app.gui_config.llm_provider
         takes_temp = supports_temperature(provider, model)
         slider.disabled = not takes_temp
         slider.tooltip = None if takes_temp else f"{model} ignores temperature"

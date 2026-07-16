@@ -12,10 +12,17 @@ fall back to the developer's keys.
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The valid LLM providers — the SINGLE SOURCE for this set. The `llm_provider`
+# field below, the factory's `provider:model` parser, and any provider
+# iteration all derive from `LLM_PROVIDERS` (kept in sync with the Literal via
+# `get_args`, so the two can never drift).
+LlmProvider = Literal["anthropic", "openai", "google", "ollama"]
+LLM_PROVIDERS: tuple[LlmProvider, ...] = get_args(LlmProvider)
 
 # Absolute path to the developer's keys file. Shared with the sibling projects
 # in this workspace — one file holds all dev secrets so we don't duplicate
@@ -171,7 +178,7 @@ class Settings(BaseSettings):
     # (Anthropic LLM + OpenAI embeddings is a real pairing). Defaults
     # match today's behaviour — Anthropic + Voyage — so no breakage on
     # upgrade for existing corpora.
-    llm_provider: Literal["anthropic", "openai", "google", "ollama"] = Field(
+    llm_provider: LlmProvider = Field(
         default="anthropic",
         description=(
             "Active LLM provider. Settings change ONLY — does NOT trigger "

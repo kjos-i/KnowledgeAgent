@@ -32,7 +32,7 @@ import flet as ft
 from knowledge_agent.evaluation.config import DEFAULT_ENABLED_GROUPS
 from knowledge_agent.gui._styles import labeled_field, sub_section_header
 from knowledge_agent.gui._widgets.info_icon import info_icon
-from knowledge_agent.gui.settings.llm_tab import LLM_AVAILABLE_MODELS
+from knowledge_agent.gui.settings.llm_tab import model_options
 
 if TYPE_CHECKING:
     from knowledge_agent.evaluation.models import EvalRecipe
@@ -241,8 +241,10 @@ class RecipeForm:
     # ---- judge panel (moved from run_tab) ---------------------------------
 
     def _judge_options(self) -> list[ft.DropdownOption]:
-        provider = getattr(self.app.gui_config, "llm_provider", "")
-        return [ft.DropdownOption(key=m, text=m) for m in LLM_AVAILABLE_MODELS.get(provider, ())]
+        # Every installed provider's models — a judge PANEL spans providers, and
+        # each judge is stored as a 'provider:model' ref the backend dispatches
+        # per-judge (so one panel can mix Claude + GPT + Gemini).
+        return model_options()
 
     def _sync_judge_grey(self) -> None:
         """Grey the whole judge box out (still visible) when judge is off —

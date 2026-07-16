@@ -1,13 +1,13 @@
-"""Anthropic-Haiku entity extractor (L6, open vocabulary).
+"""LLM entity extractor (L6, open vocabulary).
 
 KNOWN_LABELS = None: this adapter does NOT constrain the user's
 `entity_types` against any closed set. Whatever labels the corpus puts
 in `corpus.toml [entities].entity_types` flow into the LLM prompt as
 guidance; an empty list means the model categorises freely.
 
-Cost (Haiku at 2026 pricing): one call per chunk. Input ~800-1000
-tokens (system prompt + chunk + types). Output small. ~$0.05 per
-200-chunk paper, ~$0.0003 per chunk.
+Cost: one call per chunk. Input ~800-1000 tokens (system prompt +
+chunk + types), output small — so per-chunk cost tracks the configured
+provider/model's input price (a cheap routing-tier model is ideal).
 
 Offsets + confidence are intentionally NOT requested from the LLM:
   - Offsets: LLMs hallucinate character positions badly; the offset is
@@ -25,7 +25,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from knowledge_agent.entity_extractors.base import Mention
-from knowledge_agent.llm_factory import get_llm as _get_llm
+from knowledge_agent.llm_factory import get_llm_ref as _get_llm
 from knowledge_agent.llm_factory import with_retry as _with_retry
 
 # Open vocabulary - the user's entity_types flow through unvalidated.
@@ -114,8 +114,9 @@ Rules:
 # ---------------------------------------------------------------------------
 
 
-# _get_llm is imported from llm_factory above — provider-agnostic
-# dispatch shared across all LLM call sites.
+# _get_llm is `get_llm_ref` from llm_factory — provider-agnostic dispatch that
+# reads the provider out of the model reference (a 'provider:model' string, or
+# a bare/legacy name → the active provider). See parse_model_ref.
 
 
 def _build_system_prompt(entity_types: list[str]) -> str:

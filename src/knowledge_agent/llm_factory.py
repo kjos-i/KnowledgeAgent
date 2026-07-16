@@ -62,7 +62,7 @@ import logging
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
-from knowledge_agent.config import get_settings
+from knowledge_agent.config import LLM_PROVIDERS, get_settings
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
@@ -254,25 +254,83 @@ def _build_llm(provider: str, model: str, temperature: float) -> BaseChatModel:
     return init_chat_model(**kwargs)
 
 
-def get_llm(model: str, temperature: float) -> BaseChatModel:
-    """Return the LLM client for the active provider.
+_KNOWN_PROVIDERS: frozenset[str] = frozenset(LLM_PROVIDERS)
+
+
+def format_model_ref(provider: str, model: str) -> str:
+    """Compose a (provider, model) selection into the stored reference string
+    'provider:model' (e.g. 'anthropic:claude-sonnet-5', 'ollama:qwen2.5:7b').
+
+    Counterpart to `parse_model_ref`. Part of the provider-per-model
+    transition: a model choice carries its provider, so any picker can offer
+    every installed provider's models rather than one global 'active provider'.
+    """
+    return f"{provider}:{model}"
+
+
+def parse_model_ref(ref: str) -> tuple[str | None, str]:
+    """Split a stored model reference into (provider, model).
+
+    'provider:model' where `provider` is a known provider (`LLM_PROVIDERS`) →
+    (provider, model). A bare model string — no provider prefix (legacy), or an
+    Ollama tag whose left side isn't a provider like 'qwen2.5:7b' → (None, ref);
+    the caller then falls back to the global provider. Splits on the FIRST ':'
+    only, so multi-colon Ollama tags survive
+    ('ollama:qwen2.5:7b' → ('ollama', 'qwen2.5:7b')).
+    """
+    head, sep, tail = ref.partition(":")
+    if sep and head in _KNOWN_PROVIDERS:
+        return head, tail
+    return None, ref
+
+
+def to_model_ref(ref: str, fallback_provider: str) -> str:
+    """Normalize a stored model reference to a composite 'provider:model'.
+
+    A bare / legacy value (no provider prefix) is wrapped with
+    `fallback_provider` so it matches a picker option and dispatches
+    explicitly; a value that already carries a provider is returned unchanged.
+    The one place model-picker code turns a stored (possibly legacy) value into
+    a display/dispatch ref.
+    """
+    provider, model = parse_model_ref(ref)
+    return format_model_ref(provider or fallback_provider, model)
+
+
+def get_llm(model: str, temperature: float, *, provider: str | None = None) -> BaseChatModel:
+    """Return the LLM client for the given (or active) provider.
 
     Args:
       model: Provider-specific model name (e.g. `claude-sonnet-4-6`,
-        `gpt-4o`, `gemini-1.5-pro`, `qwen2.5:7b`). Read from one of
-        the `*_model` Settings fields; the lifecycle's switch step
-        ensures these align with the active provider.
+        `gpt-4o`, `gemini-1.5-pro`, `qwen2.5:7b`).
       temperature: Sampling temperature, 0.0-1.0.
+      provider: The LLM provider to dispatch through. When None (the default),
+        falls back to the global `settings.llm_provider` — the legacy behavior,
+        preserved while model choices migrate to carrying their own provider
+        (see `parse_model_ref` / `format_model_ref`).
 
-    Lazy key validation runs first; mis-configured provider raises
-    `ConfigError` with the exact env var to fix. If the active
-    provider's adapter package isn't installed, `init_chat_model`
-    raises `ImportError` pointing at the pip extra.
+    Lazy key validation runs first; a mis-configured provider raises
+    `ConfigError` with the exact env var to fix. If the provider's adapter
+    package isn't installed, `init_chat_model` raises `ImportError` pointing
+    at the pip extra.
     """
     settings = get_settings()
-    provider = settings.llm_provider
-    _validate_provider_config(provider)
-    return _build_llm(provider, model, temperature)
+    resolved = provider or settings.llm_provider
+    _validate_provider_config(resolved)
+    return _build_llm(resolved, model, temperature)
+
+
+def get_llm_ref(ref: str, temperature: float) -> BaseChatModel:
+    """`get_llm` for a stored model reference.
+
+    `ref` is a 'provider:model' string (new form) or a bare/legacy model name;
+    this parses the provider out (`parse_model_ref`) and dispatches — a bare
+    ref falls back to the global `settings.llm_provider`. This is the single
+    seam every call site uses, so a stored selection's provider is always
+    honored without each site re-implementing the parse.
+    """
+    provider, model = parse_model_ref(ref)
+    return get_llm(model, temperature, provider=provider)
 
 
 def with_retry(runnable: Runnable) -> Runnable:

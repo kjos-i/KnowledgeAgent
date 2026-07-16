@@ -14,8 +14,12 @@ from knowledge_agent.llm_factory import (
     ConfigError,
     _validate_provider_config,
     clear_cache,
+    format_model_ref,
     get_llm,
+    get_llm_ref,
+    parse_model_ref,
     supports_temperature,
+    to_model_ref,
 )
 
 # init_chat_model is imported lazily inside `_build_llm`, so we patch
@@ -255,3 +259,96 @@ def test_clear_cache_drops_cached_clients():
         clear_cache()
         get_llm("claude-sonnet-4-6", 0.0)
     assert mock_init.call_count == 2
+
+
+# ---- provider:model reference helpers (provider-per-model transition) ----
+
+
+def test_format_model_ref_composes():
+    assert format_model_ref("anthropic", "claude-sonnet-5") == "anthropic:claude-sonnet-5"
+    assert format_model_ref("ollama", "qwen2.5:7b") == "ollama:qwen2.5:7b"
+
+
+def test_parse_model_ref_known_provider_prefix():
+    assert parse_model_ref("anthropic:claude-sonnet-5") == ("anthropic", "claude-sonnet-5")
+    # First-colon split, so a multi-colon Ollama tag survives intact.
+    assert parse_model_ref("ollama:qwen2.5:7b") == ("ollama", "qwen2.5:7b")
+
+
+def test_parse_model_ref_bare_or_non_provider_prefix():
+    # No prefix (legacy) → provider None, the whole string is the model.
+    assert parse_model_ref("claude-sonnet-5") == (None, "claude-sonnet-5")
+    # A colon whose left side isn't a known provider (a bare Ollama tag) is
+    # treated as bare, not mis-read as "provider qwen2.5".
+    assert parse_model_ref("qwen2.5:7b") == (None, "qwen2.5:7b")
+
+
+def test_format_parse_round_trip():
+    for provider, model in [("anthropic", "claude-opus-4-8"), ("ollama", "qwen2.5:7b")]:
+        assert parse_model_ref(format_model_ref(provider, model)) == (provider, model)
+
+
+# ---- explicit provider override (foundation for cross-provider picks) ----
+
+
+def test_get_llm_explicit_provider_overrides_global():
+    """An explicit `provider=` dispatches through it, ignoring the global
+    `settings.llm_provider` — the foundation for cross-provider model picks."""
+    settings = _FakeSettings(llm_provider="anthropic", openai_api_key="sk-openai")
+    with (
+        patch("knowledge_agent.llm_factory.get_settings", return_value=settings),
+        patch(_INIT_PATCH) as mock_init,
+    ):
+        get_llm("gpt-4o", 0.2, provider="openai")
+    _args, kwargs = mock_init.call_args
+    assert kwargs["model_provider"] == "openai"
+    assert kwargs["api_key"] == "sk-openai"
+
+
+def test_get_llm_provider_none_falls_back_to_global():
+    """`provider=None` keeps the legacy behavior — dispatch through the global
+    active provider — so every existing call site is unaffected."""
+    settings = _FakeSettings(llm_provider="openai", openai_api_key="sk-openai")
+    with (
+        patch("knowledge_agent.llm_factory.get_settings", return_value=settings),
+        patch(_INIT_PATCH) as mock_init,
+    ):
+        get_llm("gpt-4o", 0.2)  # no provider= → global
+    _args, kwargs = mock_init.call_args
+    assert kwargs["model_provider"] == "openai"
+
+
+def test_get_llm_ref_dispatches_by_provider_prefix():
+    """get_llm_ref reads the provider out of a 'provider:model' ref and
+    dispatches through it — even when it differs from the global provider."""
+    settings = _FakeSettings(llm_provider="anthropic", openai_api_key="sk-openai")
+    with (
+        patch("knowledge_agent.llm_factory.get_settings", return_value=settings),
+        patch(_INIT_PATCH) as mock_init,
+    ):
+        get_llm_ref("openai:gpt-4o", 0.0)  # composite → openai, not global anthropic
+    _args, kwargs = mock_init.call_args
+    assert kwargs["model_provider"] == "openai"
+    assert kwargs["model"] == "gpt-4o"
+
+
+def test_get_llm_ref_bare_ref_uses_global_provider():
+    """A bare/legacy ref (no provider prefix) falls back to the global provider,
+    so pre-migration configs keep working unchanged."""
+    settings = _FakeSettings(llm_provider="anthropic", anthropic_api_key="sk-anthropic")
+    with (
+        patch("knowledge_agent.llm_factory.get_settings", return_value=settings),
+        patch(_INIT_PATCH) as mock_init,
+    ):
+        get_llm_ref("claude-sonnet-4-6", 0.0)
+    _args, kwargs = mock_init.call_args
+    assert kwargs["model_provider"] == "anthropic"
+    assert kwargs["model"] == "claude-sonnet-4-6"
+
+
+def test_to_model_ref_wraps_bare_and_preserves_composite():
+    """to_model_ref wraps a bare/legacy value with the fallback provider and
+    leaves an already-composite ref untouched (the picker normalizer)."""
+    assert to_model_ref("claude-sonnet-5", "anthropic") == "anthropic:claude-sonnet-5"
+    assert to_model_ref("openai:gpt-4o", "anthropic") == "openai:gpt-4o"  # already composite
+    assert to_model_ref("qwen2.5:7b", "ollama") == "ollama:qwen2.5:7b"  # bare Ollama tag wrapped

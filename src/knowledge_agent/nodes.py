@@ -57,7 +57,7 @@ from knowledge_agent.kg.cypher_safety import (
 from knowledge_agent.kg.schema_as_prompt import (
     format_schema_for_prompt,
 )
-from knowledge_agent.llm_factory import get_llm as _get_llm
+from knowledge_agent.llm_factory import get_llm_ref as _get_llm
 from knowledge_agent.llm_factory import with_retry as _with_retry
 from knowledge_agent.models import (
     AgentAnswer,

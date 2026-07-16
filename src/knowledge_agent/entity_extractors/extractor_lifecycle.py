@@ -266,7 +266,7 @@ _HUNFLAIR2_EMITTED_LABELS: tuple[str, ...] = (
 
 EXTRACTOR_REGISTRY: dict[str, dict[str, Any]] = {
     "llm": {
-        "display_name": "LLM (Claude Haiku)",
+        "display_name": "LLM",
         # Bundled with the base package - install/uninstall are no-ops.
         "bundled": True,
         "pip_extras": None,

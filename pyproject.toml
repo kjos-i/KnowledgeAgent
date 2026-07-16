@@ -94,8 +94,9 @@ dev = [
     "hypothesis>=6.100,<7",
 ]
 # L6 entity extractor backends. Only install what your corpus uses.
-# The `llm` adapter has no extra deps (langchain-anthropic is a base
-# requirement); each NER adapter brings its own model + framework.
+# The `llm` adapter has no extra deps of its own — it runs on whatever
+# LLM provider you install (the `llm-*` extras); each NER adapter brings
+# its own model + framework.
 # Zero-shot multilingual NER. Pinned model `urchade/gliner_multi-v2.1`
 # (Apache-2.0, safetensors, ~1.1 GB) auto-downloads on first inference.
 # Pulls PyTorch transitively (~2.5 GB shared with any other transformer

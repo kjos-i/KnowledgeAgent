@@ -95,15 +95,16 @@ def build_judge_input(run: CaseRun, case: EvalCase) -> dict[str, Any]:
 
 
 class _JudgeLLM(_BaseLLM):
-    """DeepEval-compatible judge LLM wrapping a KA `get_llm` client, with
-    per-instance token accounting. Provider-agnostic: the model runs on the
-    active `llm_provider`."""
+    """DeepEval-compatible judge LLM wrapping a KA `get_llm_ref` client, with
+    per-instance token accounting. Provider-agnostic: each judge runs on the
+    provider named in its model ref ('provider:model'), or the active
+    `llm_provider` for a bare ref — so a judge panel can span providers."""
 
     def __init__(self, model: str) -> None:
-        from knowledge_agent.llm_factory import get_llm
+        from knowledge_agent.llm_factory import get_llm_ref
 
         self._model_name = model
-        self._client = get_llm(model, 0.0)  # temp 0 for judge determinism
+        self._client = get_llm_ref(model, 0.0)  # temp 0 for judge determinism
         self.input_tokens = 0
         self.output_tokens = 0
         self._lock = asyncio.Lock()

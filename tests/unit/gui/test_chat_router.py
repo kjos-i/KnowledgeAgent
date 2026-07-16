@@ -62,7 +62,7 @@ def test_get_chat_router_is_cached_by_temperature():
 
     get_chat_router.cache_clear()
     with patch(
-        "knowledge_agent.gui.chat_router.get_llm",
+        "knowledge_agent.gui.chat_router.get_llm_ref",
         return_value=fake_llm,
     ) as mock_get:
         first = get_chat_router("claude-haiku-4-5-20251001", 0.0)
@@ -75,14 +75,14 @@ def test_get_chat_router_is_cached_by_temperature():
 
 
 def test_get_chat_router_dispatches_via_llm_factory():
-    """Slice 1 contract: chat router builds on top of llm_factory.get_llm
+    """Slice 1 contract: chat router builds on top of llm_factory.get_llm_ref
     so it works under whichever provider the user has configured."""
     fake_llm = MagicMock()
     fake_llm.with_structured_output.return_value = MagicMock()
 
     get_chat_router.cache_clear()
     with patch(
-        "knowledge_agent.gui.chat_router.get_llm",
+        "knowledge_agent.gui.chat_router.get_llm_ref",
         return_value=fake_llm,
     ) as mock_get:
         get_chat_router("claude-haiku-4-5-20251001", 0.0)

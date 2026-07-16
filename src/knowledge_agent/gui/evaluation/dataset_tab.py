@@ -60,9 +60,8 @@ from knowledge_agent.gui._widgets.retrieval_form import (
     store_forced_by_mode,
 )
 from knowledge_agent.gui.evaluation._case_view import case_card, render_case_cards
-from knowledge_agent.gui.evaluation._recipe_form import RecipeForm
-from knowledge_agent.gui.settings.llm_tab import LLM_AVAILABLE_MODELS
-from knowledge_agent.llm_factory import supports_temperature
+from knowledge_agent.gui.settings.llm_tab import model_options
+from knowledge_agent.llm_factory import parse_model_ref, supports_temperature
 
 if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
@@ -78,6 +77,7 @@ if TYPE_CHECKING:
 
 _NONE = ""  # the expected_mode "(none)" sentinel (maps to None on read)
 _PREVIEW_DEBOUNCE_S = 0.3  # settle time before the live preview re-renders
+_IDLE_STATUS = "No activity yet."  # the Progress line's default when nothing has happened
 # Fixed caption column for the case-edit form, so every field's input starts at
 # the same x (aligned left edges) instead of hugging its variable-width caption.
 # Wide enough for the longest label ("expected_answer_points").
@@ -132,12 +132,9 @@ class DatasetTab:
         self.coordinator = coordinator
         self.dataset_field: ft.TextField | None = None
         self.status_group: ft.RadioGroup | None = None
-        # The dataset's recipe editor (metric groups + judge panel + gate
-        # thresholds + profile) — the SAME widget the Run tab shows read-only.
-        # Edits ride along with any dataset save (see `_stamp_header`). Goes
-        # read-only when the dataset is frozen; Unfreeze (top, with confirm)
-        # unlocks it.
-        self.recipe_form: RecipeForm | None = None
+        # Freeze/unfreeze affordance (Run-tab style). The dataset's run settings
+        # (metric groups + judge panel + gate thresholds) are edited on the Run
+        # tab; here we only show + toggle the dataset-level frozen lock.
         self.unfreeze_button: ft.TextButton | None = None
         self.frozen_indicator: ft.Text | None = None
         self.case_list: ft.Column | None = None
@@ -251,12 +248,11 @@ class DatasetTab:
         self.gen_count = ft.TextField(value="5", width=80, dense=True)
         self.gen_one_spinner = ft.ProgressRing(visible=False, width=16, height=16, stroke_width=2)
         self.gen_multi_spinner = ft.ProgressRing(visible=False, width=16, height=16, stroke_width=2)
-        provider = getattr(self.app.gui_config, "llm_provider", "")
         self.gen_model_dropdown = ft.Dropdown(
             editable=True,  # pick a known model OR type one; required for LLM generation
-            options=[
-                ft.DropdownOption(key=m, text=m) for m in LLM_AVAILABLE_MODELS.get(provider, ())
-            ],
+            # Any installed provider's models (stored as a 'provider:model' ref
+            # the generator dispatches per-ref).
+            options=model_options(),
             hint_text="required — pick a model for LLM case generation",
             expand=True,
             on_blur=self._on_gen_model_changed,
@@ -269,16 +265,14 @@ class DatasetTab:
         self.gen_temp_value_text = ft.Text("0.30", size=12, color=ft.Colors.WHITE, width=42)
         # A sampling-free model (e.g. Opus 4.8) greys the temp slider out.
         self._sync_gen_temp_enabled()
-        self.status = ft.Text("", size=12, color=ft.Colors.GREY_500)
+        self.status = ft.Text(_IDLE_STATUS, size=12, italic=True, color=ft.Colors.GREY_600)
 
-        # Recipe editor (shared widget with the Run tab). Built now; populated
-        # from the dataset's saved recipe on load (`_load` / `_start_new_dataset`)
-        # and persisted with any save (`_stamp_header`). Read-only when frozen.
-        self.recipe_form = RecipeForm(self.app)
-        # Frozen badge + Unfreeze (with confirm) — shown only when the loaded
-        # dataset is frozen; sit at the top by Status.
+        # Frozen badge + Unfreeze, Run-tab style: the badge shows only when the
+        # dataset is frozen; Unfreeze is ALWAYS shown, just disabled (greyed)
+        # until the dataset is frozen. The run settings it locks are edited on
+        # the Run tab.
         self.frozen_indicator = ft.Text(
-            "\U0001f512 Recipe frozen — read-only",
+            "\U0001f512 Run settings frozen",
             size=12,
             color=ft.Colors.ORANGE,
             visible=False,
@@ -286,9 +280,9 @@ class DatasetTab:
         self.unfreeze_button = ft.TextButton(
             "Unfreeze",
             icon=ft.Icons.LOCK_OPEN,
-            tooltip="Unlock the recipe so it can change again (asks to confirm)",
+            tooltip="Unlock the run settings so they can change again (asks to confirm)",
             on_click=self._on_unfreeze_clicked,
-            visible=False,
+            disabled=True,  # always shown; enabled only when the dataset is frozen
         )
 
         # No own scroll / expand — the right column scrolls the preview + list
@@ -385,18 +379,36 @@ class DatasetTab:
             ),
         }
 
+        # Three sections mirroring the case model's hash structure:
+        #   * Information — bookkeeping, NOT hashed (id / origin / category / notes).
+        #   * Facts — the gold that forms `facts_hash`; SHARED across a suite's
+        #     members (question + user_cypher + every expected_*).
+        #   * Retrieval settings — the knobs that form `knob_hash`; they VARY
+        #     across a suite's members (built by `_retrieval_group`).
+        # Field captions stay as their exact schema keys for now (friendlier
+        # labels come later); this only regroups + reorders the same fields.
         self.form = ft.Column(
             controls=[
                 *self._group(
-                    "Identity",
-                    ["id", "question", "origin", "category", "notes"],
+                    "Information",
+                    ["id", "origin", "category", "notes"],
                     first=True,
                 ),
+                *self._group(
+                    "Facts",
+                    [
+                        "question",
+                        "user_cypher",
+                        "expected_sources",
+                        "expected_chunks",
+                        "required_keywords",
+                        "disallowed_keywords",
+                        "expected_answer_points",
+                        "expected_entities",
+                        "expected_mode",
+                    ],
+                ),
                 *self._retrieval_group(),
-                *self._group("Retrieval / chunk gold", ["expected_sources", "expected_chunks"]),
-                *self._group("Keyword checks", ["required_keywords", "disallowed_keywords"]),
-                *self._group("Judge gold", ["expected_answer_points"]),
-                *self._group("KG gold", ["expected_entities", "expected_mode"]),
             ],
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             spacing=8,
@@ -422,23 +434,24 @@ class DatasetTab:
                 [
                     # ============ Section: Evaluation cases ============
                     section_title("Evaluation cases"),
-                    labeled_field(
-                        "Dataset",
-                        self.dataset_field,
-                        trailing=ft.Row(
-                            [browse_button, new_dataset_button, generate_suite_button], spacing=6
-                        ),
-                    ),
-                    labeled_field("Status", self.status_group),
+                    # Dataset field spans the full width; its file actions sit on
+                    # the row beneath (three trailing buttons used to squash the
+                    # field to a sliver).
+                    labeled_field("Dataset", self.dataset_field),
+                    ft.Row([browse_button, new_dataset_button], spacing=6),
+                    # Freeze/unfreeze (Run-tab style) under the Dataset field —
+                    # badge only when frozen, Unfreeze always shown but greyed
+                    # until then. The run settings it locks are edited on the Run
+                    # tab.
                     ft.Row(
                         [self.frozen_indicator, self.unfreeze_button],
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         spacing=8,
                     ),
-                    # The dataset's canonical run settings (case type + metric
-                    # groups + judge panel + gate thresholds). Saved with the
-                    # dataset on any commit; the Run tab shows them read-only.
-                    self.recipe_form.build(),
+                    labeled_field("Status", self.status_group),
+                    # Derive a knob-sweep suite from THIS dataset. Interim spot —
+                    # kept off the file-selection row; final home still TBD.
+                    ft.Row([generate_suite_button], spacing=6),
                     section_divider(),
                     # ============ Section: Progress ============
                     section_title("Progress"),
@@ -591,9 +604,10 @@ class DatasetTab:
                 trailing=self._mmr_value_text,
             ),
             labeled_field("kg_max_rows", f["kg_max_rows"], label_width=_FORM_LABEL_WIDTH),
-            sub_section_header("Input mode", bold=True),
+            # Input mode is part of Retrieval settings, not its own section — a
+            # plain bold label (no dividing rule) rather than a sub_section_header.
+            sub_section_title("Input mode", bold=True),
             f["input_mode"],
-            labeled_field("user_cypher", f["user_cypher"], label_width=_FORM_LABEL_WIDTH),
             f["direct_retrieval"],
         ]
         self._sync_retrieval_gray_out()
@@ -798,8 +812,6 @@ class DatasetTab:
             self.dataset_field.value = str(path)
         if self.status_group is not None:
             self.status_group.value = ds.status
-        if self.recipe_form is not None:
-            self.recipe_form.load(ds.recipe)  # fresh dataset → default recipe
         self._apply_frozen_ui()
         self._clear_form()
         self._render_list()
@@ -898,8 +910,7 @@ class DatasetTab:
         try:
             ds = load_dataset(path)
         except Exception as exc:  # broad: surface any parse/validation error in-line
-            if self.status is not None:
-                self.status.value = f"could not load: {exc}"
+            self._write_status(f"could not load: {exc}")
             if refresh_page:
                 self.app.page.update()
             return
@@ -911,14 +922,11 @@ class DatasetTab:
             self.dataset_field.value = str(path)
         if self.status_group is not None:
             self.status_group.value = ds.status
-        if self.recipe_form is not None:
-            self.recipe_form.load(ds.recipe)
         self._apply_frozen_ui()
         self._clear_form()
         self._render_list()
         self._render_preview()
-        if self.status is not None:
-            self.status.value = f"{len(self._cases)} case(s)"
+        self._write_status(f"{len(self._cases)} case(s)")
         if refresh_page:
             self.app.page.update()
 
@@ -1132,29 +1140,28 @@ class DatasetTab:
         return self._path
 
     def _stamp_header(self) -> None:
-        """Copy the dataset-level header controls (status + recipe) onto the
-        in-memory dataset so the next `save_dataset` persists them. Called by
-        every save path — the header rides along with any dataset write, the
-        same way a case edit does. The recipe is run config (metric groups,
-        judge panel, gate thresholds); it never changes how a case is scored."""
+        """Copy the dataset-level header control (status) onto the in-memory
+        dataset so the next `save_dataset` persists it. Called by every save
+        path — status rides along with any dataset write, the same way a case
+        edit does. The recipe (metric groups / judge panel / gate thresholds)
+        is edited on the Run tab; here it's left exactly as loaded, so a save
+        from this tab preserves it."""
         if self._dataset is None:
             return
         if self.status_group is not None:
             self._dataset.status = self.status_group.value or "draft"
-        if self.recipe_form is not None:
-            self._dataset.recipe = self.recipe_form.to_recipe()
         # Invariant: only a final dataset can be frozen.
         if self._dataset.status != "final":
             self._dataset.frozen = False
 
     def _apply_frozen_ui(self) -> None:
-        """Sync the recipe's read-only state + the Unfreeze affordance to the
-        dataset's frozen flag. Frozen ⇒ recipe read-only; cases stay editable."""
+        """Sync the freeze affordance to the dataset's frozen flag (Run-tab
+        style): the badge shows only when frozen, and Unfreeze is always shown
+        but disabled until frozen. The run settings it locks live on the Run
+        tab; cases stay editable regardless."""
         frozen = bool(self._dataset is not None and self._dataset.frozen)
-        if self.recipe_form is not None:
-            self.recipe_form.set_enabled(not frozen)
         if self.unfreeze_button is not None:
-            self.unfreeze_button.visible = frozen
+            self.unfreeze_button.disabled = not frozen
         if self.frozen_indicator is not None:
             self.frozen_indicator.visible = frozen
 
@@ -1180,8 +1187,8 @@ class DatasetTab:
             self.app,
             title="Unfreeze run settings?",
             message=(
-                "This unlocks the recipe so it can be changed again, and clears "
-                "the frozen state saved on the dataset."
+                "This clears the dataset's frozen lock so its run settings can "
+                "be changed again on the Run tab."
             ),
             confirm_label="Unfreeze",
             on_confirm=self._do_unfreeze,
@@ -1200,7 +1207,7 @@ class DatasetTab:
             self._set_status(f"could not unfreeze: {exc}")
             return
         self._apply_frozen_ui()
-        self._set_status("Unfroze — the recipe is editable again.")
+        self._set_status("Unfroze — run settings can change again (edit them on the Run tab).")
         self.app.page.update()
 
     def _on_new(self, _e: ft.Event) -> None:
@@ -1339,8 +1346,10 @@ class DatasetTab:
         empty selection keeps the slider active."""
         if self.gen_temp_slider is None:
             return
-        provider = getattr(self.app.gui_config, "llm_provider", "")
-        model = (self.gen_model_dropdown.value or "").strip() if self.gen_model_dropdown else ""
+        raw = (self.gen_model_dropdown.value or "").strip() if self.gen_model_dropdown else ""
+        provider, model = parse_model_ref(raw)
+        if provider is None:  # bare / legacy / empty → global fallback provider
+            provider = getattr(self.app.gui_config, "llm_provider", "")
         takes_temp = supports_temperature(provider, model)
         self.gen_temp_slider.disabled = not takes_temp
         self.gen_temp_slider.tooltip = None if takes_temp else f"{model} ignores temperature"
@@ -1528,7 +1537,7 @@ class DatasetTab:
             if self.status_group is not None:
                 self.status_group.value = self._dataset.status
         self._dataset.cases.extend(cases)
-        self._stamp_header()  # persist status + recipe alongside the new cases
+        self._stamp_header()  # persist the status header alongside the new cases
         try:
             save_dataset(self._dataset, path)
         except Exception as exc:  # broad: I/O failure → status
@@ -1568,8 +1577,9 @@ class DatasetTab:
             return
         if self._dataset is None:
             self._dataset = EvalDataset()
-        # Status + recipe edits ride along with any save (name is the filename
-        # now — the human `name` header field was dropped from the UI).
+        # The status header rides along with any save; the recipe is left exactly
+        # as loaded (it's edited on the Run tab). `name` is the filename now — the
+        # human `name` header field was dropped from the UI.
         self._stamp_header()
 
         if self._selected is not None and 0 <= self._selected < len(self._dataset.cases):
@@ -1601,7 +1611,7 @@ class DatasetTab:
             self._set_status("No dataset path to save to.")
             return
         del self._dataset.cases[idx]
-        self._stamp_header()  # persist status + recipe alongside the deletion
+        self._stamp_header()  # persist the status header alongside the deletion
         try:
             save_dataset(self._dataset, path)
         except Exception as exc:  # broad: I/O failure → status line
@@ -1620,10 +1630,20 @@ class DatasetTab:
 
     # ---- helpers ----------------------------------------------------------
 
+    def _write_status(self, msg: str) -> None:
+        """Set the Progress line's text + style without flushing the page: a real
+        message reads GREY_500; a blank message falls back to the muted italic
+        idle placeholder so the line never collapses to nothing."""
+        if self.status is None:
+            return
+        idle = not msg.strip()
+        self.status.value = _IDLE_STATUS if idle else msg
+        self.status.italic = idle
+        self.status.color = ft.Colors.GREY_600 if idle else ft.Colors.GREY_500
+
     def _set_status(self, msg: str) -> None:
-        if self.status is not None:
-            self.status.value = msg
-            self.app.page.update()
+        self._write_status(msg)
+        self.app.page.update()
 
     def _set_busy(self, button: ft.Control | None, spinner: ft.Control | None, busy: bool) -> None:
         """Toggle a Generate button's disabled state and its spinner together."""

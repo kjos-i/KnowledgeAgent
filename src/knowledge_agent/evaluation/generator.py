@@ -28,7 +28,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from knowledge_agent.evaluation.models import EvalCase
-from knowledge_agent.llm_factory import get_llm, with_retry
+from knowledge_agent.llm_factory import get_llm_ref, with_retry
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
@@ -145,9 +145,9 @@ async def generate_cases(
 ) -> list[EvalCase]:
     """Draft one `origin="llm"` `EvalCase` per passage.
 
-    `llm` is injectable (tests pass a fake); when None, one is built from
-    the active provider via `get_llm(model, temperature)` with `model`
-    defaulting to the mode-classifier model. A passage whose generation
+    `llm` is injectable (tests pass a fake); when None, one is built via
+    `get_llm_ref(model, temperature)` (the model ref's provider, or the active
+    provider for a bare ref) with `model` defaulting to the mode-classifier model. A passage whose generation
     fails (rate limit, malformed structured output, …) is skipped
     best-effort — one bad passage doesn't abort the batch.
     """
@@ -156,7 +156,7 @@ async def generate_cases(
     settings = get_settings()
     if llm is None:
         model = model or settings.mode_classifier_model
-        llm = get_llm(model, temperature)
+        llm = get_llm_ref(model, temperature)
     structured = with_retry(llm.with_structured_output(GeneratedCase))
     # Pin every retrieval knob from the active global defaults so each
     # generated case is runnable + reproducible out of the box.
@@ -349,7 +349,7 @@ async def generate_gold_for_question(
     if llm is None:
         settings = get_settings()
         model = model or settings.mode_classifier_model
-        llm = get_llm(model, temperature)
+        llm = get_llm_ref(model, temperature)
     structured = with_retry(llm.with_structured_output(GeneratedGold))
     context = "\n\n".join(f"[{p.doc_id}]\n{p.text}" for p in passages if p.text.strip())
     human = f"QUESTION:\n{question}\n\nRETRIEVED PASSAGES:\n{context or '(none)'}"

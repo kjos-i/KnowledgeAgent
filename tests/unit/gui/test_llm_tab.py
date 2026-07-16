@@ -1,19 +1,19 @@
-"""Tests for the LLM settings tab — chat-router row, per-node temperature
-greying, and the provider-switch model reset.
+"""Tests for the LLM settings tab — installed-providers display, per-node
+model pickers that span every installed provider, and per-node temperature
+greying.
 
-Provider install/uninstall moved to the Installs tab (see test_installs_tab).
-The router is GUI-only but reuses the per-node model+temp machinery (keyed
-'chat_router'); on a provider switch it resets to the new provider's curated
-model GUI-side — NOT via the backend registry, which has no router entry.
+Provider install/uninstall lives in the Installs tab (see test_installs_tab).
+There is no single "active provider": each node picks a 'provider:model' ref
+from any installed provider (see `available_models`). The router is GUI-only
+but reuses the same per-node model+temp machinery (keyed 'chat_router').
 """
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from knowledge_agent.config import PROVIDER_NODE_DEFAULTS
 from knowledge_agent.gui.config_store import GuiConfig
-from knowledge_agent.gui.settings.llm_tab import LlmTab
+from knowledge_agent.gui.settings.llm_tab import LlmTab, available_models, model_options
 
 
 def _tab() -> LlmTab:
@@ -30,24 +30,67 @@ def test_llm_tab_builds_chat_router_field():
     assert "chat_router" in tab.node_temp_sliders
 
 
-def test_provider_switch_resets_router_model_gui_side():
+def test_node_pickers_migrate_bare_to_composite():
+    """On build, each node's stored bare model is normalized to a
+    'provider:model' composite (wrapped with the global provider), and the
+    dropdown value tracks it — so legacy configs display + dispatch correctly."""
+    tab = _tab()  # GuiConfig defaults are bare, global provider = anthropic
+    for node in ("mode_classifier", "synthesizer", "chat_router"):
+        stored = getattr(tab.app.gui_config, f"{node}_model")
+        assert stored.startswith("anthropic:")  # bare → wrapped with global provider
+        assert tab.node_model_fields[node].value == stored
+
+
+def test_available_models_only_installed_providers():
+    """available_models() yields (provider, model) pairs only for providers
+    whose adapter is installed — so pickers span exactly what's set up."""
+    from knowledge_agent.gui.settings import llm_tab
+
+    fake_registry = {
+        "anthropic": {"is_installed_fn": lambda: True},
+        "openai": {"is_installed_fn": lambda: True},
+        "google": {"is_installed_fn": lambda: False},
+        "ollama": {"is_installed_fn": lambda: False},
+    }
+    with patch.object(llm_tab, "LLM_PROVIDER_REGISTRY", fake_registry):
+        models = available_models()
+    assert {p for p, _ in models} == {"anthropic", "openai"}  # not google/ollama
+    assert ("anthropic", "claude-opus-4-8") in models
+    assert ("openai", "gpt-4o") in models
+
+
+def test_model_options_keys_are_composite_refs():
+    """model_options() keys are stored 'provider:model' refs (not bare names)."""
+    from knowledge_agent.gui.settings import llm_tab
+
+    fake_registry = {
+        "anthropic": {"is_installed_fn": lambda: True},
+        "openai": {"is_installed_fn": lambda: False},
+        "google": {"is_installed_fn": lambda: False},
+        "ollama": {"is_installed_fn": lambda: False},
+    }
+    with patch.object(llm_tab, "LLM_PROVIDER_REGISTRY", fake_registry):
+        keys = {o.key for o in model_options()}
+    assert "anthropic:claude-opus-4-8" in keys
+    assert all(k.startswith("anthropic:") for k in keys)  # only the installed provider
+
+
+def test_installed_providers_display_lists_names():
+    """The Installed-providers box shows installed adapters' display names
+    (read-only) — no single-select radio any more."""
     tab = _tab()
-    assert tab.app.gui_config.llm_provider == "anthropic"
-    # Simulate the user picking a different provider in the radio.
-    tab.active_provider_radio = MagicMock(value="openai")
-    # Patch both persistence side-effects: save_config (disk) and
-    # apply_llm_to_env (which would leak os.environ into later tests).
-    with (
-        patch("knowledge_agent.gui.settings.llm_tab.save_config"),
-        patch("knowledge_agent.gui.settings.llm_tab.apply_llm_to_env"),
-    ):
-        tab.on_active_provider_changed(MagicMock())
-    # chat_router borrows mode_classifier's default from the single source
-    # (config), NOT the menu's first item.
-    expected_router = PROVIDER_NODE_DEFAULTS["openai"]["mode_classifier"]
-    assert tab.app.gui_config.chat_router_model == expected_router
-    # And the visible dropdown value tracks it.
-    assert tab.node_model_fields["chat_router"].value == expected_router
+    tab._installed_state = {"anthropic": True, "openai": True, "google": False, "ollama": False}
+    tab._sync_installed_providers_display()
+    shown = tab.installed_providers_box.content.value
+    assert "Anthropic Claude" in shown and "OpenAI GPT" in shown
+    assert "Gemini" not in shown  # google not installed
+
+
+def test_installed_providers_display_empty_state():
+    tab = _tab()
+    tab._installed_state = dict.fromkeys(("anthropic", "openai", "google", "ollama"), False)
+    tab._sync_installed_providers_display()
+    assert "No LLM providers installed" in tab.installed_providers_box.content.value
 
 
 # ---- temperature-slider greying (sampling-free models) ----
@@ -68,3 +111,8 @@ def test_temp_slider_greys_out_for_sampling_free_model():
     tab._sync_temp_enabled("synthesizer")
     assert tab.node_temp_sliders["synthesizer"].disabled is False
     assert tab.node_temp_sliders["synthesizer"].tooltip is None
+
+    # A composite ref: the provider comes from the ref, not the global one.
+    tab.app.gui_config.synthesizer_model = "openai:gpt-4o"
+    tab._sync_temp_enabled("synthesizer")
+    assert tab.node_temp_sliders["synthesizer"].disabled is False  # openai takes temperature

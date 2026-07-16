@@ -19,7 +19,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from knowledge_agent.llm_factory import get_llm
+from knowledge_agent.llm_factory import get_llm_ref
 
 CHAT_SYSTEM_PROMPT = """\
 You are a research-literature assistant with a corpus of research
@@ -90,11 +90,11 @@ def get_chat_router(model: str, temperature: float = 0.0) -> Any:
     supervisor agent, so its model choice lives in the GUI, NOT in the
     backend Settings (which is the graph/tool's config — the tool must not
     carry a piece of its own caller). Builds on the shared
-    `llm_factory.get_llm`, which routes to whichever provider the user
-    configured (Anthropic / OpenAI / Google / Ollama).
+    `llm_factory.get_llm_ref`, which routes to the provider named in the model
+    ref (or the active provider for a bare / legacy ref).
 
     Keyed by (model, temperature) so changing either yields a distinct
     cached client.
     """
-    llm = get_llm(model, temperature)
+    llm = get_llm_ref(model, temperature)
     return llm.with_structured_output(ChatTurnOutput)

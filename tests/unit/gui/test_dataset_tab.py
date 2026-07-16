@@ -479,41 +479,30 @@ def test_input_mode_derived_on_load(fake_app, tmp_path):
     assert tab.f["input_mode"].value == "refined"
 
 
-def test_recipe_saved_with_dataset(fake_app, tmp_path):
-    """The recipe authored on the tab persists with the dataset on a case save
-    — it rides along like the status header (`_stamp_header`)."""
-    p = tmp_path / "r.json"
-    tab = _tab(fake_app, p)
-    tab._on_new(MagicMock())
-    tab.f["id"].value = "c1"
-    tab.f["question"].value = "q?"
-    # Turn the judge group off on the recipe form (a knob-profiling recipe).
-    tab.recipe_form.group_checks["judge"].value = False
-    tab.recipe_form.group_checks["source"].value = True
-    tab._on_save_case(MagicMock())
-
-    ds = load_dataset(p)
-    assert ds.recipe is not None
-    assert "judge" not in ds.recipe.enabled_groups
-    assert "source" in ds.recipe.enabled_groups
-
-
-def test_recipe_loaded_from_dataset(fake_app, tmp_path):
-    """Loading a dataset populates the recipe form from its saved recipe."""
+def test_recipe_preserved_on_save(fake_app, tmp_path):
+    """The recipe (metric groups / judge panel / gate thresholds) is no longer
+    shown on this tab — it's edited on the Run tab. A case save from here must
+    leave the dataset's saved recipe untouched, not wipe it."""
     from knowledge_agent.evaluation.models import EvalDataset, EvalRecipe, save_dataset
 
     p = tmp_path / "r.json"
     save_dataset(
         EvalDataset(
-            recipe=EvalRecipe(enabled_groups=["source", "judge"], judge_threshold=0.9),
-            cases=[EvalCase(id="c", question="q?")],
+            recipe=EvalRecipe(enabled_groups=["source"], judge_threshold=0.9),
+            cases=[EvalCase(id="c1", question="q?")],
         ),
         p,
     )
     tab = _tab(fake_app)
     tab._load(p)
-    assert tab.recipe_form.group_checks["judge"].value is True
-    assert tab.recipe_form.threshold_fields["judge_threshold"].value == "0.9"
+    tab._select(0)
+    tab.f["question"].value = "edited?"
+    tab._on_save_case(MagicMock())
+
+    ds = load_dataset(p)
+    assert ds.cases[0].question == "edited?"  # the case edit persisted
+    assert ds.recipe.enabled_groups == ["source"]  # recipe rode through untouched
+    assert ds.recipe.judge_threshold == 0.9
 
 
 def test_write_suite_generates_tagged_files(fake_app, tmp_path):
@@ -550,17 +539,17 @@ def _frozen_file(tmp_path):
     return p
 
 
-def test_frozen_dataset_recipe_readonly(fake_app, tmp_path):
-    """Loading a frozen dataset makes the recipe read-only + shows Unfreeze."""
+def test_frozen_dataset_shows_freeze_ui(fake_app, tmp_path):
+    """Loading a frozen dataset shows the badge + enables Unfreeze (Run-tab
+    style: the button is always present, greyed until the dataset is frozen)."""
     tab = _tab(fake_app)
     tab._load(_frozen_file(tmp_path))
-    assert tab.recipe_form._wrapper.disabled is True  # recipe read-only
-    assert tab.unfreeze_button.visible is True
     assert tab.frozen_indicator.visible is True
+    assert tab.unfreeze_button.disabled is False  # enabled because frozen
 
 
 def test_dataset_unfreeze_persists(fake_app, tmp_path):
-    """Unfreeze clears the frozen flag on disk and re-enables the recipe."""
+    """Unfreeze clears the frozen flag on disk and greys Unfreeze back out."""
     from knowledge_agent.evaluation.models import load_dataset
 
     p = _frozen_file(tmp_path)
@@ -568,19 +557,19 @@ def test_dataset_unfreeze_persists(fake_app, tmp_path):
     tab._load(p)
     tab._do_unfreeze()
     assert load_dataset(p).frozen is False
-    assert tab.recipe_form._wrapper.disabled is False  # editable again
+    assert tab.unfreeze_button.disabled is True  # greyed again (nothing to unfreeze)
 
 
 def test_status_to_draft_clears_frozen(fake_app, tmp_path):
-    """Setting status below final clears the frozen lock in-session (invariant),
-    re-enabling the recipe."""
+    """Setting status below final clears the frozen lock in-session (invariant)
+    and greys Unfreeze out."""
     tab = _tab(fake_app)
     tab._load(_frozen_file(tmp_path))
     assert tab._dataset.frozen is True
     tab.status_group.value = "draft"
     tab._on_status_change(MagicMock())
     assert tab._dataset.frozen is False
-    assert tab.recipe_form._wrapper.disabled is False
+    assert tab.unfreeze_button.disabled is True
 
 
 def test_new_knobs_round_trip(fake_app, tmp_path):
