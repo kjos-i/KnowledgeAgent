@@ -37,6 +37,7 @@ from knowledge_agent.gui._styles import (
     FIELD_LABEL_SIZE,
     PANEL_BG_RAISED,
     PANEL_RADIUS,
+    section_divider,
     sub_section_header,
 )
 
@@ -135,7 +136,10 @@ class DashboardRail:
             for origin in ALL_ORIGINS
         }
         origin_filter = ft.Column(
-            controls=[sub_section_header("Filter by origin"), *self.origin_checks.values()],
+            controls=[
+                sub_section_header("Filter by test case origin"),
+                *self.origin_checks.values(),
+            ],
             spacing=0,
         )
         self.context = ft.Column(controls=[], spacing=2)
@@ -152,6 +156,8 @@ class DashboardRail:
                     self.dataset_dd,
                     self.run_dd,
                     origin_filter,
+                    # Divider between the origin filter and the read-only info panel.
+                    section_divider(),
                     self.context,
                 ],
                 spacing=8,
