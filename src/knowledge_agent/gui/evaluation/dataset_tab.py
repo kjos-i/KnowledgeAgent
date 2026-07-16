@@ -39,6 +39,7 @@ import flet as ft
 from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     LEFT_COLUMN_WIDTH,
+    apply_input_box,
     centered_label,
     labeled_field,
     panel_box,
@@ -450,17 +451,37 @@ class DatasetTab:
         )
         # Two premade dropdowns (Hybrid / KG groups) — picking one drops it into
         # the knob-set list (read-only), like adding a judge to the judge panel.
-        self.hybrid_preset_dd = ft.Dropdown(
-            options=[
-                ft.DropdownOption(key=k, text=STRATEGY_LABELS[k]) for k in PRESET_GROUPS["Hybrid"]
-            ],
-            on_select=lambda _e: self._add_preset_member(self.hybrid_preset_dd),
+        # Each preset picker gets the app-standard outlined box (a bare Flet
+        # Dropdown has no border) so it matches the rest of the layout (614).
+        # A leading blank option (key "") carries the default prompt text —
+        # Flet 0.85's Dropdown rejects `hint_text`, so the placeholder rides an
+        # option that `value=""` selects; `_add_preset_member` ignores the ""
+        # key and resets to it, so the prompt returns after each pick.
+        self.hybrid_preset_dd = apply_input_box(
+            ft.Dropdown(
+                value="",
+                options=[
+                    ft.DropdownOption(key="", text="Add a hybrid preset…"),
+                    *(
+                        ft.DropdownOption(key=k, text=STRATEGY_LABELS[k])
+                        for k in PRESET_GROUPS["Hybrid"]
+                    ),
+                ],
+                on_select=lambda _e: self._add_preset_member(self.hybrid_preset_dd),
+            )
         )
-        self.kg_preset_dd = ft.Dropdown(
-            options=[
-                ft.DropdownOption(key=k, text=STRATEGY_LABELS[k]) for k in PRESET_GROUPS["KG"]
-            ],
-            on_select=lambda _e: self._add_preset_member(self.kg_preset_dd),
+        self.kg_preset_dd = apply_input_box(
+            ft.Dropdown(
+                value="",
+                options=[
+                    ft.DropdownOption(key="", text="Add a KG preset…"),
+                    *(
+                        ft.DropdownOption(key=k, text=STRATEGY_LABELS[k])
+                        for k in PRESET_GROUPS["KG"]
+                    ),
+                ],
+                on_select=lambda _e: self._add_preset_member(self.kg_preset_dd),
+            )
         )
         self.add_from_form_button = ft.Button(
             "Add from form",
@@ -493,7 +514,7 @@ class DatasetTab:
                         [
                             ft.Row(
                                 [
-                                    sub_section_title("Case information and facts", bold=True),
+                                    sub_section_title("Case information and facts"),
                                     info_icon(
                                         self.app,
                                         title="Case information and facts",
@@ -969,7 +990,7 @@ class DatasetTab:
         from knowledge_agent.evaluation.suite_gen import STRATEGIES
 
         key = dropdown.value
-        dropdown.value = None
+        dropdown.value = ""  # back to the placeholder prompt, not blank
         if key in STRATEGIES and not any(k == key for k, _ in self._suite_members):
             self._suite_members.append((key, STRATEGIES[key].model_copy()))
             self._render_suite_members()

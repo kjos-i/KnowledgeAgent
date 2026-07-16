@@ -66,6 +66,27 @@ two-column screens; the right column expands to fill the rest. One source so
 those tabs line up at the same left-column width."""
 
 
+def apply_input_box(control: ft.Control) -> ft.Control:
+    """Give a `TextField`/`Dropdown` the app-standard outlined grey box — a thin
+    `FRAME_BORDER_COLOR` border on a `PANEL_BG` fill — filling only unset props
+    so a self-styled control keeps its look (other control types pass through
+    untouched). The single source for the field box: `labeled_field` uses it for
+    its `Label: [input]` rows, and standalone inputs that carry their own caption
+    (e.g. a boxed dropdown under a caption) call it directly. Without it a bare
+    Flet `TextField` shows an OUTLINE border with NO colour (invisible until
+    focus) and a `Dropdown` no border at all, so both render borderless. Returns
+    the control for chaining.
+    """
+    if isinstance(control, ft.TextField | ft.Dropdown):
+        if control.border is None:
+            control.border = ft.InputBorder.OUTLINE
+        if control.border_color is None:
+            control.border_color = FRAME_BORDER_COLOR
+        if control.bgcolor is None:
+            control.bgcolor = PANEL_BG
+    return control
+
+
 def labeled_field(
     label: str,
     control: ft.Control,
@@ -94,20 +115,9 @@ def labeled_field(
     # so an explicit per-field size still wins and non-text controls are skipped.
     if getattr(control, "text_size", "missing") is None:
         control.text_size = FIELD_LABEL_SIZE
-    # Give the input the app-standard outlined gray box if it hasn't set its
-    # own, so form fields look identical across every tab. A bare Flet
-    # TextField defaults to an OUTLINE border with NO colour (invisible until
-    # focus) and Dropdown to no border at all — which is why the Eval-tab
-    # fields looked borderless. Only TextField/Dropdown are touched, and each
-    # property is filled only when unset, so fields that styled themselves keep
-    # their look.
-    if isinstance(control, ft.TextField | ft.Dropdown):
-        if control.border is None:
-            control.border = ft.InputBorder.OUTLINE
-        if control.border_color is None:
-            control.border_color = FRAME_BORDER_COLOR
-        if control.bgcolor is None:
-            control.bgcolor = PANEL_BG
+    # Give the input the app-standard outlined gray box (single source:
+    # `apply_input_box`) so form fields look identical across every tab.
+    apply_input_box(control)
     # Multi-line inputs read better with the caption pinned to the TOP of the
     # box; single-line inputs centre the caption against the field.
     multiline = bool(getattr(control, "multiline", False))
