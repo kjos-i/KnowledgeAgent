@@ -193,4 +193,8 @@ def test_empty_ledger_no_selection(fake_app, tmp_path):
     rail, coord, _ = _rail(fake_app, led)
     assert rail.dataset_dd.options == []
     assert coord.selected_run_id is None
-    assert "No run selected" in rail.context.controls[0].value
+    assert "No runs yet" in rail.context.controls[0].value
+    # empty-ledger default reads on all three selectors + the info panel
+    assert rail.suite_dd.hint_text == "No runs yet"
+    assert rail.dataset_dd.hint_text == "No runs yet"
+    assert rail.run_dd.hint_text == "No runs yet"

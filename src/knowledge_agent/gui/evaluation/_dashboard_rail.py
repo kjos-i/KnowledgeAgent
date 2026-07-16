@@ -112,16 +112,31 @@ class DashboardRail:
         # on_change silently never fires, so a picked value would be lost and the
         # next refresh would snap back to the newest. Mirror the app's other
         # Dropdowns (corpus selector, dataset-tab dropdowns).
+        # `hint_text` shows only when a dropdown has no value — which, given the
+        # newest-run auto-fallback, happens exactly when the ledger is empty. So
+        # "No runs yet" reads as the empty-ledger default across all three.
         self.suite_dd = ft.Dropdown(
-            label="Suite", options=[], width=_RAIL_WIDTH - 24, text_size=FIELD_LABEL_SIZE
+            label="Suite",
+            options=[],
+            width=_RAIL_WIDTH - 24,
+            text_size=FIELD_LABEL_SIZE,
+            hint_text="No runs yet",
         )
         self.suite_dd.on_select = self._on_suite_change
         self.dataset_dd = ft.Dropdown(
-            label="Dataset", options=[], width=_RAIL_WIDTH - 24, text_size=FIELD_LABEL_SIZE
+            label="Dataset",
+            options=[],
+            width=_RAIL_WIDTH - 24,
+            text_size=FIELD_LABEL_SIZE,
+            hint_text="No runs yet",
         )
         self.dataset_dd.on_select = self._on_dataset_change
         self.run_dd = ft.Dropdown(
-            label="Run", options=[], width=_RAIL_WIDTH - 24, text_size=FIELD_LABEL_SIZE
+            label="Run",
+            options=[],
+            width=_RAIL_WIDTH - 24,
+            text_size=FIELD_LABEL_SIZE,
+            hint_text="No runs yet",
         )
         self.run_dd.on_select = self._on_run_change
         refresh_button = ft.TextButton("Refresh", on_click=self._on_refresh)
@@ -260,7 +275,7 @@ class DashboardRail:
             return
         if run is None:
             self.context.controls = [
-                ft.Text("No run selected.", size=12, italic=True, color=ft.Colors.GREY_500)
+                ft.Text("No runs yet.", size=12, italic=True, color=ft.Colors.GREY_500)
             ]
             return
         groups = _parse(run.get("enabled_groups")) or []
