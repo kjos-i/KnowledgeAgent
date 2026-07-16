@@ -423,9 +423,7 @@ class DatasetTab:
         # Right column: two commit buttons. Both route through _on_save_case; the
         # disabled state (set in _sync_commit_buttons) gates which applies, and
         # _selected drives append-vs-overwrite. Add is also grayed in suite mode.
-        self.add_button = ft.Button(
-            "Add single case", icon=ft.Icons.ADD, on_click=self._on_save_case
-        )
+        self.add_button = ft.Button("Add case", icon=ft.Icons.ADD, on_click=self._on_save_case)
         self.update_button = ft.Button(
             "Update case", icon=ft.Icons.SAVE, on_click=self._on_save_case
         )
@@ -436,7 +434,7 @@ class DatasetTab:
         )
 
         # ----- Suite mode (601): assemble a knob-sweep suite -----
-        # The checkbox reveals the suite panel + grays "Add single case": in suite
+        # The checkbox reveals the suite panel + grays "Add case": in suite
         # mode you add the shared facts via "Add Information and Fact" (the form's
         # Info + Fact → a case) and assemble the knob-sets below. Generate then
         # clones those facts once per knob-set.
@@ -527,7 +525,7 @@ class DatasetTab:
                     # Both preset pickers + "Add from form" share one row (614).
                     # The pickers expand + STRETCH so each dropdown fills its half
                     # and they narrow with the window; the button keeps its width
-                    # on the right, bottom-aligned to the dropdown baseline.
+                    # on the right, vertically centered against the dropdowns.
                     ft.Row(
                         [
                             ft.Column(
@@ -548,10 +546,20 @@ class DatasetTab:
                                 expand=1,
                                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                             ),
-                            self.add_from_form_button,
+                            # A blank caption above the button mirrors the dropdown
+                            # columns' caption + spacing, so CENTER lines the
+                            # button's middle up with the dropdowns' middle rather
+                            # than with the captions above them.
+                            ft.Column(
+                                [
+                                    ft.Text(" ", size=12),
+                                    self.add_from_form_button,
+                                ],
+                                spacing=2,
+                            ),
                         ],
                         spacing=8,
-                        vertical_alignment=ft.CrossAxisAlignment.END,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     # The assembled knob-sets heading, with "Generate suite" on
                     # its right, and extra top space setting it off from the
@@ -973,7 +981,7 @@ class DatasetTab:
     # ---- suite mode (601) -------------------------------------------------
 
     def _on_suite_toggled(self, _e: ft.Event) -> None:
-        """Reveal/hide the suite panel; suite mode also grays "Add single case"
+        """Reveal/hide the suite panel; suite mode also grays "Add case"
         (you build the suite via the panel, not per-case Add)."""
         on = self.generate_suite_check is not None and bool(self.generate_suite_check.value)
         if self.suite_panel is not None:

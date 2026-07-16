@@ -603,7 +603,7 @@ def test_suite_toggle_reveals_panel_and_grays_add(fake_app):
     tab.generate_suite_check.value = True
     tab._on_suite_toggled(MagicMock())
     assert tab.suite_panel.visible is True
-    assert tab.add_button.disabled is True  # suite mode grays "Add single case"
+    assert tab.add_button.disabled is True  # suite mode grays "Add case"
     tab.generate_suite_check.value = False
     tab._on_suite_toggled(MagicMock())
     assert tab.suite_panel.visible is False
