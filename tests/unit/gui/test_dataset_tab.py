@@ -668,3 +668,22 @@ def test_generate_suite_needs_a_knob_set(fake_app, tmp_path):
     tab._on_generate_suite_clicked(MagicMock())
     assert "knob-set" in tab.suite_status.value
     assert not list(tmp_path.glob("sweep__*.json"))  # nothing written
+
+
+def test_knob_summary_is_complete(fake_app):
+    """The read-only knob-set line shows the FULL config, incl. pinned numbers."""
+    from knowledge_agent.evaluation.suite_gen import STRATEGIES
+
+    tab = _tab(fake_app)
+    hybrid = tab._knob_summary(STRATEGIES["hybrid"])
+    assert "mode=lancedb_only" in hybrid
+    assert "search=hybrid" in hybrid
+    assert "top_k=5" in hybrid
+    assert "num_candidates=100" in hybrid
+    assert "rrf=60" in hybrid
+    kg = tab._knob_summary(STRATEGIES["kg_only"])
+    assert "mode=neo4j_only" in kg
+    assert "kg_max_rows=50" in kg
+    assert "search=" not in kg  # no LanceDB leg → no search mode shown
+    mmr = tab._knob_summary(STRATEGIES["hybrid_mmr"])
+    assert "mmr=on" in mmr and "mmr_lambda=0.6" in mmr

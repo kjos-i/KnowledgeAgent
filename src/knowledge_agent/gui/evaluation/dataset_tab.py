@@ -958,13 +958,25 @@ class DatasetTab:
 
     @staticmethod
     def _knob_summary(settings: RetrievalSettings) -> str:
-        """A compact read-only description of a knob-set for its list line."""
-        parts = [settings.retrieval_mode]
-        if settings.retrieval_mode != "neo4j_only":
-            parts.append(settings.lancedb_search_mode)
-            if settings.use_mmr:
-                parts.append("MMR")
-        parts.append(f"k{settings.top_k}")
+        """A COMPLETE read-only description of a knob-set — every value it pins
+        for the legs it runs (incl. the default numbers), so two presets are
+        fully distinguishable on their list line."""
+        parts = [f"mode={settings.retrieval_mode}", f"top_k={settings.top_k}"]
+        if settings.retrieval_mode != "neo4j_only":  # LanceDB leg runs
+            parts.append(f"search={settings.lancedb_search_mode}")
+            if settings.num_candidates is not None:
+                parts.append(f"num_candidates={settings.num_candidates}")
+            if settings.rrf_rank_constant is not None:
+                parts.append(f"rrf={settings.rrf_rank_constant}")
+            parts.append(f"mmr={'on' if settings.use_mmr else 'off'}")
+            if settings.use_mmr and settings.mmr_lambda is not None:
+                parts.append(f"mmr_lambda={settings.mmr_lambda}")
+        if settings.kg_max_rows is not None:  # Neo4j leg runs
+            parts.append(f"kg_max_rows={settings.kg_max_rows}")
+        if settings.skip_query_builder:
+            parts.append("skip_query_builder")
+        if settings.direct_retrieval:
+            parts.append("direct_retrieval")
         return " · ".join(parts)
 
     def _render_suite_members(self) -> None:
