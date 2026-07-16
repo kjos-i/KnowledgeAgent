@@ -456,7 +456,6 @@ class DatasetTab:
         # form" stay grouped rather than stretching apart on a wide window (614).
         self.hybrid_preset_dd = apply_input_box(
             ft.Dropdown(
-                width=300,
                 options=[
                     ft.DropdownOption(key=k, text=STRATEGY_LABELS[k])
                     for k in PRESET_GROUPS["Hybrid"]
@@ -466,7 +465,6 @@ class DatasetTab:
         )
         self.kg_preset_dd = apply_input_box(
             ft.Dropdown(
-                width=300,
                 options=[
                     ft.DropdownOption(key=k, text=STRATEGY_LABELS[k]) for k in PRESET_GROUPS["KG"]
                 ],
@@ -520,10 +518,16 @@ class DatasetTab:
                             vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
                     ),
-                    # Plain title — no dividing rule inside the suite box (613).
-                    sub_section_title("Retrieval settings"),
-                    # Both preset pickers + "Add from form" share one row (614),
-                    # bottom-aligned so the button lines up with the dropdowns.
+                    # Plain title, no rule, but keep the sub-section's top
+                    # breathing room (613 removed the rule, not the spacing).
+                    ft.Container(
+                        content=sub_section_title("Retrieval settings"),
+                        padding=ft.Padding.only(top=16),
+                    ),
+                    # Both preset pickers + "Add from form" share one row (614).
+                    # The pickers expand + STRETCH so each dropdown fills its half
+                    # and they narrow with the window; the button keeps its width
+                    # on the right, bottom-aligned to the dropdown baseline.
                     ft.Row(
                         [
                             ft.Column(
@@ -532,6 +536,8 @@ class DatasetTab:
                                     self.hybrid_preset_dd,
                                 ],
                                 spacing=2,
+                                expand=1,
+                                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                             ),
                             ft.Column(
                                 [
@@ -539,16 +545,29 @@ class DatasetTab:
                                     self.kg_preset_dd,
                                 ],
                                 spacing=2,
+                                expand=1,
+                                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                             ),
                             self.add_from_form_button,
                         ],
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.END,
                     ),
-                    # The assembled knob-sets, one read-only line each (614 heading).
-                    sub_section_title("Selected settings for datasets in suite"),
+                    # The assembled knob-sets heading, with "Generate suite" on
+                    # its right, and extra top space setting it off from the
+                    # pickers above (614).
+                    ft.Container(
+                        padding=ft.Padding.only(top=16),
+                        content=ft.Row(
+                            [
+                                sub_section_title("Selected settings for datasets in suite"),
+                                self.suite_generate_button,
+                            ],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                    ),
                     self.suite_members_list,
-                    self.suite_generate_button,
                     self.suite_status,
                 ],
             ),
