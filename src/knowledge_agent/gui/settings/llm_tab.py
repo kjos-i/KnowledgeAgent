@@ -1,30 +1,25 @@
-"""Search → LLM sub-tab — installed providers + query-time node models + rates.
+"""Search → LLMs sub-tab — installed providers + query-time node models + rates.
 
 Layout (top to bottom):
 
   1. Installed providers — read-only list of installed adapters. There is no
      single "active" provider any more; a model is chosen per node (below)
      from ANY installed provider and stored as a 'provider:model' ref.
-  2. Ollama — base URL + daemon-reachable status.
-  3. Per-node models + temperatures — model Dropdown + temperature
-     Slider for each of: mode_classifier, query_builder,
-     cypher_builder, synthesizer. Plus a separate "Chat router" row
-     for the GUI-only chat-router model + temperature. Each picker offers
-     every installed provider's models (see `available_models`).
-  4. Per-provider rate limits + retries — 4 Optional[float] fields
-     + llm_max_retries int.
+  2. Select LLM models and temperatures — model Dropdown + temperature
+     Slider for each of: chat_router (the GUI-only router, listed first),
+     mode_classifier, query_builder, cypher_builder, synthesizer. Each
+     picker offers every installed provider's models (see `available_models`).
+  3. Per-provider rate limits + retries — Optional[float] fields (incl. the
+     Voyage embedder) + llm_max_retries int.
 
-Provider Install / Uninstall moved to the Installs tab (the global install
-surface). This tab reads install-state (per-provider `is_installed_fn`) to
-show which providers are installed and to build the per-node model-picker
-options. Ollama daemon reachability is async — probed in a background task
-that updates the Ollama daemon-status line (in the Ollama section) when it
-completes.
+Provider Install / Uninstall — and the Ollama base URL + daemon-reachability
+status — live in the Installs tab (the global setup surface). This tab reads
+install-state (per-provider `is_installed_fn`) to show which providers are
+installed and to build the per-node model-picker options.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -51,10 +46,7 @@ from knowledge_agent.llm_factory import (
     supports_temperature,
     to_model_ref,
 )
-from knowledge_agent.llm_lifecycle import (
-    LLM_PROVIDER_REGISTRY,
-    _ollama_daemon_is_reachable,
-)
+from knowledge_agent.llm_lifecycle import LLM_PROVIDER_REGISTRY
 
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
@@ -137,9 +129,6 @@ class LlmTab:
 
     def __init__(self, app: GuiApp) -> None:
         self.app = app
-        # Strong refs to fire-and-forget background tasks so the event
-        # loop doesn't GC them mid-flight (see the daemon probe below).
-        self._bg_tasks: set[asyncio.Task] = set()
         self.status: ft.Text | None = None
 
         # Installed-providers display box — filled on first show + on install
@@ -150,12 +139,6 @@ class LlmTab:
         # Adapter-installed bool per provider (from `is_installed_fn`) — read
         # to build the installed-providers display + the model-picker options.
         self._installed_state: dict[str, bool] = {}
-        # Ollama daemon reachability (separate from adapter-installed) —
-        # probed async + shown in the Ollama section below.
-        self._ollama_daemon_ok: bool | None = None
-        self.ollama_daemon_status: ft.Text | None = None
-
-        self.ollama_url_field: ft.TextField | None = None
 
         # Per-node model Dropdown (editable, options driven by the
         # active provider's curated list) + temperature Slider + value
@@ -186,24 +169,6 @@ class LlmTab:
                 color=ft.Colors.GREY_500,
                 italic=True,
             ),
-        )
-
-        # Ollama daemon-reachability status line (shown in the Ollama section
-        # below). Adapter install/uninstall moved to the Installs tab.
-        self.ollama_daemon_status = ft.Text(
-            "(checking daemon…)",
-            size=12,
-            color=ft.Colors.GREY_500,
-            italic=True,
-        )
-
-        # Ollama base URL.
-        self.ollama_url_field = ft.TextField(
-            value=cfg.ollama_base_url,
-            border=ft.InputBorder.OUTLINE,
-            border_color=FRAME_BORDER_COLOR,
-            bgcolor=PANEL_BG,
-            on_blur=self.on_ollama_url_blur,
         )
 
         # Per-node models + temperatures (4 nodes). Each model picker is
@@ -283,27 +248,13 @@ class LlmTab:
     # ----- public API -------------------------------------------------------
 
     def build(self) -> ft.Control:
-        # First show: query install state (sync), kick off async Ollama
-        # daemon probe. Re-rebuild the active-provider radio + provider
-        # rows once we know the state.
+        # First show: query install state (sync) so the installed-providers
+        # display + the per-node model-picker options reflect what's set up.
         if self._first_build:
             self._first_build = False
             self._sync_installed_state()
             self._sync_installed_providers_display()
             self._sync_model_options()
-            self._sync_ollama_daemon_status()
-            # Async daemon probe — skip when there's no running loop
-            # (test env). Live GUI always has one running. Loop-check
-            # FIRST so we don't construct a coroutine we never await
-            # (would emit a RuntimeWarning).
-            try:
-                asyncio.get_running_loop()
-            except RuntimeError:
-                pass
-            else:
-                task = asyncio.create_task(self._probe_ollama_daemon())
-                self._bg_tasks.add(task)
-                task.add_done_callback(self._bg_tasks.discard)
 
         return ft.Column(
             scroll=ft.ScrollMode.AUTO,
@@ -320,14 +271,6 @@ class LlmTab:
                     "model — from any installed provider — for each node below.",
                 ),
                 self.installed_providers_box,
-                section_divider(),
-                # ---- Ollama --------------------------------------------
-                section_header(self.app, "Ollama"),
-                labeled_field(
-                    "Ollama base URL (used when Ollama is active)",
-                    self.ollama_url_field,
-                ),
-                self.ollama_daemon_status,
                 section_divider(),
                 # ---- Models + temperatures -----------------------------
                 section_header(
@@ -419,41 +362,6 @@ class LlmTab:
                 )
                 self._installed_state[provider] = False
 
-    async def _probe_ollama_daemon(self) -> None:
-        """Async daemon probe — 1s timeout. Updates Ollama row status."""
-        try:
-            self._ollama_daemon_ok = await _ollama_daemon_is_reachable()
-        except Exception as exc:
-            logger.warning("ollama daemon probe failed: %r", exc)
-            self._ollama_daemon_ok = False
-        self._sync_ollama_daemon_status()
-        self.app.page.update()
-
-    def _sync_ollama_daemon_status(self) -> None:
-        """Update the Ollama daemon-reachability line (the adapter-install rows
-        moved to the Installs tab; whether the DAEMON is actually running is a
-        runtime concern that belongs beside the base URL)."""
-        if self.ollama_daemon_status is None:
-            return
-        installed = self._installed_state.get("ollama", False)
-        daemon = self._ollama_daemon_ok
-        if not installed:
-            self.ollama_daemon_status.value = (
-                "Ollama adapter not installed — install it in the Installs tab."
-            )
-            self.ollama_daemon_status.color = ft.Colors.GREY_400
-        elif daemon is True:
-            self.ollama_daemon_status.value = "✓ daemon reachable"
-            self.ollama_daemon_status.color = ft.Colors.GREEN_300
-        elif daemon is False:
-            self.ollama_daemon_status.value = (
-                "○ daemon not reachable — install / start it from https://ollama.com/download"
-            )
-            self.ollama_daemon_status.color = ft.Colors.AMBER_300
-        else:
-            self.ollama_daemon_status.value = "probing daemon…"
-            self.ollama_daemon_status.color = ft.Colors.GREY_400
-
     def _sync_installed_providers_display(self) -> None:
         """Show which providers are installed (read-only). A model is chosen per
         node below, from any installed provider — there's no single 'active'
@@ -515,25 +423,6 @@ class LlmTab:
         )
 
     # ----- Handlers --------------------------------------------------------
-
-    def on_ollama_url_blur(self, e: ft.Event) -> None:
-        if self.ollama_url_field is None:
-            return
-        raw = (self.ollama_url_field.value or "").strip()
-        if not raw:
-            self.ollama_url_field.value = self.app.gui_config.ollama_base_url
-            if self.status is not None:
-                self.status.value = "Ollama base URL can't be empty"
-            self.app.page.update()
-            return
-        if raw == self.app.gui_config.ollama_base_url:
-            return
-        previous = self.app.gui_config.ollama_base_url
-        self.app.gui_config.ollama_base_url = raw
-        if not self._commit("Ollama base URL"):
-            self.app.gui_config.ollama_base_url = previous
-            self.ollama_url_field.value = previous
-            self.app.page.update()
 
     def on_model_blur(self, node_name: str) -> None:
         field = self.node_model_fields.get(node_name)

@@ -98,6 +98,7 @@ from knowledge_agent.gui._styles import (
 from knowledge_agent.gui._widgets.info_icon import section_header
 from knowledge_agent.gui.config_store import (
     ConfigError,
+    apply_llm_to_env,
     apply_ontology_downloads_dir_to_env,
     save_config,
 )
@@ -113,6 +114,7 @@ from knowledge_agent.ingestion.parser_lifecycle import (
 from knowledge_agent.kg.ontology_linking import ONTOLOGY_REGISTRY
 from knowledge_agent.llm_lifecycle import (
     LLM_PROVIDER_REGISTRY,
+    _ollama_daemon_is_reachable,
     install_llm_provider_execute,
     install_llm_provider_plan,
     uninstall_llm_provider_execute,
@@ -250,11 +252,20 @@ class InstallsTab:
         self.embedder_provider_install_buttons: dict[str, ft.Button] = {}
         self.embedder_provider_uninstall_buttons: dict[str, ft.Button] = {}
 
-        # LLM-provider row widgets — same shape as the embedder rows. The
-        # active-provider choice + Ollama daemon status stay in the LLM tab.
+        # LLM-provider row widgets — same shape as the embedder rows. Per-node
+        # model choices live in the LLMs tab; only the pip-adapter install is
+        # here.
         self.llm_provider_status_texts: dict[str, ft.Text] = {}
         self.llm_provider_install_buttons: dict[str, ft.Button] = {}
         self.llm_provider_uninstall_buttons: dict[str, ft.Button] = {}
+
+        # Ollama base URL (editable) + daemon-reachability line live beside the
+        # Ollama adapter row: "is Ollama set up + reachable at its URL" is an
+        # install/setup concern. The daemon check is an async runtime probe,
+        # distinct from whether the pip adapter is installed.
+        self.ollama_url_field: ft.TextField | None = None
+        self.ollama_daemon_status: ft.Text | None = None
+        self._ollama_daemon_ok: bool | None = None
 
         # ontology_downloads_dir — EDITABLE TextField backed by
         # `GuiConfig.ontology_downloads_dir` (JSON persistence via
@@ -418,6 +429,22 @@ class InstallsTab:
                 on_click=lambda e, n=name: self._on_llm_provider_uninstall(n),
             )
 
+        # Ollama base URL (editable) + daemon-reachability line — rendered under
+        # the Ollama adapter row in build().
+        self.ollama_url_field = ft.TextField(
+            value=self.app.gui_config.ollama_base_url,
+            border=ft.InputBorder.OUTLINE,
+            border_color=FRAME_BORDER_COLOR,
+            bgcolor=PANEL_BG,
+            on_blur=self._on_ollama_url_blur,
+        )
+        self.ollama_daemon_status = ft.Text(
+            "(checking daemon…)",
+            size=12,
+            color=ft.Colors.GREY_500,
+            italic=True,
+        )
+
     # ----- public API -------------------------------------------------------
 
     def build(self) -> ft.Control:
@@ -432,6 +459,15 @@ class InstallsTab:
             # sync. The former async Neo4j probe moved into the Ingest
             # tab's bulk_ops surface where node writes belong.
             self._sync_ontology_state()
+            # Ollama daemon reachability — sync placeholder now, then an async
+            # probe (skipped without a running loop, e.g. under unit tests).
+            self._sync_ollama_daemon_status()
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+            else:
+                self._spawn(self._probe_ollama_daemon())
 
         # Each section carries its OWN download-location row(s) under its header
         # (no separate "Global download locations" block): the editable
@@ -446,10 +482,9 @@ class InstallsTab:
                 self.app,
                 "LLM providers (4)",
                 "Install / Uninstall each LLM adapter's pip package (confirm "
-                "dialog; a restart is needed after). Choose the ACTIVE LLM + "
-                "per-node models in Search → LLM, not here (that's also where "
-                "the Ollama daemon status lives). The active LLM can't be "
-                "uninstalled — switch it there first.",
+                "dialog; a restart is needed after). Pick per-node models in "
+                "Search → LLMs, not here. The Ollama base URL + daemon status "
+                "sit below its row.",
             )
         )
         # Where Ollama keeps pulled local-LLM models — read-only (library-owned).
@@ -468,6 +503,11 @@ class InstallsTab:
                     source_url=LLM_PROVIDER_REGISTRY[name]["provenance"].source_url,
                 )
             )
+            if name == "ollama":
+                # Ollama runs as a local daemon reached over a base URL — its
+                # connection setting + reachability sit right under its row.
+                controls.append(labeled_field("Ollama base URL", self.ollama_url_field))
+                controls.append(self.ollama_daemon_status)
         controls.append(section_divider())
 
         # ---- Embedding providers (4) -------------------------------
@@ -902,6 +942,68 @@ class InstallsTab:
             else:
                 uninstall_btn.disabled = False
                 uninstall_btn.tooltip = None
+
+    def _on_ollama_url_blur(self, e: ft.Event) -> None:
+        """Persist the Ollama base URL to GuiConfig on blur + bridge it to env
+        (`apply_llm_to_env` sets OLLAMA_BASE_URL). Empty is rejected — Ollama
+        needs a URL to reach its daemon. GUI writes settings.json, never .env."""
+        if self.ollama_url_field is None:
+            return
+        raw = (self.ollama_url_field.value or "").strip()
+        current = self.app.gui_config.ollama_base_url
+        if not raw:
+            self.ollama_url_field.value = current
+            self._set_status("Ollama base URL can't be empty", ok=False)
+            return
+        if raw == current:
+            return
+        previous = current
+        self.app.gui_config.ollama_base_url = raw
+        try:
+            save_config(self.app.gui_config)
+        except ConfigError as exc:
+            self.app.gui_config.ollama_base_url = previous
+            self.ollama_url_field.value = previous
+            self._set_status(f"Could not save Ollama base URL: {exc}", ok=False)
+            return
+        apply_llm_to_env(self.app.gui_config)
+        try:
+            reset_after_key_change()
+        except Exception as exc:
+            logger.warning("reset_after_key_change failed: %r", exc)
+        self._set_status(f"Saved Ollama base URL: {raw}")
+
+    async def _probe_ollama_daemon(self) -> None:
+        """Async daemon-reachability probe — updates the Ollama status line."""
+        try:
+            self._ollama_daemon_ok = await _ollama_daemon_is_reachable()
+        except Exception as exc:
+            logger.warning("ollama daemon probe failed: %r", exc)
+            self._ollama_daemon_ok = False
+        self._sync_ollama_daemon_status()
+        self.app.page.update()
+
+    def _sync_ollama_daemon_status(self) -> None:
+        """Update the Ollama daemon line. Adapter-installed = the pip package;
+        the DAEMON being up at the base URL is a separate runtime concern."""
+        if self.ollama_daemon_status is None:
+            return
+        installed = self._safe_bool(LLM_PROVIDER_REGISTRY["ollama"].get("is_installed_fn"))
+        daemon = self._ollama_daemon_ok
+        if not installed:
+            self.ollama_daemon_status.value = "Ollama adapter not installed — install it above."
+            self.ollama_daemon_status.color = ft.Colors.GREY_400
+        elif daemon is True:
+            self.ollama_daemon_status.value = "✓ daemon reachable"
+            self.ollama_daemon_status.color = ft.Colors.GREEN_300
+        elif daemon is False:
+            self.ollama_daemon_status.value = (
+                "○ daemon not reachable — install / start it from https://ollama.com/download"
+            )
+            self.ollama_daemon_status.color = ft.Colors.AMBER_300
+        else:
+            self.ollama_daemon_status.value = "probing daemon…"
+            self.ollama_daemon_status.color = ft.Colors.GREY_400
 
     def _sync_ontology_state(self) -> None:
         """Read on-disk state for each ontology and update its row.

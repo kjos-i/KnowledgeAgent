@@ -96,3 +96,42 @@ def test_llm_provider_sync_disables_active_uninstall(fake_app):
     assert tab.llm_provider_install_buttons["anthropic"].visible is False
     assert tab.llm_provider_uninstall_buttons["anthropic"].disabled is True  # active
     assert tab.llm_provider_uninstall_buttons["openai"].disabled is False  # inactive
+
+
+# ---- Ollama base URL + daemon status (moved here from the LLMs tab) ----
+
+
+def test_ollama_url_blur_persists_and_bridges(fake_app):
+    """Editing the Ollama base URL writes GuiConfig and bridges it to env via
+    apply_llm_to_env (which sets OLLAMA_BASE_URL)."""
+    from knowledge_agent.gui.library import installs
+
+    fake_app.gui_config = GuiConfig()
+    tab = InstallsTab(fake_app)
+    tab.ollama_url_field.value = "http://localhost:22222"
+    with (
+        patch.object(installs, "save_config"),
+        patch.object(installs, "apply_llm_to_env") as bridge,
+        patch.object(installs, "reset_after_key_change"),
+    ):
+        tab._on_ollama_url_blur(MagicMock())
+    assert fake_app.gui_config.ollama_base_url == "http://localhost:22222"
+    bridge.assert_called_once()
+
+
+def test_ollama_daemon_status_reflects_state(fake_app):
+    """The daemon line reports reachability when the adapter is installed, and
+    otherwise points back to the install row (a separate, non-daemon state)."""
+    fake_app.gui_config = GuiConfig()
+    tab = InstallsTab(fake_app)
+    # Adapter installed + daemon reachable → ✓ reachable.
+    tab._ollama_daemon_ok = True
+    with patch.object(tab, "_safe_bool", return_value=True):
+        tab._sync_ollama_daemon_status()
+    assert "reachable" in tab.ollama_daemon_status.value
+
+    # Adapter not installed → not a daemon state; points at the install row.
+    tab._ollama_daemon_ok = None
+    with patch.object(tab, "_safe_bool", return_value=False):
+        tab._sync_ollama_daemon_status()
+    assert "not installed" in tab.ollama_daemon_status.value
