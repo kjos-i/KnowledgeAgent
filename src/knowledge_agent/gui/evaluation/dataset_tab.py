@@ -627,26 +627,23 @@ class DatasetTab:
                 [
                     # ============ Section: Evaluation cases ============
                     section_title("Evaluation cases"),
-                    # Dataset field spans the full width; its file actions sit on
-                    # the row beneath (three trailing buttons used to squash the
-                    # field to a sliver).
-                    labeled_field("Dataset", self.dataset_field),
-                    # Browse / New dataset + the freeze affordance (Run-tab style)
-                    # on ONE row: Unfreeze sits right of New dataset (always shown,
-                    # greyed until frozen) and the frozen badge trails it (visible
-                    # only when frozen). The run settings it locks live on the Run
-                    # tab.
+                    # Browse / New dataset trail the Dataset field on its line.
+                    labeled_field(
+                        "Dataset",
+                        self.dataset_field,
+                        trailing=ft.Row([browse_button, new_dataset_button], spacing=8, tight=True),
+                    ),
+                    labeled_field("Status", self.status_group),
+                    # The freeze affordance (Run-tab style) on its own line under
+                    # the Status radios, right-aligned: Unfreeze (always shown,
+                    # greyed until frozen) + the frozen badge (visible only when
+                    # frozen). The run settings it locks live on the Run tab.
                     ft.Row(
-                        [
-                            browse_button,
-                            new_dataset_button,
-                            self.unfreeze_button,
-                            self.frozen_indicator,
-                        ],
+                        [self.unfreeze_button, self.frozen_indicator],
+                        alignment=ft.MainAxisAlignment.END,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         spacing=8,
                     ),
-                    labeled_field("Status", self.status_group),
                     section_divider(),
                     # ============ Section: Progress ============
                     section_title("Progress"),
@@ -925,12 +922,15 @@ class DatasetTab:
         self._render_pager(editing)
 
     def _render_pager(self, editing: bool) -> None:
-        """Show < n/N > + the delete-X only for a multi-page draft batch (not
-        while editing an existing case); disable the ends."""
+        """Show < n/N > for any draft page (even 1/1), disabling the ends. The
+        delete-X only appears for a multi-page batch (you can't delete the sole
+        page). Hidden entirely while editing an existing case."""
         n = len(self._drafts)
-        show = (not editing) and n > 1
+        show = (not editing) and n >= 1
         if self.pager is not None:
             self.pager.visible = show
+        if self.page_delete is not None:
+            self.page_delete.visible = n > 1  # no delete on a single page
         if show and self.page_label is not None:
             self.page_label.value = f"{self._draft_index + 1}/{n}"
             if self.page_prev is not None:

@@ -393,10 +393,13 @@ def _batch(tab, *ids):
 
 
 def test_build_starts_with_one_blank_page(fake_app):
-    """The tab opens on a single blank draft page — form editable, no pager."""
+    """The tab opens on a single blank draft page — form editable, pager shows
+    1/1 (but no delete-X on the sole page)."""
     tab = _tab(fake_app)
     assert len(tab._drafts) == 1
-    assert tab.pager.visible is False  # a single page shows no pager
+    assert tab.pager.visible is True  # < 1/1 > always shown for a draft page
+    assert tab.page_label.value == "1/1"
+    assert tab.page_delete.visible is False  # can't delete the only page
     assert tab.f["id"].value == ""
 
 
@@ -416,13 +419,15 @@ def test_pager_navigates_and_preserves_edits(fake_app):
 
 
 def test_delete_page_drops_current_from_batch(fake_app):
-    """The X removes the current page; the pager hides once one page is left."""
+    """The X removes the current page; with one page left the pager shows 1/1
+    and the delete-X disappears."""
     tab = _tab(fake_app)
     _batch(tab, "b1", "b2")
     tab._on_delete_page(MagicMock())  # drop page 1 (b1)
     assert len(tab._drafts) == 1
     assert tab.f["id"].value == "b2"  # showing the survivor
-    assert tab.pager.visible is False  # one left → pager hidden
+    assert tab.pager.visible is True  # still shows < 1/1 >
+    assert tab.page_delete.visible is False  # no delete on the sole page
 
 
 def test_do_blank_clears_the_form_to_one_page(fake_app):
