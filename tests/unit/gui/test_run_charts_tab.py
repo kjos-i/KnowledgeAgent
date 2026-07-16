@@ -10,6 +10,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from knowledge_agent.evaluation.ledger import EvalLedger
+from knowledge_agent.gui.evaluation._common import ALL_ORIGINS
 from knowledge_agent.gui.evaluation.run_charts_tab import RunChartsTab
 
 
@@ -58,12 +59,19 @@ def _report_multi() -> dict:
 
 
 def test_run_charts_builds(fake_app):
-    assert RunChartsTab(fake_app, coordinator=MagicMock(selected_suite=None)).build() is not None
+    assert (
+        RunChartsTab(
+            fake_app, coordinator=MagicMock(selected_suite=None, selected_origins=set(ALL_ORIGINS))
+        ).build()
+        is not None
+    )
 
 
 def test_refresh_empty_ledger(fake_app, tmp_path):
     led = EvalLedger(tmp_path / "l.db")
-    tab = RunChartsTab(fake_app, coordinator=MagicMock(selected_suite=None))
+    tab = RunChartsTab(
+        fake_app, coordinator=MagicMock(selected_suite=None, selected_origins=set(ALL_ORIGINS))
+    )
     tab.build()
     with patch("knowledge_agent.gui.evaluation._common.active_eval_ledger", return_value=led):
         tab.refresh()
@@ -73,7 +81,7 @@ def test_refresh_empty_ledger(fake_app, tmp_path):
 def test_refresh_renders_analysis_and_histogram_switch(fake_app, tmp_path):
     led = EvalLedger(tmp_path / "l.db")
     led.save_run(_report_multi())
-    coordinator = MagicMock(selected_suite=None)
+    coordinator = MagicMock(selected_suite=None, selected_origins=set(ALL_ORIGINS))
     coordinator.selected_run_id = None
     tab = RunChartsTab(fake_app, coordinator=coordinator)
     tab.build()
@@ -90,7 +98,9 @@ def test_refresh_renders_analysis_and_histogram_switch(fake_app, tmp_path):
 def test_n_present_counts_cases_with_a_value():
     """`_n_present` — how many cases fed a metric's mean (a None case is dropped);
     shown as (n=X) on each Metric Balance bar."""
-    tab = RunChartsTab(MagicMock(), coordinator=MagicMock(selected_suite=None))
+    tab = RunChartsTab(
+        MagicMock(), coordinator=MagicMock(selected_suite=None, selected_origins=set(ALL_ORIGINS))
+    )
     tab._cases = [{"mrr": 1.0}, {"mrr": None}, {"mrr": 0.5}]
     assert tab._n_present("mrr") == 2
     assert tab._n_present("hit_at_k") == 0  # no case has this metric

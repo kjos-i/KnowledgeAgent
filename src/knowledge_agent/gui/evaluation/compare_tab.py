@@ -106,7 +106,16 @@ class CompareDatasetsTab:
             self.app.page.update()
             return
         # Every run stamped with this suite_run_id = the members of one execution.
-        cols = [(dataset_of(r), r) for r in ledger.get_suite_run(suite_run_id)]
+        # Recompute each member over the shared origin filter (all checked = the
+        # stored member row, unchanged).
+        from knowledge_agent.gui.evaluation._common import filtered_run
+
+        origins = self.coordinator.selected_origins
+        cols = [
+            (dataset_of(r), filtered_run(self.app, r["run_id"], origins)[0])
+            for r in ledger.get_suite_run(suite_run_id)
+        ]
+        cols = [(ds, run) for ds, run in cols if run is not None]
         if len(cols) < 2:
             self.body.controls = [
                 ft.Text("This suite-run has fewer than 2 members to compare.", italic=True)

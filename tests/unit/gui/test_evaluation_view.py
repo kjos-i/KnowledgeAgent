@@ -73,12 +73,12 @@ def test_on_suite_complete_points_cascade_and_switches(fake_app: MagicMock):
     view.compare_tab.refresh = MagicMock()
     suite = MagicMock(
         results=[
-            MagicMock(run_id=1, report={"dataset_name": "facts_vector", "facts_hash": "fh"}),
-            MagicMock(run_id=2, report={"dataset_name": "facts_graph", "facts_hash": "fh"}),
+            MagicMock(run_id=1, report={"dataset_name": "facts_vector", "suite": "mode-sweep"}),
+            MagicMock(run_id=2, report={"dataset_name": "facts_graph", "suite": "mode-sweep"}),
         ]
     )
     view.on_suite_complete(suite)
-    assert view.selected_suite == "fh"
+    assert view.selected_suite == "mode-sweep"  # the rail groups by suite NAME
     assert view.selected_dataset == "facts_vector"
     assert view.selected_run_id == 1  # first member drives Compare via its suite_run_id
     view.compare_tab.refresh.assert_called_once()

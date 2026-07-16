@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from knowledge_agent.evaluation.ledger import EvalLedger
+from knowledge_agent.gui.evaluation._common import ALL_ORIGINS
 from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail
 
 _LEDGER = "knowledge_agent.gui.evaluation._common.active_eval_ledger"
@@ -37,6 +38,7 @@ def _rail(fake_app, led, **coord_kw):
         "selected_suite": None,
         "selected_run_id": None,
         "selected_dataset": None,
+        "selected_origins": set(ALL_ORIGINS),
         **coord_kw,
     }
     coord = SimpleNamespace(**state)
@@ -116,6 +118,21 @@ def test_dropdowns_wired_to_on_select(fake_app, tmp_path):
     assert rail.run_dd.on_select == rail._on_run_change
     assert rail.dataset_dd.on_select == rail._on_dataset_change
     assert rail.suite_dd.on_select == rail._on_suite_change
+
+
+def test_origin_filter_updates_coordinator(fake_app, tmp_path):
+    """The rail's origin checkboxes reflect + drive the coordinator's shared
+    `selected_origins`; unticking one removes it and re-renders the body."""
+    led = EvalLedger(tmp_path / "l.db")
+    led.save_run(_report("alpha", "2026-07-01T09:00:00"))
+    rail, coord, on_change = _rail(fake_app, led)
+    assert set(rail.origin_checks) == set(ALL_ORIGINS)
+    assert all(cb.value for cb in rail.origin_checks.values())  # all checked by default
+    # untick "llm" → coordinator drops it + the host body re-renders
+    rail.origin_checks["llm"].value = False
+    rail._on_origin_toggle(MagicMock())
+    assert coord.selected_origins == {"manual", "search", "chat"}
+    assert on_change.called
 
 
 def test_unnamed_runs_group_as_no_suite(fake_app, tmp_path):

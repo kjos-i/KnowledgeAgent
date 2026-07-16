@@ -15,13 +15,19 @@ from unittest.mock import patch
 import flet as ft
 
 from knowledge_agent.evaluation.ledger import EvalLedger
+from knowledge_agent.gui.evaluation._common import ALL_ORIGINS
 from knowledge_agent.gui.evaluation.compare_tab import CompareDatasetsTab
 
 _LEDGER = "knowledge_agent.gui.evaluation._common.active_eval_ledger"
 
 
 def _coord() -> SimpleNamespace:
-    return SimpleNamespace(selected_suite=None, selected_dataset=None, selected_run_id=None)
+    return SimpleNamespace(
+        selected_suite=None,
+        selected_dataset=None,
+        selected_run_id=None,
+        selected_origins=set(ALL_ORIGINS),
+    )
 
 
 def _report(dataset: str, hit: float, *, suite_run_id: str | None = None) -> dict:

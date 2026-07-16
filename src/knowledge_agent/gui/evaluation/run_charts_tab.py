@@ -289,14 +289,17 @@ class RunChartsTab:
             self.body.controls = [ft.Text("No evaluation runs recorded yet.", italic=True)]
             self.app.page.update()
             return
-        ledger = self._ledger()
-        run = ledger.get_run(run_id)
+        from knowledge_agent.gui.evaluation._common import filtered_run
+
+        # The shared origin filter re-scopes the charts to the checked provenances
+        # (all checked = the stored run, unchanged).
+        run, cases = filtered_run(self.app, run_id, self.coordinator.selected_origins)
         if run is None:
             self.body.controls = [ft.Text("Run not found — press Refresh.", italic=True)]
             self.app.page.update()
             return
-        self._runs = ledger.list_runs()
-        self._cases = ledger.get_run_cases(run_id)
+        self._runs = self._ledger().list_runs()
+        self._cases = cases
         self.body.controls = [
             *self._balance_sections(run),
             section_divider(),

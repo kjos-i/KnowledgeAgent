@@ -170,19 +170,23 @@ class RunSummaryTab:
             self.body.controls = [ft.Text("No evaluation runs recorded yet.", italic=True)]
             self.app.page.update()
             return
-        ledger = self._ledger()
-        run = ledger.get_run(run_id)
+        from knowledge_agent.gui.evaluation._common import filtered_run
+
+        # The shared origin filter re-scopes the KPIs + case list to the checked
+        # provenances (all checked = the stored run, unchanged).
+        origins = self.coordinator.selected_origins
+        run, cases = filtered_run(self.app, run_id, origins)
         if run is None:
             self.body.controls = [ft.Text("Run not found — press Refresh.", italic=True)]
             self.app.page.update()
             return
-        cases = ledger.get_run_cases(run_id)
         self._cases = cases
-        self._runs = ledger.list_runs()
+        self._runs = self._ledger().list_runs()
         # Previous run (next-lower run_id) drives the delta pills on the KPI
         # cards — mirroring the Streamlit dashboard's compare-to-previous view.
+        # Filter it too, so the delta is like-for-like under the active filter.
         prev_id = max((r["run_id"] for r in self._runs if r["run_id"] < run_id), default=None)
-        prev_run = ledger.get_run(prev_id) if prev_id is not None else None
+        prev_run = filtered_run(self.app, prev_id, origins)[0] if prev_id is not None else None
         # A newly loaded/refreshed run resets the chart filters to all-selected;
         # per-toggle changes (which don't re-enter refresh) persist within a run.
         self._chart_metrics = None

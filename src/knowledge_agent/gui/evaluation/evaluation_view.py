@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
+from knowledge_agent.gui.evaluation._common import ALL_ORIGINS
 from knowledge_agent.gui.evaluation.compare_tab import CompareDatasetsTab
 from knowledge_agent.gui.evaluation.dataset_tab import DatasetTab
 from knowledge_agent.gui.evaluation.metrics_guide_tab import MetricsGuideTab
@@ -75,6 +76,10 @@ class EvaluationView:
         self.selected_suite: str | None = None
         self.selected_dataset: str | None = None
         self.selected_run_id: int | None = None
+        # Shared case-origin filter (the rail's checkboxes). All origins = no
+        # filter; a subset restricts Run Summary / Run Charts / Compare to those
+        # cases (Trends is unaffected). Read by those tabs via `filtered_run`.
+        self.selected_origins: set[str] = set(ALL_ORIGINS)
         self._tabs: ft.Tabs | None = None
         self.run_tab = RunTab(app, coordinator=self)
         self.dataset_tab = DatasetTab(app, coordinator=self)
@@ -153,7 +158,8 @@ class EvaluationView:
         side by side (via the selected run's suite_run_id)."""
         if suite.results:
             first = suite.results[0]
-            self.selected_suite = first.report.get("facts_hash")
+            # The rail groups by suite NAME (not facts_hash), so point it there.
+            self.selected_suite = first.report.get("suite")
             self.selected_dataset = first.report.get("dataset_name")
             self.selected_run_id = first.run_id
         self.compare_tab.refresh()

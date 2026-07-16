@@ -97,6 +97,10 @@ class DashboardRail:
         self.suite_dd: ft.Dropdown | None = None
         self.dataset_dd: ft.Dropdown | None = None
         self.run_dd: ft.Dropdown | None = None
+        # Origin filter — one checkbox per case provenance (Manual/LLM/Search/
+        # Chat). Ticking a subset re-scopes the per-run view to those cases; all
+        # ticked = no filter. Shared through the coordinator like the cascade.
+        self.origin_checks: dict[str, ft.Checkbox] = {}
         self.context: ft.Column | None = None
         self._runs: list[dict[str, Any]] = []
 
@@ -120,6 +124,20 @@ class DashboardRail:
         )
         self.run_dd.on_select = self._on_run_change
         refresh_button = ft.TextButton("Refresh", on_click=self._on_refresh)
+        # Origin filter — sits below the Run picker, above the info panel. Metrics
+        # recompute over the checked origins (Run Summary / Charts / Compare).
+        from knowledge_agent.gui.evaluation._common import ALL_ORIGINS, ORIGIN_LABELS
+
+        self.origin_checks = {
+            origin: ft.Checkbox(
+                label=ORIGIN_LABELS[origin], value=True, on_change=self._on_origin_toggle
+            )
+            for origin in ALL_ORIGINS
+        }
+        origin_filter = ft.Column(
+            controls=[sub_section_header("Filter by origin"), *self.origin_checks.values()],
+            spacing=0,
+        )
         self.context = ft.Column(controls=[], spacing=2)
         return ft.Container(
             width=_RAIL_WIDTH,
@@ -133,6 +151,7 @@ class DashboardRail:
                     self.suite_dd,
                     self.dataset_dd,
                     self.run_dd,
+                    origin_filter,
                     self.context,
                 ],
                 spacing=8,
@@ -217,6 +236,14 @@ class DashboardRail:
         self.coordinator.selected_run_id = run_id
         self.run_dd.value = str(run_id) if run_id is not None else None
         self._render_context(self._ledger().get_run(run_id) if run_id is not None else None)
+        self._sync_origin_checks()
+
+    def _sync_origin_checks(self) -> None:
+        """Reflect the coordinator's shared origin filter onto this rail's
+        checkboxes (each view tab holds its own rail; they sync on refresh)."""
+        selected = self.coordinator.selected_origins
+        for origin, check in self.origin_checks.items():
+            check.value = origin in selected
 
     def _render_context(self, run: dict[str, Any] | None) -> None:
         """The read-only info panel for the selected run — sourced from the run's
@@ -303,5 +330,14 @@ class DashboardRail:
 
     def _on_refresh(self, _e: ft.Event) -> None:
         self.refresh()
+        self.app.page.update()
+        self._on_change()
+
+    def _on_origin_toggle(self, _e: ft.Event) -> None:
+        """A provenance checkbox flipped — update the shared filter + re-render
+        the host tab's body (which recomputes its metrics over the subset)."""
+        self.coordinator.selected_origins = {
+            origin for origin, check in self.origin_checks.items() if check.value
+        }
         self.app.page.update()
         self._on_change()
