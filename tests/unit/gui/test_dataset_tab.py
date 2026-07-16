@@ -364,6 +364,32 @@ async def test_generate_warns_when_form_has_unsaved_content(fake_app, tmp_path):
     gen_mock.assert_not_awaited()  # not generated over the unsaved draft
 
 
+async def test_advanced_toggle_dispatches_to_generate_advanced(fake_app, tmp_path):
+    """The Advanced checkbox routes the LLM button to generate_advanced (whole-
+    doc + KG), not the Lazy generate_from_corpus."""
+    p = tmp_path / "adv.json"
+    tab = _tab(fake_app, p)
+    tab.gen_model_dropdown.value = "some-model"
+    tab.advanced_check.value = True
+    tab.gen_count.value = "2"
+    adv = EvalCase(id="adv-00-x", question="Q?", origin="llm")
+    with (
+        patch(
+            "knowledge_agent.evaluation.generator.generate_advanced",
+            new_callable=AsyncMock,
+            return_value=[adv],
+        ) as adv_mock,
+        patch(
+            "knowledge_agent.evaluation.generator.generate_from_corpus",
+            new_callable=AsyncMock,
+        ) as lazy_mock,
+    ):
+        await tab._on_generate(MagicMock())
+    adv_mock.assert_awaited_once()  # Advanced path
+    lazy_mock.assert_not_awaited()  # not the Lazy path
+    assert tab.f["id"].value == "adv-00-x"  # loaded into the buffer
+
+
 async def test_generate_one_fills_form_without_saving(fake_app, tmp_path):
     """Generate one drafts a single candidate into the form for review — it
     fills the form (origin=llm) and writes nothing until Add case."""

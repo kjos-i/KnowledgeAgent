@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
     from knowledge_agent.config import Settings
+    from knowledge_agent.kg.client import Neo4jClient
     from knowledge_agent.search.client import LanceClient
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,13 @@ class EvalGenerationConnectionError(RuntimeError):
     one clear, actionable message instead of grinding through N identical
     failures and reporting "0 cases". The message is user-facing (the GUI
     shows it as-is), so it names the problem and says to retry."""
+
+
+_CONN_MSG = (
+    "Couldn't reach the LLM API — this looks like a network / connection "
+    "problem, not your corpus. Check your internet connection (and VPN / proxy "
+    "/ firewall), then try again."
+)
 
 
 def _is_connection_error(exc: BaseException) -> bool:
@@ -173,11 +181,7 @@ async def generate_cases(
                 # Not this passage's fault — the LLM API is unreachable, so
                 # every remaining call would fail the same way. Abort the whole
                 # batch with one clear, retryable message instead of N skips.
-                raise EvalGenerationConnectionError(
-                    "Couldn't reach the LLM API — this looks like a network / "
-                    "connection problem, not your corpus. Check your internet "
-                    "connection (and VPN / proxy / firewall), then try again."
-                ) from exc
+                raise EvalGenerationConnectionError(_CONN_MSG) from exc
             # Best-effort: skip a passage the LLM couldn't turn into a case
             # (e.g. malformed structured output) rather than aborting the batch.
             logger.warning(
@@ -247,6 +251,282 @@ async def generate_from_corpus(
     per passage. Live glue over `sample_passages` + `generate_cases`."""
     passages = await sample_passages(n)
     return await generate_cases(passages, model=model, temperature=temperature)
+
+
+# ==================== Advanced generator (602) ====================
+# The Lazy path above samples ONE chunk per document. "Advanced" grounds each
+# case in the WHOLE document (all its chunks) and, where the corpus has a
+# knowledge graph, in that document's entities + their relationships — so it can
+# write BOTH hybrid (text-answerable) and KG (relationship-answerable) cases,
+# plus a few CROSS-DOCUMENT cases from entities that appear in more than one
+# document. Graph reads go through the existing Neo4j client (read_query) — no
+# new Cypher layer — and degrade to full-doc hybrid cases when there's no graph.
+# Because it grounds in the ACTUAL sampled docs/entities, it fills
+# expected_sources / expected_entities (the "paste into ChatGPT" flow can't).
+
+
+class GeneratedAdvancedCase(BaseModel):
+    """The LLM's richer draft — picks hybrid vs KG and fills more gold fields
+    than the Lazy `GeneratedCase`."""
+
+    case_type: Literal["hybrid", "kg"] = Field(
+        default="hybrid",
+        description="'kg' if best answered from an entity RELATIONSHIP; 'hybrid' if from the TEXT.",
+    )
+    question: str = Field(
+        description="A specific, self-contained question grounded in the material."
+    )
+    answer_points: list[str] = Field(
+        default_factory=list, description="Key facts a correct answer must contain."
+    )
+    keywords: list[str] = Field(
+        default_factory=list, description="Salient terms a correct answer should include."
+    )
+    expected_entities: list[str] = Field(
+        default_factory=list,
+        description="For a 'kg' case: entity / relationship names expected in the graph rows.",
+    )
+    category: str = Field(
+        default="", description="Short grouping tag, e.g. Mechanism / Relationship."
+    )
+
+
+_ADVANCED_SYSTEM = (
+    "You write evaluation cases for a retrieval-augmented QA system that searches "
+    "BOTH a text store and a knowledge graph. You are given a document's full "
+    "text and (when available) graph facts — entity relationships drawn from that "
+    "document. Write ONE high-quality case:\n"
+    "  - case_type: 'kg' when the best answer depends on a RELATIONSHIP between "
+    "entities (use the graph facts); 'hybrid' when it depends on a fact stated in "
+    "the TEXT.\n"
+    "  - question: one specific, self-contained question — natural, not "
+    "'according to the document'.\n"
+    "  - answer_points: the key facts a correct answer must contain.\n"
+    "  - keywords: a few salient terms a correct answer should include.\n"
+    "  - expected_entities: for a 'kg' case, the entity / relationship names the "
+    "graph rows should contain; leave empty for 'hybrid'.\n"
+    "  - category: a short grouping tag (Mechanism, Definition, Relationship, …).\n"
+    "Ground everything ONLY in the material provided — invent nothing. Prefer "
+    "'kg' when strong graph facts are present, otherwise 'hybrid'."
+)
+
+_ADVANCED_CROSS_SYSTEM = (
+    "You write a CROSS-DOCUMENT evaluation case: a question answerable ONLY by "
+    "COMBINING facts from the TWO documents provided (they share an entity). Same "
+    "output fields; set case_type='hybrid'. The question must genuinely require "
+    "BOTH documents — not be answerable from either alone. Ground only in the "
+    "provided text; invent nothing."
+)
+
+
+async def _sample_doc_ids(client: LanceClient, n: int) -> list[str]:
+    """Up to `n` indexed doc_ids (spread across the corpus, one per doc)."""
+    ids: list[str] = []
+    for doc in await client.list_indexed_docs():
+        did = doc.get("doc_id")
+        if did:
+            ids.append(did)
+        if len(ids) >= n:
+            break
+    return ids
+
+
+async def _full_doc_text(client: LanceClient, doc_id: str, *, max_chars: int = 8000) -> str:
+    """The document's chunks concatenated (capped) — full-doc grounding vs the
+    Lazy generator's single chunk."""
+    parts: list[str] = []
+    total = 0
+    for chunk in await client.get_chunks_by_doc_id(doc_id):
+        text = (chunk.get("text") or "").strip()
+        if not text:
+            continue
+        parts.append(text)
+        total += len(text)
+        if total >= max_chars:
+            break
+    return "\n\n".join(parts)
+
+
+async def _doc_graph_facts(
+    kg_client: Neo4jClient, doc_id: str, *, max_entities: int = 8, max_facts: int = 15
+) -> list[str]:
+    """`A --REL--> B` relationship facts for the entities this document mentions.
+    Best-effort: any KG error (no graph / Neo4j down) yields []."""
+    facts: list[str] = []
+    try:
+        by_chunk = await kg_client.get_entities_by_chunk(doc_id)
+    except Exception as exc:  # broad: no graph / unreachable → hybrid-only
+        logger.info("advanced: no graph facts for %s: %r", doc_id, exc)
+        return facts
+    keys: list[str] = []
+    for pairs in by_chunk.values():
+        for key, _type in pairs:
+            if key and key not in keys:
+                keys.append(key)
+    for key in keys[:max_entities]:
+        try:
+            rows = await kg_client.read_query(
+                "MATCH (a:Entity {key: $key})-[r]->(b:Entity) "
+                "RETURN type(r) AS rel, b.key AS target LIMIT 5",
+                key=key,
+            )
+        except Exception as exc:  # broad: skip this entity's facts
+            logger.info("advanced: triple read failed for %s: %r", key, exc)
+            continue
+        for row in rows:
+            rel, target = row.get("rel"), row.get("target")
+            if rel and target:
+                facts.append(f"{key} --{rel}--> {target}")
+        if len(facts) >= max_facts:
+            break
+    return facts[:max_facts]
+
+
+async def _cross_doc_pairs(kg_client: Neo4jClient, *, limit: int) -> list[tuple[str, str, str]]:
+    """(entity_key, doc_a, doc_b) for entities mentioned in >= 2 documents — the
+    seeds for cross-document cases. Best-effort: [] on any KG error."""
+    if limit <= 0:
+        return []
+    try:
+        rows = await kg_client.read_query(
+            "MATCH (e:Entity)<-[:MENTIONS]-(:Chunk)-[:PART_OF]->(d) "
+            "WITH e, collect(DISTINCT d.doc_id) AS docs "
+            "WHERE size(docs) >= 2 "
+            "RETURN e.key AS key, docs[0] AS a, docs[1] AS b "
+            "ORDER BY rand() LIMIT $limit",
+            limit=limit,
+        )
+    except Exception as exc:  # broad: no graph / pattern absent → no cross-doc
+        logger.info("advanced: cross-doc pair read failed: %r", exc)
+        return []
+    return [
+        (r["key"], r["a"], r["b"])
+        for r in rows
+        if r.get("key") and r.get("a") and r.get("b") and r["a"] != r["b"]
+    ]
+
+
+def _doc_context(doc_id: str, text: str, facts: list[str]) -> str:
+    graph = "\n".join(f"- {f}" for f in facts) if facts else "(none for this document)"
+    return f"DOCUMENT [{doc_id}]:\n{text}\n\nGRAPH FACTS (entity relationships):\n{graph}"
+
+
+def _cross_context(key: str, a: str, ta: str, b: str, tb: str) -> str:
+    return f"SHARED ENTITY: {key}\n\nDOCUMENT A [{a}]:\n{ta}\n\nDOCUMENT B [{b}]:\n{tb}"
+
+
+def _advanced_to_case(
+    i: int, doc_ids: list[str], gen: GeneratedAdvancedCase, settings: Settings
+) -> EvalCase | None:
+    """Map an LLM draft to a runnable `EvalCase`, pinning retrieval to the KG or
+    text leg per the chosen type (retrieval stays fully pinned → reproducible)."""
+    question = (gen.question or "").strip()
+    if not question:
+        return None
+    is_kg = gen.case_type == "kg" and bool(gen.expected_entities)
+    retrieval = {
+        **_pinned_retrieval(settings),
+        "retrieval_mode": "neo4j_only" if is_kg else "lancedb_only",
+    }
+    return EvalCase(
+        id=f"adv-{i:02d}-{_slug(question)}",
+        question=question,
+        expected_sources=list(doc_ids),
+        expected_answer_points=list(gen.answer_points),
+        required_keywords=list(gen.keywords),
+        expected_entities=list(gen.expected_entities) if is_kg else [],
+        origin="llm",
+        category=gen.category.strip() or ("kg" if is_kg else "generated"),
+        notes="Advanced LLM candidate — review before trusting.",
+        retrieval=retrieval,
+    )
+
+
+async def _draft(structured, system: str, human: str, label: str) -> GeneratedAdvancedCase | None:
+    """One structured LLM draft; a connection failure aborts the batch (retryable),
+    any other error skips this unit (best-effort)."""
+    try:
+        return await structured.ainvoke(
+            [SystemMessage(content=system), HumanMessage(content=human)]
+        )
+    except Exception as exc:
+        if _is_connection_error(exc):
+            raise EvalGenerationConnectionError(_CONN_MSG) from exc
+        logger.warning("advanced: skipping unit %s: %r", label, exc)
+        return None
+
+
+async def generate_advanced(
+    n: int,
+    *,
+    model: str | None = None,
+    temperature: float = 0.3,
+    lance_client: LanceClient | None = None,
+    kg_client: Neo4jClient | None = None,
+    llm: BaseChatModel | None = None,
+) -> list[EvalCase]:
+    """Draft up to `n` richer `origin="llm"` cases with full-document + knowledge-
+    graph grounding.
+
+    Per document: the WHOLE document text + that document's entity relationships
+    (from Neo4j). The LLM writes either a hybrid (text-answerable) or a KG
+    (relationship-answerable) case. When entities are shared across documents, a
+    slice of the batch is CROSS-DOCUMENT cases. Degrades to full-doc hybrid cases
+    when there's no graph. `lance_client` / `kg_client` / `llm` are injectable for
+    tests. A network failure raises `EvalGenerationConnectionError` (retryable)."""
+    from knowledge_agent.config import get_settings
+
+    if n <= 0:
+        return []
+    settings = get_settings()
+    if llm is None:
+        model = model or settings.mode_classifier_model
+        llm = get_llm_ref(model, temperature)
+    if lance_client is None:
+        from knowledge_agent.search.client import get_search_client
+
+        lance_client = get_search_client()
+    if kg_client is None:
+        try:
+            from knowledge_agent.kg.client import get_kg_client
+
+            kg_client = get_kg_client()
+        except Exception as exc:  # broad: no graph configured → hybrid-only
+            logger.info("advanced: KG client unavailable, hybrid-only: %r", exc)
+
+    per_case = with_retry(llm.with_structured_output(GeneratedAdvancedCase))
+
+    # Reserve a slice for cross-document cases when the graph supports them.
+    pairs = await _cross_doc_pairs(kg_client, limit=n // 4) if kg_client else []
+    doc_ids = await _sample_doc_ids(lance_client, n - len(pairs))
+
+    cases: list[EvalCase] = []
+    for doc_id in doc_ids:
+        text = await _full_doc_text(lance_client, doc_id)
+        if not text:
+            continue
+        facts = await _doc_graph_facts(kg_client, doc_id) if kg_client else []
+        gen = await _draft(per_case, _ADVANCED_SYSTEM, _doc_context(doc_id, text, facts), doc_id)
+        if gen is None:
+            continue
+        case = _advanced_to_case(len(cases), [doc_id], gen, settings)
+        if case:
+            cases.append(case)
+
+    for key, a, b in pairs:
+        ta, tb = await _full_doc_text(lance_client, a), await _full_doc_text(lance_client, b)
+        if not (ta and tb):
+            continue
+        gen = await _draft(
+            per_case, _ADVANCED_CROSS_SYSTEM, _cross_context(key, a, ta, b, tb), f"{a}+{b}"
+        )
+        if gen is None:
+            continue
+        case = _advanced_to_case(len(cases), [a, b], gen, settings)
+        if case:
+            cases.append(case)
+
+    return cases
 
 
 class GeneratedGold(BaseModel):
@@ -359,9 +639,5 @@ async def generate_gold_for_question(
         )
     except Exception as exc:
         if _is_connection_error(exc):
-            raise EvalGenerationConnectionError(
-                "Couldn't reach the LLM API — this looks like a network / "
-                "connection problem, not your corpus. Check your internet "
-                "connection (and VPN / proxy / firewall), then try again."
-            ) from exc
+            raise EvalGenerationConnectionError(_CONN_MSG) from exc
         raise
