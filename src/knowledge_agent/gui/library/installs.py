@@ -112,6 +112,7 @@ from knowledge_agent.ingestion.parser_lifecycle import (
     uninstall_parser_extra_plan,
 )
 from knowledge_agent.kg.ontology_linking import ONTOLOGY_REGISTRY
+from knowledge_agent.llm_factory import parse_model_ref
 from knowledge_agent.llm_lifecycle import (
     LLM_PROVIDER_REGISTRY,
     _ollama_daemon_is_reachable,
@@ -140,6 +141,16 @@ _INSTALLABLE_EXTRACTOR_ORDER: tuple[str, ...] = tuple(
 _PARSER_ORDER: tuple[str, ...] = tuple(PARSER_LIFECYCLE_REGISTRY.keys())
 _EMBEDDER_PROVIDER_ORDER: tuple[str, ...] = ("voyage", "openai", "google", "huggingface")
 _LLM_PROVIDER_ORDER: tuple[str, ...] = ("anthropic", "openai", "google", "ollama")
+# Query-time node models whose provider counts as "in use": uninstalling a
+# provider a node is set to would break that node until it's re-pointed. Kept
+# in sync with the LLMs tab's per-node pickers.
+_LLM_NODE_MODEL_ATTRS: tuple[str, ...] = (
+    "chat_router_model",
+    "mode_classifier_model",
+    "query_builder_model",
+    "cypher_builder_model",
+    "synthesizer_model",
+)
 
 
 def _fmt_bytes(n: int) -> str:
@@ -914,12 +925,24 @@ class InstallsTab:
                 uninstall_btn.disabled = False
                 uninstall_btn.tooltip = None
 
+    def _providers_in_use(self) -> set[str]:
+        """LLM providers referenced by any query-time node model. A provider a
+        node is currently set to shouldn't be uninstalled out from under it —
+        the model would fail to load until the node is re-pointed. Bare/legacy
+        refs (no `provider:` prefix) fall back to the global default provider."""
+        cfg = self.app.gui_config
+        used: set[str] = set()
+        for attr in _LLM_NODE_MODEL_ATTRS:
+            provider, _ = parse_model_ref(getattr(cfg, attr, "") or "")
+            used.add(provider or cfg.llm_provider)
+        return used
+
     def _sync_llm_provider_state(self) -> None:
-        """Install-state (pip adapter) per LLM provider. The active LLM's
-        Uninstall is disabled — switch it in Search → LLM first. Ollama's
-        DAEMON reachability is a runtime concern shown in the LLM tab, not
-        here — this row is only 'is the adapter pip-installed'."""
-        active = self.app.gui_config.llm_provider
+        """Install-state (pip adapter) per LLM provider. A provider that a
+        query-time node model currently uses can't be uninstalled — it would
+        break that node (see `_providers_in_use`). The row itself is only
+        'is the adapter pip-installed'; the Ollama daemon line is separate."""
+        in_use = self._providers_in_use()
         for name in _LLM_PROVIDER_ORDER:
             entry = LLM_PROVIDER_REGISTRY[name]
             installed = self._safe_bool(entry.get("is_installed_fn"))
@@ -934,10 +957,11 @@ class InstallsTab:
                 status_text.color = ft.Colors.GREY_400
             install_btn.visible = not installed
             uninstall_btn.visible = installed
-            if installed and name == active:
+            if installed and name in in_use:
                 uninstall_btn.disabled = True
                 uninstall_btn.tooltip = (
-                    "Active LLM can't be uninstalled — switch it in Search → LLM first."
+                    f"{entry['display_name']} is used by a model in Search → "
+                    "LLMs — re-point those nodes before uninstalling."
                 )
             else:
                 uninstall_btn.disabled = False

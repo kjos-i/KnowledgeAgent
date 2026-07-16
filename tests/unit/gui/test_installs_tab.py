@@ -87,15 +87,27 @@ def test_llm_provider_uninstall_shows_confirm_dialog(fake_app):
     fake_app.page.show_dialog.assert_called_once()
 
 
-def test_llm_provider_sync_disables_active_uninstall(fake_app):
+def test_llm_provider_sync_disables_uninstall_for_in_use_provider(fake_app):
+    """A provider a query-time node model uses can't be uninstalled; an unused
+    installed provider can. (Replaces the old single 'active provider' guard —
+    there's no active provider any more; each node picks its own.)"""
     fake_app.gui_config = GuiConfig()
     fake_app.gui_config.llm_provider = "anthropic"
+    for attr in (
+        "chat_router_model",
+        "mode_classifier_model",
+        "query_builder_model",
+        "cypher_builder_model",
+    ):
+        setattr(fake_app.gui_config, attr, "anthropic:claude-haiku-4-5")
+    fake_app.gui_config.synthesizer_model = "openai:gpt-4o"  # one node on OpenAI
     tab = InstallsTab(fake_app)
     with patch.object(tab, "_safe_bool", return_value=True):  # all providers installed
         tab._sync_llm_provider_state()
     assert tab.llm_provider_install_buttons["anthropic"].visible is False
-    assert tab.llm_provider_uninstall_buttons["anthropic"].disabled is True  # active
-    assert tab.llm_provider_uninstall_buttons["openai"].disabled is False  # inactive
+    assert tab.llm_provider_uninstall_buttons["anthropic"].disabled is True  # in use
+    assert tab.llm_provider_uninstall_buttons["openai"].disabled is True  # in use (synthesizer)
+    assert tab.llm_provider_uninstall_buttons["google"].disabled is False  # unused
 
 
 # ---- Ollama base URL + daemon status (moved here from the LLMs tab) ----
