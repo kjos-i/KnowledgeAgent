@@ -90,7 +90,12 @@ from knowledge_agent.kg.schema import (
     MAIN_LABELS,
     SUB_LABEL_TO_MAIN,
 )
-from knowledge_agent.llm_factory import parse_model_ref, supports_temperature, to_model_ref
+from knowledge_agent.llm_factory import (
+    format_model_ref,
+    parse_model_ref,
+    supports_temperature,
+    to_model_ref,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -171,6 +176,39 @@ def _embedding_dims_for(provider: str, model: str) -> int | None:
         return hf.dimensions if hf is not None else None
     entry = EMBEDDER_PROVIDER_REGISTRY.get(provider)
     return entry["provenance"].default_dim if entry is not None else None
+
+
+def embedding_model_options() -> list[ft.DropdownOption]:
+    """Composite 'provider:model' options across INSTALLED embedder providers —
+    the model implies its provider, so there's no separate provider picker
+    (mirrors the LLM `model_options`). A provider's models appear only when its
+    adapter is installed, so the picker spans exactly what the user set up."""
+    out: list[ft.DropdownOption] = []
+    for provider in EMBEDDING_AVAILABLE_MODELS:
+        entry = EMBEDDER_PROVIDER_REGISTRY.get(provider)
+        fn = entry.get("is_installed_fn") if entry else None
+        try:
+            installed = bool(fn()) if callable(fn) else False
+        except Exception as exc:  # broad: a flaky probe must not break the picker
+            logger.warning("embedder is_installed_fn(%s) failed: %r", provider, exc)
+            installed = False
+        if installed:
+            out.extend(
+                ft.DropdownOption(key=format_model_ref(provider, m), text=f"{provider} — {m}")
+                for m in EMBEDDING_AVAILABLE_MODELS.get(provider, ())
+            )
+    return out
+
+
+def _parse_embedding_ref(ref: str, fallback_provider: str) -> tuple[str, str]:
+    """Split a composite 'provider:model' embedding ref into (provider, model).
+    A bare/legacy value (no known embedder-provider prefix) falls back to
+    `fallback_provider`; embedding model names contain no ':', so a first-':'
+    split is unambiguous."""
+    head, sep, tail = ref.partition(":")
+    if sep and head in EMBEDDER_PROVIDER_REGISTRY:
+        return head, tail
+    return fallback_provider, ref
 
 
 class CorpusConfigEditor:
@@ -272,14 +310,12 @@ class CorpusConfigEditor:
         self.min_figure_bytes_field: ft.TextField | None = None
         self.optimize_indexes_checkbox: ft.Checkbox | None = None
 
-        # ----- Embedding (per-corpus; provider/model/dims) -----
-        # The embedder is corpus-bound (LanceDB pins the vector dim at
-        # ingest). Provider + model write to corpus.toml (staged);
-        # embedding_dims is DERIVED from them (not a raw field). Install/
-        # Uninstall live in the Installs tab; this is the CHOICE of which
-        # installed embedder the corpus uses. (The global Voyage request-rate
-        # cap lives in the LLMs tab's rate-limits section, not here.)
-        self.embedding_provider_dropdown: ft.Dropdown | None = None
+        # ----- Embedding (per-corpus) -----
+        # The embedder is corpus-bound (LanceDB pins the vector dim at ingest).
+        # ONE composite provider:model picker spanning installed embedders — the
+        # provider comes with the chosen model (staged to corpus.toml; dims are
+        # DERIVED). Install/Uninstall live in the Installs tab. (The global
+        # Voyage request-rate cap lives in the LLMs tab, not here.)
         self.embedding_model_field: ft.Dropdown | None = None
 
         # ----- Entity extraction -----
@@ -796,33 +832,17 @@ class CorpusConfigEditor:
             ),
         )
 
-        # ----- Embedding (per-corpus provider + model) -----
-        self.embedding_provider_dropdown = ft.Dropdown(
-            value="voyage",
-            options=[
-                ft.DropdownOption(
-                    key=p,
-                    text=EMBEDDER_PROVIDER_REGISTRY[p]["display_name"],
-                )
-                for p in EMBEDDING_AVAILABLE_MODELS
-            ],
-            border=ft.InputBorder.OUTLINE,
-            border_color=FRAME_BORDER_COLOR,
-            bgcolor=PANEL_BG,
-            on_select=self._on_embedding_provider_changed,
-        )
+        # ----- Embedding (per-corpus) — one composite provider:model picker ---
+        # Options span installed embedders (filled on load via
+        # `_sync_embedding_model_options`); picking a model brings its provider.
         self.embedding_model_field = ft.Dropdown(
-            value="voyage-multimodal-3",
-            options=[
-                ft.DropdownOption(key=m, text=m)
-                for m in EMBEDDING_AVAILABLE_MODELS.get("voyage", ())
-            ],
+            options=[],
             editable=True,
             enable_filter=True,
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,
-            on_blur=self._on_embedding_model_blur,
+            on_blur=self._on_embedding_model_selected,
         )
 
         # ----- Cross-doc thresholds -----
@@ -1027,10 +1047,6 @@ class CorpusConfigEditor:
                     ),
                     subtitle=self.embedding_subtitle,
                     controls=[
-                        ft.Container(
-                            padding=ft.Padding.symmetric(vertical=6),
-                            content=labeled_field("Provider", self.embedding_provider_dropdown),
-                        ),
                         ft.Container(
                             padding=ft.Padding.symmetric(vertical=6),
                             content=labeled_field("Embedding model", self.embedding_model_field),
@@ -1325,15 +1341,13 @@ class CorpusConfigEditor:
             self.min_figure_bytes_field.value = str(cfg.min_figure_bytes)
         if self.optimize_indexes_checkbox is not None:
             self.optimize_indexes_checkbox.value = cfg.optimize_indexes_per_ingest
-        # Embedding (per-corpus provider + model).
-        if self.embedding_provider_dropdown is not None:
-            self.embedding_provider_dropdown.value = cfg.embedding_provider
+        # Embedding (per-corpus): one composite provider:model picker spanning
+        # installed embedders — the provider comes with the chosen model.
         if self.embedding_model_field is not None:
-            self.embedding_model_field.options = [
-                ft.DropdownOption(key=m, text=m)
-                for m in EMBEDDING_AVAILABLE_MODELS.get(cfg.embedding_provider, ())
-            ]
-            self.embedding_model_field.value = cfg.embedding_model
+            self._sync_embedding_model_options()
+            self.embedding_model_field.value = format_model_ref(
+                cfg.embedding_provider, cfg.embedding_model
+            )
         # Entities (L6) per-corpus fields. Pickers span every installed provider;
         # a stored bare/legacy model is normalized to a composite ref so it
         # matches an option and dispatches explicitly.
@@ -2374,100 +2388,82 @@ class CorpusConfigEditor:
 
     # ----- Embedding (per-corpus) field handlers --------------------------
 
-    def _on_embedding_provider_changed(self, e: ft.Event) -> None:
-        """Switch the corpus's embedding provider (staged to corpus.toml).
+    def _sync_embedding_model_options(self) -> None:
+        """Fill the embedding-model picker with composite provider:model options
+        across installed embedder providers (deferred to corpus load — the
+        options need install state). Mirrors `_sync_extractor_model_options`."""
+        if self.embedding_model_field is not None:
+            self.embedding_model_field.options = embedding_model_options()
+
+    def _on_embedding_model_selected(self, e: ft.Event) -> None:
+        """Stage a composite provider:model embedding choice — the provider
+        comes with the picked model (options span installed embedders).
 
         Dimension guard: LanceDB pins the vector dim at table creation, so
-        switching to a provider whose default dim differs from the corpus's
-        existing chunks is DESTRUCTIVE. `switch_embedder_plan` reads the
-        active corpus's LanceDB table (the per-corpus bridge points
-        `get_settings()` at this corpus); on a mismatch we hard-confirm and
-        point the user at Re-embed. No data / matching dim applies straight
-        through.
+        switching to a model whose dim differs from the corpus's existing chunks
+        is DESTRUCTIVE. A PROVIDER change with a dim mismatch hard-confirms and
+        points at Re-embed (`switch_embedder_plan` reads the active corpus's
+        LanceDB table); same-provider / matching-dim / no-data applies through.
         """
-        if self._corpus_config is None or self.embedding_provider_dropdown is None:
-            return
-        new_provider = self.embedding_provider_dropdown.value
-        if new_provider not in EMBEDDER_PROVIDER_REGISTRY:
-            return
-        current = self._corpus_config.embedding_provider
-        if new_provider == current:
-            return
-        try:
-            plan = switch_embedder_plan(new_provider)
-        except Exception as exc:
-            logger.warning(
-                "switch_embedder_plan(%s) failed (%r); switching without dim guard",
-                new_provider,
-                exc,
-            )
-            plan = None
-        if plan is not None and plan.dim_mismatch:
-            self._show_embedding_confirm(
-                title="Embedding dimension change",
-                body=(
-                    f"{plan.summary}\n\nAfter switching, run the Re-embed bulk "
-                    f"operation (Library → Bulk operations) to rebuild the "
-                    f"existing chunks under {new_provider}."
-                ),
-                confirm_label="Switch anyway",
-                on_confirm=lambda: self._apply_embedding_provider(new_provider),
-                on_cancel=lambda: self._revert_embedding_provider(current),
-            )
-            return
-        self._apply_embedding_provider(new_provider)
-
-    def _apply_embedding_provider(self, new_provider: str) -> None:
-        """Commit an embedding-provider switch: stage provider + its default
-        model + derived dims, and repopulate the model dropdown."""
-        if (
-            self._corpus_config is None
-            or self.embedding_provider_dropdown is None
-            or self.embedding_model_field is None
-        ):
-            return
-        new_model = EMBEDDER_PROVIDER_REGISTRY[new_provider]["default_model"]
-        dims = _embedding_dims_for(new_provider, new_model) or self._corpus_config.embedding_dims
-        self._corpus_config = self._corpus_config.model_copy(
-            update={
-                "embedding_provider": new_provider,
-                "embedding_model": new_model,
-                "embedding_dims": dims,
-            },
-        )
-        self.embedding_provider_dropdown.value = new_provider
-        self.embedding_model_field.options = [
-            ft.DropdownOption(key=m, text=m)
-            for m in EMBEDDING_AVAILABLE_MODELS.get(new_provider, ())
-        ]
-        self.embedding_model_field.value = new_model
-        self._after_mutation()
-
-    def _revert_embedding_provider(self, provider: str) -> None:
-        """Snap the provider dropdown back after a cancelled dim-change switch."""
-        if self.embedding_provider_dropdown is None:
-            return
-        self.embedding_provider_dropdown.value = provider
-        self.app.page.update()
-
-    def _on_embedding_model_blur(self, e: ft.Event) -> None:
-        """Persist a model edit (staged) + re-derive the vector dimension."""
         if self._corpus_config is None or self.embedding_model_field is None:
             return
         raw = (self.embedding_model_field.value or "").strip()
-        current = self._corpus_config.embedding_model
+        cur_provider = self._corpus_config.embedding_provider
+        cur_model = self._corpus_config.embedding_model
         if not raw:
-            self.embedding_model_field.value = current
+            self.embedding_model_field.value = format_model_ref(cur_provider, cur_model)
             self.app.page.update()
             return
-        if raw == current:
+        provider, model = _parse_embedding_ref(raw, cur_provider)
+        if provider == cur_provider and model == cur_model:
             return
-        provider = self._corpus_config.embedding_provider
-        dims = _embedding_dims_for(provider, raw) or self._corpus_config.embedding_dims
+        dims = _embedding_dims_for(provider, model) or self._corpus_config.embedding_dims
+        if provider != cur_provider:
+            try:
+                plan = switch_embedder_plan(provider)
+            except Exception as exc:
+                logger.warning(
+                    "switch_embedder_plan(%s) failed (%r); switching without dim guard",
+                    provider,
+                    exc,
+                )
+                plan = None
+            if plan is not None and plan.dim_mismatch:
+                self._show_embedding_confirm(
+                    title="Embedding dimension change",
+                    body=(
+                        f"{plan.summary}\n\nAfter switching, run the Re-embed bulk "
+                        f"operation (Library → Bulk operations) to rebuild the "
+                        f"existing chunks under {provider}."
+                    ),
+                    confirm_label="Switch anyway",
+                    on_confirm=lambda: self._apply_embedding_choice(provider, model, dims),
+                    on_cancel=lambda: self._revert_embedding_choice(cur_provider, cur_model),
+                )
+                return
+        self._apply_embedding_choice(provider, model, dims)
+
+    def _apply_embedding_choice(self, provider: str, model: str, dims: int) -> None:
+        """Commit a composite embedding choice: stage provider + model + derived
+        dims and reflect the composite ref back into the picker."""
+        if self._corpus_config is None or self.embedding_model_field is None:
+            return
         self._corpus_config = self._corpus_config.model_copy(
-            update={"embedding_model": raw, "embedding_dims": dims},
+            update={
+                "embedding_provider": provider,
+                "embedding_model": model,
+                "embedding_dims": dims,
+            },
         )
+        self.embedding_model_field.value = format_model_ref(provider, model)
         self._after_mutation()
+
+    def _revert_embedding_choice(self, provider: str, model: str) -> None:
+        """Snap the picker back to the current choice after a cancelled switch."""
+        if self.embedding_model_field is None:
+            return
+        self.embedding_model_field.value = format_model_ref(provider, model)
+        self.app.page.update()
 
     def _show_embedding_confirm(
         self,
