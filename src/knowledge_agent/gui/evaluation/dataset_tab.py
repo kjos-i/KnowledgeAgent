@@ -826,7 +826,11 @@ class DatasetTab:
         """Clone the current dataset into a knob-sweep SUITE — one file per
         retrieval strategy (same facts, forced knobs), all tagged into a named
         suite, written to the corpus folder. The current dataset is the master."""
-        from knowledge_agent.evaluation.suite_gen import STRATEGIES
+        from knowledge_agent.evaluation.suite_gen import (
+            STRATEGIES,
+            STRATEGY_LABELS,
+            strategy_members,
+        )
         from knowledge_agent.gui.evaluation._common import active_corpus_dir
 
         if self._dataset is None or not self._dataset.cases:
@@ -835,7 +839,7 @@ class DatasetTab:
         folder = active_corpus_dir(self.app) or (self._path.parent if self._path else Path.cwd())
         default = f"{(self._path.stem if self._path else self._dataset.name) or 'suite'}-sweep"
         name_field = ft.TextField(label="Suite name", value=default)
-        checks = {s: ft.Checkbox(label=s, value=True) for s in STRATEGIES}
+        checks = {s: ft.Checkbox(label=STRATEGY_LABELS[s], value=True) for s in STRATEGIES}
         error = ft.Text("", size=12, color=ft.Colors.RED_300, visible=False)
 
         def _show_error(msg: str) -> None:
@@ -856,7 +860,7 @@ class DatasetTab:
                 _show_error("Pick at least one strategy.")
                 return
             try:
-                written = self._write_suite(self._dataset, suite, chosen, folder)
+                written = self._write_suite(self._dataset, suite, strategy_members(chosen), folder)
             except Exception as exc:  # broad: bad input / I-O → inline error, dialog stays
                 _show_error(f"could not generate: {exc}")
                 return
@@ -895,15 +899,20 @@ class DatasetTab:
         self.app.page.update()
 
     def _write_suite(
-        self, master: EvalDataset, suite_name: str, strategies: list[str], folder: Path
+        self,
+        master: EvalDataset,
+        suite_name: str,
+        members: list[tuple[str, RetrievalSettings]],
+        folder: Path,
     ) -> list[str]:
         """Generate + write the suite files to `folder`; return the written
-        filenames. Raises on bad input / I-O (the dialog surfaces it)."""
+        filenames. `members` = (label, knob-set) pairs — premade presets and/or
+        custom form knob-sets. Raises on bad input / I-O (the caller surfaces it)."""
         from knowledge_agent.evaluation.models import save_dataset
         from knowledge_agent.evaluation.suite_gen import generate_suite
 
         written: list[str] = []
-        for stem, ds in generate_suite(master, suite_name, strategies=strategies):
+        for stem, ds in generate_suite(master, suite_name, members):
             path = folder / f"{stem}.json"
             save_dataset(ds, path)
             written.append(path.name)
