@@ -5,22 +5,23 @@ a case (blank / from the last Search / an LLM draft), and edit EVERY field of
 the current case in a form grouped like the `EvalCase` schema (so it doubles as
 documentation of what a case contains).
 
+The form is backed by a **draft buffer** (602): a seed action replaces the
+buffer with its output — **+ Case form** → one blank page, **From last search**
+→ one page from the last Search, **LLM** → `nr. of cases` pages (1 → a page,
+N → a batch). A batch shows a `< n/N >` pager + delete-X in the form header;
+**Blank** clears to a fresh page. Seeding / editing an existing case first
+warns if the form holds unsaved content.
+
 Right column = two stacked sections:
-  * **Preview** — a live card mirroring the left form (debounced) with the
-    **Add case / Update case** commit button beneath it. Nothing is written
-    until you commit.
+  * **Commit** — **Add case(s)** appends every draft page at once; loading a
+    dataset case flips it to **Update**. Nothing is written until you commit.
   * **Dataset cases** — the dataset's cases as cards; click one to load it
     into the form (commit becomes **Update**), or delete it on the card.
 
 Dataset files are chosen by **Browse** (opens in the active corpus's folder)
 or created by **New dataset** — no packaged-set dropdown. Persistence goes
-through the backend `save_dataset` helper.
-
-Two ways to draft LLM cases:
-  * **Generate one** — draft a single candidate straight into the form for
-    review; **Add case** keeps it. Nothing hits disk unreviewed.
-  * **Generate multiple** — bulk-draft `count` candidates straight into the
-    dataset (origin=llm); review/edit/delete them afterward from the list.
+through the backend `save_dataset` helper. Drafts never hit disk until
+**Add case(s)** (origin=llm for the LLM ones).
 
 Dropdown options are derived from the model's own `Literal`s (via
 `typing.get_args`) so the choices can never drift from the schema. List-valued
@@ -78,6 +79,7 @@ if TYPE_CHECKING:
     from knowledge_agent.gui.evaluation.evaluation_view import EvaluationView
 
 _NONE = ""  # the expected_mode "(none)" sentinel (maps to None on read)
+_MAX_GEN_CASES = 20  # upper bound on the LLM "nr. of cases" per generate (602)
 _PREVIEW_DEBOUNCE_S = 0.3  # settle time before the live preview re-renders
 _IDLE_STATUS = "No activity yet."  # the Progress line's default when nothing has happened
 # Fixed caption column for the case-edit form, so every field's input starts at
@@ -143,15 +145,23 @@ class DatasetTab:
         self.form: ft.Column | None = None
         self.status: ft.Text | None = None
         self.gen_count: ft.TextField | None = None
-        self.gen_one_button: ft.Control | None = None
-        self.gen_multi_button: ft.Control | None = None
-        # Spinners shown beside each Generate button while its LLM calls run.
-        self.gen_one_spinner: ft.ProgressRing | None = None
-        self.gen_multi_spinner: ft.ProgressRing | None = None
-        # LLM model + temperature used for generation (Generate one + multiple).
+        # One "LLM" generate button (602): drafts `gen_count` cases into the form
+        # buffer (was two buttons — Generate one / multiple).
+        self.gen_button: ft.Control | None = None
+        # Spinner shown beside the LLM button while its calls run.
+        self.gen_spinner: ft.ProgressRing | None = None
+        # LLM model + temperature used for case generation.
         self.gen_model_dropdown: ft.Dropdown | None = None
         self.gen_temp_slider: ft.Slider | None = None
         self.gen_temp_value_text: ft.Text | None = None
+        # Draft-buffer pager (602): < n/N > + delete-X over the multi-case buffer,
+        # plus a Blank button — all created in build().
+        self.pager: ft.Row | None = None
+        self.page_label: ft.Text | None = None
+        self.page_prev: ft.IconButton | None = None
+        self.page_next: ft.IconButton | None = None
+        self.page_delete: ft.IconButton | None = None
+        self.blank_button: ft.TextButton | None = None
         # Right column: two commit buttons. Only one is live at a time — Add for
         # a new case, Update for an existing one (Add is also grayed in suite mode).
         self.add_button: ft.Button | None = None
@@ -173,6 +183,15 @@ class DatasetTab:
         self._cases: list[EvalCase] = []
         self._selected: int | None = None
         self._path: Path | None = None
+        # Draft buffer (602): unsaved draft "pages" as raw form snapshots — a
+        # blank/half-filled page isn't a valid EvalCase (id/question are required),
+        # so we snapshot form state, not cases. In draft mode `_selected` is None
+        # and the form shows `_drafts[_draft_index]`; editing an existing case is
+        # the other mode (`_selected` set, buffer idle) with `_edit_baseline` the
+        # snapshot taken on load for the unsaved-changes guard.
+        self._drafts: list[dict] = []
+        self._draft_index: int = 0
+        self._edit_baseline: dict | None = None
         # Chat provenance carried onto an origin="chat" case (not editable form
         # fields): the captured conversation turns + the router model that
         # distilled the query. Set on capture-from-chat, restored on load.
@@ -228,18 +247,15 @@ class DatasetTab:
         capture_button = ft.TextButton(
             "From last search", icon=ft.Icons.SEARCH, on_click=self._on_capture_from_search
         )
-        self.gen_one_button = ft.TextButton(
-            "LLM", icon=ft.Icons.AUTO_AWESOME, on_click=self._on_generate_one
-        )
-        self.gen_multi_button = ft.TextButton(
-            "LLM (multiple)",
-            icon=ft.Icons.AUTO_AWESOME_MOTION,
-            on_click=self._on_generate_multiple,
+        # One LLM button (602): drafts `gen_count` cases into the form buffer —
+        # 1 → a single page, N → an N-page batch with the pager. Replaces the old
+        # Generate-one / Generate-multiple pair.
+        self.gen_button = ft.TextButton(
+            "LLM", icon=ft.Icons.AUTO_AWESOME, on_click=self._on_generate
         )
         # Orthogonal to the three seeds: when on, a seeded case's QUESTION is the
         # last chat's distilled query (origin=chat) and the seeds only fill the
-        # rest. A chat is one conversation → one case, so it disables the bulk
-        # generator.
+        # rest. A chat is one conversation → one case, so it forces the count to 1.
         self.from_chat_check = ft.Checkbox(
             label="Query from chat",
             value=False,
@@ -251,9 +267,33 @@ class DatasetTab:
             ),
             on_change=self._on_from_chat_toggled,
         )
-        self.gen_count = ft.TextField(value="5", width=80, dense=True)
-        self.gen_one_spinner = ft.ProgressRing(visible=False, width=16, height=16, stroke_width=2)
-        self.gen_multi_spinner = ft.ProgressRing(visible=False, width=16, height=16, stroke_width=2)
+        # nr. of cases the LLM button drafts (default 1 → a single page).
+        self.gen_count = ft.TextField(value="1", width=80, dense=True)
+        self.gen_spinner = ft.ProgressRing(visible=False, width=16, height=16, stroke_width=2)
+        # Draft-buffer pager + delete-X (602): shown only for a multi-page batch.
+        self.page_prev = ft.IconButton(
+            ft.Icons.CHEVRON_LEFT, tooltip="Previous case", on_click=self._on_prev_page
+        )
+        self.page_label = ft.Text("", size=12)
+        self.page_next = ft.IconButton(
+            ft.Icons.CHEVRON_RIGHT, tooltip="Next case", on_click=self._on_next_page
+        )
+        self.page_delete = ft.IconButton(
+            ft.Icons.CLOSE,
+            icon_color=ft.Colors.RED_300,
+            tooltip="Delete this case from the batch",
+            on_click=self._on_delete_page,
+        )
+        self.pager = ft.Row(
+            [self.page_prev, self.page_label, self.page_next, self.page_delete],
+            spacing=0,
+            tight=True,
+            visible=False,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        self.blank_button = ft.TextButton(
+            "Blank", icon=ft.Icons.CLEAR, tooltip="Clear the form", on_click=self._on_blank
+        )
         self.gen_model_dropdown = ft.Dropdown(
             editable=True,  # pick a known model OR type one; required for LLM generation
             # Any installed provider's models (stored as a 'provider:model' ref
@@ -423,7 +463,7 @@ class DatasetTab:
         # Right column: two commit buttons. Both route through _on_save_case; the
         # disabled state (set in _sync_commit_buttons) gates which applies, and
         # _selected drives append-vs-overwrite. Add is also grayed in suite mode.
-        self.add_button = ft.Button("Add case", icon=ft.Icons.ADD, on_click=self._on_save_case)
+        self.add_button = ft.Button("Add case(s)", icon=ft.Icons.ADD, on_click=self._on_save_case)
         self.update_button = ft.Button(
             "Update case", icon=ft.Icons.SAVE, on_click=self._on_save_case
         )
@@ -442,9 +482,9 @@ class DatasetTab:
             label="Generate suite", value=False, on_change=self._on_suite_toggled
         )
         self.add_info_fact_button = ft.Button(
-            "Add Info and Fact",
+            "Add case(s) info and fact",
             icon=ft.Icons.ADD,
-            tooltip="Add the form's Information + Fact as a case (a shared suite fact)",
+            tooltip="Add the form's case(s) as shared suite facts (the whole batch at once)",
             on_click=self._on_save_case,
         )
         # Two premade dropdowns (Hybrid / KG groups) — picking one drops it into
@@ -504,10 +544,10 @@ class DatasetTab:
                                     title="Case information and facts",
                                     text=(
                                         "The suite's facts are this dataset's "
-                                        "cases. Add each from the form with 'Add "
-                                        "Info and Fact'; Generate then clones "
-                                        "every fact once per retrieval knob-set "
-                                        "below."
+                                        "cases. Add them from the form with 'Add "
+                                        "case(s) info and fact'; Generate then "
+                                        "clones every fact once per retrieval "
+                                        "knob-set below."
                                     ),
                                 ),
                             ],
@@ -614,28 +654,21 @@ class DatasetTab:
                     section_divider(),
                     # ============ Section: Add cases ============
                     section_title("Add cases"),
-                    # Three sub-sections: seed a single case, bulk-generate many,
-                    # and the shared LLM model/temperature both generators use.
+                    # The three seeds share one row — + Case form, From last
+                    # search, and the LLM button with its nr.-of-cases field
+                    # (602: one LLM button; count 1 → a page, N → a batch).
                     sub_section_title("Generate new case by"),
                     self.from_chat_check,
                     ft.Row(
                         [
                             new_case_button,
                             capture_button,
-                            self.gen_one_button,
-                            self.gen_one_spinner,
+                            self.gen_button,
+                            ft.Text("nr. of cases:", size=14, color=ft.Colors.GREY_300),
+                            self.gen_count,
+                            self.gen_spinner,
                         ],
                         wrap=True,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    sub_section_header("Generate multiple cases at once"),
-                    ft.Row(
-                        [
-                            self.gen_multi_button,
-                            ft.Text("nr of cases:", size=14, color=ft.Colors.GREY_300),
-                            self.gen_count,
-                            self.gen_multi_spinner,
-                        ],
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
@@ -657,11 +690,24 @@ class DatasetTab:
                             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                             spacing=8,
                             controls=[
-                                ft.Text(
-                                    "--- Per case form ---",
-                                    size=16,
-                                    weight=ft.FontWeight.BOLD,
-                                    text_align=ft.TextAlign.CENTER,
+                                # Header: the batch pager (left, shown only for a
+                                # multi-page batch), the centered title, and the
+                                # Blank button on the right (602).
+                                ft.Row(
+                                    [
+                                        self.pager,
+                                        ft.Container(
+                                            content=ft.Text(
+                                                "--- Per case form ---",
+                                                size=16,
+                                                weight=ft.FontWeight.BOLD,
+                                                text_align=ft.TextAlign.CENTER,
+                                            ),
+                                            expand=True,
+                                        ),
+                                        self.blank_button,
+                                    ],
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
                                 self.form,
                             ],
@@ -724,6 +770,10 @@ class DatasetTab:
                 ),
             ],
         )
+
+        # Start with one blank draft page (602) so the form is immediately
+        # editable + committable; seed actions replace this buffer.
+        self._load_drafts([self._blank_snapshot()])
 
         # Auto-load the dataset shown in the field on first open (50a). The tree
         # isn't mounted yet, so no page.update — build returns it populated.
@@ -857,16 +907,32 @@ class DatasetTab:
         self.app.page.update()
 
     def _render_preview(self) -> None:
-        """Sync the commit buttons (the live preview was removed — the form
-        itself shows the case). Exactly one is live: Add for a new case, Update
-        when editing an existing one. Add is ALSO grayed in suite mode — you
-        build a suite via the panel, not the per-case Add."""
+        """Sync the commit buttons + the draft-batch pager (the form itself is the
+        preview). Exactly one commit button is live: Add case(s) for drafts,
+        Update when editing an existing case; Add is ALSO grayed in suite mode
+        (you build a suite via the panel). The pager shows only for a multi-page
+        batch."""
         editing = self._selected is not None
         suite = self.generate_suite_check is not None and bool(self.generate_suite_check.value)
         if self.add_button is not None:
             self.add_button.disabled = editing or suite
         if self.update_button is not None:
             self.update_button.disabled = not editing
+        self._render_pager(editing)
+
+    def _render_pager(self, editing: bool) -> None:
+        """Show < n/N > + the delete-X only for a multi-page draft batch (not
+        while editing an existing case); disable the ends."""
+        n = len(self._drafts)
+        show = (not editing) and n > 1
+        if self.pager is not None:
+            self.pager.visible = show
+        if show and self.page_label is not None:
+            self.page_label.value = f"{self._draft_index + 1}/{n}"
+            if self.page_prev is not None:
+                self.page_prev.disabled = self._draft_index == 0
+            if self.page_next is not None:
+                self.page_next.disabled = self._draft_index >= n - 1
 
     def _on_refresh(self, _e: ft.Event | None = None) -> None:
         """Reload the current dataset from disk and refresh the case list — picks
@@ -943,7 +1009,7 @@ class DatasetTab:
                 _show_error(f"could not create: {exc}")
                 return
             self.app.page.pop_dialog()
-            self._set_status(f"created {path.name} — add cases, then Add case")
+            self._set_status(f"created {path.name} — add cases, then Add case(s)")
 
         dialog = ft.AlertDialog(
             modal=True,
@@ -1182,20 +1248,193 @@ class DatasetTab:
         )
 
     def _select(self, idx: int) -> None:
+        """Load an existing case for editing — guarded: warn first if the form
+        holds unsaved drafts or edits."""
+        self._guarded(lambda: self._do_select(idx))
+
+    def _do_select(self, idx: int) -> None:
         self._selected = idx
+        self._drafts = []
+        self._draft_index = 0
         self._fill_form(self._cases[idx])
+        self._edit_baseline = self._snapshot_form()  # baseline for the unsaved guard
         self._render_list()
         self._render_preview()
         self.app.page.update()
 
     def _on_cancel_edit(self, _idx: int | None = None) -> None:
-        """Cancel editing (the selected card's Cancel button): blank the form
-        and deselect, back to new-case mode."""
-        self._selected = None
+        """Cancel editing (the selected card's Cancel button): back to a fresh
+        blank draft page."""
+        self._load_drafts([self._blank_snapshot()])
+        self._set_status("edit cancelled")
+
+    # ---- draft buffer (602) ----------------------------------------------
+    # The form is backed by a buffer of unsaved draft "pages" (raw form
+    # snapshots — a blank/half-filled page is not a valid EvalCase). Seed
+    # actions replace the buffer; the pager moves between pages; Add case(s)
+    # commits the whole buffer. Editing an existing case is the other mode
+    # (`_selected` set, buffer idle).
+
+    _CONTENT_FIELDS = (
+        "id",
+        "question",
+        "expected_sources",
+        "expected_chunks",
+        "required_keywords",
+        "disallowed_keywords",
+        "expected_answer_points",
+        "expected_entities",
+        "user_cypher",
+        "notes",
+        "category",
+    )
+
+    def _snapshot_form(self) -> dict:
+        """Capture the whole form as a raw snapshot (form state, not a case)."""
+        return {
+            "f": {k: v.value for k, v in self.f.items()},
+            "chat_conversation": list(self._chat_conversation),
+            "chat_router_model": self._chat_router_model,
+            "mmr": float(self.f["mmr_lambda"].value),
+        }
+
+    def _restore_form(self, snap: dict) -> None:
+        """Load a form snapshot back into the widgets + the derived controls."""
+        for key, val in snap["f"].items():
+            if key in self.f:
+                self.f[key].value = val
+        self._chat_conversation = list(snap["chat_conversation"])
+        self._chat_router_model = snap["chat_router_model"]
+        self._mmr_value_text.value = f"{float(snap['mmr']):.2f}"
+        if self.from_chat_check is not None:
+            self.from_chat_check.value = (self.f["origin"].value or "") == "chat"
+        self._sync_gen_count_for_chat()
+        self._sync_retrieval_gray_out()
+
+    def _blank_snapshot(self) -> dict:
+        """A snapshot of the blank + default form. Clears the live form as a side
+        effect; every caller then shows a page, so the form is re-rendered."""
         self._clear_form()
+        return self._snapshot_form()
+
+    def _snapshots_from_cases(self, cases: list[EvalCase]) -> list[dict]:
+        """Turn generated cases into draft-page snapshots via the case→form map
+        (so the round-trip matches editing). Leaves the form on the last case;
+        the caller shows page 0."""
+        snaps: list[dict] = []
+        for case in cases:
+            self._fill_form(case)
+            snaps.append(self._snapshot_form())
+        return snaps
+
+    def _load_drafts(self, snaps: list[dict]) -> None:
+        """Replace the draft buffer and show its first page (draft mode)."""
+        self._selected = None
+        self._edit_baseline = None
+        self._drafts = list(snaps)
+        self._draft_index = 0
+        if self._drafts:
+            self._restore_form(self._drafts[0])
+        else:
+            self._clear_form()
         self._render_list()
         self._render_preview()
-        self._set_status("edit cancelled")
+
+    def _capture_page(self) -> None:
+        """Sync the live form back into the current draft page (draft mode)."""
+        if self._selected is None and 0 <= self._draft_index < len(self._drafts):
+            self._drafts[self._draft_index] = self._snapshot_form()
+
+    def _show_page(self, i: int) -> None:
+        if not (0 <= i < len(self._drafts)):
+            return
+        self._capture_page()
+        self._draft_index = i
+        self._restore_form(self._drafts[i])
+        self._render_preview()
+        self.app.page.update()
+
+    def _on_prev_page(self, _e: ft.Event) -> None:
+        self._show_page(self._draft_index - 1)
+
+    def _on_next_page(self, _e: ft.Event) -> None:
+        self._show_page(self._draft_index + 1)
+
+    def _on_delete_page(self, _e: ft.Event) -> None:
+        """Drop the current page from the batch (the X by the pager). Only shown
+        for a multi-page batch, so the buffer never empties here."""
+        if self._selected is not None or not self._drafts:
+            return
+        del self._drafts[self._draft_index]
+        self._draft_index = min(self._draft_index, len(self._drafts) - 1)
+        if self._drafts:
+            self._restore_form(self._drafts[self._draft_index])
+        else:
+            self._clear_form()
+        self._render_preview()
+        self._set_status("removed a case from the batch")
+
+    @staticmethod
+    def _snap_has_content(snap: dict) -> bool:
+        f = snap.get("f", {})
+        return any((f.get(k) or "").strip() for k in DatasetTab._CONTENT_FIELDS)
+
+    def _has_unsaved(self) -> bool:
+        """True when the form holds work a reload/reseed would lose — unsaved
+        edits to a loaded case, or any draft page with real content. A pristine
+        blank page counts as empty."""
+        if self._selected is not None:
+            return self._edit_baseline is not None and self._snapshot_form() != self._edit_baseline
+        self._capture_page()
+        return any(self._snap_has_content(s) for s in self._drafts)
+
+    def _discard_dialog(self, on_confirm) -> None:
+        """Show the 'discard unsaved content?' warning; `on_confirm` is the
+        confirm button's on_click (sync or async — Flet awaits async on_click)."""
+
+        def _cancel(_ev: ft.Event) -> None:
+            self.app.page.pop_dialog()
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Discard unsaved content?"),
+            content=ft.Text("The form has unsaved content that will be lost. Continue?", size=12),
+            actions=[
+                ft.TextButton("Cancel", on_click=_cancel),
+                ft.Button("Discard & continue", on_click=on_confirm),
+            ],
+        )
+        self.app.page.show_dialog(dialog)
+        self.app.page.update()
+
+    def _guarded(self, proceed) -> None:
+        """Run `proceed` now, or warn first when there's unsaved content."""
+        if not self._has_unsaved():
+            proceed()
+            return
+
+        def _confirm(_ev: ft.Event) -> None:
+            self.app.page.pop_dialog()
+            proceed()
+
+        self._discard_dialog(_confirm)
+
+    def _on_blank(self, _e: ft.Event) -> None:
+        """Blank button: wipe the form to a fresh blank page (guarded)."""
+        self._guarded(self._do_blank)
+
+    def _do_blank(self) -> None:
+        self._load_drafts([self._blank_snapshot()])
+        self._set_status("form cleared")
+
+    def _sync_gen_count_for_chat(self) -> None:
+        """A chat is one conversation → one case: with 'Query from chat' on, pin
+        the nr.-of-cases field to 1 and disable it."""
+        on = bool(self.from_chat_check and self.from_chat_check.value)
+        if self.gen_count is not None:
+            if on:
+                self.gen_count.value = "1"
+            self.gen_count.disabled = on
 
     # ---- form <-> case ----------------------------------------------------
 
@@ -1255,8 +1494,7 @@ class DatasetTab:
         self._chat_router_model = case.chat_router_model
         if self.from_chat_check is not None:
             self.from_chat_check.value = case.origin == "chat"
-            if self.gen_multi_button is not None:
-                self.gen_multi_button.disabled = self.from_chat_check.value
+            self._sync_gen_count_for_chat()
 
     def _clear_form(self) -> None:
         f = self.f
@@ -1444,23 +1682,25 @@ class DatasetTab:
         self.app.page.update()
 
     def _on_new(self, _e: ft.Event) -> None:
-        self._selected = None
-        self._clear_form()
-        # With 'Query from chat' on, a new case starts with the chat's distilled
-        # question (not blank); revert the toggle if there's no chat to draw from.
+        """+ Case form: reset to a fresh blank draft page (guarded)."""
+        self._guarded(self._do_new)
+
+    def _do_new(self) -> None:
+        """Reset the buffer to one fresh blank page. With 'Query from chat' on it
+        starts with the chat's distilled question; revert the toggle if there's
+        no chat to draw from."""
+        self._load_drafts([self._blank_snapshot()])
         if self.from_chat_check and self.from_chat_check.value:
             if self._chat_available():
                 self._apply_chat_source()
+                self._capture_page()
             else:
                 self.from_chat_check.value = False
-                if self.gen_multi_button is not None:
-                    self.gen_multi_button.disabled = False
-        self._render_list()
-        self._render_preview()
+                self._sync_gen_count_for_chat()
         msg = (
-            "new chat-sourced case — question from the last chat; add the gold, then Add case"
-            if self.f["origin"].value == "chat"
-            else "new case — fill the form, then Add case"
+            "new chat-sourced case — question from the last chat; add the gold, then Add case(s)"
+            if (self.f["origin"].value or "") == "chat"
+            else "new case — fill the form, then Add case(s)"
         )
         self._set_status(msg)
 
@@ -1484,8 +1724,8 @@ class DatasetTab:
 
     def _on_from_chat_toggled(self, _e: ft.Event) -> None:
         """Turn 'Query from chat' on/off. On: seed the question from the last
-        chat's distilled query (warn + revert if there's no chat yet) and disable
-        the bulk generator (a chat is one conversation → one case). Off: drop the
+        chat's distilled query (warn + revert if there's no chat yet) and pin the
+        nr.-of-cases to 1 (a chat is one conversation → one case). Off: drop the
         chat provenance and reset origin to manual."""
         on = bool(self.from_chat_check and self.from_chat_check.value)
         if on and not self._chat_available():
@@ -1493,8 +1733,7 @@ class DatasetTab:
             self._set_status("No chat query yet — run a Conversational search in Search first.")
             self.app.page.update()
             return
-        if self.gen_multi_button is not None:
-            self.gen_multi_button.disabled = on
+        self._sync_gen_count_for_chat()
         if on:
             self._apply_chat_source()
         else:
@@ -1512,7 +1751,8 @@ class DatasetTab:
 
         With 'Query from chat' on, the question is the router's DISTILLED query
         and `origin=chat` (+ the conversation is stored); otherwise the raw query
-        and `origin=search`. The user reviews (keywords / answer points) + commits."""
+        and `origin=search`. Guarded (warn if the form holds unsaved content) —
+        but only after confirming a result exists, so we never warn then no-op."""
         app = self.app
         from_chat = bool(self.from_chat_check and self.from_chat_check.value)
         answer = getattr(app, "last_answer", None)
@@ -1521,9 +1761,17 @@ class DatasetTab:
             need = "a Conversational search" if from_chat else "a query"
             self._set_status(f"No search result to capture — run {need} in Search first.")
             return
+        self._guarded(self._do_capture_from_search)
+
+    def _do_capture_from_search(self) -> None:
+        app = self.app
+        from_chat = bool(self.from_chat_check and self.from_chat_check.value)
+        answer = getattr(app, "last_answer", None)
+        query = getattr(app, "last_search_query" if from_chat else "last_query", None)
+        if answer is None or not query:
+            return
         sources = _dedup_doc_ids(getattr(answer, "chunk_sources", None) or [])
-        self._selected = None
-        self._clear_form()
+        self._load_drafts([self._blank_snapshot()])  # fresh single page
         self.f["question"].value = query
         self.f["expected_sources"].value = _text(sources)
         self._pin_retrieval(getattr(app, "last_retrieval", None))
@@ -1533,10 +1781,14 @@ class DatasetTab:
             self._chat_router_model = getattr(app.gui_config, "chat_router_model", None)
         else:
             self.f["origin"].value = "search"
-        self._render_list()
+        if self.from_chat_check is not None:
+            self.from_chat_check.value = from_chat
+        self._capture_page()  # fold the capture into the single draft page
         self._render_preview()
         kind = "chat" if from_chat else "search"
-        self._set_status(f"captured from {kind} ({len(sources)} source(s)) — review, then Add case")
+        self._set_status(
+            f"captured from {kind} ({len(sources)} source(s)) — review, then Add case(s)"
+        )
 
     def _selected_gen_model(self) -> str | None:
         """The chosen LLM model for case generation, or None to let the backend
@@ -1600,14 +1852,49 @@ class DatasetTab:
             self.gen_temp_value_text.value = f"{self.gen_temp_slider.value:.2f}"
             self.app.page.update()
 
-    async def _on_generate_one(self, _e: ft.Event) -> None:
-        """Draft ONE LLM candidate straight into the form for review — nothing is
-        written until you Add case. With 'Query from chat' on, the LLM writes only
-        the GOLD for the chat's distilled question (origin=chat); otherwise it
-        invents a whole case from a corpus passage (origin=llm)."""
+    async def _on_generate(self, _e: ft.Event) -> None:
+        """LLM button: draft `nr. of cases` candidates into the form buffer for
+        review — nothing is written until Add case(s). 1 → a single page, N → an
+        N-page batch. With 'Query from chat' on it drafts ONE case (the LLM writes
+        only the gold for the chat's distilled question, origin=chat); otherwise
+        it invents whole cases from corpus passages (origin=llm). Guarded: warn
+        first if the form holds unsaved content."""
         if not self._require_gen_model():
             return
-        if self.from_chat_check and self.from_chat_check.value:
+        from_chat = bool(self.from_chat_check and self.from_chat_check.value)
+        n = 1 if from_chat else self._gen_count_value()
+        if n is None:
+            return
+        if not self._has_unsaved():
+            await self._do_generate(n, from_chat)
+            return
+
+        async def _confirm(_ev: ft.Event) -> None:
+            self.app.page.pop_dialog()
+            await self._do_generate(n, from_chat)
+
+        self._discard_dialog(_confirm)
+
+    def _gen_count_value(self) -> int | None:
+        """Parse + bound the nr.-of-cases field (1..`_MAX_GEN_CASES`); on bad
+        input set the status line and return None."""
+        try:
+            n = int((self.gen_count.value or "1").strip()) if self.gen_count else 1
+        except ValueError:
+            self._set_status("Count must be a whole number.")
+            return None
+        if n <= 0:
+            self._set_status("Count must be at least 1.")
+            return None
+        if n > _MAX_GEN_CASES:
+            self._set_status(f"Count is capped at {_MAX_GEN_CASES}.")
+            return _MAX_GEN_CASES
+        return n
+
+    async def _do_generate(self, n: int, from_chat: bool) -> None:
+        """Draft `n` cases and load them into the form buffer for review (nothing
+        saved). from_chat routes to the single gold-for-the-chat path."""
+        if from_chat:
             await self._generate_gold_from_chat()
             return
         from knowledge_agent.evaluation.generator import (
@@ -1615,31 +1902,37 @@ class DatasetTab:
             generate_from_corpus,
         )
 
-        self._set_busy(self.gen_one_button, self.gen_one_spinner, True)
-        self._set_status("drafting one candidate from the active corpus…")
+        self._set_busy(self.gen_button, self.gen_spinner, True)
+        self._set_status(f"drafting {n} candidate case(s) from the active corpus…")
         try:
             cases = await generate_from_corpus(
-                1, model=self._selected_gen_model(), temperature=self._selected_gen_temp()
+                n, model=self._selected_gen_model(), temperature=self._selected_gen_temp()
             )
         except EvalGenerationConnectionError as exc:
             # Network/connection failure — show the clear, retryable message.
-            self._set_busy(self.gen_one_button, self.gen_one_spinner, False)
+            self._set_busy(self.gen_button, self.gen_spinner, False)
             self._set_status(str(exc))
             return
         except Exception as exc:  # broad: provider / corpus / LLM errors → status
-            self._set_busy(self.gen_one_button, self.gen_one_spinner, False)
+            self._set_busy(self.gen_button, self.gen_spinner, False)
             self._set_status(f"generation failed: {exc}")
             return
-        self._set_busy(self.gen_one_button, self.gen_one_spinner, False)
+        self._set_busy(self.gen_button, self.gen_spinner, False)
         if not cases:
             self._set_status("no candidate generated (empty corpus or all passages too short)")
             return
-        # Load it into the form as a NEW case for review — do NOT save.
-        self._selected = None
-        self._fill_form(cases[0])
-        self._render_list()
-        self._render_preview()
-        self._set_status("generated one candidate (origin=llm) — review, then Add case")
+        # Load the batch into the form buffer for review — nothing saved yet.
+        self._load_drafts(self._snapshots_from_cases(cases))
+        shortfall = ""
+        if len(cases) < n:
+            shortfall = (
+                f" of {n} requested (one case per document — the corpus has "
+                "fewer usable docs, or a passage was skipped)"
+            )
+        tail = (
+            "review the batch, then Add case(s)" if len(cases) > 1 else "review, then Add case(s)"
+        )
+        self._set_status(f"drafted {len(cases)} LLM candidate(s){shortfall} (origin=llm) — {tail}")
 
     async def _generate_gold_from_chat(self) -> None:
         """The 'Query from chat' + LLM path: keep the chat's distilled query as the
@@ -1657,7 +1950,7 @@ class DatasetTab:
         if not query:
             self._set_status("No chat query — run a Conversational search in Search first.")
             return
-        self._set_busy(self.gen_one_button, self.gen_one_spinner, True)
+        self._set_busy(self.gen_button, self.gen_spinner, True)
         self._set_status("writing gold for the chat question…")
         try:
             passages = await passages_from_sources(getattr(answer, "chunk_sources", None) or [])
@@ -1668,145 +1961,38 @@ class DatasetTab:
                 temperature=self._selected_gen_temp(),
             )
         except EvalGenerationConnectionError as exc:
-            self._set_busy(self.gen_one_button, self.gen_one_spinner, False)
+            self._set_busy(self.gen_button, self.gen_spinner, False)
             self._set_status(str(exc))
             return
         except Exception as exc:  # broad: provider / LLM errors → status
-            self._set_busy(self.gen_one_button, self.gen_one_spinner, False)
+            self._set_busy(self.gen_button, self.gen_spinner, False)
             self._set_status(f"generation failed: {exc}")
             return
-        self._set_busy(self.gen_one_button, self.gen_one_spinner, False)
-        # Fresh case: chat question + provenance + pinned retrieval, then the
+        self._set_busy(self.gen_button, self.gen_spinner, False)
+        # Single page: chat question + provenance + pinned retrieval, then the
         # LLM-written gold + the chat's own retrieved sources.
-        self._selected = None
-        self._clear_form()
+        self._load_drafts([self._blank_snapshot()])
         self._apply_chat_source()
         self.f["expected_answer_points"].value = _text(gold.answer_points)
         self.f["required_keywords"].value = _text(gold.keywords)
         self.f["expected_sources"].value = _text(
             _dedup_doc_ids(getattr(answer, "chunk_sources", None) or [])
         )
-        self._render_list()
+        self._capture_page()
         self._render_preview()
-        self._set_status("wrote gold for the chat question (origin=chat) — review, then Add case")
-
-    def _on_generate_multiple(self, _e: ft.Event) -> None:
-        """Validate the count, then CONFIRM before bulk-drafting: these cost LLM
-        calls and land straight in the dataset unreviewed, so ask first."""
-        if not self._require_gen_model():
-            return
-        path = self._current_path()
-        if path is None:
-            self._set_status("Choose a dataset (Browse or New dataset) first.")
-            return
-        try:
-            n = int((self.gen_count.value or "5").strip()) if self.gen_count else 5
-        except ValueError:
-            self._set_status("Count must be a whole number.")
-            return
-        if n <= 0:
-            self._set_status("Count must be at least 1.")
-            return
-
-        def _cancel(_ev: ft.Event) -> None:
-            self.app.page.pop_dialog()
-
-        async def _confirm(_ev: ft.Event) -> None:
-            self.app.page.pop_dialog()
-            await self._run_generate_multiple(n, path)
-
-        dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Text("Generate cases with the LLM?"),
-            content=ft.Text(
-                f"This will draft {n} case(s) with the LLM and add them straight to "
-                f"{path.name} (origin=llm). You review, edit, or delete them afterward.",
-            ),
-            actions=[
-                ft.TextButton("Cancel", on_click=_cancel),
-                ft.Button(content=f"Generate {n}", on_click=_confirm),
-            ],
-        )
-        self.app.page.show_dialog(dialog)
-        self.app.page.update()
-
-    async def _run_generate_multiple(self, n: int, path: Path) -> None:
-        """Bulk-draft `n` LLM candidates straight into the dataset (origin=llm)
-        and save — no per-case review; edit/delete them afterward from the list.
-        A spinner shows beside the button while the LLM calls run.
-
-        `generator.generate_from_corpus` samples one passage per corpus doc and
-        drafts a question + answer points + keywords via the active provider's
-        model."""
-        from knowledge_agent.evaluation.generator import (
-            EvalGenerationConnectionError,
-            generate_from_corpus,
-        )
-        from knowledge_agent.evaluation.models import EvalDataset, save_dataset
-
-        self._set_busy(self.gen_multi_button, self.gen_multi_spinner, True)
-        self._set_status(f"generating {n} candidate case(s) from the active corpus…")
-        try:
-            cases = await generate_from_corpus(
-                n, model=self._selected_gen_model(), temperature=self._selected_gen_temp()
-            )
-        except EvalGenerationConnectionError as exc:
-            # Network/connection failure — show the clear, retryable message.
-            self._set_busy(self.gen_multi_button, self.gen_multi_spinner, False)
-            self._set_status(str(exc))
-            return
-        except Exception as exc:  # broad: provider / corpus / LLM errors → status
-            self._set_busy(self.gen_multi_button, self.gen_multi_spinner, False)
-            self._set_status(f"generation failed: {exc}")
-            return
-        self._set_busy(self.gen_multi_button, self.gen_multi_spinner, False)
-
-        if not cases:
-            self._set_status("no candidates generated (empty corpus or all passages too short)")
-            return
-
-        if self._dataset is None:
-            self._dataset = EvalDataset()
-            if self.status_group is not None:
-                self.status_group.value = self._dataset.status
-        self._dataset.cases.extend(cases)
-        self._stamp_header()  # persist the status header alongside the new cases
-        try:
-            save_dataset(self._dataset, path)
-        except Exception as exc:  # broad: I/O failure → status
-            self._set_status(f"generated {len(cases)} but save failed: {exc}")
-            return
-        self._cases = self._dataset.cases
-        self._path = path
-        self._selected = None
-        self._render_list()
-        self._render_preview()
-        # When fewer than requested came back, say why — the generator drafts
-        # one case per document, so the count is capped by the corpus size.
-        shortfall = ""
-        if len(cases) < n:
-            shortfall = (
-                f" of {n} requested (one case per document — the corpus has "
-                "fewer usable docs, or a passage was skipped)"
-            )
         self._set_status(
-            f"generated {len(cases)} LLM candidate(s){shortfall} — "
-            "review each (origin=llm), keep/edit/delete"
+            "wrote gold for the chat question (origin=chat) — review, then Add case(s)"
         )
 
     def _on_save_case(self, _e: ft.Event) -> None:
-        """Commit the form: append a new case (Add) or overwrite the selected
-        one (Update), then persist. Wired to the right-column commit button."""
+        """Commit the form: Update the selected existing case, or Add ALL draft
+        pages as new cases (602 — one Add case(s) commits the whole batch), then
+        persist. Wired to both right-column commit buttons."""
         from knowledge_agent.evaluation.models import EvalDataset, save_dataset
 
         path = self._current_path()
         if path is None:
             self._set_status("Choose a dataset (Browse or New dataset) first.")
-            return
-        try:
-            case = self._read_form()
-        except Exception as exc:  # broad: validation / int-parse errors → status line
-            self._set_status(f"invalid case: {exc}")
             return
         if self._dataset is None:
             self._dataset = EvalDataset()
@@ -1816,15 +2002,24 @@ class DatasetTab:
         self._stamp_header()
 
         if self._selected is not None and 0 <= self._selected < len(self._dataset.cases):
+            # Edit mode: overwrite the selected case with the form.
+            try:
+                case = self._read_form()
+            except Exception as exc:  # broad: validation / int-parse → status line
+                self._set_status(f"invalid case: {exc}")
+                return
             self._dataset.cases[self._selected] = case
-            verb = "updated"
+            verb = "updated 1"
         else:
-            self._dataset.cases.append(case)
-            # Don't leave the just-added case selected — after an Add you're back
-            # in new-case mode (Add live, Update grey), not editing what you just
-            # added (which looked like the row was still in edit).
-            self._selected = None
-            verb = "added"
+            # Draft mode: read every page (strict) and append the valid batch —
+            # a page that fails validation aborts the whole add (all-or-nothing).
+            self._capture_page()
+            cases, err = self._cases_from_drafts()
+            if not cases:
+                self._set_status(err or "nothing to add — fill in the case first.")
+                return
+            self._dataset.cases.extend(cases)
+            verb = f"added {len(cases)}"
         try:
             save_dataset(self._dataset, path)
         except Exception as exc:  # broad: I/O failure → status line
@@ -1832,9 +2027,29 @@ class DatasetTab:
             return
         self._cases = self._dataset.cases
         self._path = path
-        self._render_list()
-        self._render_preview()
+        # Fresh blank page, ready for the next case; nothing left selected.
+        self._load_drafts([self._blank_snapshot()])
         self._set_status(f"{verb} — saved {len(self._cases)} case(s) to {path.name}")
+
+    def _cases_from_drafts(self) -> tuple[list[EvalCase], str | None]:
+        """Read every draft page (strict) into EvalCases; restore the displayed
+        page afterward. Returns (cases, error-or-None); a page that fails
+        validation aborts with a message naming its position (all-or-nothing)."""
+        saved = self._draft_index
+        cases: list[EvalCase] = []
+        err: str | None = None
+        for i, snap in enumerate(self._drafts):
+            self._restore_form(snap)
+            try:
+                cases.append(self._read_form())
+            except Exception as exc:  # broad: validation / parse → abort the add
+                where = f"case {i + 1}/{len(self._drafts)}" if len(self._drafts) > 1 else "case"
+                err = f"invalid {where}: {exc}"
+                cases = []
+                break
+        if self._drafts:
+            self._restore_form(self._drafts[min(saved, len(self._drafts) - 1)])
+        return cases, err
 
     def _delete_case(self, idx: int) -> None:
         """Delete case `idx` (wired to each card's Delete button) and persist."""

@@ -221,7 +221,7 @@ def test_query_from_chat_toggle_fills_question_and_provenance(fake_app):
     assert [t.role for t in tab._chat_conversation] == ["user", "assistant"]
     assert tab._chat_conversation[0].content == "valve trouble?"
     assert tab._chat_router_model == "claude-haiku-4-5"
-    assert tab.gen_multi_button.disabled is True  # a chat = one conversation = one case
+    assert tab.gen_count.disabled is True  # a chat = one conversation = one case
 
 
 def test_query_from_chat_toggle_reverts_without_a_chat(fake_app):
@@ -280,7 +280,7 @@ async def test_generate_one_from_chat_writes_gold_for_chat_question(fake_app):
             new=AsyncMock(return_value=[]),
         ),
     ):
-        await tab._on_generate_one(MagicMock())
+        await tab._on_generate(MagicMock())
     # Question stays the chat's distilled query; the LLM only filled the gold.
     assert tab.f["question"].value == "distilled: why did the valve fail?"
     assert tab.f["origin"].value == "chat"
@@ -304,15 +304,16 @@ def test_fill_form_restores_chat_provenance_and_checkbox(fake_app):
     assert tab._chat_conversation[0].content == "hi"
     assert tab._chat_router_model == "m1"
     assert tab.from_chat_check.value is True  # reflects origin
-    assert tab.gen_multi_button.disabled is True
+    assert tab.gen_count.disabled is True
 
 
-async def test_generate_multiple_appends_candidates_and_saves(fake_app, tmp_path):
-    """Generate multiple drafts candidates via the backend, appends them
-    (origin=llm) to the dataset, and saves to the path."""
+async def test_generate_multiple_drafts_batch_into_buffer(fake_app, tmp_path):
+    """LLM with nr.>1 drafts a batch into the form buffer for review — the pager
+    appears, nothing is written until Add case(s), then all pages are saved."""
     p = tmp_path / "gen.json"
     tab = _tab(fake_app, p)
     tab.gen_model_dropdown.value = "some-model"  # chosen generation model
+    tab.gen_count.value = "2"
     fake_cases = [
         EvalCase(id="gen-00-a", question="A?", origin="llm", expected_sources=["d1"]),
         EvalCase(id="gen-01-b", question="B?", origin="llm", expected_sources=["d2"]),
@@ -322,34 +323,45 @@ async def test_generate_multiple_appends_candidates_and_saves(fake_app, tmp_path
         new_callable=AsyncMock,
         return_value=fake_cases,
     ) as gen_mock:
-        await tab._run_generate_multiple(2, p)
+        await tab._on_generate(MagicMock())
 
-    gen_mock.assert_awaited_once_with(
-        2, model="some-model", temperature=0.3
-    )  # picker threads through
+    gen_mock.assert_awaited_once_with(2, model="some-model", temperature=0.3)
+    assert len(tab._drafts) == 2  # a two-page batch in the buffer
+    assert tab.pager.visible is True  # multi-page → pager shown
+    assert tab.f["id"].value == "gen-00-a"  # form shows page 1
+    assert not p.exists()  # nothing written until Add case(s)
+
+    tab._on_save_case(MagicMock())  # Add case(s) commits the whole batch
     ds = load_dataset(p)
     assert [c.id for c in ds.cases] == ["gen-00-a", "gen-01-b"]
     assert all(c.origin == "llm" for c in ds.cases)
-    assert "generated 2" in tab.status.value
+    assert "added 2" in tab.status.value
 
 
-def test_generate_multiple_requires_dataset_path(fake_app):
+def test_add_requires_dataset_path(fake_app):
+    """Drafting needs no path (it stays in the buffer), but Add case(s) does —
+    it surfaces 'choose a dataset' when there's nowhere to save."""
     tab = _tab(fake_app)  # no path → cleared dataset field
-    tab.gen_model_dropdown.value = "some-model"  # past the required-model guard
-    tab._on_generate_multiple(MagicMock())
+    tab.f["id"].value = "c1"
+    tab.f["question"].value = "q?"
+    tab._on_save_case(MagicMock())
     assert "choose a dataset" in tab.status.value.lower()
 
 
-def test_generate_multiple_confirms_before_running(fake_app, tmp_path):
-    """Generate multiple asks first — it opens a confirm dialog rather than
-    generating immediately (nothing written until you confirm)."""
+async def test_generate_warns_when_form_has_unsaved_content(fake_app, tmp_path):
+    """Generate is guarded: with unsaved content in the form it opens the
+    discard warning instead of generating over it."""
     p = tmp_path / "gen.json"
     tab = _tab(fake_app, p)
     tab.gen_model_dropdown.value = "some-model"  # past the required-model guard
-    tab.gen_count.value = "3"
-    tab._on_generate_multiple(MagicMock())
-    fake_app.page.show_dialog.assert_called_once()
-    assert not p.exists()  # nothing generated or written yet
+    tab.f["question"].value = "a half-typed draft"  # unsaved content
+    with patch(
+        "knowledge_agent.evaluation.generator.generate_from_corpus",
+        new_callable=AsyncMock,
+    ) as gen_mock:
+        await tab._on_generate(MagicMock())
+    fake_app.page.show_dialog.assert_called_once()  # discard warning shown
+    gen_mock.assert_not_awaited()  # not generated over the unsaved draft
 
 
 async def test_generate_one_fills_form_without_saving(fake_app, tmp_path):
@@ -364,11 +376,88 @@ async def test_generate_one_fills_form_without_saving(fake_app, tmp_path):
         new_callable=AsyncMock,
         return_value=[candidate],
     ):
-        await tab._on_generate_one(MagicMock())
+        await tab._on_generate(MagicMock())
     assert tab.f["id"].value == "draft-1"
     assert tab.f["origin"].value == "llm"
     assert tab._selected is None  # new case → commits via Add
     assert not p.exists()  # nothing written until Add case
+
+
+# ---- draft buffer / pager (602) ----
+
+
+def _batch(tab, *ids):
+    """Load a multi-page draft batch from case ids."""
+    cases = [EvalCase(id=i, question=f"{i}?", origin="llm") for i in ids]
+    tab._load_drafts(tab._snapshots_from_cases(cases))
+
+
+def test_build_starts_with_one_blank_page(fake_app):
+    """The tab opens on a single blank draft page — form editable, no pager."""
+    tab = _tab(fake_app)
+    assert len(tab._drafts) == 1
+    assert tab.pager.visible is False  # a single page shows no pager
+    assert tab.f["id"].value == ""
+
+
+def test_pager_navigates_and_preserves_edits(fake_app):
+    """< n/N > flips pages and folds the current page's edits into the buffer
+    first, so an edit survives paging away and back."""
+    tab = _tab(fake_app)
+    _batch(tab, "b1", "b2")
+    assert tab.pager.visible is True
+    assert tab.page_label.value == "1/2"
+    tab.f["question"].value = "edited one?"  # edit page 1
+    tab._on_next_page(MagicMock())
+    assert tab.page_label.value == "2/2"
+    assert tab.f["id"].value == "b2"  # page 2
+    tab._on_prev_page(MagicMock())
+    assert tab.f["question"].value == "edited one?"  # the edit survived the flip
+
+
+def test_delete_page_drops_current_from_batch(fake_app):
+    """The X removes the current page; the pager hides once one page is left."""
+    tab = _tab(fake_app)
+    _batch(tab, "b1", "b2")
+    tab._on_delete_page(MagicMock())  # drop page 1 (b1)
+    assert len(tab._drafts) == 1
+    assert tab.f["id"].value == "b2"  # showing the survivor
+    assert tab.pager.visible is False  # one left → pager hidden
+
+
+def test_do_blank_clears_the_form_to_one_page(fake_app):
+    tab = _tab(fake_app)
+    tab.f["id"].value = "x"
+    tab.f["question"].value = "y?"
+    tab._do_blank()
+    assert tab.f["id"].value == ""
+    assert tab.f["question"].value == ""
+    assert len(tab._drafts) == 1  # one fresh blank page
+
+
+def test_edit_existing_warns_when_form_has_unsaved_draft(fake_app, tmp_path):
+    """Selecting a list row to edit is guarded: with an unsaved draft it warns
+    and does NOT switch into edit mode."""
+    tab = _tab(fake_app)
+    tab._load(_dataset_file(tmp_path))
+    tab.f["question"].value = "a draft I care about"  # unsaved content
+    tab._select(0)
+    fake_app.page.show_dialog.assert_called_once()  # discard warning shown
+    assert tab._selected is None  # stayed in draft mode (did not switch)
+
+
+def test_add_commits_the_culled_batch(fake_app, tmp_path):
+    """Add case(s) commits every remaining page at once — a culled batch lands
+    exactly the kept pages."""
+    p = tmp_path / "batch.json"
+    tab = _tab(fake_app, p)
+    _batch(tab, "k1", "k2", "k3")
+    tab._show_page(1)  # go to k2
+    tab._on_delete_page(MagicMock())  # cull it → k1, k3 remain
+    tab._on_save_case(MagicMock())  # Add case(s)
+    ds = load_dataset(p)
+    assert [c.id for c in ds.cases] == ["k1", "k3"]
+    assert "added 2" in tab.status.value
 
 
 def test_build_opens_empty(fake_app):
