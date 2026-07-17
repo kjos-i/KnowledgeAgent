@@ -515,8 +515,8 @@ class DatasetTab:
         # Two premade dropdowns (Hybrid / KG groups) — picking one drops it into
         # the knob-set list (read-only), like adding a judge to the judge panel.
         # Each preset picker gets the app-standard outlined box (a bare Flet
-        # Dropdown has no border) + a fixed width so the pickers and "Add from
-        # form" stay grouped rather than stretching apart on a wide window (614).
+        # Dropdown has no border); the row below wraps each so it fills its column
+        # and grows/shrinks with the window (614).
         self.hybrid_preset_dd = apply_input_box(
             ft.Dropdown(
                 options=[
@@ -588,15 +588,19 @@ class DatasetTab:
                         padding=ft.Padding.only(top=16),
                     ),
                     # Both preset pickers + "Add from form" share one row (614).
-                    # The pickers expand + STRETCH so each dropdown fills its half
-                    # and they narrow with the window; the button keeps its width
-                    # on the right, vertically centered against the dropdowns.
+                    # Each dropdown is wrapped in Row([Container(expand=True)]) so
+                    # it FILLS its expand=1 column and grows/shrinks with the
+                    # window — a bare Flet Dropdown ignores the column's STRETCH
+                    # (same fill trick labeled_field uses). Button stays on the
+                    # right, centered against the dropdowns.
                     ft.Row(
                         [
                             ft.Column(
                                 [
                                     ft.Text("Hybrid preset", size=12, color=ft.Colors.GREY_400),
-                                    self.hybrid_preset_dd,
+                                    ft.Row(
+                                        [ft.Container(content=self.hybrid_preset_dd, expand=True)]
+                                    ),
                                 ],
                                 spacing=2,
                                 expand=1,
@@ -605,7 +609,7 @@ class DatasetTab:
                             ft.Column(
                                 [
                                     ft.Text("KG preset", size=12, color=ft.Colors.GREY_400),
-                                    self.kg_preset_dd,
+                                    ft.Row([ft.Container(content=self.kg_preset_dd, expand=True)]),
                                 ],
                                 spacing=2,
                                 expand=1,
