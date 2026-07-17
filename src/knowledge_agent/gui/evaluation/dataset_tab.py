@@ -588,44 +588,22 @@ class DatasetTab:
                         padding=ft.Padding.only(top=16),
                     ),
                     # Both preset pickers + "Add from form" share one row (614).
-                    # Each dropdown is wrapped in Row([Container(expand=True)]) so
-                    # it FILLS its expand=1 column and grows/shrinks with the
-                    # window — a bare Flet Dropdown ignores the column's STRETCH
-                    # (same fill trick labeled_field uses). Button stays on the
-                    # right, centered against the dropdowns.
+                    # Each dropdown goes through labeled_field (caption inline-left)
+                    # wrapped in an expand=1 Container, so it FILLS its half and
+                    # grows/shrinks with the window — a bare Flet Dropdown ignores
+                    # column STRETCH; this is the same fill mechanism the Model
+                    # field uses. Button stays on the right.
                     ft.Row(
                         [
-                            ft.Column(
-                                [
-                                    ft.Text("Hybrid preset", size=12, color=ft.Colors.GREY_400),
-                                    ft.Row(
-                                        [ft.Container(content=self.hybrid_preset_dd, expand=True)]
-                                    ),
-                                ],
-                                spacing=2,
+                            ft.Container(
+                                labeled_field("Hybrid preset", self.hybrid_preset_dd),
                                 expand=1,
-                                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                             ),
-                            ft.Column(
-                                [
-                                    ft.Text("KG preset", size=12, color=ft.Colors.GREY_400),
-                                    ft.Row([ft.Container(content=self.kg_preset_dd, expand=True)]),
-                                ],
-                                spacing=2,
+                            ft.Container(
+                                labeled_field("KG preset", self.kg_preset_dd),
                                 expand=1,
-                                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                             ),
-                            # A blank caption above the button mirrors the dropdown
-                            # columns' caption + spacing, so CENTER lines the
-                            # button's middle up with the dropdowns' middle rather
-                            # than with the captions above them.
-                            ft.Column(
-                                [
-                                    ft.Text(" ", size=12),
-                                    self.add_from_form_button,
-                                ],
-                                spacing=2,
-                            ),
+                            self.add_from_form_button,
                         ],
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
