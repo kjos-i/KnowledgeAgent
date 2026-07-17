@@ -491,13 +491,9 @@ class DatasetTab:
         # disabled state (set in _sync_commit_buttons) gates which applies, and
         # _selected drives append-vs-overwrite. Add is also grayed in suite mode.
         self.add_button = ft.Button("Add case(s)", icon=ft.Icons.ADD, on_click=self._on_save_case)
-        self.update_button = ft.Button(
-            "Update case", icon=ft.Icons.SAVE, on_click=self._on_save_case
-        )
-        # Icon-only (frees ~60px) so Refresh + Update + Add + the suite toggle
-        # all fit on one line at typical widths without clipping (613).
-        refresh_button = ft.IconButton(
-            ft.Icons.REFRESH,
+        self.update_button = ft.Button("Update case", on_click=self._on_save_case)
+        refresh_button = ft.Button(
+            "Refresh",
             tooltip="Reload the dataset from disk and refresh the case list",
             on_click=self._on_refresh,
         )
@@ -759,9 +755,9 @@ class DatasetTab:
             ft.Column(
                 [
                     # ============ Section: Commit / suite ============
-                    # The suite toggle rides the commit-button row: one line when
-                    # wide, wrapping when narrow so nothing is clipped off the
-                    # right edge (613).
+                    # The suite toggle sits inline with the commit buttons on one
+                    # line. No wrap: Flet's wrap drops the checkbox to a new line
+                    # even with ample free space to its right (613).
                     ft.Row(
                         [
                             refresh_button,
@@ -770,7 +766,6 @@ class DatasetTab:
                             self.generate_suite_check,
                         ],
                         spacing=8,
-                        wrap=True,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     self.suite_panel,
