@@ -339,7 +339,7 @@ class Settings(BaseSettings):
         ),
     )
 
-    # ----- Agent retrieval mode. Six topologies are planned across the
+    # ----- Agent retrieval mode. Five retrieval topologies span the
     # two stores (LanceDB hybrid + Neo4j graph). The graph state carries
     # the per-invocation `retrieval_mode`; this default is what the agent
     # uses when the caller doesn't override.

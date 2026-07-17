@@ -15,7 +15,7 @@ Two storage backends serve different query shapes:
 - **[LanceDB](src/knowledge_agent/search/)** — embedded vector + BM25 hybrid search over chunked document text. Answers content questions ("what does the literature say about X?").
 - **[Neo4j](src/knowledge_agent/kg/)** — knowledge graph spanning papers, authors, citations, venues, topics, entities, ontology canonicals, typed relations, and cross-document links. Answers structural and cross-document questions ("which authors cite each other?", "papers connected by shared concepts").
 
-The agent ([nodes.py](src/knowledge_agent/nodes.py), [graph.py](src/knowledge_agent/graph.py)) orchestrates retrieval across both stores in one of six modes.
+The agent ([nodes.py](src/knowledge_agent/nodes.py), [graph.py](src/knowledge_agent/graph.py)) orchestrates retrieval across both stores in one of five modes.
 
 ---
 
@@ -34,10 +34,13 @@ src/knowledge_agent/
 ├── embedder_factory.py       # Provider-agnostic embedding dispatch (4 providers)
 ├── llm_lifecycle.py          # GUI plan/execute for LLM provider install
 ├── embedder_lifecycle.py     # GUI plan/execute for embedder provider install
+├── cli.py                    # Headless CLI — ka ingest / query / health / eval
+├── health.py                 # Startup health checks (DB reachability, config)
+├── artifacts.py              # Save / export answers + chats (md / txt / docx / json)
 │
 ├── ingestion/                # Document ingest pipeline
 │   ├── pipeline.py           # Per-doc orchestrator: parse → embed → write
-│   ├── bulk_ops.py           # 11 multi-doc operations (delete, backfill, sync, ...)
+│   ├── bulk_ops.py           # 14 multi-doc operations (delete, backfill, sync, ...)
 │   ├── parse.py              # Format dispatcher
 │   ├── parsers/              # docling_parser, code_parser, json_parser
 │   ├── parser_lifecycle.py   # parsers-asr / parsers-code install ops
@@ -51,7 +54,7 @@ src/knowledge_agent/
 │   ├── schema_as_prompt.py   # Schema → LLM system prompt for Cypher generation
 │   ├── cypher_safety.py      # Read-only validation, LIMIT wrapping
 │   ├── openalex_writes.py    # L1-L4: papers, authors, citations, topics
-│   ├── chunks_writes.py      # L5: per-chunk :Chunk nodes
+│   ├── chunk_writes.py      # L5: per-chunk :Chunk nodes
 │   ├── entity_writes.py      # L6: extracted entities
 │   ├── ontology_*_writes.py  # L7: 18 ontology importers (one file per ontology)
 │   ├── ontology_helpers.py   # Shared pronto + rdflib + Neo4j-write primitives
@@ -65,16 +68,22 @@ src/knowledge_agent/
 │
 ├── entity_extractors/        # NER adapters (L6)
 │   ├── base.py               # Mention dataclass + adapter contract
-│   ├── dispatcher.py         # Routes corpus.toml extractor=... to adapter
+│   ├── __init__.py           # Dispatch table: routes corpus.toml extractor to adapter
 │   ├── llm.py                # Anthropic Haiku (or active LLM provider)
 │   ├── gliner.py             # GLiNER multilingual zero-shot
 │   ├── gliner_biomed.py      # GLiNER-BioMed biomedical zero-shot
 │   ├── hunflair2.py          # HunFlair2 biomedical (Flair, 5-label)
 │   └── extractor_lifecycle.py # GUI plan/execute for extractor install
 │
-└── search/                   # LanceDB layer
-    ├── client.py             # Connection lifecycle, write, hybrid/fts/vector search
-    └── schema.py             # chunks table schema (pinned at first creation)
+├── search/                   # LanceDB layer
+│   ├── client.py             # Connection lifecycle, write, hybrid/fts/vector search
+│   └── schema.py             # chunks table schema (pinned at first creation)
+│
+├── evaluation/               # Evaluation harness — metrics, LLM-judge panel,
+│                             #   SQLite ledger + JSON/CSV reports (ka eval / GUI)
+│
+└── gui/                      # Flet desktop app — Search / Library / Evaluation /
+                              #   Settings / Log / Info tabs (entry point: ka-gui)
 ```
 
 ---
@@ -265,7 +274,7 @@ This matches how SQLAlchemy / Django / FastAPI all handle layered errors: except
 
 Three tiers — see [tests/unit/](tests/unit/), [tests/integration/](tests/integration/), `tests/e2e/`.
 
-- **Unit** — fast, pure-Python, no real services. Mocks for Neo4j / LanceDB / Voyage / LLMs. 1645+ tests run in ~35 seconds.
+- **Unit** — fast, pure-Python, no real services. Mocks for Neo4j / LanceDB / Voyage / LLMs. 2,400+ tests run in ~35 seconds.
 - **Integration** — real services via the test instance (`@pytest.mark.integration`). Hits Neo4j Desktop test instance + LanceDB on-disk. Opt-in via `pytest -m integration`.
 - **e2e** — Flet app launched end-to-end (`@pytest.mark.e2e`). Opt-in via `pytest -m e2e`.
 

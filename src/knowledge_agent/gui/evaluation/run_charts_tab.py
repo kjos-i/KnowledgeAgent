@@ -12,8 +12,8 @@ Body (all native Flet — canvas ships with Flet, no extra deps):
   - Latency by Case — total latency per case (KA has no retrieval/LLM split).
   - Token Usage by Case — stacked agent input + output tokens per case.
 
-Reads the ledger on `refresh()` only. (SSOT TODO: the run rail + run-details
-rendering is mirrored from RunSummaryTab — extract a shared helper.)
+Reads the ledger on `refresh()` only. The run rail + run-resolution scaffolding
+is shared with Run Summary via `_run_dashboard`.
 """
 
 from __future__ import annotations
@@ -31,8 +31,8 @@ from knowledge_agent.gui._styles import (
     section_divider,
 )
 from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail
+from knowledge_agent.gui.evaluation._run_dashboard import dashboard_shell, resolve_run_or_empty
 from knowledge_agent.gui.evaluation.run_summary_tab import _score_color
-from knowledge_agent.gui.views._frame import view_header
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -294,18 +294,7 @@ class RunChartsTab:
             expand=True,
             spacing=16,
         )
-        return ft.Row(
-            [
-                rail_ctl,
-                ft.Column(
-                    [view_header("Run Charts"), self.body],
-                    expand=True,
-                    spacing=8,
-                ),
-            ],
-            expand=True,
-            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
-        )
+        return dashboard_shell(rail_ctl, "Run Charts", self.body)
 
     # ---- data / refresh ---------------------------------------------------
 
@@ -325,20 +314,10 @@ class RunChartsTab:
         the rail owns the selectors + recipe panel; this owns the body."""
         if self.body is None:
             return
-        run_id = self.coordinator.selected_run_id
-        if run_id is None:
-            self.body.controls = [ft.Text("No evaluation runs recorded yet.", italic=True)]
-            self.app.page.update()
+        resolved = resolve_run_or_empty(self.app, self.coordinator, self.body)
+        if resolved is None:
             return
-        from knowledge_agent.gui.evaluation._common import filtered_run
-
-        # The shared origin filter re-scopes the charts to the checked provenances
-        # (all checked = the stored run, unchanged).
-        run, cases = filtered_run(self.app, run_id, self.coordinator.selected_origins)
-        if run is None:
-            self.body.controls = [ft.Text("Run not found — press Refresh.", italic=True)]
-            self.app.page.update()
-            return
+        run, cases = resolved
         self._runs = self._ledger().list_runs()
         self._cases = cases
         # A newly loaded/refreshed run resets the chart filters to all-selected;

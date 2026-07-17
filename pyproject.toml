@@ -14,7 +14,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
-    "Development Status :: 1 - Planning",
+    "Development Status :: 4 - Beta",
 ]
 dependencies = [
     "neo4j>=5,<6",
@@ -89,6 +89,7 @@ ka-gui = "knowledge_agent.gui.app:main"
 dev = [
     "pytest>=9.0.3,<10.0.0",
     "pytest-asyncio>=0.23,<1",
+    "pytest-cov>=5",
     "ruff>=0.7.0",
     "pre-commit>=4,<5",
     "hypothesis>=6.100,<7",

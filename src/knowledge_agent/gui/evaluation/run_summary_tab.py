@@ -21,7 +21,7 @@ import flet as ft
 from knowledge_agent.gui._markdown import themed_markdown
 from knowledge_agent.gui._styles import dashboard_section_header, section_divider, thin_rule
 from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail
-from knowledge_agent.gui.views._frame import view_header
+from knowledge_agent.gui.evaluation._run_dashboard import dashboard_shell, resolve_run_or_empty
 
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
@@ -81,18 +81,7 @@ class RunSummaryTab:
             expand=True,
             spacing=14,
         )
-        return ft.Row(
-            [
-                rail_ctl,
-                ft.Column(
-                    [view_header("Run Summary"), self.body],
-                    expand=True,
-                    spacing=8,
-                ),
-            ],
-            expand=True,
-            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
-        )
+        return dashboard_shell(rail_ctl, "Run Summary", self.body)
 
     # ---- data / refresh ---------------------------------------------------
 
@@ -113,26 +102,19 @@ class RunSummaryTab:
         the rail owns the selectors + recipe panel; this owns the body."""
         if self.body is None:
             return
-        run_id = self.coordinator.selected_run_id
-        if run_id is None:
-            self.body.controls = [ft.Text("No evaluation runs recorded yet.", italic=True)]
-            self.app.page.update()
+        resolved = resolve_run_or_empty(self.app, self.coordinator, self.body)
+        if resolved is None:
             return
-        from knowledge_agent.gui.evaluation._common import filtered_run
-
-        # The shared origin filter re-scopes the KPIs + case list to the checked
-        # provenances (all checked = the stored run, unchanged).
-        origins = self.coordinator.selected_origins
-        run, cases = filtered_run(self.app, run_id, origins)
-        if run is None:
-            self.body.controls = [ft.Text("Run not found — press Refresh.", italic=True)]
-            self.app.page.update()
-            return
+        run, cases = resolved
         self._cases = cases
         self._runs = self._ledger().list_runs()
         # Previous run (next-lower run_id) drives the delta pills on the KPI
         # cards — mirroring the Streamlit dashboard's compare-to-previous view.
         # Filter it too, so the delta is like-for-like under the active filter.
+        from knowledge_agent.gui.evaluation._common import filtered_run
+
+        run_id = self.coordinator.selected_run_id
+        origins = self.coordinator.selected_origins
         prev_id = max((r["run_id"] for r in self._runs if r["run_id"] < run_id), default=None)
         prev_run = filtered_run(self.app, prev_id, origins)[0] if prev_id is not None else None
         self.body.controls = self._build_body(run, prev_run, cases)
