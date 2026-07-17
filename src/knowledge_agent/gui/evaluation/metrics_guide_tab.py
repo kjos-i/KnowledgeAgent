@@ -10,9 +10,14 @@ own keyed control. That does two things Flet's `ft.Markdown` can't on its own:
 (1) it strips the raw anchor tags — Flet would otherwise render `<a id="…">`
 as literal visible text — and (2) it makes the glance-table links actually
 work: an `#anchor` tap scrolls the body to the matching `ScrollKey` (Flet's
-markdown has no built-in in-page anchor navigation). A `MarkdownStyleSheet`
-bumps the body text one size up from Flet's small default. The `.md` keeps the
-anchor tags so it still jumps when viewed on GitHub / a normal markdown viewer.
+markdown has no built-in in-page anchor navigation). The `.md` keeps the anchor
+tags so it still jumps when viewed on GitHub / a normal markdown viewer.
+
+Prose + tables render through the shared `gui/_markdown.render_markdown`, which
+themes the markdown to match VS Code and pulls GFM tables out into native
+controls (Flet's `ft.Markdown` draws tables as an equal-width grid we can't
+restyle). That renderer is shared with every other `ft.Markdown` site app-wide;
+only the anchor-splitting + in-page scroll below is guide-specific.
 
 Has a left rail matching the other Evaluation tabs (Refresh reloads the doc +
 a short summary), so the four tabs share the same two-column layout.
@@ -26,26 +31,13 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
+from knowledge_agent.gui._markdown import render_markdown
 from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail
 from knowledge_agent.gui.views._frame import empty_state, view_header
 
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
     from knowledge_agent.gui.evaluation.evaluation_view import EvaluationView
-
-# Body text one size up from Flet markdown's small default (still inside the
-# tab's 12–16 range), applied to paragraphs, links, lists, emphasis, and table
-# cells so the whole doc reads at one consistent, legible size.
-_GUIDE_TEXT_SIZE = 15
-_MD_STYLE = ft.MarkdownStyleSheet(
-    p_text_style=ft.TextStyle(size=_GUIDE_TEXT_SIZE),
-    a_text_style=ft.TextStyle(size=_GUIDE_TEXT_SIZE, color=ft.Colors.BLUE_400),
-    strong_text_style=ft.TextStyle(size=_GUIDE_TEXT_SIZE, weight=ft.FontWeight.BOLD),
-    em_text_style=ft.TextStyle(size=_GUIDE_TEXT_SIZE, italic=True),
-    list_bullet_text_style=ft.TextStyle(size=_GUIDE_TEXT_SIZE),
-    table_head_text_style=ft.TextStyle(size=_GUIDE_TEXT_SIZE, weight=ft.FontWeight.BOLD),
-    table_body_text_style=ft.TextStyle(size=_GUIDE_TEXT_SIZE),
-)
 
 # Each `<a id="X"></a>` starts a keyed section; the tag itself is removed from
 # the rendered text (Flet would show it literally) and reused as the scroll key.
@@ -117,17 +109,22 @@ class MetricsGuideTab:
         for anchor, chunk in _split_anchored(path.read_text(encoding="utf-8")):
             if not chunk.strip():
                 continue
-            md = ft.Markdown(
-                chunk,
-                selectable=True,
-                extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-                md_style_sheet=_MD_STYLE,
-                on_tap_link=self._on_tap_link,
-            )
+            # Shared renderer: themed prose + GFM tables as native controls. Links
+            # are wired to the in-page anchor-scroll handler.
+            content = render_markdown(chunk, on_tap_link=self._on_tap_link)
             # An anchored section becomes a keyed Container so a link can scroll
             # to it; the leading (pre-anchor) chunk is rendered as-is.
-            controls.append(ft.Container(key=ft.ScrollKey(anchor), content=md) if anchor else md)
-        self._scroll = ft.Column(controls=controls, scroll=ft.ScrollMode.AUTO, expand=True)
+            controls.append(
+                ft.Container(key=ft.ScrollKey(anchor), content=content) if anchor else content
+            )
+        # STRETCH so the native tables (whose body columns fill + wrap) span the
+        # full width instead of collapsing to their content.
+        self._scroll = ft.Column(
+            controls=controls,
+            scroll=ft.ScrollMode.AUTO,
+            expand=True,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        )
         return self._scroll
 
     async def _on_tap_link(self, e: ft.Event) -> None:

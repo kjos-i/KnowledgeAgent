@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 import flet as ft
 
 from knowledge_agent.artifacts import render_answer_markdown
+from knowledge_agent.gui._markdown import themed_markdown
 from knowledge_agent.gui.views._frame import empty_state, view_with_header
 
 if TYPE_CHECKING:
@@ -59,16 +60,10 @@ class LatestView:
     def build(self) -> ft.Control:
         if self.answer is None:
             body: ft.Control = empty_state("Search result will show here once you ask a question.")
-            return view_with_header("Latest Result", body)
+            return view_with_header("View result from search", body)
 
         md = render_answer_markdown(self.answer, self.query)
-        controls: list[ft.Control] = [
-            ft.Markdown(
-                md,
-                selectable=True,
-                extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-            )
-        ]
+        controls: list[ft.Control] = [themed_markdown(md)]
 
         # Extract figure sources and render a thumbnail gallery. Any
         # ChunkSource with content_type='figure' and an existing file

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import flet as ft
+
 from knowledge_agent.evaluation.ledger import EvalLedger
 from knowledge_agent.gui.evaluation._common import ALL_ORIGINS
 from knowledge_agent.gui.evaluation.run_charts_tab import RunChartsTab
@@ -104,3 +106,26 @@ def test_n_present_counts_cases_with_a_value():
     tab._cases = [{"mrr": 1.0}, {"mrr": None}, {"mrr": 0.5}]
     assert tab._n_present("mrr") == 2
     assert tab._n_present("hit_at_k") == 0  # no case has this metric
+
+
+def test_metric_scores_chart_defaults_all_and_filters(fake_app, tmp_path):
+    """The 'Metric Scores by Case' chart (moved here from Run Summary) offers the
+    0-1 score columns that have data, defaults every metric/case selected, and
+    de-selecting every metric swaps the chart for a 'select at least one' note."""
+    led = EvalLedger(tmp_path / "l.db")
+    led.save_run(_report_multi())  # c1/c2/c3 have hit_at_k + mrr values
+    coordinator = MagicMock(selected_suite=None, selected_origins=set(ALL_ORIGINS))
+    coordinator.selected_run_id = None
+    tab = RunChartsTab(fake_app, coordinator=coordinator)
+    tab.build()
+    with patch("knowledge_agent.gui.evaluation._common.active_eval_ledger", return_value=led):
+        tab.refresh()
+    cols = {c for c, _ in tab._chart_metric_cols(tab._cases)}
+    assert "hit_at_k" in cols  # a 0-1 score column with data is chartable
+    assert tab._chart_metrics == cols  # defaults to all metrics selected
+    assert tab._chart_host is not None  # chart rendered into its host
+    tab._on_metric_toggle("hit_at_k", False)  # de-select a metric → redraw
+    assert "hit_at_k" not in tab._chart_metrics
+    for metric in list(tab._chart_metrics):  # de-select the rest
+        tab._on_metric_toggle(metric, False)
+    assert isinstance(tab._draw_metric_chart(tab._cases), ft.Text)  # guidance note

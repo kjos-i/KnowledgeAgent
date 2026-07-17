@@ -133,11 +133,11 @@ class IngestTab:
             visible=False,
         )
         self.progress_bar = ft.ProgressBar(value=0, visible=False)
-        # Cancel button — hidden until a folder ingest is executing. Stops at
-        # the next document boundary (the current file finishes first).
+        # Cancel button — always visible but greyed out until a folder ingest is
+        # executing. Stops at the next document boundary (current file finishes).
         self.cancel_button = ft.Button(
             content=centered_label("Cancel"),
-            visible=False,
+            disabled=True,
             on_click=self._on_cancel_clicked,
         )
         self.skip_manual_checkbox = ft.Checkbox(
@@ -1015,8 +1015,7 @@ class IngestTab:
         # Arm the Cancel button for this run (cooperative cancel between files).
         self._cancel_requested = False
         if self.cancel_button is not None:
-            self.cancel_button.visible = True
-            self.cancel_button.disabled = False
+            self.cancel_button.disabled = False  # enable (it's greyed when idle)
         self._set_busy(True, f"{action}: working…")
         self._begin_progress(total)
 
@@ -1048,13 +1047,13 @@ class IngestTab:
                 )
                 msg = self._fmt_sync_result(result)
         except Exception as exc:
-            self._hide_cancel_button()
+            self._disable_cancel_button()
             self._end_progress()
             self._set_busy(False, f"{action} failed: {exc}")
             return
         if self._cancel_requested:
             msg = f"Cancelled — {msg}"
-        self._hide_cancel_button()
+        self._disable_cancel_button()
         self._end_progress()
         self._set_busy(False, msg)
         self._notify_ingest_complete()
@@ -1070,10 +1069,10 @@ class IngestTab:
         self._write_status("Cancelling — will stop after the current file…")
         self.app.page.update()
 
-    def _hide_cancel_button(self) -> None:
+    def _disable_cancel_button(self) -> None:
+        """Grey out Cancel when no folder ingest is running (it stays visible)."""
         if self.cancel_button is not None:
-            self.cancel_button.visible = False
-            self.cancel_button.disabled = False
+            self.cancel_button.disabled = True
 
     # ----- progress bar (execute phase) -----------------------------------
 

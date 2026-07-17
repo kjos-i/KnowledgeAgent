@@ -106,3 +106,36 @@ async def test_browse_folder_rolls_back_on_save_failure(tmp_path):
     with patch(_SAVE, side_effect=ConfigError("disk full")):
         await tab.on_browse_folder(MagicMock())
     assert tab.app.gui_config.results_dir is None  # reverted, not left half-set
+
+
+# ---- Block 0b: Save chat (its own separate settings) ----
+
+
+def test_chat_save_format_persists_separately_from_results():
+    tab = _tab()  # chat md checked by default
+    tab.chat_format_checkboxes["txt"].value = True
+    with patch(_SAVE):
+        tab.on_chat_format_changed(MagicMock())
+    assert tab.app.gui_config.chat_save_formats == ["md", "txt"]
+    assert tab.app.gui_config.save_formats == ["md"]  # results untouched
+
+
+def test_chat_save_format_keeps_at_least_one():
+    tab = _tab()
+    tab.chat_format_checkboxes["md"].value = False  # uncheck the only one
+    with patch(_SAVE) as save:
+        tab.on_chat_format_changed(MagicMock())
+    save.assert_not_called()
+    assert tab.app.gui_config.chat_save_formats == ["md"]
+    assert tab.chat_format_checkboxes["md"].value is True  # re-checked
+
+
+async def test_chat_browse_folder_persists_chat_dir(tmp_path):
+    tab = _tab()
+    tab.app.file_picker = MagicMock()
+    tab.app.file_picker.get_directory_path = AsyncMock(return_value=str(tmp_path))
+    with patch(_SAVE):
+        await tab.on_chat_browse_folder(MagicMock())
+    assert tab.app.gui_config.chat_dir == tmp_path
+    assert tab.chat_dir_text.value == str(tmp_path)
+    assert tab.app.gui_config.results_dir is None  # results folder untouched

@@ -299,8 +299,8 @@ async def test_save_answer_without_default_dir_asks_then_hints(
 async def test_save_chat_drops_json_and_falls_back_to_md(fake_page: MagicMock, tmp_path: Path):
     """json is answer-only — a chat save with json-only selection falls back to md."""
     app = _make_app(fake_page)
-    app.gui_config.results_dir = tmp_path
-    app.gui_config.save_formats = ["json"]
+    app.gui_config.chat_dir = tmp_path
+    app.gui_config.chat_save_formats = ["json"]
     app.messages = [HumanMessage(content="hi")]
     app.last_query = "q"
     app.file_picker = MagicMock()
@@ -310,6 +310,28 @@ async def test_save_chat_drops_json_and_falls_back_to_md(fake_page: MagicMock, t
 
     assert list(tmp_path.glob("*.md"))  # fell back to md
     assert not list(tmp_path.glob("*.json"))  # json dropped for a transcript
+
+
+async def test_save_chat_uses_its_own_dir_and_formats(fake_page: MagicMock, tmp_path: Path):
+    """Save Chat reads chat_dir + chat_save_formats — independent of the results
+    settings (which stay pointed elsewhere and are untouched)."""
+    app = _make_app(fake_page)
+    chat_dir = tmp_path / "chats"
+    chat_dir.mkdir()
+    app.gui_config.chat_dir = chat_dir
+    app.gui_config.chat_save_formats = ["md", "txt"]
+    app.gui_config.results_dir = tmp_path / "results"  # different — must be untouched
+    app.gui_config.save_formats = ["json"]
+    app.messages = [HumanMessage(content="hi")]
+    app.last_query = "q"
+    app.file_picker = MagicMock()
+    app.file_picker.get_directory_path = AsyncMock()
+
+    await app.on_save_chat(MagicMock())
+
+    app.file_picker.get_directory_path.assert_not_awaited()  # chat_dir set → no picker
+    assert list(chat_dir.glob("*.md")) and list(chat_dir.glob("*.txt"))
+    assert not (tmp_path / "results").exists()  # results dir untouched
 
 
 async def test_save_answer_surfaces_save_error(fake_page: MagicMock, tmp_path: Path):

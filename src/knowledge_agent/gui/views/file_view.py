@@ -9,6 +9,7 @@ saved plain-text answer shows exactly its characters. Same shape as
 
 import flet as ft
 
+from knowledge_agent.gui._markdown import themed_markdown
 from knowledge_agent.gui.views._frame import view_with_header
 
 
@@ -29,11 +30,7 @@ class FileView:
                 font_family="monospace",
             )
         else:
-            content_control = ft.Markdown(
-                self.content,
-                selectable=True,
-                extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-            )
+            content_control = themed_markdown(self.content)
         body = ft.Column(
             controls=[content_control],
             scroll=ft.ScrollMode.AUTO,

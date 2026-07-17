@@ -17,15 +17,13 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import flet as ft
-from flet import canvas as cv
 
+from knowledge_agent.gui._markdown import themed_markdown
 from knowledge_agent.gui._styles import dashboard_section_header, section_divider, thin_rule
 from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail
 from knowledge_agent.gui.views._frame import view_header
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from knowledge_agent.gui.app import GuiApp
     from knowledge_agent.gui.evaluation.evaluation_view import EvaluationView
 
@@ -37,36 +35,6 @@ _SECTION_HEADER_SIZE = 16  # section headers — the 16 ceiling (= panel_title)
 _KPI_VALUE_SIZE = 16  # metric value — the 16 ceiling
 _KPI_LABEL_SIZE = 12  # metric label; also the size of a "Not evaluated" value
 _NOT_EVALUATED = "Not evaluated"  # sentinel value when a metric wasn't computed
-
-# "Metric Scores by Case" grouped bar-chart geometry (px). Drawn on flet.canvas
-# — the same native primitive the Trends tab uses (Flet 0.85 has no BarChart).
-_CHART_H = 300
-_CHART_ML, _CHART_MR, _CHART_MT, _CHART_MB = 46, 12, 18, 78  # tall bottom = angled labels
-_CHART_BAR_W = 14  # a single metric bar
-_CHART_BAR_INTRA = 2  # gap between bars within one case group
-_CHART_GROUP_GAP = 22  # gap between case groups
-_CHART_MIN_W = 460
-_CHART_LABEL_ANGLE = -0.62  # radians (~ -35°) for the angled case labels
-
-# Distinct bar/legend colours per metric (cycled if there are more metrics).
-_METRIC_PALETTE: tuple[str, ...] = (
-    ft.Colors.BLUE,
-    ft.Colors.GREEN,
-    ft.Colors.ORANGE,
-    ft.Colors.PURPLE,
-    ft.Colors.RED,
-    ft.Colors.TEAL,
-    ft.Colors.PINK,
-    ft.Colors.BROWN,
-    ft.Colors.CYAN,
-    ft.Colors.LIME,
-    ft.Colors.AMBER,
-    ft.Colors.INDIGO,
-    ft.Colors.DEEP_ORANGE,
-    ft.Colors.LIGHT_GREEN,
-    ft.Colors.DEEP_PURPLE,
-    ft.Colors.BLUE_GREY,
-)
 
 
 def _score_color(value: Any) -> str:
@@ -86,18 +54,6 @@ def _score_color(value: Any) -> str:
     return ft.Colors.RED
 
 
-def _fill_paint(color: str) -> ft.Paint:
-    return ft.Paint(color=color, style=ft.PaintingStyle.FILL)
-
-
-def _stroke_paint(color: str, width: float = 1.0) -> ft.Paint:
-    return ft.Paint(color=color, stroke_width=width, style=ft.PaintingStyle.STROKE)
-
-
-def _truncate(text: str, n: int) -> str:
-    return text if len(text) <= n else text[: n - 1] + "…"
-
-
 class RunSummaryTab:
     """Per-run KPI + per-case-table sub-tab."""
 
@@ -111,14 +67,6 @@ class RunSummaryTab:
         self._sort_key: str | None = None
         self._sort_asc: bool = True
         self._table_host: ft.Column | None = None
-        # "Metric Scores by Case" chart state: multi-select metric/case filters
-        # (None = all selected), the chart host, and the filter-title Text refs
-        # whose live "selected/total" counts update on toggle.
-        self._chart_metrics: set[str] | None = None
-        self._chart_cases: set[str] | None = None
-        self._chart_host: ft.Container | None = None
-        self._metrics_title: ft.Text | None = None
-        self._cases_title: ft.Text | None = None
 
     # ---- build ------------------------------------------------------------
 
@@ -187,10 +135,6 @@ class RunSummaryTab:
         # Filter it too, so the delta is like-for-like under the active filter.
         prev_id = max((r["run_id"] for r in self._runs if r["run_id"] < run_id), default=None)
         prev_run = filtered_run(self.app, prev_id, origins)[0] if prev_id is not None else None
-        # A newly loaded/refreshed run resets the chart filters to all-selected;
-        # per-toggle changes (which don't re-enter refresh) persist within a run.
-        self._chart_metrics = None
-        self._chart_cases = None
         self.body.controls = self._build_body(run, prev_run, cases)
         self.app.page.update()
 
@@ -212,8 +156,6 @@ class RunSummaryTab:
             *metrics,
             section_divider(),
             self._case_table(cases),
-            section_divider(),
-            self._metric_scores_by_case(cases),
             section_divider(),
             self._case_details(cases),
         ]
@@ -601,227 +543,6 @@ class RunSummaryTab:
             color = ft.Colors.WHITE
         return ft.DataCell(ft.Text(text, color=color, size=12))
 
-    # ---- metric-scores-by-case chart --------------------------------------
-
-    def _chart_metric_cols(self, cases: list[dict[str, Any]]) -> list[tuple[str, str]]:
-        """The 0–1 score columns that have data in this run — the chartable
-        metrics. Same band derivation as the per-case table (registry-driven:
-        score groups only, no tokens/latency/count columns), then filtered to
-        those with at least one numeric value so the dropdown never offers an
-        all-empty metric."""
-        from knowledge_agent.evaluation import registry as R
-
-        labels = R.metric_labels()
-        banded = {
-            m.sql_column
-            for m in R.METRICS
-            if m.sql_column and m.group not in ("tokens", "latency") and m.fmt != "d"
-        }
-        cols: list[tuple[str, str]] = []
-        for col, _ in R.case_sql_columns():
-            if col in banded and any(isinstance(c.get(col), (int, float)) for c in cases):
-                cols.append((col, labels.get(col, col)))
-        return cols
-
-    def _metric_scores_by_case(self, cases: list[dict[str, Any]]) -> ft.Control:
-        """'Metric Scores by Case' — the reference's grouped bar chart: per case,
-        one bar per selected metric (coloured by metric, with a legend), on a
-        native canvas. Two multi-select filters (Metrics / Cases) are collapsible
-        checklists — Flet has no native multiselect dropdown — both defaulting to
-        all selected. The metric set is registry-derived (no hardcodes)."""
-        if not cases:
-            return ft.Text("No case-level data for this run.", italic=True)
-        cols = self._chart_metric_cols(cases)
-        if not cols:
-            return ft.Text("No 0–1 score metrics to chart for this run.", italic=True)
-
-        metric_keys = [c for c, _ in cols]
-        case_keys = [c.get("case_id") or "" for c in cases]
-        if self._chart_metrics is None:
-            self._chart_metrics = set(metric_keys)
-        if self._chart_cases is None:
-            self._chart_cases = set(case_keys)
-
-        self._metrics_title = ft.Text(size=13, weight=ft.FontWeight.BOLD)
-        self._cases_title = ft.Text(size=13, weight=ft.FontWeight.BOLD)
-        self._sync_filter_titles(cases)
-        metrics_filter = self._filter_expander(
-            self._metrics_title, cols, self._chart_metrics, self._on_metric_toggle
-        )
-        cases_filter = self._filter_expander(
-            self._cases_title,
-            [(cid, cid) for cid in case_keys],
-            self._chart_cases,
-            self._on_case_toggle,
-        )
-
-        self._chart_host = ft.Container(content=self._draw_metric_chart(cases))
-        return ft.Column(
-            [
-                self._section_header("Metric Scores by Case"),
-                ft.Row(
-                    [metrics_filter, cases_filter],
-                    spacing=16,
-                    vertical_alignment=ft.CrossAxisAlignment.START,
-                ),
-                self._chart_host,
-            ],
-            spacing=8,
-        )
-
-    @staticmethod
-    def _filter_expander(
-        title: ft.Text,
-        items: list[tuple[str, str]],
-        selected: set[str],
-        on_toggle: Callable[[str, bool], None],
-    ) -> ft.Control:
-        """A collapsible multi-select: an ExpansionTile titled with a live
-        selected/total count, opening to a scrollable checkbox list. Native
-        (ExpansionTile + Checkbox) — the substitute for Flet's absent multiselect
-        dropdown; toggling a box redraws the chart without collapsing the tile."""
-        checks = [
-            ft.Checkbox(
-                label=text,
-                value=key in selected,
-                on_change=lambda e, k=key: on_toggle(k, bool(e.control.value)),
-            )
-            for key, text in items
-        ]
-        return ft.Container(
-            width=300,
-            content=ft.ExpansionTile(
-                title=title,
-                controls=[
-                    ft.Container(
-                        height=min(220, 24 + 34 * len(checks)),
-                        content=ft.Column(checks, scroll=ft.ScrollMode.AUTO, spacing=0),
-                    )
-                ],
-            ),
-        )
-
-    def _draw_metric_chart(self, cases: list[dict[str, Any]]) -> ft.Control:
-        """Draw the selected metrics' bars grouped by case on a canvas sized to
-        the group count (horizontally scrollable). Each metric keeps one colour
-        (legend below); case labels are angled so long ids don't collide. A
-        metric/case with no value simply draws no bar."""
-        cols = self._chart_metric_cols(cases)
-        if not cols:
-            return ft.Text("No 0–1 score metrics to chart for this run.", italic=True)
-        color_of = {
-            col: _METRIC_PALETTE[i % len(_METRIC_PALETTE)] for i, (col, _) in enumerate(cols)
-        }
-        label_of = dict(cols)
-        selected_metrics = self._chart_metrics or set()
-        selected_cases = self._chart_cases or set()
-        metrics = [col for col, _ in cols if col in selected_metrics]
-        chosen = [c for c in cases if (c.get("case_id") or "") in selected_cases]
-        if not metrics or not chosen:
-            return ft.Text("Select at least one metric and one case to chart.", italic=True)
-
-        m = len(metrics)
-        group_w = m * _CHART_BAR_W + (m - 1) * _CHART_BAR_INTRA
-        pitch = group_w + _CHART_GROUP_GAP
-        width = max(_CHART_MIN_W, _CHART_ML + _CHART_MR + len(chosen) * pitch)
-        plot_h = _CHART_H - _CHART_MT - _CHART_MB
-        baseline = _CHART_MT + plot_h
-
-        def py(v: float) -> float:
-            return _CHART_MT + plot_h - max(0.0, min(1.0, v)) * plot_h
-
-        tick_style = ft.TextStyle(size=12, color=ft.Colors.GREY_500)
-        shapes: list[cv.Shape] = [
-            cv.Line(_CHART_ML, _CHART_MT, _CHART_ML, baseline, _stroke_paint(ft.Colors.GREY_500)),
-            cv.Line(
-                _CHART_ML, baseline, width - _CHART_MR, baseline, _stroke_paint(ft.Colors.GREY_500)
-            ),
-        ]
-        for frac in (0.0, 0.5, 1.0):
-            y = py(frac)
-            shapes.append(
-                cv.Line(_CHART_ML, y, width - _CHART_MR, y, _stroke_paint(ft.Colors.GREY_800))
-            )
-            shapes.append(cv.Text(2, y - 6, f"{frac:.1f}", tick_style))
-
-        for g, c in enumerate(chosen):
-            gx = _CHART_ML + g * pitch + _CHART_GROUP_GAP / 2
-            for j, col in enumerate(metrics):
-                v = c.get(col)
-                if not isinstance(v, (int, float)):
-                    continue
-                x = gx + j * (_CHART_BAR_W + _CHART_BAR_INTRA)
-                top = py(float(v))
-                shapes.append(
-                    cv.Rect(x, top, _CHART_BAR_W, baseline - top, paint=_fill_paint(color_of[col]))
-                )
-            shapes.append(
-                cv.Text(
-                    gx + group_w / 2,
-                    baseline + 6,
-                    _truncate(c.get("case_id") or "", 16),
-                    tick_style,
-                    rotate=_CHART_LABEL_ANGLE,
-                    alignment=ft.Alignment(1, -1),
-                )
-            )
-
-        chart = cv.Canvas(shapes=shapes, width=width, height=_CHART_H)
-        # Legend on the RIGHT of the chart (matching the reference): a vertical
-        # swatch+label list, top-aligned beside the horizontally-scrolling chart
-        # and height-capped to the chart so a long legend scrolls, not overflows.
-        legend = ft.Column(
-            [
-                ft.Row(
-                    [
-                        ft.Container(width=12, height=12, bgcolor=color_of[col], border_radius=2),
-                        ft.Text(label_of.get(col, col), size=12),
-                    ],
-                    spacing=6,
-                )
-                for col in metrics
-            ],
-            spacing=4,
-            scroll=ft.ScrollMode.AUTO,
-        )
-        return ft.Row(
-            [
-                ft.Row([chart], scroll=ft.ScrollMode.AUTO, expand=True),
-                ft.Container(content=legend, height=_CHART_H, padding=ft.Padding.only(left=8)),
-            ],
-            vertical_alignment=ft.CrossAxisAlignment.START,
-            spacing=8,
-        )
-
-    def _sync_filter_titles(self, cases: list[dict[str, Any]]) -> None:
-        """Refresh the two filter titles' live 'selected/total' counts."""
-        total_m = len(self._chart_metric_cols(cases))
-        if self._metrics_title is not None:
-            sel_m = len(self._chart_metrics or set())
-            self._metrics_title.value = f"Metrics ({sel_m}/{total_m})"
-        if self._cases_title is not None:
-            sel_c = len(self._chart_cases or set())
-            self._cases_title.value = f"Cases ({sel_c}/{len(cases)})"
-
-    def _on_metric_toggle(self, col: str, checked: bool) -> None:
-        if self._chart_metrics is None:
-            return
-        (self._chart_metrics.add if checked else self._chart_metrics.discard)(col)
-        self._sync_filter_titles(self._cases)
-        self._redraw_chart()
-
-    def _on_case_toggle(self, cid: str, checked: bool) -> None:
-        if self._chart_cases is None:
-            return
-        (self._chart_cases.add if checked else self._chart_cases.discard)(cid)
-        self._sync_filter_titles(self._cases)
-        self._redraw_chart()
-
-    def _redraw_chart(self) -> None:
-        if self._chart_host is not None:
-            self._chart_host.content = self._draw_metric_chart(self._cases)
-            self.app.page.update()
-
     def _case_details(self, cases: list[dict[str, Any]]) -> ft.Control:
         """Per-case expandable panels: the question, the expected answer (the
         run's joined `expected_answer_points`), the agent's answer, quick stats
@@ -962,11 +683,7 @@ class RunSummaryTab:
         elif markdown:
             # Render as markdown so an Evidence section / lists / bold format,
             # matching the Streamlit reference (Metrics Guide uses the same set).
-            body = ft.Markdown(
-                str(text),
-                selectable=True,
-                extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-            )
+            body = themed_markdown(str(text))
         else:
             body = ft.Text(str(text), size=12, selectable=True)
         return RunSummaryTab._labeled_box(label, body)

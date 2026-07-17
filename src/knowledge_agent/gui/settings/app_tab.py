@@ -1,6 +1,7 @@
-"""Settings → App sub-tab — behaviour toggles + DB connection + diagnostics.
+"""Settings tab — behaviour toggles + DB connection + diagnostics.
 
-Four stacked blocks (top to bottom):
+Two columns (house `panel_box` style): LEFT holds Save results & chat + App
+behaviour; RIGHT holds Diagnostics + Database connection. The four sections:
 
   0. Save results & chat — format checkboxes (md/txt/docx/json) + a
      default folder (Browse). These drive the Search tab's Save Result /
@@ -42,9 +43,15 @@ from typing import TYPE_CHECKING
 import flet as ft
 from pydantic import ValidationError
 
-from knowledge_agent.artifacts import ANSWER_FORMATS, FORMAT_LABELS
+from knowledge_agent.artifacts import ANSWER_FORMATS, CHAT_FORMATS, FORMAT_LABELS
 from knowledge_agent.config import get_settings
-from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, centered_label, section_divider
+from knowledge_agent.gui._styles import (
+    FRAME_BORDER_COLOR,
+    centered_label,
+    panel_box,
+    panel_title,
+    section_divider,
+)
 from knowledge_agent.gui._widgets.info_icon import info_icon, section_header, tier_icon_sample
 from knowledge_agent.gui.config_store import ConfigError, save_config
 from knowledge_agent.gui.views._frame import view_header
@@ -64,10 +71,16 @@ _DEBUG_BLURB = (
     "essential 'answer ready' closure line."
 )
 
-_SAVE_BLURB = (
-    "Where and in which format(s) the Search tab's Save Result and Save "
-    "Chat buttons write. Check one or more; JSON applies to answers only. "
-    "When no folder is set, the first Save asks for one and remembers it here."
+_SAVE_RESULTS_BLURB = (
+    "Where and in which format(s) the Search tab's Save Result button writes. "
+    "Check one or more (JSON = answers only). When no folder is set, the first "
+    "save asks for one and remembers it here."
+)
+
+_SAVE_CHAT_BLURB = (
+    "Where and in which format(s) the Search tab's Save Chat button writes — its "
+    "own settings, separate from Save Result. A chat transcript has no JSON form. "
+    "When no folder is set, the first save asks for one and remembers it here."
 )
 
 _CONNECTION_BLURB = (
@@ -92,6 +105,9 @@ class AppTab:
         self.save_format_checkboxes: dict[str, ft.Checkbox] = {}
         self.results_dir_text: ft.Text | None = None
         self.browse_folder_button: ft.Button | None = None
+        self.chat_format_checkboxes: dict[str, ft.Checkbox] = {}
+        self.chat_dir_text: ft.Text | None = None
+        self.chat_browse_button: ft.Button | None = None
         self.restore_last_corpus_checkbox: ft.Checkbox | None = None
         self.keep_loaded_checkbox: ft.Checkbox | None = None
         self.debug_mode_checkbox: ft.Checkbox | None = None
@@ -116,7 +132,7 @@ class AppTab:
         # Mirrors `settings_status` in the sibling app.
         self.status = ft.Text("", size=12, color=ft.Colors.GREY_400)
 
-        # Block 0: Save results & chat (formats + default folder).
+        # Block 0a: Save results (formats + default folder).
         self.save_format_checkboxes = {
             fmt: ft.Checkbox(
                 label=FORMAT_LABELS[fmt],
@@ -135,6 +151,27 @@ class AppTab:
         self.browse_folder_button = ft.Button(
             content=centered_label("Browse…"),
             on_click=self.on_browse_folder,
+        )
+        # Block 0b: Save chat — its own formats + folder. Chat has no JSON form,
+        # so only chat-capable formats (CHAT_FORMATS) are offered.
+        self.chat_format_checkboxes = {
+            fmt: ft.Checkbox(
+                label=FORMAT_LABELS[fmt],
+                value=fmt in self.app.gui_config.chat_save_formats,
+                on_change=self.on_chat_format_changed,
+            )
+            for fmt in CHAT_FORMATS
+        }
+        cd = self.app.gui_config.chat_dir
+        self.chat_dir_text = ft.Text(
+            str(cd) if cd else "(not set — first Save will ask)",
+            size=12,
+            color=ft.Colors.WHITE,
+            selectable=True,
+        )
+        self.chat_browse_button = ft.Button(
+            content=centered_label("Browse…"),
+            on_click=self.on_chat_browse_folder,
         )
 
         # Block 1: App behaviour.
@@ -253,81 +290,130 @@ class AppTab:
                 self._bg_tasks.add(task)
                 task.add_done_callback(self._bg_tasks.discard)
 
+        # LEFT column: Save results & chat + App behaviour.
+        left_pane = panel_box(
+            ft.Column(
+                scroll=ft.ScrollMode.AUTO,
+                spacing=10,
+                controls=[
+                    # ---- Save results -------------------------------------
+                    section_header(self.app, "Save results", _SAVE_RESULTS_BLURB),
+                    ft.Row(
+                        controls=[self.save_format_checkboxes[f] for f in ANSWER_FORMATS],
+                        wrap=True,
+                        spacing=12,
+                    ),
+                    _kv_row("Default folder", self.results_dir_text),
+                    ft.Row(controls=[self.browse_folder_button]),
+                    section_divider(),
+                    # ---- Save chat ----------------------------------------
+                    section_header(self.app, "Save chat", _SAVE_CHAT_BLURB),
+                    ft.Row(
+                        controls=[self.chat_format_checkboxes[f] for f in CHAT_FORMATS],
+                        wrap=True,
+                        spacing=12,
+                    ),
+                    _kv_row("Default folder", self.chat_dir_text),
+                    ft.Row(controls=[self.chat_browse_button]),
+                    section_divider(),
+                    # ---- App behaviour -------------------------------------
+                    section_header(self.app, "App behaviour"),
+                    self.restore_last_corpus_checkbox,
+                    self.keep_loaded_checkbox,
+                    # Each info-tier toggle shows a live sample of the icon it
+                    # controls, so the user sees what "standard / beginner /
+                    # technical" help icons look like (task 51).
+                    ft.Row(
+                        [self.show_info_icons_checkbox, tier_icon_sample("standard")],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=4,
+                    ),
+                    ft.Row(
+                        [self.show_beginner_info_checkbox, tier_icon_sample("beginner")],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=4,
+                    ),
+                    ft.Row(
+                        [self.show_technical_info_checkbox, tier_icon_sample("technical")],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=4,
+                    ),
+                ],
+            ),
+            expand=1,
+        )
+        # RIGHT column: Diagnostics + Database connection.
+        right_pane = panel_box(
+            ft.Column(
+                scroll=ft.ScrollMode.AUTO,
+                spacing=10,
+                controls=[
+                    # ---- Diagnostics ---------------------------------------
+                    section_header(self.app, "Diagnostics"),
+                    ft.Row(
+                        [
+                            self.debug_mode_checkbox,
+                            info_icon(
+                                self.app,
+                                title="Show diagnostic info in chat",
+                                text=_DEBUG_BLURB,
+                            ),
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=4,
+                    ),
+                    ft.Container(height=8),
+                    ft.Text(
+                        "System health — Neo4j, LanceDB, active provider keys:",
+                        size=12,
+                        color=ft.Colors.GREY_400,
+                    ),
+                    self.chips_row,
+                    ft.Row(controls=[self.rerun_button]),
+                    section_divider(),
+                    # ---- Database connection (read-only display) -----------
+                    section_header(self.app, "Database connection", _CONNECTION_BLURB),
+                    _kv_row("Active corpus", self.active_corpus_text),
+                    _kv_row("Neo4j URI", self.neo4j_uri_text),
+                    _kv_row("Neo4j user", self.neo4j_user_text),
+                    _kv_row("LanceDB path", self.lancedb_path_text),
+                    _kv_row("Connection pool size", self.pool_size_text),
+                    _kv_row("Connection acquisition timeout", self.acq_timeout_text),
+                ],
+            ),
+            expand=1,
+        )
+        # Column titles sit ABOVE each box (the house two-column layout), aligned
+        # to the columns via matching expand + horizontal padding.
+        column_titles = ft.Row(
+            spacing=12,
+            controls=[
+                ft.Container(
+                    expand=1,
+                    padding=ft.Padding.symmetric(horizontal=12),
+                    content=panel_title("General"),
+                ),
+                ft.Container(
+                    expand=1,
+                    padding=ft.Padding.symmetric(horizontal=12),
+                    content=panel_title("System"),
+                ),
+            ],
+        )
         return ft.Column(
-            scroll=ft.ScrollMode.AUTO,
             expand=True,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-            spacing=10,
+            spacing=8,
             controls=[
-                view_header("App"),
-                # ---- Block 0: Save results & chat ----------------------
-                section_header(self.app, "Save results & chat", _SAVE_BLURB),
+                view_header("Settings"),
+                column_titles,
                 ft.Row(
-                    controls=[self.save_format_checkboxes[f] for f in ANSWER_FORMATS],
-                    wrap=True,
+                    expand=True,
+                    vertical_alignment=ft.CrossAxisAlignment.STRETCH,
                     spacing=12,
+                    controls=[left_pane, right_pane],
                 ),
-                _kv_row("Default folder", self.results_dir_text),
-                ft.Row(controls=[self.browse_folder_button]),
-                section_divider(),
-                # ---- Block 1: App behaviour ----------------------------
-                section_header(self.app, "App behaviour"),
-                self.restore_last_corpus_checkbox,
-                self.keep_loaded_checkbox,
-                # Each info-tier toggle shows a live sample of the icon it
-                # controls, so the user sees what "standard / beginner /
-                # technical" help icons look like (task 51).
-                ft.Row(
-                    [self.show_info_icons_checkbox, tier_icon_sample("standard")],
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    spacing=4,
-                ),
-                ft.Row(
-                    [self.show_beginner_info_checkbox, tier_icon_sample("beginner")],
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    spacing=4,
-                ),
-                ft.Row(
-                    [self.show_technical_info_checkbox, tier_icon_sample("technical")],
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    spacing=4,
-                ),
-                section_divider(),
-                # ---- Block 2: Diagnostics ------------------------------
-                section_header(self.app, "Diagnostics"),
-                ft.Row(
-                    [
-                        self.debug_mode_checkbox,
-                        info_icon(
-                            self.app,
-                            title="Show diagnostic info in chat",
-                            text=_DEBUG_BLURB,
-                        ),
-                    ],
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    spacing=4,
-                ),
-                ft.Container(height=8),
-                ft.Text(
-                    "System health — Neo4j, LanceDB, active provider keys:",
-                    size=12,
-                    color=ft.Colors.GREY_400,
-                ),
-                self.chips_row,
-                ft.Row(controls=[self.rerun_button]),
-                section_divider(),
-                # ---- Block 3: DB connection (read-only display) --------
-                section_header(self.app, "Database connection", _CONNECTION_BLURB),
-                _kv_row("Active corpus", self.active_corpus_text),
-                _kv_row("Neo4j URI", self.neo4j_uri_text),
-                _kv_row("Neo4j user", self.neo4j_user_text),
-                _kv_row("LanceDB path", self.lancedb_path_text),
-                _kv_row("Connection pool size", self.pool_size_text),
-                _kv_row(
-                    "Connection acquisition timeout",
-                    self.acq_timeout_text,
-                ),
-                # ---- Shared status text --------------------------------
+                # Shared status line, full width below the two columns.
                 self.status,
             ],
         )
@@ -460,13 +546,13 @@ class AppTab:
         self.app.page.update()
 
     async def on_browse_folder(self, e: ft.Event) -> None:
-        """Pick + persist the default save folder for results / chats."""
+        """Pick + persist the default save folder for results."""
         if self.status is None or self.results_dir_text is None:
             return
         rd = self.app.gui_config.results_dir
         try:
             chosen = await self.app.file_picker.get_directory_path(
-                dialog_title="Default folder for saved results & chats",
+                dialog_title="Default folder for saved results",
                 initial_directory=str(rd) if rd else None,
             )
         except Exception as exc:
@@ -486,7 +572,62 @@ class AppTab:
             self.app.page.update()
             return
         self.results_dir_text.value = chosen
-        self.status.value = "default save folder set"
+        self.status.value = "default results folder set"
+        self.app.page.update()
+
+    def on_chat_format_changed(self, e: ft.Event) -> None:
+        """Persist the checked chat-save formats; keep at least one; rollback on fail."""
+        if self.status is None:
+            return
+        previous = list(self.app.gui_config.chat_save_formats)
+        chosen = [f for f in CHAT_FORMATS if self.chat_format_checkboxes[f].value]
+        if not chosen:
+            for fmt, cb in self.chat_format_checkboxes.items():
+                cb.value = fmt in previous
+            self.status.value = "keep at least one chat-save format"
+            self.app.page.update()
+            return
+        self.app.gui_config.chat_save_formats = chosen
+        try:
+            save_config(self.app.gui_config)
+        except ConfigError as exc:
+            self.app.gui_config.chat_save_formats = previous
+            for fmt, cb in self.chat_format_checkboxes.items():
+                cb.value = fmt in previous
+            self.status.value = f"could not save: {exc}"
+            self.app.page.update()
+            return
+        self.status.value = f"chat-save formats: {', '.join(chosen)}"
+        self.app.page.update()
+
+    async def on_chat_browse_folder(self, e: ft.Event) -> None:
+        """Pick + persist the default save folder for chats."""
+        if self.status is None or self.chat_dir_text is None:
+            return
+        cd = self.app.gui_config.chat_dir
+        try:
+            chosen = await self.app.file_picker.get_directory_path(
+                dialog_title="Default folder for saved chats",
+                initial_directory=str(cd) if cd else None,
+            )
+        except Exception as exc:
+            logger.warning("folder picker failed: %r", exc)
+            self.status.value = f"folder picker error: {exc}"
+            self.app.page.update()
+            return
+        if not chosen:
+            return
+        previous = self.app.gui_config.chat_dir
+        self.app.gui_config.chat_dir = Path(chosen)
+        try:
+            save_config(self.app.gui_config)
+        except ConfigError as exc:
+            self.app.gui_config.chat_dir = previous
+            self.status.value = f"could not save: {exc}"
+            self.app.page.update()
+            return
+        self.chat_dir_text.value = chosen
+        self.status.value = "default chat folder set"
         self.app.page.update()
 
     # ----- Block 2 (system_status chips) -----------------------------------

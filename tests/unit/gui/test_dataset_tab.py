@@ -425,7 +425,7 @@ def test_build_starts_with_one_blank_page(fake_app):
     assert len(tab._drafts) == 1
     assert tab.pager.visible is True  # < 1/1 > always shown for a draft page
     assert tab.page_label.value == "1/1"
-    assert tab.page_delete.visible is False  # can't delete the only page
+    assert tab.page_delete.disabled is True  # greyed (but visible) on the only page
     assert tab.f["id"].value == ""
 
 
@@ -453,7 +453,7 @@ def test_delete_page_drops_current_from_batch(fake_app):
     assert len(tab._drafts) == 1
     assert tab.f["id"].value == "b2"  # showing the survivor
     assert tab.pager.visible is True  # still shows < 1/1 >
-    assert tab.page_delete.visible is False  # no delete on the sole page
+    assert tab.page_delete.disabled is True  # greyed (but visible) on the sole page
 
 
 def test_do_blank_clears_the_form_to_one_page(fake_app):

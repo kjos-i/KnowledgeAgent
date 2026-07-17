@@ -120,6 +120,7 @@ _STRUCTURE_TREE = {
         "          ├── corpus.toml       (config file)\n"
         "          ├── figures/          (multimodal figures)\n"
         "          ├── .ka_session.json  (GUI session state — gitignored)\n"
+        "          ├── <dataset>.json    (evaluation datasets)\n"
         "          └── eval_output/      (evaluation results)\n"
         "                ├── eval_ledger.db          (run history)\n"
         "                ├── eval_report_<ts>.json   (per-run report)\n"
@@ -131,6 +132,7 @@ _STRUCTURE_TREE = {
         "    ├── corpus.toml       (config file)\n"
         "    ├── figures/          (multimodal figures)\n"
         "    ├── .ka_session.json  (GUI session state — gitignored)\n"
+        "    ├── <dataset>.json    (evaluation datasets)\n"
         "    └── eval_output/      (evaluation results)\n"
         "          ├── eval_ledger.db          (run history)\n"
         "          ├── eval_report_<ts>.json   (per-run report)\n"
@@ -308,7 +310,7 @@ class CreateNewDatasetTab:
                 spacing=8,
                 controls=[
                     ft.Text(
-                        "What gets created",
+                        "What gets stored in the corpus folder",
                         size=13,
                         weight=ft.FontWeight.BOLD,
                     ),

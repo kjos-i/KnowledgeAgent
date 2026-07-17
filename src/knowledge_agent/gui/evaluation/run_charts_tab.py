@@ -35,6 +35,8 @@ from knowledge_agent.gui.evaluation.run_summary_tab import _score_color
 from knowledge_agent.gui.views._frame import view_header
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from knowledge_agent.gui.app import GuiApp
     from knowledge_agent.gui.evaluation.evaluation_view import EvaluationView
 
@@ -74,6 +76,36 @@ _CASE_BAR_W = 22
 _CASE_GAP = 16
 _CASE_MIN_W = 480
 _CASE_LABEL_ANGLE = -0.62  # radians (~ -35°) for angled case-name labels
+
+# "Metric Scores by Case" grouped bar-chart geometry (px) — moved here from Run
+# Summary. Drawn on flet.canvas, the same native primitive the other charts use.
+_MSC_H = 300
+_MSC_ML, _MSC_MR, _MSC_MT, _MSC_MB = 46, 12, 18, 78  # tall bottom = angled labels
+_MSC_BAR_W = 14  # a single metric bar
+_MSC_BAR_INTRA = 2  # gap between bars within one case group
+_MSC_GROUP_GAP = 22  # gap between case groups
+_MSC_MIN_W = 460
+_MSC_LABEL_ANGLE = -0.62  # radians (~ -35°) for the angled case labels
+
+# Distinct bar/legend colours per metric (cycled if there are more metrics).
+_METRIC_PALETTE: tuple[str, ...] = (
+    ft.Colors.BLUE,
+    ft.Colors.GREEN,
+    ft.Colors.ORANGE,
+    ft.Colors.PURPLE,
+    ft.Colors.RED,
+    ft.Colors.TEAL,
+    ft.Colors.PINK,
+    ft.Colors.BROWN,
+    ft.Colors.CYAN,
+    ft.Colors.LIME,
+    ft.Colors.AMBER,
+    ft.Colors.INDIGO,
+    ft.Colors.DEEP_ORANGE,
+    ft.Colors.LIGHT_GREEN,
+    ft.Colors.DEEP_PURPLE,
+    ft.Colors.BLUE_GREY,
+)
 
 
 def _hbar(value: float, y_max: float, color: str) -> ft.Control:
@@ -241,6 +273,15 @@ class RunChartsTab:
         self._runs: list[dict[str, Any]] = []
         self._cases: list[dict[str, Any]] = []
         self._hist_metric: str | None = None
+        # "Metric Scores by Case" chart state (moved from Run Summary): the
+        # multi-select metric/case filters (None = all selected), the chart host,
+        # and the filter-title Texts whose live "selected/total" counts update on
+        # toggle.
+        self._chart_metrics: set[str] | None = None
+        self._chart_cases: set[str] | None = None
+        self._chart_host: ft.Container | None = None
+        self._metrics_title: ft.Text | None = None
+        self._cases_title: ft.Text | None = None
 
     # ---- build ------------------------------------------------------------
 
@@ -300,7 +341,13 @@ class RunChartsTab:
             return
         self._runs = self._ledger().list_runs()
         self._cases = cases
+        # A newly loaded/refreshed run resets the chart filters to all-selected;
+        # per-toggle changes (which don't re-enter refresh) persist within a run.
+        self._chart_metrics = None
+        self._chart_cases = None
         self.body.controls = [
+            self._metric_scores_by_case(cases),
+            section_divider(),
             *self._balance_sections(run),
             section_divider(),
             self._distribution_section(),
@@ -312,6 +359,223 @@ class RunChartsTab:
             self._token_usage_section(),
         ]
         self.app.page.update()
+
+    # ---- metric scores by case (grouped bar chart) ------------------------
+
+    def _chart_metric_cols(self, cases: list[dict[str, Any]]) -> list[tuple[str, str]]:
+        """The 0–1 score columns that have data in this run — the chartable
+        metrics. Same band derivation as the per-case table (registry-driven:
+        score groups only, no tokens/latency/count columns), then filtered to
+        those with at least one numeric value so the filter never offers an
+        all-empty metric."""
+        from knowledge_agent.evaluation import registry as R
+
+        labels = R.metric_labels()
+        banded = {
+            m.sql_column
+            for m in R.METRICS
+            if m.sql_column and m.group not in ("tokens", "latency") and m.fmt != "d"
+        }
+        cols: list[tuple[str, str]] = []
+        for col, _ in R.case_sql_columns():
+            if col in banded and any(isinstance(c.get(col), (int, float)) for c in cases):
+                cols.append((col, labels.get(col, col)))
+        return cols
+
+    def _metric_scores_by_case(self, cases: list[dict[str, Any]]) -> ft.Control:
+        """'Metric Scores by Case' — a grouped bar chart: per case, one bar per
+        selected metric (coloured by metric, with a legend), on a native canvas.
+        Two multi-select filters (Metrics / Cases) are collapsible checklists —
+        Flet has no native multiselect dropdown — both defaulting to all
+        selected. The metric set is registry-derived (no hardcodes)."""
+        if not cases:
+            return ft.Text("No case-level data for this run.", italic=True)
+        cols = self._chart_metric_cols(cases)
+        if not cols:
+            return ft.Text("No 0–1 score metrics to chart for this run.", italic=True)
+
+        metric_keys = [c for c, _ in cols]
+        case_keys = [c.get("case_id") or "" for c in cases]
+        if self._chart_metrics is None:
+            self._chart_metrics = set(metric_keys)
+        if self._chart_cases is None:
+            self._chart_cases = set(case_keys)
+
+        self._metrics_title = ft.Text(size=13, weight=ft.FontWeight.BOLD)
+        self._cases_title = ft.Text(size=13, weight=ft.FontWeight.BOLD)
+        self._sync_filter_titles(cases)
+        metrics_filter = self._filter_expander(
+            self._metrics_title, cols, self._chart_metrics, self._on_metric_toggle
+        )
+        cases_filter = self._filter_expander(
+            self._cases_title,
+            [(cid, cid) for cid in case_keys],
+            self._chart_cases,
+            self._on_case_toggle,
+        )
+
+        self._chart_host = ft.Container(content=self._draw_metric_chart(cases))
+        return ft.Column(
+            [
+                dashboard_section_header("Metric Scores by Case"),
+                ft.Row(
+                    [metrics_filter, cases_filter],
+                    spacing=16,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
+                ),
+                self._chart_host,
+            ],
+            spacing=8,
+        )
+
+    @staticmethod
+    def _filter_expander(
+        title: ft.Text,
+        items: list[tuple[str, str]],
+        selected: set[str],
+        on_toggle: Callable[[str, bool], None],
+    ) -> ft.Control:
+        """A collapsible multi-select: an ExpansionTile titled with a live
+        selected/total count, opening to a scrollable checkbox list. Native
+        (ExpansionTile + Checkbox) — the substitute for Flet's absent multiselect
+        dropdown; toggling a box redraws the chart without collapsing the tile."""
+        checks = [
+            ft.Checkbox(
+                label=text,
+                value=key in selected,
+                on_change=lambda e, k=key: on_toggle(k, bool(e.control.value)),
+            )
+            for key, text in items
+        ]
+        return ft.Container(
+            width=300,
+            content=ft.ExpansionTile(
+                title=title,
+                controls=[
+                    ft.Container(
+                        height=min(220, 24 + 34 * len(checks)),
+                        content=ft.Column(checks, scroll=ft.ScrollMode.AUTO, spacing=0),
+                    )
+                ],
+            ),
+        )
+
+    def _draw_metric_chart(self, cases: list[dict[str, Any]]) -> ft.Control:
+        """Draw the selected metrics' bars grouped by case on a canvas sized to
+        the group count (horizontally scrollable). Each metric keeps one colour
+        (legend beside it); case labels are angled so long ids don't collide. A
+        metric/case with no value simply draws no bar."""
+        cols = self._chart_metric_cols(cases)
+        if not cols:
+            return ft.Text("No 0–1 score metrics to chart for this run.", italic=True)
+        color_of = {
+            col: _METRIC_PALETTE[i % len(_METRIC_PALETTE)] for i, (col, _) in enumerate(cols)
+        }
+        label_of = dict(cols)
+        selected_metrics = self._chart_metrics or set()
+        selected_cases = self._chart_cases or set()
+        metrics = [col for col, _ in cols if col in selected_metrics]
+        chosen = [c for c in cases if (c.get("case_id") or "") in selected_cases]
+        if not metrics or not chosen:
+            return ft.Text("Select at least one metric and one case to chart.", italic=True)
+
+        m = len(metrics)
+        group_w = m * _MSC_BAR_W + (m - 1) * _MSC_BAR_INTRA
+        pitch = group_w + _MSC_GROUP_GAP
+        width = max(_MSC_MIN_W, _MSC_ML + _MSC_MR + len(chosen) * pitch)
+        plot_h = _MSC_H - _MSC_MT - _MSC_MB
+        baseline = _MSC_MT + plot_h
+
+        def py(v: float) -> float:
+            return _MSC_MT + plot_h - max(0.0, min(1.0, v)) * plot_h
+
+        tick_style = ft.TextStyle(size=12, color=ft.Colors.GREY_500)
+        shapes: list[cv.Shape] = [
+            cv.Line(_MSC_ML, _MSC_MT, _MSC_ML, baseline, _stroke(ft.Colors.GREY_500)),
+            cv.Line(_MSC_ML, baseline, width - _MSC_MR, baseline, _stroke(ft.Colors.GREY_500)),
+        ]
+        for frac in (0.0, 0.5, 1.0):
+            y = py(frac)
+            shapes.append(cv.Line(_MSC_ML, y, width - _MSC_MR, y, _stroke(ft.Colors.GREY_800)))
+            shapes.append(cv.Text(2, y - 6, f"{frac:.1f}", tick_style))
+
+        for g, c in enumerate(chosen):
+            gx = _MSC_ML + g * pitch + _MSC_GROUP_GAP / 2
+            for j, col in enumerate(metrics):
+                v = c.get(col)
+                if not isinstance(v, (int, float)):
+                    continue
+                x = gx + j * (_MSC_BAR_W + _MSC_BAR_INTRA)
+                top = py(float(v))
+                shapes.append(
+                    cv.Rect(x, top, _MSC_BAR_W, baseline - top, paint=_fill(color_of[col]))
+                )
+            shapes.append(
+                cv.Text(
+                    gx + group_w / 2,
+                    baseline + 6,
+                    _trunc(c.get("case_id") or "", 16),
+                    tick_style,
+                    rotate=_MSC_LABEL_ANGLE,
+                    alignment=ft.Alignment(1, -1),
+                )
+            )
+
+        chart = cv.Canvas(shapes=shapes, width=width, height=_MSC_H)
+        # Legend on the RIGHT of the chart: a vertical swatch+label list,
+        # top-aligned beside the horizontally-scrolling chart and height-capped to
+        # the chart so a long legend scrolls, not overflows.
+        legend = ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Container(width=12, height=12, bgcolor=color_of[col], border_radius=2),
+                        ft.Text(label_of.get(col, col), size=12),
+                    ],
+                    spacing=6,
+                )
+                for col in metrics
+            ],
+            spacing=4,
+            scroll=ft.ScrollMode.AUTO,
+        )
+        return ft.Row(
+            [
+                ft.Row([chart], scroll=ft.ScrollMode.AUTO, expand=True),
+                ft.Container(content=legend, height=_MSC_H, padding=ft.Padding.only(left=8)),
+            ],
+            vertical_alignment=ft.CrossAxisAlignment.START,
+            spacing=8,
+        )
+
+    def _sync_filter_titles(self, cases: list[dict[str, Any]]) -> None:
+        """Refresh the two filter titles' live 'selected/total' counts."""
+        total_m = len(self._chart_metric_cols(cases))
+        if self._metrics_title is not None:
+            sel_m = len(self._chart_metrics or set())
+            self._metrics_title.value = f"Metrics ({sel_m}/{total_m})"
+        if self._cases_title is not None:
+            sel_c = len(self._chart_cases or set())
+            self._cases_title.value = f"Cases ({sel_c}/{len(cases)})"
+
+    def _on_metric_toggle(self, col: str, checked: bool) -> None:
+        if self._chart_metrics is None:
+            return
+        (self._chart_metrics.add if checked else self._chart_metrics.discard)(col)
+        self._sync_filter_titles(self._cases)
+        self._redraw_chart()
+
+    def _on_case_toggle(self, cid: str, checked: bool) -> None:
+        if self._chart_cases is None:
+            return
+        (self._chart_cases.add if checked else self._chart_cases.discard)(cid)
+        self._sync_filter_titles(self._cases)
+        self._redraw_chart()
+
+    def _redraw_chart(self) -> None:
+        if self._chart_host is not None:
+            self._chart_host.content = self._draw_metric_chart(self._cases)
+            self.app.page.update()
 
     # ---- metric balance (bar-of-means) ------------------------------------
 
@@ -563,8 +827,8 @@ class RunChartsTab:
                 ),
                 ft.Row([self._corr_heatmap(metrics)], scroll=ft.ScrollMode.AUTO),
                 ft.Text(
-                    "= X means the metric scored X on every case (zero variance) — "
-                    "correlation cannot be calculated.",
+                    "= X cell means that metric was constant at X across all cases "
+                    "(zero variance), so its correlation cannot be calculated.",
                     size=12,
                     color=ft.Colors.GREY_500,
                 ),

@@ -319,7 +319,7 @@ class DatasetTab:
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
         self.blank_button = ft.TextButton(
-            "Blank", icon=ft.Icons.CLEAR, tooltip="Clear the form", on_click=self._on_blank
+            "Blank", tooltip="Clear the form", on_click=self._on_blank
         )
         self.gen_model_dropdown = ft.Dropdown(
             editable=True,  # pick a known model OR type one; required for LLM generation
@@ -933,14 +933,15 @@ class DatasetTab:
 
     def _render_pager(self, editing: bool) -> None:
         """Show < n/N > for any draft page (even 1/1), disabling the ends. The
-        delete-X only appears for a multi-page batch (you can't delete the sole
-        page). Hidden entirely while editing an existing case."""
+        delete-X stays visible but greyed for a single page (you can't delete the
+        sole page); it enables once there are ≥2. Hidden entirely (with the whole
+        pager) while editing an existing case."""
         n = len(self._drafts)
         show = (not editing) and n >= 1
         if self.pager is not None:
             self.pager.visible = show
         if self.page_delete is not None:
-            self.page_delete.visible = n > 1  # no delete on a single page
+            self.page_delete.disabled = n <= 1  # can't delete the sole page — greyed, not hidden
         if show and self.page_label is not None:
             self.page_label.value = f"{self._draft_index + 1}/{n}"
             if self.page_prev is not None:

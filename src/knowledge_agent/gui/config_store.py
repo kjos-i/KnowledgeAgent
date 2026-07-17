@@ -36,7 +36,7 @@ from typing import Literal, NamedTuple
 import keyring
 import keyring.errors
 from platformdirs import user_config_dir
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from knowledge_agent.config import PROVIDER_NODE_DEFAULTS
 
@@ -439,21 +439,50 @@ class GuiConfig(BaseModel):
     results_dir: Path | None = Field(
         default=None,
         description=(
-            "Default folder Save Result / Save Chat writes to. Editable in "
-            "Settings → App → Save results & chat (with a Browse button). "
-            "When unset, the first Save auto-opens a folder picker and "
-            "remembers the choice here."
+            "Default folder Save Result writes to (Save Chat has its own "
+            "`chat_dir`). Editable in Settings → Save results (with a Browse "
+            "button). When unset, the first save auto-opens a folder picker "
+            "and remembers the choice here."
         ),
     )
     save_formats: list[str] = Field(
         default_factory=lambda: ["md"],
         description=(
-            "Formats Save Result / Save Chat writes — any of 'md', 'txt', "
-            "'docx', 'json' (json = answers only). Default ['md']. Set via "
-            "Settings → App → Save results & chat; at least one format (the "
-            "Save buttons fall back to ['md'] if the list is empty)."
+            "Formats Save Result writes — any of 'md', 'txt', 'docx', 'json'. "
+            "Default ['md']. Set via Settings → Save results; Save Chat has its "
+            "own `chat_save_formats`. Falls back to ['md'] if empty."
         ),
     )
+    chat_dir: Path | None = Field(
+        default=None,
+        description=(
+            "Default folder Save Chat writes to — separate from Save Result's "
+            "`results_dir`. Editable in Settings → Save chat. When unset, the "
+            "first chat save opens a folder picker and remembers it here."
+        ),
+    )
+    chat_save_formats: list[str] = Field(
+        default_factory=lambda: ["md"],
+        description=(
+            "Formats Save Chat writes — any of 'md', 'txt', 'docx' (a chat "
+            "transcript has no JSON form). Separate from `save_formats`; set "
+            "via Settings → Save chat."
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _mirror_chat_from_results(cls, data: object) -> object:
+        """Back-compat: a config saved before Save Chat had its own settings has
+        no `chat_*` keys — inherit them from the results settings so behaviour is
+        unchanged (they can be diverged afterward)."""
+        if isinstance(data, dict):
+            if "chat_dir" not in data and "results_dir" in data:
+                data["chat_dir"] = data["results_dir"]
+            if "chat_save_formats" not in data and "save_formats" in data:
+                data["chat_save_formats"] = data["save_formats"]
+        return data
+
     corpus_config_path: Path | None = Field(
         default=None,
         description=(

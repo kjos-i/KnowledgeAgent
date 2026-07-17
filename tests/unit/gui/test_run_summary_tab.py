@@ -179,29 +179,6 @@ def test_sorted_cases_keeps_not_evaluated_last(fake_app: MagicMock):
     assert [c["case_id"] for c in tab._sorted_cases()] == ["c", "a", "b"]
 
 
-def test_metric_scores_chart_defaults_all_and_filters(fake_app: MagicMock, tmp_path):
-    """The 'Metric Scores by Case' chart offers the 0-1 score columns that have
-    data (hit_at_k here), defaults every metric/case selected, and de-selecting
-    every metric swaps the chart for a 'select at least one' note."""
-    led = EvalLedger(tmp_path / "l.db")
-    led.save_run(_report())  # c1/c2 have hit_at_k values
-    coordinator = MagicMock(selected_suite=None, selected_origins=set(ALL_ORIGINS))
-    coordinator.selected_run_id = None
-    tab = RunSummaryTab(fake_app, coordinator=coordinator)
-    tab.build()
-    with patch("knowledge_agent.gui.evaluation._common.active_eval_ledger", return_value=led):
-        tab.refresh()
-    cols = {c for c, _ in tab._chart_metric_cols(tab._cases)}
-    assert "hit_at_k" in cols  # a 0-1 score column with data is chartable
-    assert tab._chart_metrics == cols  # defaults to all metrics selected
-    assert tab._chart_host is not None  # chart rendered into its host
-    tab._on_metric_toggle("hit_at_k", False)  # de-select a metric → redraw
-    assert "hit_at_k" not in tab._chart_metrics
-    for metric in list(tab._chart_metrics):  # de-select the rest
-        tab._on_metric_toggle(metric, False)
-    assert isinstance(tab._draw_metric_chart(tab._cases), ft.Text)  # guidance note
-
-
 def test_labeled_box_has_title_and_border():
     """`_labeled_box` — the shared Answer-Detail block shape — renders a bold
     title above a bordered box wrapping the body (used by Quick Stats too)."""

@@ -42,6 +42,29 @@ def test_default_config_has_safe_defaults():
     assert cfg.keep_loaded_file_on_clear is True
 
 
+def test_chat_save_settings_default_and_mirror_from_results():
+    """Save-chat has its own formats + folder. A config saved before the split
+    (results keys, no chat keys) mirrors chat ← results for back-compat; an
+    explicit chat value wins; a fresh config gets independent defaults."""
+    # Fresh config → chat defaults (md, no folder).
+    fresh = GuiConfig()
+    assert fresh.chat_save_formats == ["md"]
+    assert fresh.chat_dir is None
+    # Old-style config (results set, no chat keys) → chat inherits results.
+    migrated = GuiConfig(save_formats=["md", "docx"], results_dir=Path("/data/out"))
+    assert migrated.chat_save_formats == ["md", "docx"]
+    assert migrated.chat_dir == Path("/data/out")
+    # Explicit chat keys override the mirror.
+    explicit = GuiConfig(
+        save_formats=["md"],
+        results_dir=Path("/data/out"),
+        chat_save_formats=["txt"],
+        chat_dir=Path("/data/chats"),
+    )
+    assert explicit.chat_save_formats == ["txt"]
+    assert explicit.chat_dir == Path("/data/chats")
+
+
 def test_default_config_router_and_info_icon_fields():
     """GUI-only additions: the chat router's curated default model + the
     global info-icon toggle default (on = teaching-program-friendly)."""

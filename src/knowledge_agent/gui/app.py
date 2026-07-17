@@ -602,22 +602,24 @@ class GuiApp:
             self.right_panel.switch_mode(MODE_LATEST)
         self.page.update()
 
-    async def _resolve_save_dir(self) -> tuple[Path | None, bool]:
+    async def _resolve_save_dir(self, *, chat: bool = False) -> tuple[Path | None, bool]:
         """Resolve the folder a Save action writes to.
 
-        Returns `(folder, asked)`. When a default folder is set (Settings →
-        App → Save results & chat), it's used silently (`asked=False`). When
-        none is set, the OS picker opens once, the choice is remembered as
-        `gui_config.results_dir`, and `asked=True` so the caller can point the
-        user at Settings for format / default-folder options. `folder` is None
-        on cancel or picker error.
+        Returns `(folder, asked)`. Save Result uses `results_dir`; Save Chat uses
+        its own `chat_dir`. When that folder is set it's used silently
+        (`asked=False`); when none is set, the OS picker opens once, the choice is
+        remembered on the matching config field, and `asked=True` so the caller
+        can point the user at Settings. `folder` is None on cancel / picker error.
         """
-        existing = self.gui_config.results_dir
+        attr = "chat_dir" if chat else "results_dir"
+        existing = getattr(self.gui_config, attr)
         if existing is not None:
             return existing, False
         try:
             chosen = await self.file_picker.get_directory_path(
-                dialog_title="Choose a folder to save to",
+                dialog_title="Choose a folder to save the chat to"
+                if chat
+                else "Choose a folder to save to",
             )
         except Exception as exc:
             logger.warning("folder picker failed: %r", exc)
@@ -627,22 +629,21 @@ class GuiApp:
             return None, False
         path = Path(chosen)
         # Remember it so subsequent saves skip the picker.
-        self.gui_config.results_dir = path
+        setattr(self.gui_config, attr, path)
         try:
             save_config(self.gui_config)
         except ConfigError as exc:
             # Non-fatal — this save still proceeds to `path`; it just won't be
             # remembered until the folder is set again / in Settings.
-            logger.warning("could not persist results_dir: %r", exc)
-            self.gui_config.results_dir = None
+            logger.warning("could not persist %s: %r", attr, exc)
+            setattr(self.gui_config, attr, None)
         return path, True
 
-    def _settings_hint(self) -> None:
+    def _settings_hint(self, section: str) -> None:
         """Point the user at the Settings section — shown after a Save that had
         to ask for a folder (i.e. the first save, before a default is set)."""
         self.chat_panel.append_system(
-            "tip: choose formats (txt / docx / json) and a default folder in "
-            "Settings → App → Save results & chat"
+            f"tip: choose formats and a default folder in Settings → {section}"
         )
 
     async def on_save_answer(self, e: ft.Event) -> None:
@@ -661,18 +662,18 @@ class GuiApp:
         for path in paths:
             self.chat_panel.append_system(f"saved: {path}")
         if asked:
-            self._settings_hint()
+            self._settings_hint("Save results")
 
     async def on_save_chat(self, e: ft.Event) -> None:
         if not self.messages:
             self.chat_panel.append_system("nothing to save — chat is empty")
             return
-        target, asked = await self._resolve_save_dir()
+        target, asked = await self._resolve_save_dir(chat=True)
         if target is None:
             return
         # A chat transcript has no JSON form — keep only chat-capable formats
         # (fall back to md if the user selected json-only).
-        chosen_formats = self.gui_config.save_formats or ["md"]
+        chosen_formats = self.gui_config.chat_save_formats or ["md"]
         formats = [f for f in chosen_formats if f in CHAT_FORMATS] or ["md"]
         try:
             paths = save_chat(self.messages, self.last_query, target, formats)
@@ -682,7 +683,7 @@ class GuiApp:
         for path in paths:
             self.chat_panel.append_system(f"saved: {path}")
         if asked:
-            self._settings_hint()
+            self._settings_hint("Save chat")
 
     # ----- Open Result / paste path ----------------------------------------
 
