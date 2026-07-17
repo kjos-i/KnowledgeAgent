@@ -38,6 +38,7 @@ from knowledge_agent.gui.evaluation.run_charts_tab import RunChartsTab
 from knowledge_agent.gui.evaluation.run_summary_tab import RunSummaryTab
 from knowledge_agent.gui.evaluation.run_tab import RunTab
 from knowledge_agent.gui.evaluation.trends_tab import TrendsTab
+from knowledge_agent.gui.views.info_doc import InfoDoc, docs_dir
 
 if TYPE_CHECKING:
     from knowledge_agent.evaluation.runner import SuiteRunResult
@@ -47,6 +48,7 @@ if TYPE_CHECKING:
 SUB_TAB_LABELS = (
     "Run evaluation",
     "Create test cases",
+    "Info",
     "Run Summary",
     "Run Charts",
     "Compare Datasets",
@@ -106,6 +108,15 @@ class EvaluationView:
             controls=[
                 ft.Container(content=self.run_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.dataset_tab.build(), padding=8, expand=True),
+                ft.Container(
+                    content=InfoDoc(
+                        self.app,
+                        docs_dir() / "info_evaluation.md",
+                        missing_hint="Evaluation help is not written yet (info_evaluation.md).",
+                    ).build(),
+                    padding=8,
+                    expand=True,
+                ),
                 ft.Container(content=self.run_summary_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.run_charts_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.compare_tab.build(), padding=8, expand=True),

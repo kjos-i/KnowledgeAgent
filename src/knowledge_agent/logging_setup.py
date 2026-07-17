@@ -159,6 +159,7 @@ __all__ = [
     # Public API
     "init_logging",
     "install_crash_handlers",
+    "log_file_path",
     "make_asyncio_exception_handler",
     "make_sys_excepthook",
     "make_threading_excepthook",
@@ -400,6 +401,23 @@ def _resolve_log_dir(settings: LoggingSettings) -> Path:
     return Path(platformdirs.user_log_dir(APP_NAME, appauthor=False)).expanduser().resolve()
 
 
+# Set by `init_logging` to the dir it actually resolved — the SSOT for
+# `log_file_path()` so the GUI shows the log that's really in use.
+_ACTIVE_LOG_DIR: Path | None = None
+
+
+def log_file_path() -> Path:
+    """Absolute path of the active rotating log file (`kagent.log`).
+
+    Returns the directory `init_logging()` resolved when it last ran; if logging
+    hasn't been initialised in this process yet, resolves from the same source
+    (settings TOML + env) so callers still get the correct path. Public accessor
+    so the GUI Log tab can show / read the log without duplicating `_resolve_log_dir`.
+    """
+    log_dir = _ACTIVE_LOG_DIR or _resolve_log_dir(LoggingSettings.load())
+    return log_dir / LOG_FILE_NAME
+
+
 # ---------------------------------------------------------------------------
 # Rotated-file gzip helper.
 #
@@ -572,7 +590,7 @@ def init_logging(
         WARNING to the asyncio logger and disappear — no crash file,
         no traceback in your main log.
     """
-    global _LISTENER, _INITIALIZED, _LOG_QUEUE
+    global _LISTENER, _INITIALIZED, _LOG_QUEUE, _ACTIVE_LOG_DIR
 
     if settings is None:
         settings = LoggingSettings.load(settings_path)
@@ -581,6 +599,7 @@ def init_logging(
     console_enabled = settings.console if settings.console is not None else not is_packaged
 
     log_dir = _resolve_log_dir(settings)
+    _ACTIVE_LOG_DIR = log_dir
     log_dir.mkdir(parents=True, exist_ok=True)
     crash_dir = log_dir / CRASH_SUBDIR
     crash_dir.mkdir(parents=True, exist_ok=True)

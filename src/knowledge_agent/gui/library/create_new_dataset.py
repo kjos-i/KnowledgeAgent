@@ -112,31 +112,23 @@ _STRUCTURE_CAPTION = {
     _MODE_CREATE: "At the location you pick:",
     _MODE_ADOPT: "In the folder you select:",
 }
+# Creation-time preview only: the core artifacts a new corpus folder gets. The
+# full folder contents (eval outputs, session state, dataset files, and the
+# LanceDB / Neo4j schemas) are the general reference — they live in Info → Files &
+# storage, not duplicated here (single source of truth).
 _STRUCTURE_TREE = {
     _MODE_CREATE: (
         "  <location>/\n"
         "    └── <corpus name>/\n"
-        "          ├── lancedb/          (vector store)\n"
-        "          ├── corpus.toml       (config file)\n"
-        "          ├── figures/          (multimodal figures)\n"
-        "          ├── .ka_session.json  (GUI session state — gitignored)\n"
-        "          ├── <dataset>.json    (evaluation datasets)\n"
-        "          └── eval_output/      (evaluation results)\n"
-        "                ├── eval_ledger.db          (run history)\n"
-        "                ├── eval_report_<ts>.json   (per-run report)\n"
-        "                └── eval_summary_<ts>.csv   (per-run summary)"
+        "          ├── lancedb/      (vector store)\n"
+        "          ├── corpus.toml   (config file)\n"
+        "          └── figures/      (multimodal figures)"
     ),
     _MODE_ADOPT: (
         "  <selected folder>/\n"
-        "    ├── lancedb/          (vector store)\n"
-        "    ├── corpus.toml       (config file)\n"
-        "    ├── figures/          (multimodal figures)\n"
-        "    ├── .ka_session.json  (GUI session state — gitignored)\n"
-        "    ├── <dataset>.json    (evaluation datasets)\n"
-        "    └── eval_output/      (evaluation results)\n"
-        "          ├── eval_ledger.db          (run history)\n"
-        "          ├── eval_report_<ts>.json   (per-run report)\n"
-        "          └── eval_summary_<ts>.csv   (per-run summary)"
+        "    ├── lancedb/      (vector store)\n"
+        "    ├── corpus.toml   (config file)\n"
+        "    └── figures/      (multimodal figures)"
     ),
 }
 
@@ -316,6 +308,14 @@ class CreateNewDatasetTab:
                     ),
                     self._structure_caption,
                     self._structure_tree,
+                    ft.Text(
+                        "Evaluation datasets, results, and the full folder "
+                        "layout (with the LanceDB + Neo4j schemas) are covered "
+                        "in Info → Files & storage.",
+                        size=12,
+                        color=ft.Colors.GREY_400,
+                        italic=True,
+                    ),
                     ft.Text(
                         "The Neo4j DBMS lives outside — Neo4j Desktop "
                         "manages its data directory itself. Only the "

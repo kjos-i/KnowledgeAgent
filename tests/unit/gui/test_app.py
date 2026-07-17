@@ -18,7 +18,6 @@ from langchain_core.messages import HumanMessage
 from knowledge_agent.artifacts import SaveError
 from knowledge_agent.gui.app import GuiApp, _LoadedFile
 from knowledge_agent.gui.config_store import GuiConfig, SwitchOutcome
-from knowledge_agent.gui.right_panel import MODE_FILE, MODE_LATEST
 from knowledge_agent.models import AgentAnswer
 
 if TYPE_CHECKING:
@@ -205,26 +204,95 @@ def test_on_clear_wipes_session_state(fake_page: MagicMock):
     app.last_answer = MagicMock()
     app.last_query = "q"
     app.loaded_file = _LoadedFile(name="x.md", content="x")
-    app.right_panel.current_mode = MODE_LATEST
 
     app.on_clear(MagicMock())
 
     assert app.messages == []
     assert app.last_answer is None
     assert app.last_query is None
-    # Default toggle: keep loaded file.
+    # Default toggle: keep loaded file. The pager is reset (which re-seeds the
+    # kept file), not left showing stale answers.
     assert app.loaded_file is not None
+    app.right_panel.reset_history.assert_called_once()
 
 
 def test_on_clear_drops_loaded_file_when_toggle_off(fake_page: MagicMock):
     app = _make_app(fake_page)
     app.gui_config.keep_loaded_file_on_clear = False
     app.loaded_file = _LoadedFile(name="x.md", content="x")
-    app.right_panel.current_mode = MODE_FILE
 
     app.on_clear(MagicMock())
     assert app.loaded_file is None
-    app.right_panel.switch_mode.assert_called_with(MODE_LATEST)
+    app.right_panel.reset_history.assert_called_once()
+
+
+# ---- on_open_path (paste-path field) ----
+
+
+def test_on_open_path_loads_typed_md_file(fake_page: MagicMock, tmp_path: Path):
+    app = _make_app(fake_page)
+    p = tmp_path / "ans.md"
+    p.write_text("# hello", encoding="utf-8")
+    e = MagicMock()
+    e.control.value = str(p)
+
+    app.on_open_path(e)
+
+    assert app.loaded_file is not None
+    assert app.loaded_file.name == "ans.md"
+    assert app.loaded_file.content == "# hello"
+    app.right_panel.push_file.assert_called_once()
+    assert e.control.value == ""  # cleared on success
+
+
+def test_on_open_path_missing_file_messages_and_keeps_field(fake_page: MagicMock, tmp_path: Path):
+    app = _make_app(fake_page)
+    e = MagicMock()
+    e.control.value = str(tmp_path / "nope.md")
+
+    app.on_open_path(e)
+
+    assert app.loaded_file is None
+    app.right_panel.push_file.assert_not_called()
+    app.chat_panel.append_system.assert_called_once()
+    assert e.control.value != ""  # left intact so the typo can be fixed
+
+
+def test_on_open_path_rejects_non_md_txt(fake_page: MagicMock, tmp_path: Path):
+    app = _make_app(fake_page)
+    p = tmp_path / "data.json"
+    p.write_text("{}", encoding="utf-8")
+    e = MagicMock()
+    e.control.value = str(p)
+
+    app.on_open_path(e)
+
+    assert app.loaded_file is None
+    app.chat_panel.append_system.assert_called_once()
+
+
+def test_on_open_path_empty_is_noop(fake_page: MagicMock):
+    app = _make_app(fake_page)
+    e = MagicMock()
+    e.control.value = "   "
+
+    app.on_open_path(e)
+
+    assert app.loaded_file is None
+    app.chat_panel.append_system.assert_not_called()
+
+
+def test_on_open_path_strips_surrounding_quotes(fake_page: MagicMock, tmp_path: Path):
+    app = _make_app(fake_page)
+    p = tmp_path / "quoted.txt"
+    p.write_text("plain", encoding="utf-8")
+    e = MagicMock()
+    e.control.value = f'"{p}"'  # Windows "Copy as path" wraps in quotes
+
+    app.on_open_path(e)
+
+    assert app.loaded_file is not None
+    assert app.loaded_file.name == "quoted.txt"
 
 
 # ---- on_save_answer ----

@@ -71,15 +71,12 @@ from knowledge_agent.gui.config_store import (
     switch_active_corpus,
 )
 from knowledge_agent.gui.library.installs import InstallsTab
-from knowledge_agent.gui.right_panel import (
-    MODE_FILE,
-    MODE_LATEST,
-    RightPanel,
-)
+from knowledge_agent.gui.right_panel import RightPanel
 from knowledge_agent.gui.settings import AppTab, KeysTab
 from knowledge_agent.gui.tabs.evaluation_tab import EvaluationTab
 from knowledge_agent.gui.tabs.info_tab import InfoTab
 from knowledge_agent.gui.tabs.library_tab import LibraryTab
+from knowledge_agent.gui.tabs.log_tab import LogTab
 from knowledge_agent.gui.tabs.search_tab import SearchTab
 from knowledge_agent.kg.corpus_config import CorpusConfig, load_corpus_config
 
@@ -133,6 +130,7 @@ class GuiApp:
     app_tab: AppTab = field(init=False)
     keys_tab: KeysTab = field(init=False)
     info_tab: InfoTab = field(init=False)
+    log_tab: LogTab = field(init=False)
     file_picker: ft.FilePicker = field(init=False)
     _send_task: asyncio.Task | None = field(default=None, init=False)
     _info_icons: dict[str, list[ft.IconButton]] = field(default_factory=dict, init=False)
@@ -567,9 +565,8 @@ class GuiApp:
                 status = f"answer ready — {n_chunk} chunk + {n_kg} KG sources. See display panel."
             self.messages.append(AIMessage(content=history_note))
             self.chat_panel.append_system(status)
-            # Refresh the right panel so the new answer shows in Latest.
-            if self.right_panel.current_mode == MODE_LATEST:
-                self.right_panel.switch_mode(MODE_LATEST)
+            # Push the new answer into the view history and jump to it.
+            self.right_panel.push_answer(answer, text)
         except asyncio.CancelledError:
             self.chat_panel.append_system("search cancelled")
         finally:
@@ -590,16 +587,13 @@ class GuiApp:
         self.last_answer = None
         self.last_query = None
         self.chat_panel.reset()
-        # Per `keep_loaded_file_on_clear`: when off, also wipe the
-        # loaded file and pull the display back to Latest view.
+        # Per `keep_loaded_file_on_clear`: when off, also wipe the loaded file
+        # so it isn't re-seeded into the reset pager below.
         if not self.gui_config.keep_loaded_file_on_clear:
             self.loaded_file = None
-            if self.right_panel.current_mode != MODE_LATEST:
-                self.right_panel.switch_mode(MODE_LATEST)
-                self.page.update()
-                return
-        if self.right_panel.current_mode == MODE_LATEST:
-            self.right_panel.switch_mode(MODE_LATEST)
+        # Reset the view-history pager; a surviving loaded file is re-seeded as
+        # its sole slot so it stays visible (matches keep_loaded_file_on_clear).
+        self.right_panel.reset_history()
         self.page.update()
 
     async def _resolve_save_dir(self, *, chat: bool = False) -> tuple[Path | None, bool]:
@@ -705,14 +699,40 @@ class GuiApp:
         if first.path is None:
             logger.warning("picker returned a file with no path")
             return
+        self._load_file_into_view(Path(first.path))
+
+    def on_open_path(self, e: ft.Event) -> None:
+        """Load the `.md` / `.txt` file whose path was typed into the paste-path
+        field beside Open Result (Enter submits). Empty → no-op; a wrong
+        extension or missing path → a chat message so the mistake is visible."""
+        raw = (e.control.value or "").strip().strip('"')
+        if not raw:
+            return
+        path = Path(raw)
+        if path.suffix.lower() not in (".md", ".txt"):
+            self.chat_panel.append_system(
+                f"open a .md or .txt file (got {path.suffix or 'no extension'})"
+            )
+            return
+        if not path.is_file():
+            self.chat_panel.append_system(f"no file at: {raw}")
+            return
+        self._load_file_into_view(path)
+        e.control.value = ""  # clear the field on a successful load
+        self.page.update()
+
+    def _load_file_into_view(self, path: Path) -> None:
+        """Read a `.md` / `.txt` file into the File view — shared by the Open
+        Result picker and the paste-path field. Read errors surface in the chat
+        panel; on success the file is pushed as the newest history slot."""
         try:
-            content = Path(first.path).read_text(encoding="utf-8")
+            content = path.read_text(encoding="utf-8")
         except OSError as exc:
-            logger.warning("could not read %s: %r", first.path, exc)
+            logger.warning("could not read %s: %r", path, exc)
             self.chat_panel.append_system(f"could not read file: {exc}")
             return
-        self.loaded_file = _LoadedFile(name=first.name, content=content)
-        self.right_panel.switch_mode(MODE_FILE)
+        self.loaded_file = _LoadedFile(name=path.name, content=content)
+        self.right_panel.push_file(path.name, content)
 
     # ----- page assembly ----------------------------------------------------
 
@@ -761,6 +781,7 @@ class GuiApp:
         self.app_tab = AppTab(self)
         self.keys_tab = KeysTab(self)
         self.info_tab = InfoTab(self)
+        self.log_tab = LogTab(self)
 
         # Native Flet `Tabs` (Flutter-style: TabBar + TabBarView aligned
         # by index through a shared `length`). The M3 chrome enforces a
@@ -774,6 +795,7 @@ class GuiApp:
                 ft.Tab(label="Installs"),
                 ft.Tab(label="Keys"),
                 ft.Tab(label="Settings"),
+                ft.Tab(label="Log"),
                 ft.Tab(label="Info"),
             ],
         )
@@ -810,6 +832,11 @@ class GuiApp:
                     expand=True,
                 ),
                 ft.Container(
+                    content=self.log_tab.build(),
+                    padding=8,
+                    expand=True,
+                ),
+                ft.Container(
                     content=self.info_tab.build(),
                     padding=8,
                     expand=True,
@@ -836,7 +863,7 @@ class GuiApp:
             spacing=8,
         )
         tabs = ft.Tabs(
-            length=7,
+            length=8,
             selected_index=0,
             content=ft.Column(
                 controls=[top_row, tab_bodies],

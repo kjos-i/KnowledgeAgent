@@ -22,25 +22,30 @@ def _tab_label(t: ft.Tab) -> str:
     return t.label.value if isinstance(t.label, ft.Text) else t.label
 
 
-def test_evaluation_view_builds_seven_sub_tabs(fake_app: MagicMock):
+def test_evaluation_view_builds_eight_sub_tabs(fake_app: MagicMock):
     view = EvaluationView(fake_app)
     ctl = view.build()
     assert isinstance(ctl, ft.Tabs)
-    assert ctl.length == len(SUB_TAB_LABELS) == 7
+    assert ctl.length == len(SUB_TAB_LABELS) == 8
     tab_bar = ctl.content.controls[0]
+    sub_bodies = ctl.content.controls[1]
     assert [_tab_label(t) for t in tab_bar.tabs] == list(SUB_TAB_LABELS)
-    assert "Create test cases" in SUB_TAB_LABELS
+    assert len(sub_bodies.controls) == len(SUB_TAB_LABELS)  # labels + bodies aligned
+    # Info sits between the authoring tabs and the dashboards.
+    assert SUB_TAB_LABELS.index("Info") == SUB_TAB_LABELS.index("Create test cases") + 1
+    assert SUB_TAB_LABELS.index("Info") == SUB_TAB_LABELS.index("Run Summary") - 1
 
 
 def test_view_tabs_are_tinted(fake_app: MagicMock):
-    """The four eval-output tabs get a coloured label; the two authoring tabs
-    keep a plain string label."""
+    """The four eval-output tabs get a coloured label; the authoring tabs and the
+    contextual Info tab keep a plain string label."""
     view = EvaluationView(fake_app)
     tab_bar = view.build().content.controls[0]
     by_label = {_tab_label(t): t for t in tab_bar.tabs}
     assert isinstance(by_label["Run Summary"].label, ft.Text)  # tinted view tab
     assert by_label["Trends"].label.color == ft.Colors.BLUE_300
     assert by_label["Run evaluation"].label == "Run evaluation"  # plain authoring tab
+    assert by_label["Info"].label == "Info"  # plain — not a tinted view tab
 
 
 def test_selecting_view_tab_auto_refreshes(fake_app: MagicMock):

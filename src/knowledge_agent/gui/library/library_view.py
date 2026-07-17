@@ -28,12 +28,13 @@ import flet as ft
 from knowledge_agent.gui.library.create_new_dataset import CreateNewDatasetTab
 from knowledge_agent.gui.library.ingest import IngestTab
 from knowledge_agent.gui.library.select_dataset import SelectDatasetTab
+from knowledge_agent.gui.views.info_doc import InfoDoc, docs_dir
 
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
 
 
-SUB_TAB_LABELS = ("Create New", "Ingest", "Metadata")
+SUB_TAB_LABELS = ("Create New", "Ingest", "Metadata", "Info")
 
 
 class LibraryView:
@@ -75,6 +76,15 @@ class LibraryView:
                 self._ingest_body,
                 ft.Container(
                     content=self.select_tab.build(),
+                    padding=8,
+                    expand=True,
+                ),
+                ft.Container(
+                    content=InfoDoc(
+                        self.app,
+                        docs_dir() / "info_library.md",
+                        missing_hint="Library help is not written yet (info_library.md).",
+                    ).build(),
                     padding=8,
                     expand=True,
                 ),

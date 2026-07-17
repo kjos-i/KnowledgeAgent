@@ -53,7 +53,7 @@ _MD_STYLE = ft.MarkdownStyleSheet(
     table_body_text_style=ft.TextStyle(size=_TEXT_SIZE, height=1.4, color=_FG),
     # Heading hierarchy — VS Code's em sizes (2 / 1.5 / 1.25 / 1 / .875 / .85 of
     # 14px), semibold, line-height 1.25, each with top breathing room.
-    h1_text_style=ft.TextStyle(size=28, weight=_SEMIBOLD, height=1.25, color=_FG),
+    h1_text_style=ft.TextStyle(size=25, weight=_SEMIBOLD, height=1.25, color=_FG),
     h1_padding=ft.Padding.only(top=8, bottom=6),
     h2_text_style=ft.TextStyle(size=21, weight=_SEMIBOLD, height=1.25, color=_FG),
     h2_padding=ft.Padding.only(top=22, bottom=6),

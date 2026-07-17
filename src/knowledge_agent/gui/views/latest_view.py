@@ -99,7 +99,7 @@ class LatestView:
             expand=True,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
-        return view_with_header("Latest Result", body)
+        return view_with_header("View result from search", body)
 
     def _build_thumbnail(
         self,

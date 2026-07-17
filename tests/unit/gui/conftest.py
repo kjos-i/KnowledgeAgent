@@ -44,6 +44,7 @@ def fake_app(fake_page: MagicMock) -> MagicMock:
         "on_save_chat",
         "on_save_answer",
         "on_open_result",
+        "on_open_path",
     ):
         setattr(app, handler, MagicMock(name=handler))
     return app
