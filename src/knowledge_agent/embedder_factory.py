@@ -301,7 +301,11 @@ async def embed_chunks(
         )
     texts = [_text_of(c) for c in chunks]
     model = settings.embedding_model
-    embedder = _build_langchain_embedder(provider, model)
+    # Build off the event loop: for HuggingFace this loads the SentenceTransformer
+    # model (large, synchronous, disk/GPU-bound) and would freeze the loop on the
+    # first call — the same reason the Voyage path uses to_thread. Cheap for
+    # OpenAI/Google, and lru_cache makes every call after the first a fast hit.
+    embedder = await asyncio.to_thread(_build_langchain_embedder, provider, model)
     if input_type == "query":
         return list(await asyncio.gather(*(embedder.aembed_query(t) for t in texts)))
     return await embedder.aembed_documents(texts)
@@ -341,7 +345,9 @@ async def embed_texts(texts: list[str], input_type: str = "document") -> list[li
         return await asyncio.to_thread(_voyage_call, texts, input_type)
 
     model = settings.embedding_model
-    embedder = _build_langchain_embedder(provider, model)
+    # Build off the loop (see embed_chunks): the HuggingFace model load is a
+    # large synchronous call that would otherwise freeze the event loop.
+    embedder = await asyncio.to_thread(_build_langchain_embedder, provider, model)
     if input_type == "query":
         # Fan out queries concurrently. For one-query callers (the
         # agent's read path) this collapses to a single await. For

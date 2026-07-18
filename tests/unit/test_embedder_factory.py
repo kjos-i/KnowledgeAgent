@@ -219,6 +219,40 @@ async def test_huggingface_dispatch_no_api_key_needed():
     assert result == [[0.5, 0.5]]
 
 
+async def test_langchain_embedder_build_runs_off_the_event_loop():
+    """The HuggingFace model load is a large synchronous call; embed_texts must
+    build the embedder via asyncio.to_thread so the load doesn't freeze the
+    event loop (the Voyage path already threads). Regression:
+    _build_langchain_embedder ran inline on the loop."""
+    import asyncio
+
+    import knowledge_agent.embedder_factory as EF
+
+    settings = _FakeSettings(embedding_provider="huggingface")
+    fake_embedder = MagicMock()
+    fake_embedder.aembed_documents = AsyncMock(return_value=[[0.1]])
+
+    offloaded = []
+    real_to_thread = asyncio.to_thread
+
+    async def spy_to_thread(fn, *a, **k):
+        offloaded.append(fn)
+        return await real_to_thread(fn, *a, **k)
+
+    with (
+        patch("knowledge_agent.embedder_factory.get_settings", return_value=settings),
+        patch(
+            "knowledge_agent.embedder_factory._build_langchain_embedder",
+            return_value=fake_embedder,
+        ) as mock_build,
+        patch.object(EF.asyncio, "to_thread", spy_to_thread),
+    ):
+        result = await embed_texts(["x"], input_type="document")
+
+    assert result == [[0.1]]
+    assert mock_build in offloaded  # the blocking build was offloaded to a thread
+
+
 def test_huggingface_embedder_pins_model_revision():
     """Security: the HF embedder must load at the curated `pinned_revision`,
     not upstream `main`, so SentenceTransformer resolves the vetted snapshot
