@@ -430,6 +430,10 @@ class LanceClient:
             try:
                 await table.create_index(
                     column="embedding",
+                    # Cosine so ranking matches the query-side distance_type and
+                    # is magnitude-invariant — non-normalized (e.g. HF) embeddings
+                    # rank wrong under the default L2 metric.
+                    config=lancedb.index.IvfPq(distance_type="cosine"),
                 )
                 logger.info("LanceDB: created vector index (%d rows)", row_count)
             except Exception as exc:
@@ -558,6 +562,9 @@ class LanceClient:
         search = (
             table.query()
             .nearest_to(query_vector)
+            # Cosine for the vector leg (see vector_search) so its RRF input
+            # ranks match the index; FTS/BM25 leg is unaffected.
+            .distance_type("cosine")
             .nearest_to_text(query)
             .rerank(RRFReranker(K=rrf_k))
             .limit(num_candidates)
@@ -633,7 +640,15 @@ class LanceClient:
             return []
         conn = await self._ensure_conn()
         table = await conn.open_table(CHUNKS_TABLE)
-        search = table.query().nearest_to(query_vector).limit(num_candidates)
+        search = (
+            table.query()
+            .nearest_to(query_vector)
+            # Cosine distance: magnitude-invariant so non-normalized (e.g. HF)
+            # embeddings rank by direction. The default L2 metric ranks wrong
+            # for them, and _row_to_chunk's `1 - distance` score assumes cosine.
+            .distance_type("cosine")
+            .limit(num_candidates)
+        )
         if filters:
             where = _filters_to_sql(filters)
             if where:

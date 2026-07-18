@@ -54,6 +54,7 @@ class _RecordingQueryBuilder:
     last_vector: list[float] | None = None
     last_text: str | None = None
     last_reranker: Any = None
+    last_distance_type: str | None = None
     raise_on_to_arrow: Exception | None = None
 
     def where(self, filter_sql: str) -> "_RecordingQueryBuilder":
@@ -74,6 +75,12 @@ class _RecordingQueryBuilder:
 
     def nearest_to_text(self, t: str) -> "_RecordingQueryBuilder":
         self.last_text = t
+        return self
+
+    def distance_type(self, distance_type: str) -> "_RecordingQueryBuilder":
+        # Mirrors AsyncVectorQuery/AsyncHybridQuery.distance_type — records the
+        # metric so search tests can assert the vector leg ranks by cosine.
+        self.last_distance_type = distance_type
         return self
 
     def rerank(self, reranker: Any) -> "_RecordingQueryBuilder":
@@ -108,6 +115,9 @@ class RecordingTable:
     # positional for vector search).
     last_search_args: tuple[Any, ...] = ()
     last_search_kwargs: dict[str, Any] = field(default_factory=dict)
+    # count_rows() return + create_index() capture, for ensure_indexes tests.
+    row_count: int = 0
+    create_index_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = field(default_factory=list)
 
     async def add(self, rows: Any) -> None:
         if self.raise_on_add is not None:
@@ -148,10 +158,10 @@ class RecordingTable:
         return self.query_builder
 
     async def count_rows(self) -> int:
-        return 0
+        return self.row_count
 
     async def create_index(self, *args: Any, **kwargs: Any) -> None:
-        pass
+        self.create_index_calls.append((args, kwargs))
 
     async def optimize(self) -> None:
         pass
@@ -930,6 +940,66 @@ async def test_vector_search_uses_num_candidates_pool_and_truncates(monkeypatch)
     assert qb.last_limit == 30
     assert qb.last_reranker is None  # vector-only path: no RRF fusion
     assert len(hits) == 2
+
+
+async def test_vector_search_ranks_by_cosine_distance(monkeypatch):
+    """vector_search must set distance_type("cosine"). Non-normalized (e.g. HF)
+    embeddings rank WRONG under LanceDB's default L2 metric, and _row_to_chunk's
+    `1 - distance` score is only a valid similarity for cosine distance.
+    Regression: the query set no distance_type, so it silently ran L2."""
+
+    async def _fake_embed(_text: str) -> list[float]:
+        return [0.5] * 1024
+
+    monkeypatch.setattr("knowledge_agent.search.client._embed_query", _fake_embed)
+    qb = _RecordingQueryBuilder(rows_to_return=[])
+    table = RecordingTable(query_builder=qb)
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    client = _client_with_conn(_configured_settings(), conn)
+
+    await client.vector_search("q", top_k=2)
+
+    assert qb.last_distance_type == "cosine"
+
+
+async def test_hybrid_search_ranks_vector_leg_by_cosine_distance(monkeypatch):
+    """The hybrid vector leg must also rank by cosine so its RRF input matches
+    the cosine-built index (and so non-normalized embeddings fuse correctly).
+    Regression: no distance_type on the chain -> L2."""
+
+    async def _fake_embed(_text: str) -> list[float]:
+        return [0.5] * 1024
+
+    monkeypatch.setattr("knowledge_agent.search.client._embed_query", _fake_embed)
+    qb = _RecordingQueryBuilder(rows_to_return=[])
+    table = RecordingTable(query_builder=qb)
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    client = _client_with_conn(_configured_settings(), conn)
+
+    await client.hybrid_search("q", top_k=3)
+
+    assert qb.last_distance_type == "cosine"
+
+
+async def test_ensure_indexes_builds_a_cosine_vector_index():
+    """The vector index must be built with cosine distance so it matches the
+    query-side distance_type; the default L2 index mis-ranks non-normalized
+    embeddings. Regression: create_index passed no config -> an L2 index."""
+    qb = _RecordingQueryBuilder()
+    # row_count >= threshold so the vector index actually builds (not skipped).
+    table = RecordingTable(query_builder=qb, row_count=1000)
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    client = _client_with_conn(_configured_settings(min_rows_for_vector_index=256), conn)
+
+    await client.ensure_indexes()
+
+    embed_cfgs = [
+        kwargs["config"]
+        for (_args, kwargs) in table.create_index_calls
+        if kwargs.get("column") == "embedding"
+    ]
+    assert embed_cfgs, "expected a vector index build on the embedding column"
+    assert embed_cfgs[0].distance_type == "cosine"
 
 
 async def test_retrieve_dispatches_to_mode_specific_method(monkeypatch):
