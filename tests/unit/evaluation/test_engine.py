@@ -212,7 +212,11 @@ def test_judge_track_wired(monkeypatch):
     from knowledge_agent.evaluation import judge as J
 
     async def fake_panel(data, models, threshold):
-        return {k: 0.9 for k in J.JUDGE_METRIC_KEYS}, 200, 80
+        # hallucination is lower-is-better: a LOW raw score (0.1) is GOOD and,
+        # inverted (1 - 0.1 = 0.9), matches the other 0.9s so the mean is 0.9.
+        scores = {k: 0.9 for k in J.JUDGE_METRIC_KEYS}
+        scores["hallucination"] = 0.1
+        return scores, 200, 80
 
     monkeypatch.setattr(J, "run_judge_panel", fake_panel)
     monkeypatch.setattr(J, "resolve_judge_models", lambda m: ["x"])
@@ -222,9 +226,35 @@ def test_judge_track_wired(monkeypatch):
     cfg = EvalConfig(enabled_groups=frozenset({"judge"}))
     result = asyncio.run(E.evaluate_case(case, None, cfg))
     assert result["faithfulness"] == 0.9
-    assert result["avg_judge_score"] == 0.9
+    assert result["hallucination"] == 0.1  # raw score preserved in its own column
+    assert result["avg_judge_score"] == 0.9  # hallucination inverted before averaging
     assert result["judge_total_tokens"] == 280
     assert result["status"] == "PASS"  # faithfulness + answer_relevancy >= threshold
+
+
+def test_avg_judge_score_inverts_hallucination(monkeypatch):
+    """hallucination is lower-is-better: a HIGH raw hallucination score (bad)
+    must LOWER avg_judge_score, not raise it. Regression: the mean blended the
+    raw hallucination un-inverted, so a fully-hallucinated answer with 1.0s
+    everywhere scored a perfect 1.0 average."""
+    from knowledge_agent.evaluation import judge as J
+
+    async def fake_panel(data, models, threshold):
+        # Everything "perfect" (1.0) INCLUDING hallucination=1.0 (fully bad).
+        return {k: 1.0 for k in J.JUDGE_METRIC_KEYS}, 10, 5
+
+    monkeypatch.setattr(J, "run_judge_panel", fake_panel)
+    monkeypatch.setattr(J, "resolve_judge_models", lambda m: ["x"])
+    monkeypatch.setattr(J, "build_judge_input", lambda run, case: {})
+    case = EvalCase(id="jh", question="q?", expected_answer_points=["fact"])
+    _patch_run(monkeypatch, _run(answer="a"))
+    cfg = EvalConfig(enabled_groups=frozenset({"judge"}))
+    result = asyncio.run(E.evaluate_case(case, None, cfg))
+    assert result["hallucination"] == 1.0  # raw (bad) value preserved
+    # 6 metrics at 1.0 + inverted hallucination (1 - 1.0 = 0.0) => mean = 6/7.
+    # Under the bug the average was 1.0 (un-inverted), so this fails without it.
+    assert result["avg_judge_score"] < 1.0
+    assert 0.8 < result["avg_judge_score"] < 0.9
 
 
 def test_judge_group_disabled_yields_none(monkeypatch):

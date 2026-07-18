@@ -17,7 +17,11 @@ from typing import TYPE_CHECKING, Any
 
 from knowledge_agent.evaluation import metrics as M
 from knowledge_agent.evaluation.adapter import run_case
-from knowledge_agent.evaluation.registry import keys_in_toggle_group, metric_decimals
+from knowledge_agent.evaluation.registry import (
+    keys_in_toggle_group,
+    metric_decimals,
+    metric_directions,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -145,7 +149,17 @@ async def _judge_metrics(case: EvalCase, run: CaseRun, cfg: EvalConfig) -> dict[
     scores, in_tok, out_tok = await J.run_judge_panel(data, models, cfg.judge_threshold)
 
     values: dict[str, Any] = {k: _round(k, scores.get(k)) for k in J.JUDGE_METRIC_KEYS}
-    present = [scores[k] for k in J.JUDGE_METRIC_KEYS if scores.get(k) is not None]
+    # Align every judge metric to "higher = better" before averaging: a
+    # lower-is-better metric (hallucination) is inverted via its registry
+    # direction, else a high (worse) hallucination score would inflate the mean
+    # and make the answer read as BETTER. Per-metric columns keep the raw score;
+    # only the blended average is direction-normalised.
+    directions = metric_directions()
+    present = [
+        (s if directions.get(k, True) else 1.0 - s)
+        for k in J.JUDGE_METRIC_KEYS
+        if (s := scores.get(k)) is not None
+    ]
     values["avg_judge_score"] = _round("avg_judge_score", M.safe_mean(present)) if present else None
     values["judge_input_tokens"] = in_tok
     values["judge_output_tokens"] = out_tok
