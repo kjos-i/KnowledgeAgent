@@ -46,7 +46,7 @@ import pytest
 from knowledge_agent.config import load_test_env
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import AsyncIterator, Iterator
 
 
 @pytest.fixture(scope="session")
@@ -62,28 +62,26 @@ def _test_env_loaded() -> None:
     load_test_env()
 
 
-@pytest.fixture(scope="module")
-def kg_client(_test_env_loaded: None) -> Iterator[Any]:
-    """Module-scoped `Neo4jClient` pointing at the test instance.
+@pytest.fixture
+async def kg_client(_test_env_loaded: None) -> AsyncIterator[Any]:
+    """Function-scoped async `Neo4jClient` pointing at the test instance.
 
-    The driver is the connection pool (one per app), so building it
-    per file keeps wire overhead low without leaking state across
-    test files. Each test still gets the same client instance for the
-    duration of its module.
-
-    `close()` is async post-refactor; we drive it via asyncio.run on
-    teardown since the fixture itself is sync (module-scoped fixtures
-    can't be async generators that yield across many tests).
+    Function-scoped + async on purpose: `pytest-asyncio` (auto mode)
+    gives each test its own event loop, and the client's `AsyncDriver`
+    - a pool of loop-bound connections - must be created AND closed on
+    that same loop. A module-scoped driver built in the first test's
+    loop errors in every later test (on Windows: `'NoneType' object has
+    no attribute 'send'` from the dead proactor) once that loop is gone.
+    Per-test construction is cheap (the driver connects lazily on first
+    query), so correctness wins over the tiny wire overhead.
     """
-    import asyncio
-
     from knowledge_agent.kg.client import Neo4jClient
 
     client = Neo4jClient()
     try:
         yield client
     finally:
-        asyncio.run(client.close())
+        await client.close()
 
 
 @pytest.fixture(scope="session")
@@ -106,7 +104,7 @@ def ensure_constraints(_test_env_loaded: None) -> None:
 
 
 @pytest.fixture
-def clean_kg(kg_client: Any) -> Iterator[None]:
+async def clean_kg(kg_client: Any) -> AsyncIterator[None]:
     """Wipe the test KG before each test that uses this fixture.
 
     Pattern: `MATCH (n) DETACH DELETE n`. The test instance is for
@@ -114,12 +112,15 @@ def clean_kg(kg_client: Any) -> Iterator[None]:
     by password from the real corpus, so a wipe here cannot reach
     real data.
 
-    Use this fixture whenever a test mutates the graph. Don't use
-    it for read-only inspections of pre-existing state (there should
-    not BE pre-existing state at this tier, but be explicit).
+    Async because `Neo4jClient.driver` is an `AsyncDriver` (its
+    sessions are `AsyncSession`; there is no sync context-manager
+    protocol on them). Use this fixture whenever a test mutates the
+    graph. Don't use it for read-only inspections of pre-existing
+    state (there should not BE pre-existing state at this tier, but
+    be explicit).
     """
-    with kg_client.driver.session() as session:
-        session.run("MATCH (n) DETACH DELETE n")
+    async with kg_client.driver.session() as session:
+        await session.run("MATCH (n) DETACH DELETE n")
     yield
 
 

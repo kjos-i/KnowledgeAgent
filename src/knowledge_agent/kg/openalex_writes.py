@@ -50,21 +50,28 @@ async def write_citations(client, doc_id: str, work: dict[str, Any]) -> None:
     From a locally-generated `doc_id` (SHA-256 of the file bytes) and one
     OpenAlex work JSON:
 
-      1. MERGE the focal :Document. When `openalex_id` is known, MERGE by
-         `openalex_id` (this naturally finds any pre-existing shadow node
-         for the same paper, upgrading it from shadow to corpus). When
-         `openalex_id` is unknown (non-scholarly doc), MERGE by `doc_id`.
-         In both cases the focal ends up with `doc_id` + `in_corpus = true`
-         (+ `doi` when known).
+      1. MERGE the focal :Document by `doc_id` (the per-file identity, so
+         two files that resolve to the same work never collapse onto one
+         node or clobber each other's `doc_id`). When `openalex_id` is
+         known, additionally, in the same atomic write:
+           (a) absorb any pre-existing *shadow* for that `openalex_id` -
+               re-point its incoming :CITES onto the focal and delete it
+               (the cited-then-now-ingested upgrade), and
+           (b) claim the `openalex_id` on the focal, but ONLY when no
+               OTHER :Document already holds it. Both `doc_id` and
+               `openalex_id` are UNIQUE; a rival holder is a duplicate
+               corpus file, so the focal keeps all its data and simply
+               forgoes the id rather than clobber or violate a constraint.
+         The focal ends up with `doc_id` + `in_corpus = true` (+ `doi`
+         when known, + `openalex_id` when known and free).
       2. UNWIND-MERGE shadow :Document nodes for each referenced work,
          keyed on `openalex_id` (all we know for citations). ON CREATE
          only - never downgrade an existing corpus doc to shadow.
       3. UNWIND-MERGE :CITES edges from focal (matched by doc_id) ->
          each referenced doc (matched by openalex_id).
 
-    Three Cypher round-trips total when there are references, two when
-    no references in the focal write path, or one for the no-references
-    case.
+    Three Cypher round-trips total when there are references (focal +
+    shadow-MERGE + CITES-edges); one when there are none (focal only).
 
     Raises `ValueError` for an empty `doc_id`; Cypher / driver failures
     propagate.
@@ -80,28 +87,52 @@ async def write_citations(client, doc_id: str, work: dict[str, Any]) -> None:
             references.append(ref_id)
 
     async with client.driver.session() as session:
-        # 1. Focal document.
-        #    - When openalex_id is known: MERGE by openalex_id so any
-        #      pre-existing shadow with the same openalex_id is found
-        #      and upgraded (shadow -> corpus path).
-        #    - When openalex_id is unknown: MERGE by doc_id only.
-        #    Always SET doc_id + in_corpus = true; SET doi when known.
+        # 1. Focal document, always keyed by doc_id (the per-file
+        #    identity - never clobbered, never collapses two files).
+        #    - openalex_id known: MERGE by doc_id, then in the SAME atomic
+        #      write (a) absorb any same-openalex_id shadow (re-point its
+        #      :CITES onto the focal, delete it) and (b) claim openalex_id
+        #      only if no other :Document holds it (both ids are UNIQUE; a
+        #      rival holder is a duplicate corpus file).
+        #    - openalex_id unknown (non-scholarly doc): MERGE by doc_id.
+        #    Always SET in_corpus = true; SET doi when known.
         if openalex_id:
             params: dict[str, Any] = {
                 "openalex_id": openalex_id,
                 "doc_id": doc_id,
             }
-            set_clauses = [
+            focal_set = [
                 f"d:{PAPER_LABEL}",
-                "d.doc_id = $doc_id",
                 "d.in_corpus = true",
             ]
             if doi:
-                set_clauses.append("d.doi = $doi")
+                focal_set.append("d.doi = $doi")
                 params["doi"] = doi
             await session.run(
-                f"MERGE (d:{DOCUMENT_LABEL} {{openalex_id: $openalex_id}}) "
-                f"SET {', '.join(set_clauses)}",
+                f"MERGE (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) "
+                f"SET {', '.join(focal_set)} "
+                f"WITH d "
+                # Absorb a same-openalex_id shadow (cited-then-ingested):
+                # move its incoming :CITES onto the focal, delete it, so
+                # the focal can hold the UNIQUE openalex_id. Unit CALL
+                # subquery - a no-shadow MATCH just leaves the focal as-is.
+                f"CALL {{ WITH d "
+                f"MATCH (shadow:{DOCUMENT_LABEL} {{openalex_id: $openalex_id}}) "
+                f"WHERE shadow.in_corpus = false AND elementId(shadow) <> elementId(d) "
+                f"OPTIONAL MATCH (citer)-[:{CITES_REL}]->(shadow) "
+                f"WITH d, shadow, collect(citer) AS citers "
+                f"FOREACH (c IN citers | MERGE (c)-[:{CITES_REL}]->(d)) "
+                f"DETACH DELETE shadow }} "
+                f"WITH d "
+                # Claim openalex_id only when no OTHER node holds it
+                # (shadows already absorbed; a rival is a duplicate file).
+                # Bare importing `WITH d`, THEN a filtering `WITH d WHERE`
+                # - an importing WITH cannot itself carry a WHERE.
+                f"CALL {{ WITH d "
+                f"WITH d WHERE NOT EXISTS {{ "
+                f"MATCH (other:{DOCUMENT_LABEL} {{openalex_id: $openalex_id}}) "
+                f"WHERE elementId(other) <> elementId(d) }} "
+                f"SET d.openalex_id = $openalex_id }}",
                 **params,
             )
         else:

@@ -178,18 +178,31 @@ async def test_write_citations_full_path_three_round_trips():
     assert len(driver.sessions[0].calls) == 3
 
 
-async def test_write_citations_focal_keyed_on_openalex_id_when_known():
-    """openalex_id known -> focal MERGE keys on openalex_id (finds + upgrades
-    any pre-existing shadow), SETs :Paper + doc_id + in_corpus + normalised doi."""
+async def test_write_citations_focal_merges_by_doc_id_and_upgrades_shadow():
+    """openalex_id known -> focal MERGEs by doc_id (never clobbers doc_id or
+    collapses two files), absorbs any same-openalex_id shadow (re-point its
+    :CITES onto the focal, delete it), and claims openalex_id only when no
+    other :Document holds it. SETs :Paper + in_corpus + normalised doi."""
     driver = RecordingDriver()
     client = _client_with_driver(driver)
     await openalex_writes.write_citations(client, DOC_ID, WORK_WITH_CITATIONS)
     query, params = driver.sessions[0].calls[0]
-    assert "MERGE (d:Document {openalex_id: $openalex_id})" in query
+    # Focal keyed by doc_id (the per-file identity), NOT by openalex_id.
+    assert "MERGE (d:Document {doc_id: $doc_id})" in query
+    assert "MERGE (d:Document {openalex_id: $openalex_id})" not in query
+    # doc_id is the MERGE key now - never SET (that was the clobber bug).
+    assert "d.doc_id = $doc_id" not in query
     assert "d:Paper" in query
-    assert "d.doc_id = $doc_id" in query
     assert "d.in_corpus = true" in query
     assert "d.doi = $doi" in query
+    # Shadow absorb: re-point incoming :CITES onto the focal, delete shadow.
+    assert "MATCH (shadow:Document {openalex_id: $openalex_id})" in query
+    assert "shadow.in_corpus = false" in query
+    assert "MERGE (c)-[:CITES]->(d)" in query
+    assert "DETACH DELETE shadow" in query
+    # Claim openalex_id only when no OTHER node holds it (UNIQUE-safe).
+    assert "NOT EXISTS" in query
+    assert "SET d.openalex_id = $openalex_id" in query
     assert params["openalex_id"] == "W1"
     assert params["doc_id"] == DOC_ID
     # DOI normalised: URL prefix stripped + lowercased.
