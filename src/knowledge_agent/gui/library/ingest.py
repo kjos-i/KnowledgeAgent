@@ -912,7 +912,9 @@ class IngestTab:
             (self.folder_field.value or "").strip() if self.folder_field is not None else ""
         )
         if not folder_str:
-            self._set_status("Pick a folder first (Browse).")
+            # Clear busy (mirrors the other early returns above) - _set_status
+            # alone left the tab stuck spinning with every button disabled.
+            self._set_busy(False, "Pick a folder first (Browse).")
             return
         folder = Path(folder_str)
 

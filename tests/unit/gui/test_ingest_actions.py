@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from knowledge_agent.gui.library.ingest import IngestTab
 
@@ -101,6 +102,30 @@ def test_start_action_noop_while_busy(fake_app):
     # Should return immediately without touching the config editor.
     tab._start_action("Ingest folder")
     assert tab._bg_tasks == set()
+
+
+async def test_run_action_empty_folder_clears_busy(fake_app, monkeypatch):
+    """Ingest folder with an empty folder field must CLEAR busy, not leave the
+    tab stuck spinning with every button disabled. Regression: this early
+    return called `_set_status` without `_set_busy(False)` (all its siblings
+    clear busy)."""
+    tab = IngestTab(fake_app)
+    tab.folder_field.value = "   "  # blank -> empty after strip
+    fake_app.gui_config.corpus_config_path = "corpus.toml"  # not None
+    monkeypatch.setattr(tab.config_editor, "get_ingest_args", lambda: ("Document", "Paper", False))
+    monkeypatch.setattr(tab, "_missing_ingest_key", lambda config: None)
+    # Skip the heavy backend import: stand-ins for (bulk_ops, load_corpus_config).
+    monkeypatch.setattr(
+        "asyncio.to_thread",
+        AsyncMock(return_value=(SimpleNamespace(), lambda _p: SimpleNamespace())),
+    )
+
+    await tab._run_action("Ingest folder")
+
+    assert tab._busy is False
+    assert tab.progress_ring.visible is False
+    assert tab.ingest_folder_button.disabled is False
+    assert "Pick a folder" in tab.status.value
 
 
 # ---- bulk-ops ----
