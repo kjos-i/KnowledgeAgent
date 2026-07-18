@@ -306,7 +306,9 @@ async def test_delete_entities_second_query_gcs_orphans():
     assert ":Entity" in cypher
     assert "NOT ()" in cypher  # WHERE-NOT orphan pattern
     assert "MENTIONS" in cypher
-    assert "DELETE e" in cypher
+    # DETACH DELETE (not plain DELETE) so a canonicalised orphan's outgoing
+    # :CANONICAL_TO edge is removed with it instead of erroring the whole delete.
+    assert "DETACH DELETE e" in cypher
     # GC is global - no doc_id parameter on this query.
     assert params == {}
 

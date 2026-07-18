@@ -177,6 +177,50 @@ async def test_delete_entities_by_doc_id_orphan_gcs_entities(
     assert n_mentions == 0
 
 
+async def test_delete_entities_gcs_orphan_with_outgoing_canonical_to_edge(
+    kg_client: Any, ensure_constraints: None, clean_kg: None
+) -> None:
+    """An orphan :Entity that still carries an OUTGOING :CANONICAL_TO edge
+    (written by the L7 ontology-linking layer) must STILL be GC'd.
+
+    The orphan check only looks at INCOMING :MENTIONS, so once L7 has
+    canonicalised an entity, a plain DELETE would raise "Cannot delete node,
+    because it still has relationships" and abort the whole re-ingest/delete.
+    DETACH DELETE removes the entity + its :CANONICAL_TO edge while leaving the
+    shared :OntologyTerm at the far end intact. Regression test for the
+    plain-DELETE bug.
+    """
+    term_id = "MESH:D001943"
+    chunk_id = _seed_chunk(kg_client, SYNTHETIC_DOC_ID)
+    await kg_client.write_entities(
+        SYNTHETIC_DOC_ID,
+        [(chunk_id, [Mention(raw_text="BRCA1", entity_type="gene", offset=0)])],
+    )
+    # Simulate the L7 canonical link: (:Entity)-[:CANONICAL_TO]->(:OntologyTerm).
+    with kg_client.driver.session() as session:
+        session.run(
+            "MATCH (e:Entity {key: 'brca1', entity_type: 'gene'}) "
+            "MERGE (t:OntologyTerm {id: $term_id}) "
+            "SET e.canonicalised = true "
+            "MERGE (e)-[:CANONICAL_TO]->(t)",
+            term_id=term_id,
+        )
+
+    # Deleting the doc's mentions orphans BRCA1 (no incoming :MENTIONS) while it
+    # still points at the term. Plain DELETE errors here; DETACH DELETE must GC
+    # the entity and keep the term.
+    ok = await kg_client.delete_entities_by_doc_id(SYNTHETIC_DOC_ID)
+    assert ok is None
+
+    with kg_client.driver.session() as session:
+        n_entities = session.run("MATCH (e:Entity) RETURN count(e) AS n").single()["n"]
+        n_terms = session.run(
+            "MATCH (t:OntologyTerm {id: $term_id}) RETURN count(t) AS n", term_id=term_id
+        ).single()["n"]
+    assert n_entities == 0  # orphan GC'd despite its outgoing :CANONICAL_TO edge
+    assert n_terms == 1  # the shared ontology term survives (DETACH deletes only the edge)
+
+
 async def test_delete_entities_preserves_entities_shared_with_other_docs(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:

@@ -1006,6 +1006,77 @@ async def test_re_embed_happy_path_swaps_embeddings_and_rewrites():
     search_mock.ensure_indexes.assert_not_called()
 
 
+async def test_re_embed_aborts_before_delete_on_dimension_change():
+    """Switching to a different-dimension embedder must NOT touch LanceDB: the
+    table's vector width is fixed, so re_embed refuses BEFORE the destructive
+    delete instead of deleting then failing the write (which would lose the
+    doc's chunks). Regression test for the re_embed data-loss bug."""
+    rows = [
+        {
+            "chunk_id": "docZ#0",
+            "doc_id": "docZ",
+            "chunk_index": 0,
+            "text": "alpha",
+            "embedding": [0.1, 0.2],  # current table dim = 2
+        },
+    ]
+    search_mock = MagicMock(spec=LanceClient)
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
+    with (
+        patch("knowledge_agent.ingestion.pipeline.get_search_client", return_value=search_mock),
+        patch(
+            "knowledge_agent.ingestion.pipeline.embed_chunks",
+            new_callable=AsyncMock,
+            return_value=[[0.9, 0.8, 0.7]],  # new dim = 3, mismatched
+        ),
+    ):
+        result = await re_embed("docZ", _re_embed_config())
+
+    assert result == {"embed_ok": True, "lancedb_ok": False, "n_chunks": 1}
+    # Nothing deleted or written — the chunks are left intact.
+    search_mock.delete_chunks_by_doc_id.assert_not_called()
+    search_mock.write_chunks.assert_not_called()
+
+
+async def test_re_embed_rolls_back_to_original_chunks_when_rewrite_fails():
+    """A rewrite that fails AFTER the delete (transient: disk full / lock)
+    must not lose the doc's chunks — re_embed restores them from its in-memory
+    snapshot. Regression test for the re_embed data-loss bug."""
+    rows = [
+        {
+            "chunk_id": "docZ#0",
+            "doc_id": "docZ",
+            "chunk_index": 0,
+            "text": "alpha",
+            "embedding": [0.1, 0.2],
+        },
+    ]
+    search_mock = MagicMock(spec=LanceClient)
+    search_mock.get_chunks_by_doc_id = AsyncMock(return_value=rows)
+    # First write (the rewrite) fails; second write (the rollback) succeeds.
+    search_mock.write_chunks = AsyncMock(side_effect=[RuntimeError("disk full"), None])
+
+    with (
+        patch("knowledge_agent.ingestion.pipeline.get_search_client", return_value=search_mock),
+        patch(
+            "knowledge_agent.ingestion.pipeline.embed_chunks",
+            new_callable=AsyncMock,
+            return_value=[[0.9, 0.8]],  # same dim (2) — passes the pre-check
+        ),
+    ):
+        result = await re_embed("docZ", _re_embed_config())
+
+    assert result["embed_ok"] is True
+    assert result["lancedb_ok"] is False  # the rewrite failed
+    assert result["n_chunks"] == 1
+    # delete + write both fire twice (once for the rewrite, once for the rollback).
+    assert search_mock.delete_chunks_by_doc_id.call_count == 2
+    assert search_mock.write_chunks.call_count == 2
+    # The rollback re-wrote the ORIGINAL embeddings, not the new ones.
+    rollback_rows = search_mock.write_chunks.call_args_list[1][0][0]
+    assert rollback_rows[0]["embedding"] == [0.1, 0.2]
+
+
 async def test_re_embed_rebuilds_index_when_setting_enabled():
     rows = [
         {

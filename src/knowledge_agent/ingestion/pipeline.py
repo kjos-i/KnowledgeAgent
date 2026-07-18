@@ -277,6 +277,31 @@ async def re_embed(doc_id: str, config: CorpusConfig) -> dict[str, Any]:
         logger.warning("re_embed (%s): embed_chunks failed: %r", doc_id, exc)
         return {"embed_ok": False, "lancedb_ok": False, "n_chunks": n_chunks}
 
+    # Snapshot the pre-re_embed rows so a failed rewrite can be rolled back.
+    # LanceDB has no transaction spanning delete+add, and after the delete the
+    # chunk text/metadata lives ONLY in memory (re_embed never touches the
+    # source file). A shallow copy suffices: the loop below REPLACES the
+    # embedding/ingested_at values rather than mutating them, so the copies
+    # keep the originals.
+    original_rows = [dict(row) for row in chunk_rows]
+
+    # Refuse a dimension change BEFORE the destructive delete. The LanceDB
+    # vector column is fixed-width, so a differently-sized vector would fail
+    # `table.add()` AFTER the delete and lose the chunks. Switching embedding
+    # dimension needs a full re-ingest (new table), not re_embed.
+    old_dim = len(chunk_rows[0].get("embedding") or [])
+    new_dim = len(new_embeddings[0]) if new_embeddings else 0
+    if old_dim and new_dim and old_dim != new_dim:
+        logger.warning(
+            "re_embed (%s): new embedding dim %d != current table dim %d - re_embed "
+            "cannot change the fixed vector width in place; re-ingest the corpus to "
+            "switch dimensions. Chunks left untouched.",
+            doc_id,
+            new_dim,
+            old_dim,
+        )
+        return {"embed_ok": True, "lancedb_ok": False, "n_chunks": n_chunks}
+
     # Mutate the existing rows in place: swap embeddings, refresh
     # `ingested_at` (semantically "last written"). All other fields -
     # metadata, label mirrors, source_path - are preserved.
@@ -290,8 +315,24 @@ async def re_embed(doc_id: str, config: CorpusConfig) -> dict[str, Any]:
         await search_client.write_chunks(chunk_rows)
         lancedb_ok = True
     except Exception as exc:
-        logger.warning("re_embed (%s): LanceDB rewrite failed: %r", doc_id, exc)
+        # The delete may already have removed the rows before the write failed,
+        # so roll back to the snapshot rather than leave the doc's chunks lost.
+        logger.warning(
+            "re_embed (%s): LanceDB rewrite failed: %r - rolling back to original chunks",
+            doc_id,
+            exc,
+        )
         lancedb_ok = False
+        try:
+            await search_client.delete_chunks_by_doc_id(doc_id)  # clear any partial add
+            await search_client.write_chunks(original_rows)
+            logger.info("re_embed (%s): rolled back to %d original chunks", doc_id, n_chunks)
+        except Exception as rb_exc:
+            logger.error(
+                "re_embed (%s): ROLLBACK FAILED after rewrite error: %r - chunks may be lost",
+                doc_id,
+                rb_exc,
+            )
     if lancedb_ok and config.optimize_indexes_per_ingest:
         try:
             await search_client.ensure_indexes()
