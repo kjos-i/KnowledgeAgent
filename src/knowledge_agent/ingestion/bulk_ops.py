@@ -1641,10 +1641,10 @@ async def recompute_cross_doc_xrefs_plan(
     if enabled:
         kg_client = get_kg_client()
         # Reuse the same diagnostic the install plan uses.
-        with kg_client.driver.session() as session:
+        async with kg_client.driver.session() as session:
             try:
-                result = session.run("MATCH ()-[r:RELATED_BY_XREF]-() RETURN count(r) AS n")
-                row = result.single()
+                result = await session.run("MATCH ()-[r:RELATED_BY_XREF]-() RETURN count(r) AS n")
+                row = await result.single()
                 n_edges = int(row["n"]) if row else 0
             except Exception as exc:
                 logger.warning(

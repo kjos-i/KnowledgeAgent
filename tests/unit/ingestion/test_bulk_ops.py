@@ -1954,14 +1954,16 @@ async def test_recompute_cross_doc_xrefs_plan_layer_off_skips_edge_count():
 
 
 async def test_recompute_cross_doc_xrefs_plan_layer_on_queries_existing_count():
-    """Layer on -> factory queries live L10 edge count via session."""
+    """Layer on -> factory queries the live L10 edge count via an ASYNC session
+    (`async with` + `await session.run(...)` + `await result.single()`). Mocking
+    a SYNC session here previously masked the sync-`with`-on-AsyncSession bug."""
     kg_mock = MagicMock()
     sess = MagicMock()
-    sess.__enter__ = MagicMock(return_value=sess)
-    sess.__exit__ = MagicMock(return_value=None)
+    sess.__aenter__ = AsyncMock(return_value=sess)
+    sess.__aexit__ = AsyncMock(return_value=None)
     fake_result = MagicMock()
-    fake_result.single.return_value = {"n": 25}
-    sess.run.return_value = fake_result
+    fake_result.single = AsyncMock(return_value={"n": 25})
+    sess.run = AsyncMock(return_value=fake_result)
     kg_mock.driver.session.return_value = sess
     with patch(
         "knowledge_agent.ingestion.bulk_ops.get_kg_client",
@@ -1973,6 +1975,8 @@ async def test_recompute_cross_doc_xrefs_plan_layer_on_queries_existing_count():
     assert plan.enabled is True
     assert plan.n_existing_l10_edges == 25
     assert plan.threshold == 4
+    # The async path actually ran — fails on the old sync `with` + un-awaited run.
+    sess.run.assert_awaited_once()
 
 
 async def test_recompute_cross_doc_xrefs_execute_skipped_when_layer_off():
