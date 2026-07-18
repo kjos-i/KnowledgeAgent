@@ -70,9 +70,10 @@ if TYPE_CHECKING:
     from knowledge_agent.logging_ring_buffer import RingBufferHandler
 
 # ---------------------------------------------------------------------------
-# Format constants shared with `logging_setup` (kept in sync — the
-# ring-tail dump in crash files uses the same format as the live
-# handlers so a developer can read them interchangeably).
+# Format constants — the SINGLE SOURCE OF TRUTH for the log line format.
+# `logging_setup` imports these (it already depends on this module), so the
+# live handlers and the ring-tail dump in crash files share one format and a
+# developer can read them interchangeably. Do not duplicate these elsewhere.
 # ---------------------------------------------------------------------------
 
 

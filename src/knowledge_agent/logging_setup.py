@@ -117,6 +117,8 @@ from pydantic import BaseModel, Field, field_validator
 from knowledge_agent.logging_crash import (
     ALLOWLISTED_ENV_KEYS,
     FAULT_LOG_NAME,
+    LOG_DATEFMT,
+    LOG_FORMAT,
     capture_system_info,
     cleanup_old_crashes,
     enable_faulthandler,
@@ -181,8 +183,8 @@ SETTINGS_FILE_NAME = "settings.toml"
 ROTATING_MAX_BYTES = 20 * 1024 * 1024  # 20 MB
 ROTATING_BACKUP_COUNT = 10  # ~30-50 MB on disk with gzip
 
-LOG_FORMAT = "%(asctime)s.%(msecs)03d %(levelname)-7s [%(threadName)s] %(name)s: %(message)s"
-LOG_DATEFMT = "%Y-%m-%dT%H:%M:%S"
+# LOG_FORMAT / LOG_DATEFMT are owned by `logging_crash` (imported above) so the
+# live handlers and the crash-file ring dump share ONE format — do not redefine.
 
 ENV_LOG_DIR = "KAGENT_LOG_DIR"
 ENV_LOG_LEVEL = "LOG_LEVEL"

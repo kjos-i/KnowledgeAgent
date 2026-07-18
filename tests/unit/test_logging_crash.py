@@ -35,6 +35,21 @@ def _make_crash(crash_dir: Path, name: str, age_days: float = 0) -> Path:
     return p
 
 
+# ---- LOG_FORMAT / LOG_DATEFMT single-sourcing ----
+
+
+def test_log_format_constants_are_single_sourced_in_logging_crash():
+    """logging_crash OWNS LOG_FORMAT / LOG_DATEFMT; logging_setup must import
+    (not redefine) them, so the live handlers and the crash-file ring dump can
+    never drift apart. Identity (`is`) proves a single source — before the SSOT
+    fix each module defined its own equal-but-distinct copy (the format string
+    is not identifier-like, so CPython does not intern the two into one)."""
+    from knowledge_agent import logging_setup as LS
+
+    assert LS.LOG_FORMAT is LC.LOG_FORMAT
+    assert LS.LOG_DATEFMT is LC.LOG_DATEFMT
+
+
 # ---- cleanup_old_crashes ----
 
 
