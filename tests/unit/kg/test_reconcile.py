@@ -134,6 +134,10 @@ async def test_reconcile_entities_layer_off_wipes_all():
     cypher, _params = driver.sessions[0].calls[0]
     assert f":{ENTITY_LABEL}" in cypher
     assert "DETACH DELETE" in cypher
+    # Guard the count fix: collect + size, never the per-node `WITH e, count(e)`
+    # grouping that made n_wiped always 1. Validated against real Neo4j
+    # (n_wiped == the true delete count) in the reconcile smoke.
+    assert "count(" not in cypher
 
 
 async def test_reconcile_entities_open_vocab_is_noop():
@@ -173,7 +177,8 @@ async def test_reconcile_triples_layer_off_deletes_edges():
     result = await reconcile.reconcile_triples_to_config(_client(driver), _config(triples=False))
     assert result == {"n_wiped": 4}
     cypher, _ = driver.sessions[0].calls[0]
-    assert "DELETE r" in cypher
+    assert "DELETE x" in cypher  # FOREACH deletes each collected edge
+    assert "count(" not in cypher  # no per-row count() grouping (the always-1 bug)
 
 
 # ---- L9 / L10: cross-doc edge reconciliation ----

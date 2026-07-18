@@ -114,8 +114,14 @@ async def reconcile_entities_to_config(client, config) -> dict[str, int]:
     if not config.layers.entities:
         # Layer off — wipe all entities corpus-wide.
         async with client.driver.session() as session:
+            # Collect first so the count is the TOTAL (one aggregated row), then
+            # DETACH DELETE each via FOREACH. The old `WITH e, count(e)` grouped
+            # per-node, so count(e) was always 1 and n_wiped never exceeded 1.
             result = await session.run(
-                f"MATCH (e:{ENTITY_LABEL}) WITH e, count(e) AS _c DETACH DELETE e RETURN _c AS n"
+                f"MATCH (e:{ENTITY_LABEL}) "
+                f"WITH collect(e) AS ents "
+                f"FOREACH (x IN ents | DETACH DELETE x) "
+                f"RETURN size(ents) AS n"
             )
             row = await result.single()
             wiped_total = int(row["n"]) if row is not None else 0
@@ -134,11 +140,10 @@ async def reconcile_entities_to_config(client, config) -> dict[str, int]:
     kept_types = list(config.entities.entity_types)
     async with client.driver.session() as session:
         result = await session.run(
-            f"MATCH (e:{ENTITY_LABEL}) "
-            f"WHERE NOT e.entity_type IN $kept "
-            f"WITH e, count(e) AS _c "
-            f"DETACH DELETE e "
-            f"RETURN _c AS n",
+            f"MATCH (e:{ENTITY_LABEL}) WHERE NOT e.entity_type IN $kept "
+            f"WITH collect(e) AS ents "
+            f"FOREACH (x IN ents | DETACH DELETE x) "
+            f"RETURN size(ents) AS n",
             kept=kept_types,
         )
         row = await result.single()
@@ -173,7 +178,10 @@ async def reconcile_triples_to_config(client, config) -> dict[str, int]:
     rel_pattern = "|".join(TRIPLE_PREDICATE_RELS)
     async with client.driver.session() as session:
         result = await session.run(
-            f"MATCH ()-[r:{rel_pattern}]->() WITH r, count(r) AS _c DELETE r RETURN _c AS n"
+            f"MATCH ()-[r:{rel_pattern}]->() "
+            f"WITH collect(r) AS rels "
+            f"FOREACH (x IN rels | DELETE x) "
+            f"RETURN size(rels) AS n"
         )
         row = await result.single()
         wiped = int(row["n"]) if row is not None else 0
@@ -205,7 +213,10 @@ async def reconcile_cross_doc_to_config(client, config) -> dict[str, int]:
 
     async with client.driver.session() as session:
         result = await session.run(
-            f"MATCH ()-[r:{RELATED_TO_REL}]->() WITH r, count(r) AS _c DELETE r RETURN _c AS n"
+            f"MATCH ()-[r:{RELATED_TO_REL}]->() "
+            f"WITH collect(r) AS rels "
+            f"FOREACH (x IN rels | DELETE x) "
+            f"RETURN size(rels) AS n"
         )
         row = await result.single()
         wiped = int(row["n"]) if row is not None else 0
@@ -239,7 +250,10 @@ async def reconcile_cross_doc_xrefs_to_config(
 
     async with client.driver.session() as session:
         result = await session.run(
-            f"MATCH ()-[r:{RELATED_BY_XREF_REL}]->() WITH r, count(r) AS _c DELETE r RETURN _c AS n"
+            f"MATCH ()-[r:{RELATED_BY_XREF_REL}]->() "
+            f"WITH collect(r) AS rels "
+            f"FOREACH (x IN rels | DELETE x) "
+            f"RETURN size(rels) AS n"
         )
         row = await result.single()
         wiped = int(row["n"]) if row is not None else 0
