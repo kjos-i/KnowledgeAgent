@@ -10,12 +10,19 @@ Only the CLI is expected to read the .env file. A future GUI should call
 fall back to the developer's keys.
 """
 
+import asyncio
+import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal, get_args
+from typing import TYPE_CHECKING, Literal, get_args
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+if TYPE_CHECKING:
+    from knowledge_agent.kg.client import Neo4jClient
+
+logger = logging.getLogger(__name__)
 
 # The valid LLM providers — the SINGLE SOURCE for this set. The `llm_provider`
 # field below, the factory's `provider:model` parser, and any provider
@@ -829,6 +836,42 @@ def disable_env_file() -> None:
     get_settings.cache_clear()
 
 
+# Scheduled Neo4j-driver closes that must outlive the sync reset call that
+# spawned them. Holding a strong reference stops the event loop from garbage-
+# collecting the task before it finishes (a bare create_task would be dropped
+# mid-close — the exact hazard the installs.py audit item flagged).
+_pending_aclose_tasks: set[asyncio.Task] = set()
+
+
+def _drain_kg_client(client: "Neo4jClient") -> None:
+    """Close an evicted KG client's Bolt driver so its connection pool is
+    released instead of leaking for the rest of the process's life.
+
+    `Neo4jClient.close()` is async (it awaits `AsyncDriver.close()`) but this
+    reset is sync, so bridge the two:
+      - a running loop (the GUI's Flet loop, where the driver was opened) →
+        schedule the close on it and keep a reference so the task is not GC'd
+        before it runs;
+      - no running loop (CLI / a fresh sync context) → run it to completion.
+    Best-effort: closing must never block a corpus switch, so any failure is
+    logged and swallowed. This explicit close is the ONLY thing that frees the
+    pool — neo4j 5.x's `AsyncDriver.__del__` merely warns for async drivers,
+    so garbage collection does not drain it."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    try:
+        if loop is not None:
+            task = loop.create_task(client.close())
+            _pending_aclose_tasks.add(task)
+            task.add_done_callback(_pending_aclose_tasks.discard)
+        else:
+            asyncio.run(client.close())
+    except Exception:
+        logger.warning("failed to close evicted Neo4j driver on reset", exc_info=True)
+
+
 def reset_after_key_change() -> None:
     """Drop cached state that captured an API key at construction.
 
@@ -868,11 +911,19 @@ def reset_after_key_change() -> None:
     from knowledge_agent.llm_factory import _build_llm
     from knowledge_agent.search.client import get_search_client
 
+    # Grab the live KG client BEFORE evicting it so its Bolt pool can be drained.
+    # `cache_clear()` only drops the reference; the AsyncDriver would otherwise
+    # leak per corpus switch (its __del__ does not close async pools).
+    old_kg_client = get_kg_client() if get_kg_client.cache_info().currsize else None
+
     _build_llm.cache_clear()
     _build_voyage_client.cache_clear()
     _build_langchain_embedder.cache_clear()
     get_kg_client.cache_clear()
     get_search_client.cache_clear()
+
+    if old_kg_client is not None:
+        _drain_kg_client(old_kg_client)
 
 
 def load_test_env() -> None:

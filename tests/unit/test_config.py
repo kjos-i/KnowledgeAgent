@@ -30,7 +30,9 @@ Notes on test isolation:
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -372,3 +374,84 @@ def test_mmr_lambda_below_zero_rejected() -> None:
         Settings(  # type: ignore[arg-type]
             **_minimal_required(mmr_lambda=-0.1)
         )
+
+
+# ---------------------------------------------------------------------------
+# reset_after_key_change() closes the evicted Neo4j driver (verify-11 HIGH,
+# config.py:874). Evicting the get_kg_client cache without closing the old
+# client leaked its AsyncDriver Bolt pool on every corpus switch — close() had
+# no other caller, and neo4j 5.x's async __del__ only warns (GC never drains
+# an async pool). Both bridge branches (running loop / no loop) must close it.
+# ---------------------------------------------------------------------------
+
+
+class _FakeKgClient:
+    """A cached Neo4jClient stand-in with an open driver + a close() spy."""
+
+    def __init__(self, closed: list[bool]) -> None:
+        self._driver = object()  # a live, open driver
+        self._closed = closed
+
+    async def close(self) -> None:
+        self._closed.append(True)
+        self._driver = None
+
+
+class _FakeCachedGetter:
+    """Mimic the lru_cache-wrapped get_kg_client: callable + cache_info +
+    cache_clear, seeded with one already-cached client."""
+
+    def __init__(self, client: _FakeKgClient) -> None:
+        self._client = client
+        self.cleared = False
+
+    def __call__(self) -> _FakeKgClient:
+        return self._client
+
+    def cache_info(self) -> SimpleNamespace:
+        return SimpleNamespace(currsize=1)
+
+    def cache_clear(self) -> None:
+        self.cleared = True
+
+
+def _install_fake_kg_getter(
+    monkeypatch: pytest.MonkeyPatch, closed: list[bool]
+) -> _FakeCachedGetter:
+    """Swap get_kg_client for a fake seeded with one open client. The local
+    `from ...kg.client import get_kg_client` inside reset reads this attr."""
+    from knowledge_agent.kg import client as kg_client_mod
+
+    getter = _FakeCachedGetter(_FakeKgClient(closed))
+    monkeypatch.setattr(kg_client_mod, "get_kg_client", getter)
+    return getter
+
+
+async def test_reset_closes_evicted_kg_driver_on_the_running_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GUI path: reset runs on the Flet event loop (a running loop), so the
+    evicted client's async close() is scheduled on it and drains the Bolt pool.
+    Fail-first: before the fix reset only cache_clear()'d, so close() was never
+    called and the driver leaked."""
+    closed: list[bool] = []
+    getter = _install_fake_kg_getter(monkeypatch, closed)
+
+    config_module.reset_after_key_change()
+    await asyncio.sleep(0)  # let the scheduled close task run to completion
+
+    assert getter.cleared is True  # cache still evicted
+    assert closed == [True]  # AND the old driver was closed (pool drained)
+
+
+def test_reset_closes_evicted_kg_driver_without_a_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI path: no running loop, so the close runs to completion inline via
+    asyncio.run. Same guarantee — the evicted driver is drained, not leaked."""
+    closed: list[bool] = []
+    _install_fake_kg_getter(monkeypatch, closed)
+
+    config_module.reset_after_key_change()
+
+    assert closed == [True]
