@@ -55,6 +55,47 @@ def test_model_revision_is_a_40_char_sha_not_a_branch():
     assert all(c in "0123456789abcdef" for c in hunflair2.MODEL_REVISION)
 
 
+def test_get_model_loads_pinned_local_path_not_bare_repo_id():
+    """Security regression (model-pin bypass): `_get_model` must resolve the
+    PINNED checkpoint file (revision-locked, from the local HF cache) and hand
+    Flair the local PATH — never the bare repo id, which Flair's `hf_download`
+    resolves through `main` (in its own cache) and pickle-executes.
+
+    Flair isn't installed at unit-test time, so `flair.models` is injected as
+    a mock; the real model-load is exercised by the hunflair2 smoke.
+    """
+    import sys
+
+    fake_models = MagicMock()
+    hunflair2._get_model.cache_clear()
+    try:
+        with (
+            patch.dict(sys.modules, {"flair": MagicMock(), "flair.models": fake_models}),
+            patch(
+                "knowledge_agent.entity_extractors.extractor_lifecycle._is_weights_downloaded",
+                return_value=True,
+            ),
+            patch(
+                "huggingface_hub.hf_hub_download",
+                return_value="/hf-cache/pinned/pytorch_model.bin",
+            ) as mock_dl,
+        ):
+            hunflair2._get_model()
+        # Resolved the pinned file from the local cache: revision-locked, no fetch.
+        mock_dl.assert_called_once()
+        kw = mock_dl.call_args.kwargs
+        assert kw["repo_id"] == hunflair2.MODEL_NAME
+        assert kw["filename"] == "pytorch_model.bin"
+        assert kw["revision"] == hunflair2.MODEL_REVISION
+        assert kw["local_files_only"] is True
+        # Loaded the local PATH, not the bare repo id (the pre-fix behaviour).
+        fake_models.PrefixedSequenceTagger.load.assert_called_once_with(
+            "/hf-cache/pinned/pytorch_model.bin"
+        )
+    finally:
+        hunflair2._get_model.cache_clear()
+
+
 def test_flair_to_our_labels_covers_five_biomedical_categories():
     """Pin the published label mapping. HunFlair2 emits Disease,
     Chemical, Gene, Species, CellLine — normalised to our

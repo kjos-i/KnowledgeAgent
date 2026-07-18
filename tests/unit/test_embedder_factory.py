@@ -219,6 +219,38 @@ async def test_huggingface_dispatch_no_api_key_needed():
     assert result == [[0.5, 0.5]]
 
 
+def test_huggingface_embedder_pins_model_revision():
+    """Security: the HF embedder must load at the curated `pinned_revision`,
+    not upstream `main`, so SentenceTransformer resolves the vetted snapshot
+    Installs downloaded.
+
+    langchain-huggingface isn't installed at unit-test time, so it's injected
+    as a mock; the real embedder load is exercised by the embedder smoke.
+    """
+    import sys
+
+    from knowledge_agent.embedder_factory import _build_langchain_embedder
+    from knowledge_agent.embedder_lifecycle import HF_EMBEDDING_MODELS
+
+    model = "BAAI/bge-m3"
+    pinned = HF_EMBEDDING_MODELS[model].pinned_revision
+    fake_hf_cls = MagicMock()
+    fake_module = MagicMock()
+    fake_module.HuggingFaceEmbeddings = fake_hf_cls
+    with (
+        patch(
+            "knowledge_agent.embedder_factory.get_settings",
+            return_value=_FakeSettings(embedding_provider="huggingface"),
+        ),
+        patch.dict(sys.modules, {"langchain_huggingface": fake_module}),
+    ):
+        _build_langchain_embedder("huggingface", model)
+    fake_hf_cls.assert_called_once()
+    kw = fake_hf_cls.call_args.kwargs
+    assert kw["model_name"] == model
+    assert kw["model_kwargs"]["revision"] == pinned
+
+
 # ---- multimodal (embed_chunks + _voyage_multimodal_call) ----
 
 

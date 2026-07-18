@@ -110,6 +110,7 @@ def _get_model():
     user before download.
     """
     from flair.models import PrefixedSequenceTagger
+    from huggingface_hub import hf_hub_download
 
     from knowledge_agent.entity_extractors.extractor_lifecycle import (
         _HUNFLAIR2_PROVENANCE,
@@ -124,7 +125,22 @@ def _get_model():
             "Open Library → Installs and press Download weights on "
             "the HunFlair2 row before running extraction.",
         )
-    return PrefixedSequenceTagger.load(MODEL_NAME)
+    # Load the PINNED checkpoint by local PATH, not the bare repo id.
+    # `PrefixedSequenceTagger.load(MODEL_NAME)` routes through Flair's
+    # `hf_download`, which (a) targets Flair's OWN cache - not the HF-hub
+    # cache Installs populated via `snapshot_download` - and (b) pins nothing
+    # (revision defaults to `main`), so a moved/hostile upstream commit could
+    # be pickle-EXECUTED (this checkpoint has no safetensors). Resolve the
+    # exact pinned file from the local HF cache (guaranteed present by the
+    # guard above; `local_files_only` never fetches) and hand Flair the path,
+    # which `.load` loads as-is - no download, no `main`.
+    model_file = hf_hub_download(
+        repo_id=MODEL_NAME,
+        filename="pytorch_model.bin",
+        revision=MODEL_REVISION,
+        local_files_only=True,
+    )
+    return PrefixedSequenceTagger.load(model_file)
 
 
 def _build_sentence(text: str):

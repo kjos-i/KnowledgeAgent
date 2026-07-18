@@ -153,7 +153,23 @@ def _build_langchain_embedder(provider: str, model: str) -> Embeddings:
                 "GUI's Embedder Provider settings, or manually with "
                 "`pip install <this package>[embed-huggingface]`."
             ) from exc
-        return HuggingFaceEmbeddings(model_name=model)
+        # Pin the model revision so SentenceTransformer loads the vetted
+        # snapshot Installs downloaded, not a moved upstream `main`. Curated
+        # menu models carry a pinned_revision; an off-menu model has no known
+        # pin, so it loads unpinned (with a warning) rather than fail.
+        from knowledge_agent.embedder_lifecycle import HF_EMBEDDING_MODELS
+
+        entry = HF_EMBEDDING_MODELS.get(model)
+        model_kwargs: dict[str, Any] = {}
+        if entry is not None:
+            model_kwargs["revision"] = entry.pinned_revision
+        else:
+            logger.warning(
+                "huggingface embedder: %r is not in the curated menu; "
+                "loading without a pinned revision",
+                model,
+            )
+        return HuggingFaceEmbeddings(model_name=model, model_kwargs=model_kwargs)
     raise ConfigError(f"unknown embedding provider: {provider!r}")
 
 
