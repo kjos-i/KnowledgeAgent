@@ -2,10 +2,11 @@
 
 One composite provider:model picker (options span installed embedders); the
 provider comes with the chosen model and is staged to the in-memory
-CorpusConfig alongside the DERIVED `embedding_dims`. A choice that changes the
-provider to one whose vector dim would strand existing chunks hard-confirms
-first (the dim guard the deleted Settings tab used to own). (The global Voyage
-request-rate cap moved to the LLMs tab — see test_llm_tab.)
+CorpusConfig alongside the DERIVED `embedding_dims`. A choice whose vector dim
+would strand existing chunks — a provider change OR a same-provider model swap
+(HF models differ in dim) — hard-confirms first (the dim guard the deleted
+Settings tab used to own). (The global Voyage request-rate cap moved to the
+LLMs tab — see test_llm_tab.)
 """
 
 from __future__ import annotations
@@ -68,16 +69,18 @@ def test_model_change_same_provider_stages_model_and_dims(fake_app):
     fake_app.page.show_dialog.assert_not_called()
 
 
-def test_provider_change_no_mismatch_stages_provider_model_dims(fake_app):
-    """A composite pick on a different provider (no dim mismatch) stages the
-    provider, model, and derived dims together."""
-    ed = _editor(fake_app)  # voyage default
-    ed.embedding_model_field.value = "openai:text-embedding-3-small"
-    with patch(f"{_EDITOR}.switch_embedder_plan", return_value=MagicMock(dim_mismatch=False)):
+def test_provider_change_dim_change_no_existing_data_applies(fake_app):
+    """A composite pick that changes the dim (voyage 1024 -> openai 1536) but
+    with NO existing chunks (existing_rows=0) stages provider + model + derived
+    dims straight through — nothing to strand, so no confirm."""
+    ed = _editor(fake_app)  # voyage default (1024)
+    ed.embedding_model_field.value = "openai:text-embedding-3-small"  # 1536
+    with patch(f"{_EDITOR}.switch_embedder_plan", return_value=MagicMock(existing_rows=0)):
         ed._on_embedding_model_selected(MagicMock())
     assert ed._corpus_config.embedding_provider == "openai"
     assert ed._corpus_config.embedding_model == "text-embedding-3-small"
     assert ed._corpus_config.embedding_dims == 1536
+    fake_app.page.show_dialog.assert_not_called()
 
 
 def test_provider_change_to_hf_derives_model_dim(fake_app):
@@ -91,15 +94,32 @@ def test_provider_change_to_hf_derives_model_dim(fake_app):
 
 
 def test_provider_change_dim_mismatch_confirms_before_applying(fake_app):
-    """A destructive switch (existing chunks at a different dim) shows a confirm
+    """A destructive switch (dim change with existing chunks) shows a confirm
     dialog and does NOT mutate the corpus until the user confirms."""
-    ed = _editor(fake_app)  # voyage
-    ed.embedding_model_field.value = "openai:text-embedding-3-small"
-    plan = MagicMock(
-        dim_mismatch=True, summary="DESTRUCTIVE switch: voyage (1024) -> openai (1536)"
-    )
-    with patch(f"{_EDITOR}.switch_embedder_plan", return_value=plan):
+    ed = _editor(fake_app)  # voyage (1024)
+    ed.embedding_model_field.value = "openai:text-embedding-3-small"  # 1536
+    with patch(f"{_EDITOR}.switch_embedder_plan", return_value=MagicMock(existing_rows=5)):
         ed._on_embedding_model_selected(MagicMock())
     fake_app.page.show_dialog.assert_called_once()
     assert ed._corpus_config.embedding_provider == "voyage"  # unchanged pending confirm
     assert ed._corpus_config.embedding_model == "voyage-multimodal-3"  # unchanged
+
+
+def test_same_provider_model_swap_dim_change_confirms(fake_app):
+    """Regression: a SAME-provider model swap that changes the dim (two HF
+    models, 1024 -> 384) is destructive too and must hard-confirm, not stage
+    silently. The old guard fired only on a provider change, so this switched
+    without warning and stranded the corpus's existing chunks."""
+    cfg = CorpusConfig(
+        embedding_provider="huggingface",
+        embedding_model="BAAI/bge-m3",  # 1024
+        embedding_dims=1024,
+    )
+    ed = _editor(fake_app, cfg)
+    ed.embedding_model_field.value = "huggingface:BAAI/bge-small-en-v1.5"  # 384
+    with patch(f"{_EDITOR}.switch_embedder_plan", return_value=MagicMock(existing_rows=7)):
+        ed._on_embedding_model_selected(MagicMock())
+    fake_app.page.show_dialog.assert_called_once()
+    # Unchanged pending confirm.
+    assert ed._corpus_config.embedding_model == "BAAI/bge-m3"
+    assert ed._corpus_config.embedding_dims == 1024

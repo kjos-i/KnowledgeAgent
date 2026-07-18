@@ -2401,9 +2401,11 @@ class CorpusConfigEditor:
 
         Dimension guard: LanceDB pins the vector dim at table creation, so
         switching to a model whose dim differs from the corpus's existing chunks
-        is DESTRUCTIVE. A PROVIDER change with a dim mismatch hard-confirms and
-        points at Re-embed (`switch_embedder_plan` reads the active corpus's
-        LanceDB table); same-provider / matching-dim / no-data applies through.
+        is DESTRUCTIVE. ANY dim change with existing chunks hard-confirms and
+        points at Re-embed - including a SAME-provider model swap (HF models
+        differ in dim: 1024 vs 384), not just a provider change. Matching-dim or
+        no-existing-data applies straight through. `switch_embedder_plan` reads
+        the active corpus's LanceDB table for the existing row count.
         """
         if self._corpus_config is None or self.embedding_model_field is None:
             return
@@ -2418,7 +2420,14 @@ class CorpusConfigEditor:
         if provider == cur_provider and model == cur_model:
             return
         dims = _embedding_dims_for(provider, model) or self._corpus_config.embedding_dims
-        if provider != cur_provider:
+        cur_dims = self._corpus_config.embedding_dims
+        # Dimension guard keyed on the DIM change, not the provider change:
+        # LanceDB pins the vector dim at table creation, so any new model whose
+        # dim differs from the existing chunks is destructive - and a
+        # same-provider model swap (two HF models at 1024 vs 384) changes the
+        # dim just like a provider change. Only read the LanceDB table (for the
+        # existing row count) when the dim actually changes.
+        if dims is not None and cur_dims is not None and dims != cur_dims:
             try:
                 plan = switch_embedder_plan(provider)
             except Exception as exc:
@@ -2428,13 +2437,17 @@ class CorpusConfigEditor:
                     exc,
                 )
                 plan = None
-            if plan is not None and plan.dim_mismatch:
+            existing_rows = plan.existing_rows if plan is not None else 0
+            if existing_rows > 0:
                 self._show_embedding_confirm(
                     title="Embedding dimension change",
                     body=(
-                        f"{plan.summary}\n\nAfter switching, run the Re-embed bulk "
-                        f"operation (Library → Bulk operations) to rebuild the "
-                        f"existing chunks under {provider}."
+                        f"Switching to {format_model_ref(provider, model)} changes "
+                        f"the embedding dimension ({cur_dims} → {dims}). The LanceDB "
+                        f"chunks table pins the vector dimension at creation, so the "
+                        f"{existing_rows} existing chunks must be rebuilt. After "
+                        f"switching, run the Re-embed bulk operation "
+                        f"(Library → Bulk operations)."
                     ),
                     confirm_label="Switch anyway",
                     on_confirm=lambda: self._apply_embedding_choice(provider, model, dims),
