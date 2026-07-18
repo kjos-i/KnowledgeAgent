@@ -177,6 +177,19 @@ class GuiApp:
         """
         if not name or name == self.gui_config.active_corpus_name:
             return
+        # A corpus switch mid-search would swap the backend clients out from
+        # under the in-flight retrieval: `switch_active_corpus` + the
+        # `reset_after_key_change` below rebind config/env and clear the cached
+        # clients, so a query that started against corpus A would finish reading
+        # corpus B's data (a silently mixed answer). Refuse while a search is
+        # live; bounce the selector back to the real active corpus.
+        if self._send_task is not None and not self._send_task.done():
+            self.chat_panel.append_system(
+                "a search is running — stop it (or let it finish) before switching corpus."
+            )
+            self._sync_corpus_selector()
+            self.page.update()
+            return
         outcome = switch_active_corpus(self.gui_config, name)
         if not outcome.ok:
             if outcome.message:

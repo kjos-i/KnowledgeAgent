@@ -552,3 +552,22 @@ def test_select_corpus_hard_failure_no_reset_no_broadcast(fake_page: MagicMock):
     reset.assert_not_called()
     app.library_tab.view.select_tab.refresh_after_switch.assert_not_called()
     app.chat_panel.append_system.assert_called()  # the error message
+
+
+def test_select_corpus_refused_while_search_in_flight(fake_page: MagicMock):
+    """A corpus switch mid-search would swap the backend clients out from under
+    the in-flight retrieval (switch_active_corpus + reset_after_key_change
+    rebind config/env and clear cached clients), so a query started against
+    corpus A would finish reading corpus B's data. The switch must be REFUSED
+    while `_send_task` is live: no switch call, selector bounced, message
+    surfaced."""
+    app = _make_app(fake_page)
+    app.gui_config = GuiConfig(active_corpus_name="c1")
+    app.corpus_dropdown = None
+    running = MagicMock(name="send_task")
+    running.done.return_value = False  # a live, unfinished search
+    app._send_task = running
+    with patch("knowledge_agent.gui.app.switch_active_corpus") as sw:
+        app.select_corpus("c2")
+    sw.assert_not_called()  # never switched → no corpus mixing
+    app.chat_panel.append_system.assert_called()  # told the user why
