@@ -21,6 +21,7 @@ knowledge-agent[eval]`.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING, Any
 
 from knowledge_agent.evaluation.metrics import safe_mean
@@ -28,6 +29,8 @@ from knowledge_agent.evaluation.metrics import safe_mean
 if TYPE_CHECKING:
     from knowledge_agent.evaluation.adapter import CaseRun
     from knowledge_agent.evaluation.models import EvalCase
+
+logger = logging.getLogger(__name__)
 
 # The 7 DeepEval metric keys — must match the registry's "llm" group.
 JUDGE_METRIC_KEYS: tuple[str, ...] = (
@@ -198,11 +201,21 @@ async def _score_one_model(
     model: str, data: dict[str, Any], threshold: float
 ) -> tuple[dict[str, float | None], int, int]:
     """Run the 7 metrics for one judge model concurrently; return its scores
-    + token usage. A metric that raises scores None (one judge failure must
-    not sink the panel)."""
-    judge_llm = _JudgeLLM(model)
-    metrics = _build_metrics(judge_llm, threshold)
-    test_case = _build_test_case(data)
+    + token usage. A metric that raises scores None, AND a judge that can't be
+    CONSTRUCTED at all (missing provider key, adapter not installed) scores all
+    None too - one judge failure must not sink the panel or the whole eval run
+    (this construct used to raise outside the guard and abort everything)."""
+    try:
+        judge_llm = _JudgeLLM(model)
+        metrics = _build_metrics(judge_llm, threshold)
+        test_case = _build_test_case(data)
+    except Exception:
+        logger.warning(
+            "judge %r could not be constructed; scoring all metrics None",
+            model,
+            exc_info=True,
+        )
+        return {name: None for name in JUDGE_METRIC_KEYS}, 0, 0
 
     async def _one(name: str, metric: Any) -> tuple[str, float | None]:
         try:

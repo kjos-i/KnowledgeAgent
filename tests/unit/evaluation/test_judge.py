@@ -91,3 +91,20 @@ def test_run_judge_panel_none_safe_when_a_model_scores_none(monkeypatch):
     monkeypatch.setattr(J, "_score_one_model", fake_score)
     scores, _, _ = asyncio.run(J.run_judge_panel({}, ["m1", "m2"], 0.5))
     assert scores["faithfulness"] == 0.8  # None skipped → mean of the one real score
+
+
+def test_run_judge_panel_survives_a_judge_that_cannot_be_constructed(monkeypatch):
+    """A judge whose LLM can't be built (missing provider key / adapter not
+    installed) must score all None for that model WITHOUT aborting the panel or
+    the whole eval run. Regression: the construct used to raise OUTSIDE the
+    per-metric guard, so one bad judge sank the entire run + persisted nothing."""
+
+    def boom(model):
+        raise RuntimeError(f"no provider key for {model}")
+
+    monkeypatch.setattr(J, "_JudgeLLM", boom)
+    # Must NOT raise; the panel completes with all-None scores + zero tokens.
+    scores, in_tok, out_tok = asyncio.run(J.run_judge_panel({}, ["bad-model"], 0.5))
+    assert all(scores[k] is None for k in J.JUDGE_METRIC_KEYS)
+    assert in_tok is None  # 0 tokens -> None per run_judge_panel's `(x or None)`
+    assert out_tok is None
