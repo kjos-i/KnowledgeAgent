@@ -138,7 +138,10 @@ def compute_chunk_metrics(
     one retrieved chunk); the rest use per-chunk relevance. All None when
     the case has no gold `expected_chunks`.
     """
-    snippets = [normalize_text(s) for s in expected_chunks if s.strip()]
+    # Filter on the NORMALIZED value, not the raw: a punctuation-only snippet
+    # passes `.strip()` but normalizes to "" — and "" is a substring of every
+    # text, which would falsely mark every retrieved chunk as a hit.
+    snippets = [ns for s in expected_chunks if (ns := normalize_text(s))]
     if not snippets:
         return dict.fromkeys(_CHUNK_KEYS, None)
     texts = [normalize_text(t) for t in retrieved_texts]
@@ -156,7 +159,10 @@ def compute_chunk_metrics(
 def required_keyword_hit_rate(answer: str, required: Sequence[str]) -> float:
     """Fraction of required keywords present in the answer (substring after
     normalization). Vacuously 1.0 when the case lists no required keywords."""
-    reqs = [normalize_text(k) for k in required if k.strip()]
+    # Filter on the NORMALIZED value: a punctuation-only keyword passes
+    # `.strip()` but normalizes to "", which is a substring of every answer and
+    # would falsely count as always-present (inflating the hit rate).
+    reqs = [nk for k in required if (nk := normalize_text(k))]
     if not reqs:
         return 1.0
     na = normalize_text(answer)
@@ -166,7 +172,10 @@ def required_keyword_hit_rate(answer: str, required: Sequence[str]) -> float:
 def disallowed_keyword_hits(answer: str, disallowed: Sequence[str]) -> int:
     """Count of disallowed keywords present in the answer (0 = clean)."""
     na = normalize_text(answer)
-    dis = [normalize_text(k) for k in disallowed if k.strip()]
+    # Filter on the NORMALIZED value: a punctuation-only disallowed keyword
+    # normalizes to "", which matches every answer and would falsely flag a
+    # clean answer as containing it (forcing a spurious REVIEW).
+    dis = [nk for k in disallowed if (nk := normalize_text(k))]
     return sum(1 for k in dis if k in na)
 
 

@@ -124,6 +124,33 @@ def test_disallowed_keyword_hits_counts():
     assert M.disallowed_keyword_hits("clean answer", ["foo"]) == 0
 
 
+def test_required_keyword_hit_rate_ignores_keyword_that_normalizes_to_empty():
+    """A punctuation-only required keyword passes `.strip()` but normalizes to
+    "" — a substring of every answer. It must be dropped, not counted as
+    always-present. Regression: it inflated the hit rate (1/2 below)."""
+    assert M.required_keyword_hit_rate("the capital city", ["Oslo", "!!!"]) == 0.0
+    # When every keyword normalizes away, the list is empty -> vacuous 1.0.
+    assert M.required_keyword_hit_rate("anything", ["***"]) == 1.0
+
+
+def test_disallowed_keyword_hits_ignores_keyword_that_normalizes_to_empty():
+    """A punctuation-only disallowed keyword normalizes to "", which matches
+    every answer. It must be dropped, not counted — else a clean answer is
+    falsely flagged (a spurious REVIEW). Regression: returned 1 / 2 here."""
+    assert M.disallowed_keyword_hits("a perfectly clean answer", ["***"]) == 0
+    assert M.disallowed_keyword_hits("contains foo", ["foo", "!!!"]) == 1
+
+
+def test_chunk_metrics_ignore_expected_chunk_that_normalizes_to_empty():
+    """A punctuation-only expected chunk normalizes to "" — a substring of every
+    text — which would falsely mark every retrieved chunk relevant. It must be
+    dropped. Regression: chunk_hit_at_k/precision inflated to 1.0/0.5."""
+    texts = ["completely unrelated text", "also unrelated"]
+    got = M.compute_chunk_metrics(texts, expected_chunks=["Oslo", "!!!"])
+    assert got["chunk_hit_at_k"] == 0.0  # only "Oslo" is real, and it's absent
+    assert got["chunk_recall_at_k"] == 0.0
+
+
 # ---- citation grounding ----
 
 
