@@ -722,19 +722,25 @@ async def install_xrefs_plan(client, new_xrefs_mode: str) -> InstallXrefsPlan:
         # returned True; we infer "imported" by counting any term
         # node via the same dangling probe (which returns 0 when
         # imported but no dangling, and None on Cypher error).
-        dangling = await count_dangling_xrefs(client, term_label)
-        if dangling is None:
-            # Cypher error for this sub-label — skip; the plan still
-            # builds with the data we got from the other 17.
+        # count_dangling_xrefs RAISES on a Cypher/driver error (it is typed
+        # `-> int` and never returns None), so the old `if dangling is None`
+        # guard was DEAD CODE — one bad sub-label crashed the whole plan build.
+        # Wrap the per-sub-label probes and skip on error so the plan still
+        # builds from the other 17 (the documented per-ontology fail-soft).
+        # `is_imported_fn` is the truer "imported" probe than counting edges.
+        try:
+            dangling = await count_dangling_xrefs(client, term_label)
+            entry = ONTOLOGY_REGISTRY.get(_term_label_to_registry_key(term_label))
+            imported = entry is not None and await entry["is_imported_fn"](client)
+        except Exception as exc:
+            logger.warning(
+                "install_xrefs_plan: probe failed for %s; skipping it: %r",
+                term_label,
+                exc,
+            )
             continue
         n_dangling += dangling
-        # Cheap second probe: any term at all? Reuse count_xref_edges
-        # to ask "are there outgoing edges from this label?" — that's
-        # not exactly "is imported" but is a strict subset (no edges
-        # without nodes). For "imported" the truer probe is the
-        # registry entry's `is_imported_fn`, so use that.
-        entry = ONTOLOGY_REGISTRY.get(_term_label_to_registry_key(term_label))
-        if entry is not None and await entry["is_imported_fn"](client):
+        if imported:
             n_imported += 1
 
     n_edges = await count_xref_edges(client, None)

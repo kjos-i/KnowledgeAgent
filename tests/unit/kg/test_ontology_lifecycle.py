@@ -856,28 +856,51 @@ async def test_install_xrefs_plan_factory_rejects_unknown_mode():
         await install_xrefs_plan(MagicMock(), "definitely_not_a_mode")
 
 
-async def test_install_xrefs_plan_factory_fail_soft_on_dangling_count_none():
-    """When `count_dangling_xrefs` returns None for a label, the
-    factory skips that label and keeps going (the plan is still
-    built from the data we did get)."""
+async def test_install_xrefs_plan_factory_fail_soft_on_dangling_count_error():
+    """count_dangling_xrefs RAISES on a Cypher/driver error (it is typed
+    `-> int` and never returns None). The factory must skip that sub-label and
+    still build the plan from the other 17. Regression: the dead
+    `if dangling is None` guard let the raised error crash the whole plan."""
 
     def fake_dangling(client, term_label):
-        # First call returns None (simulating Cypher error), then 0.
         if term_label == "MeSHTerm":
-            return None
+            raise RuntimeError("cypher boom for MeSHTerm")
         return 0
 
     def fake_edges(client, term_label):
         return 0
 
+    async def fake_is_imported_fn(client):
+        return True
+
+    fake_registry_entry = {
+        "term_label": "MeSHTerm",
+        "is_imported_fn": fake_is_imported_fn,
+        "import_fn": AsyncMock(return_value=True),
+        "delete_fn": AsyncMock(return_value=True),
+        "download_size_mb": 1,
+    }
+    from knowledge_agent.kg.schema import ONTOLOGY_SUB_LABELS
+
+    fake_registry = {
+        f"key_{lbl}": {**fake_registry_entry, "term_label": lbl} for lbl in ONTOLOGY_SUB_LABELS
+    }
     with (
         patch(
             "knowledge_agent.kg.ontology_lifecycle.count_dangling_xrefs", side_effect=fake_dangling
         ),
         patch("knowledge_agent.kg.ontology_lifecycle.count_xref_edges", side_effect=fake_edges),
+        patch("knowledge_agent.kg.ontology_lifecycle.ONTOLOGY_REGISTRY", fake_registry),
+        patch(
+            "knowledge_agent.kg.ontology_lifecycle._TERM_LABEL_TO_REGISTRY_KEY",
+            {lbl: f"key_{lbl}" for lbl in ONTOLOGY_SUB_LABELS},
+        ),
     ):
         plan = await install_xrefs_plan(MagicMock(), "collect_only")
+    # The plan still built (did NOT crash); MeSHTerm was skipped, so only the
+    # other 17 imported sub-labels are counted.
     assert isinstance(plan, InstallXrefsPlan)
+    assert plan.n_imported_ontologies == len(ONTOLOGY_SUB_LABELS) - 1
 
 
 # ---- InstallCrossDocXrefsPlan ----
