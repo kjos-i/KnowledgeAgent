@@ -71,17 +71,21 @@ def _collect_async_names() -> set[str]:
     return names - _IGNORE_NAMES
 
 
-def _is_asyncio_run_call(node: ast.Call) -> bool:
-    """True iff this Call is `asyncio.run(...)` — the canonical sync→async
-    bridge. Used to exempt the inner call from the sync-calls-async check.
+def _is_coro_consuming_call(node: ast.Call) -> bool:
+    """True iff this Call CONSUMES a coroutine passed as an argument — the
+    canonical sync→async bridges. The inner coroutine-producing call is then
+    exempt from the sync-calls-async check (the coroutine is not leaked):
+      - `asyncio.run(coro())`                     — sync entry point;
+      - `loop.create_task(coro())` / `asyncio.create_task(coro())` — schedule
+        the coroutine on the running loop (fire-and-forget);
+      - `asyncio.ensure_future(coro())`.
     """
     func = node.func
-    return (
-        isinstance(func, ast.Attribute)
-        and func.attr == "run"
-        and isinstance(func.value, ast.Name)
-        and func.value.id == "asyncio"
-    )
+    if not isinstance(func, ast.Attribute):
+        return False
+    if func.attr in ("create_task", "ensure_future"):
+        return True
+    return func.attr == "run" and isinstance(func.value, ast.Name) and func.value.id == "asyncio"
 
 
 class _SyncCallsFinder(ast.NodeVisitor):
@@ -95,9 +99,10 @@ class _SyncCallsFinder(ast.NodeVisitor):
         # legitimate patterns (decorators, dispatcher tables) reference
         # async-named callables at import time.
         self._sync_stack: list[bool] = []
-        # Depth counter: > 0 means we're processing args of an
-        # `asyncio.run(...)` call, where an "unawaited" coroutine is the
-        # whole point (`asyncio.run(coro())` is the sync→async bridge).
+        # Depth counter: > 0 means we're processing args of a
+        # coroutine-consuming call (asyncio.run / create_task / ensure_future),
+        # where an "unawaited" coroutine is the whole point (the sync→async
+        # bridge consumes it).
         self._asyncio_run_depth = 0
         self.problems: list[tuple[int, str]] = []
 
@@ -126,9 +131,10 @@ class _SyncCallsFinder(ast.NodeVisitor):
                 name = node.func.id
             if name is not None and name in self._async_names:
                 self.problems.append((node.lineno, name))
-        # `asyncio.run(<coro_call>)`: descend with the depth flag set so
-        # the inner coroutine-producing call isn't flagged.
-        if _is_asyncio_run_call(node):
+        # A coroutine-consuming call (asyncio.run / create_task / ensure_future):
+        # descend with the depth flag set so the inner coroutine-producing call
+        # isn't flagged.
+        if _is_coro_consuming_call(node):
             self._asyncio_run_depth += 1
             try:
                 self.generic_visit(node)

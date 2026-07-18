@@ -246,18 +246,21 @@ async def test_write_citations_three_round_trips():
     assert len(driver.sessions[0].calls) == 3
 
 
-async def test_write_citations_with_openalex_id_keys_focal_on_openalex_id():
-    """When openalex_id is known the focal MERGE keys on openalex_id (so a
-    pre-existing shadow with the same openalex_id gets found + upgraded),
-    while doc_id is SET as a property and the :Paper subtype label is added."""
+async def test_write_citations_with_openalex_id_keys_focal_on_doc_id_and_claims_openalex():
+    """When openalex_id is known the focal MERGE keys on doc_id (NOT openalex_id
+    — keying on openalex_id would clobber an existing in-corpus doc's doc_id and
+    violate the doc_id uniqueness constraint; the openalex doc_id-clobber fix).
+    openalex_id is then CLAIMED via a guarded subquery only if no other node
+    already holds it; the :Paper subtype label + in_corpus + doi are set."""
     driver = RecordingDriver()
     client = _client_with_driver(_configured_settings(), driver)
     await client.write_citations(DOC_ID, WORK_WITH_CITATIONS)
     focal_query, focal_params = driver.sessions[0].calls[0]
-    assert "MERGE (d:Document {openalex_id: $openalex_id})" in focal_query
+    assert "MERGE (d:Document {doc_id: $doc_id})" in focal_query
     assert "d:Paper" in focal_query
-    assert "d.doc_id = $doc_id" in focal_query
     assert "d.in_corpus = true" in focal_query
+    # openalex_id is claimed via the guarded subquery, not the focal MERGE key.
+    assert "SET d.openalex_id = $openalex_id" in focal_query
     assert focal_params["openalex_id"] == "W1"
     assert focal_params["doc_id"] == DOC_ID
     # DOI was normalized: lowercase, URL prefix stripped.
