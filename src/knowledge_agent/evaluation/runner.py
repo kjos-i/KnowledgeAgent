@@ -166,7 +166,12 @@ async def run(
         results = await evaluate_cases(cases, corpus_config, cfg, on_progress=on_progress)
 
     run_timestamp = datetime.now(UTC).isoformat(timespec="seconds")
-    report = report_mod.build_report(
+    # build_report captures provenance via a blocking `git rev-parse` subprocess.
+    # run() is async and the GUI drives it on the Flet event loop, so assemble
+    # the report off-loop in a worker thread — otherwise the git call (a few ms,
+    # up to its 5s timeout on a git hang) stalls the UI. The CLI is unaffected.
+    report = await asyncio.to_thread(
+        report_mod.build_report,
         cfg,
         results,
         run_timestamp,

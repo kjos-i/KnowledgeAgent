@@ -97,6 +97,58 @@ def test_end_to_end_with_stubbed_graph(tmp_path, monkeypatch):
     assert stored_hash == report["dataset_hash"]  # persisted to the ledger
 
 
+def test_run_builds_report_off_the_event_loop(tmp_path, monkeypatch):
+    """build_report captures provenance via a blocking `git rev-parse`
+    subprocess. run() is async and the GUI drives it on the Flet event loop, so
+    the report must be assembled via asyncio.to_thread, not inline — else the
+    git call stalls the UI. Regression: run() called build_report() directly on
+    the loop, so `build_report` never appeared among the offloaded callables."""
+
+    async def fake_run_case(case, corpus_config):
+        return CaseRun(
+            question=case.question,
+            answer="a",
+            retrieved_texts=["t"],
+            retrieved_doc_ids=["d"],
+            retrieved_chunk_ids=["c"],
+        )
+
+    monkeypatch.setattr(E, "run_case", fake_run_case)
+    monkeypatch.setattr(
+        RP, "capture_provenance", lambda: {"git_commit": None, "model_config": {}, "prompts": {}}
+    )
+
+    # Spy on asyncio.to_thread (call through so run() completes normally) and
+    # record which callables were offloaded.
+    offloaded: list[str] = []
+    real_to_thread = asyncio.to_thread
+
+    async def spy_to_thread(fn, *args, **kwargs):
+        offloaded.append(getattr(fn, "__name__", repr(fn)))
+        return await real_to_thread(fn, *args, **kwargs)
+
+    monkeypatch.setattr(RN.asyncio, "to_thread", spy_to_thread)
+
+    dataset = tmp_path / "gold.json"
+    dataset.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "c1",
+                    "question": "q?",
+                    "retrieval": {"num_candidates": 100, "rrf_rank_constant": 60},
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    cfg = load_eval_config(dataset_path=dataset, output_dir=tmp_path / "out", max_cases=1)
+    result = asyncio.run(RN.run(cfg))
+
+    assert result.run_id == 1
+    assert "build_report" in offloaded  # report assembled off the event loop
+
+
 def test_run_suite_shares_one_id_across_members(tmp_path, monkeypatch):
     """run_suite runs each member (same facts, swept knobs) and stamps them all
     with ONE shared suite_run_id — so members share a facts_hash but differ by
