@@ -63,6 +63,46 @@ def test_keyword_in_middle_of_query_rejects():
     assert not is_cypher_read_only(cypher)
 
 
+# ---- is_cypher_read_only: keywords inside string literals are data ----
+
+
+def test_write_keyword_inside_double_quoted_literal_does_not_reject():
+    """A forbidden keyword that appears only as string DATA (an entity named
+    "gene set" — SET is not a write clause here) must NOT reject the read.
+    Regression: the raw regex matched inside literals, so every such legit read
+    was dropped and the KG leg returned empty."""
+    assert is_cypher_read_only('MATCH (n:Entity) WHERE n.name = "gene set" RETURN n')
+
+
+def test_write_keyword_inside_single_quoted_literal_does_not_reject():
+    assert is_cypher_read_only("MATCH (n:Entity) WHERE n.name = 'gene set' RETURN n LIMIT 5")
+
+
+def test_apoc_namespace_inside_string_literal_does_not_reject():
+    """`apoc.` as a substring of a string VALUE is data, not an inline call, so
+    the namespace check must not reject it once literals are blanked."""
+    assert is_cypher_read_only("MATCH (n) WHERE n.host = 'apoc.example.com' RETURN n")
+
+
+def test_real_write_after_string_literal_still_rejects():
+    """Blanking literals must NOT weaken the guard: a real SET clause OUTSIDE
+    the string is still caught."""
+    assert not is_cypher_read_only("MATCH (n) WHERE n.x = 'ok' SET n.y = 1 RETURN n")
+
+
+def test_unterminated_string_literal_fails_closed():
+    """A dangling quote does not match the literal pattern, so nothing is
+    stripped and the raw text is scanned — a write keyword after it still
+    rejects (fail-closed, never fail-open)."""
+    assert not is_cypher_read_only('MATCH (n) WHERE n.x = "abc DELETE (m) RETURN n')
+
+
+def test_real_apoc_call_with_string_arg_still_rejects():
+    """The dangerous `apoc.`/`CALL` tokens sit OUTSIDE the string argument, so
+    blanking the URL literal leaves them to be caught."""
+    assert not is_cypher_read_only("CALL apoc.load.json('http://169.254.169.254/latest/') YIELD v")
+
+
 # ---- is_cypher_read_only: procedure / bulk-load / namespace hardening ----
 
 
