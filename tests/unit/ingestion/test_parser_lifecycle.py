@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from knowledge_agent import DISTRIBUTION_NAME
 from knowledge_agent.ingestion.parser_lifecycle import (
     PARSER_LIFECYCLE_REGISTRY,
     InstallParserExtraPlan,
@@ -234,8 +235,9 @@ async def test_install_execute_not_installed_calls_pip_with_extras_target():
     pip_mock.assert_called_once()
     args = pip_mock.call_args[0][0]
     assert args[0] == "install"
-    # target is "research-literature-agent[parsers-code]"
-    assert "research-literature-agent[parsers-code]" in args[1]
+    # target is "<dist>[parsers-code]" using the shared DISTRIBUTION_NAME -
+    # NOT the pre-rename name that made every parser install fail.
+    assert f"{DISTRIBUTION_NAME}[parsers-code]" in args[1]
     assert result.did_install is True
     assert result.install_ok is True
     assert result.restart_required is True

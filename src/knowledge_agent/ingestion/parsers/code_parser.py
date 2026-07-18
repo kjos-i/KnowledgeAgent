@@ -39,6 +39,7 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
+from knowledge_agent import DISTRIBUTION_NAME
 from knowledge_agent.ingestion.parsers.base import ParsedChunk
 
 logger = logging.getLogger(__name__)
@@ -206,7 +207,7 @@ def _get_parser(language: str) -> Any:
     except ImportError as exc:
         raise ImportError(
             "code_parser requires the 'parsers-code' install extra. "
-            "Install with: pip install research-literature-agent[parsers-code]"
+            f"Install with: pip install {DISTRIBUTION_NAME}[parsers-code]"
         ) from exc
     return get_parser(language)
 

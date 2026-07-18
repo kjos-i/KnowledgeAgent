@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from knowledge_agent import DISTRIBUTION_NAME
 from knowledge_agent.entity_extractors.extractor_lifecycle import (
     EXTRACTOR_REGISTRY,
     DeleteExtractorCachePlan,
@@ -442,15 +443,15 @@ async def test_install_execute_runs_pip_with_distribution_and_extras():
         new_callable=AsyncMock,
         return_value=(True, "ok"),
     ) as pip_mock:
-        result = await install_extractor_execute(
-            plan,
-            distribution_name="research-literature-agent",
-        )
+        result = await install_extractor_execute(plan)
 
     args, _ = pip_mock.call_args
+    # Default distribution_name -> the shared DISTRIBUTION_NAME (the pip name
+    # the app was installed under), NOT the pre-rename literal that made every
+    # extractor install fail.
     assert args[0] == [
         "install",
-        "research-literature-agent[entities-hunflair2]",
+        f"{DISTRIBUTION_NAME}[entities-hunflair2]",
     ]
     assert result.did_install is True
     assert result.install_ok is True

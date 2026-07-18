@@ -56,6 +56,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from knowledge_agent import DISTRIBUTION_NAME
+
 logger = logging.getLogger(__name__)
 
 
@@ -300,7 +302,7 @@ def install_parser_extra_plan(extra_name: str) -> InstallParserExtraPlan:
 async def install_parser_extra_execute(
     plan: InstallParserExtraPlan,
     *,
-    distribution_name: str = "research-literature-agent",
+    distribution_name: str = DISTRIBUTION_NAME,
 ) -> InstallParserExtraResult:
     """Run `pip install <dist>[<pip_extras>]` if not already installed.
 

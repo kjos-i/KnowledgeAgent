@@ -55,6 +55,7 @@ import sys
 from dataclasses import dataclass
 from typing import Any
 
+from knowledge_agent import DISTRIBUTION_NAME
 from knowledge_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -541,7 +542,7 @@ async def install_llm_provider_plan(provider: str) -> InstallLLMProviderPlan:
 async def install_llm_provider_execute(
     plan: InstallLLMProviderPlan,
     *,
-    distribution_name: str = "knowledge-agent",
+    distribution_name: str = DISTRIBUTION_NAME,
 ) -> InstallLLMProviderResult:
     """Run `pip install <dist>[<pip_extras>]` if not already installed.
 

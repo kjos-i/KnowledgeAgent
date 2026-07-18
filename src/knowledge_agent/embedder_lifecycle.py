@@ -55,6 +55,7 @@ import sys
 from dataclasses import dataclass
 from typing import Any
 
+from knowledge_agent import DISTRIBUTION_NAME
 from knowledge_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -494,7 +495,7 @@ def install_embedder_provider_plan(
 async def install_embedder_provider_execute(
     plan: InstallEmbedderProviderPlan,
     *,
-    distribution_name: str = "knowledge-agent",
+    distribution_name: str = DISTRIBUTION_NAME,
 ) -> InstallEmbedderProviderResult:
     """Run `pip install <dist>[<pip_extras>]` if not already installed."""
     if plan.bundled or plan.already_installed:

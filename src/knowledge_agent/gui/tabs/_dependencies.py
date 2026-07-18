@@ -12,7 +12,9 @@ from __future__ import annotations
 import importlib.metadata as im
 import re
 
-_DIST = "knowledge-agent"
+from knowledge_agent import DISTRIBUTION_NAME
+
+_DIST = DISTRIBUTION_NAME
 _EXTRA_RE = re.compile(r"""extra\s*==\s*["']([^"']+)["']""")
 _NAME_RE = re.compile(r"^\s*([A-Za-z0-9._-]+)")
 

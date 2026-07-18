@@ -61,6 +61,8 @@ import traceback
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from knowledge_agent import DISTRIBUTION_NAME
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
@@ -150,7 +152,7 @@ def capture_system_info() -> dict[str, Any]:
     already loaded (no eager import).
     """
     try:
-        app_version = importlib.metadata.version("research-literature-agent")
+        app_version = importlib.metadata.version(DISTRIBUTION_NAME)
     except importlib.metadata.PackageNotFoundError:
         app_version = "dev"
 

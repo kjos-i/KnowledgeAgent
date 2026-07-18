@@ -48,6 +48,8 @@ import sys
 from dataclasses import dataclass
 from typing import Any
 
+from knowledge_agent import DISTRIBUTION_NAME
+
 logger = logging.getLogger(__name__)
 
 
@@ -591,7 +593,7 @@ def install_extractor_plan(extractor_name: str) -> InstallExtractorPlan:
 async def install_extractor_execute(
     plan: InstallExtractorPlan,
     *,
-    distribution_name: str = "research-literature-agent",
+    distribution_name: str = DISTRIBUTION_NAME,
 ) -> InstallExtractorResult:
     """Run `pip install <dist>[<extras>]` for non-bundled extractors.
 
