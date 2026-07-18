@@ -31,12 +31,14 @@ SYNTHETIC_DOC_ID = "integ-doc-l8-001"
 pytestmark = pytest.mark.integration
 
 
-def _seed_chunk_and_entities(client: Any, doc_id: str, entities: list[tuple[str, str]]) -> str:
+async def _seed_chunk_and_entities(
+    client: Any, doc_id: str, entities: list[tuple[str, str]]
+) -> str:
     """Create focal :Document + :Chunk + :Entity nodes (with
     :MENTIONS edges from the chunk). Returns chunk_id."""
     chunk_id = make_chunk_id(doc_id, 0)
-    with client.driver.session() as session:
-        session.run(
+    async with client.driver.session() as session:
+        await session.run(
             "MERGE (d:Document {doc_id: $doc_id}) "
             "ON CREATE SET d.in_corpus = true, d:Paper "
             "MERGE (c:Chunk {chunk_id: $chunk_id}) "
@@ -47,7 +49,7 @@ def _seed_chunk_and_entities(client: Any, doc_id: str, entities: list[tuple[str,
             chunk_id=chunk_id,
         )
         for key, etype in entities:
-            session.run(
+            await session.run(
                 "MERGE (e:Entity {key: $key, entity_type: $type}) "
                 "WITH e "
                 "MATCH (c:Chunk {chunk_id: $chunk_id}) "
@@ -105,22 +107,21 @@ async def test_write_triples_creates_one_edge_per_triple(
     """write_triples produces one typed edge per ExtractedTriple,
     using the matching predicate from TRIPLE_PREDICATE_RELS as the
     edge type. Each edge carries doc_id + chunk_id properties."""
-    chunk_id = _seed_chunk_and_entities(kg_client, SYNTHETIC_DOC_ID, SYNTHETIC_ENTITIES)
+    chunk_id = await _seed_chunk_and_entities(kg_client, SYNTHETIC_DOC_ID, SYNTHETIC_ENTITIES)
     ok = await kg_client.write_triples(SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_TRIPLES)])
     assert ok is None  # success: returns None (typed-errors contract)
 
     rel_union = "|".join(TRIPLE_PREDICATE_RELS)
-    with kg_client.driver.session() as session:
-        rows = list(
-            session.run(
-                f"MATCH (s:Entity)-[r:{rel_union}]->(o:Entity) "
-                f"WHERE r.doc_id = $doc_id "
-                f"RETURN type(r) AS predicate, s.key AS subj, o.key AS obj, "
-                f"r.chunk_id AS chunk_id, r.evidence_span AS evidence "
-                f"ORDER BY predicate",
-                doc_id=SYNTHETIC_DOC_ID,
-            )
+    async with kg_client.driver.session() as session:
+        result = await session.run(
+            f"MATCH (s:Entity)-[r:{rel_union}]->(o:Entity) "
+            f"WHERE r.doc_id = $doc_id "
+            f"RETURN type(r) AS predicate, s.key AS subj, o.key AS obj, "
+            f"r.chunk_id AS chunk_id, r.evidence_span AS evidence "
+            f"ORDER BY predicate",
+            doc_id=SYNTHETIC_DOC_ID,
         )
+        rows = [r async for r in result]
     assert len(rows) == 3
     predicates = {r["predicate"] for r in rows}
     assert predicates == set(_PREDS)
@@ -135,7 +136,7 @@ async def test_write_triples_out_of_vocabulary_predicate_is_skipped(
     """A triple with a predicate not in TRIPLE_PREDICATE_RELS is
     dropped silently — does NOT raise, does NOT block other triples
     in the same batch."""
-    chunk_id = _seed_chunk_and_entities(kg_client, SYNTHETIC_DOC_ID, SYNTHETIC_ENTITIES)
+    chunk_id = await _seed_chunk_and_entities(kg_client, SYNTHETIC_DOC_ID, SYNTHETIC_ENTITIES)
     mixed = [
         SYNTHETIC_TRIPLES[0],  # valid
         ExtractedTriple(
@@ -152,11 +153,12 @@ async def test_write_triples_out_of_vocabulary_predicate_is_skipped(
     assert ok is None  # success: returns None (typed-errors contract)
 
     rel_union = "|".join(TRIPLE_PREDICATE_RELS)
-    with kg_client.driver.session() as session:
-        n_real = session.run(
+    async with kg_client.driver.session() as session:
+        result = await session.run(
             f"MATCH ()-[r:{rel_union}]->() WHERE r.doc_id = $doc_id RETURN count(r) AS n",
             doc_id=SYNTHETIC_DOC_ID,
-        ).single()["n"]
+        )
+        n_real = (await result.single())["n"]
     assert n_real == 2  # only the two valid triples landed
 
 
@@ -167,8 +169,8 @@ async def test_delete_triples_removes_only_target_doc_edges(
     sourced by the target doc, AND preserves edges sourced by other
     docs."""
     other_doc = "integ-doc-l8-other"
-    chunk_a = _seed_chunk_and_entities(kg_client, SYNTHETIC_DOC_ID, SYNTHETIC_ENTITIES)
-    chunk_b = _seed_chunk_and_entities(kg_client, other_doc, SYNTHETIC_ENTITIES)
+    chunk_a = await _seed_chunk_and_entities(kg_client, SYNTHETIC_DOC_ID, SYNTHETIC_ENTITIES)
+    chunk_b = await _seed_chunk_and_entities(kg_client, other_doc, SYNTHETIC_ENTITIES)
     await kg_client.write_triples(SYNTHETIC_DOC_ID, [(chunk_a, SYNTHETIC_TRIPLES)])
     await kg_client.write_triples(other_doc, [(chunk_b, SYNTHETIC_TRIPLES)])
 
@@ -176,15 +178,17 @@ async def test_delete_triples_removes_only_target_doc_edges(
     assert ok is None  # success: returns None (typed-errors contract)
 
     rel_union = "|".join(TRIPLE_PREDICATE_RELS)
-    with kg_client.driver.session() as session:
-        n_target = session.run(
+    async with kg_client.driver.session() as session:
+        result = await session.run(
             f"MATCH ()-[r:{rel_union}]->() WHERE r.doc_id = $doc_id RETURN count(r) AS n",
             doc_id=SYNTHETIC_DOC_ID,
-        ).single()["n"]
-        n_other = session.run(
+        )
+        n_target = (await result.single())["n"]
+        result = await session.run(
             f"MATCH ()-[r:{rel_union}]->() WHERE r.doc_id = $doc_id RETURN count(r) AS n",
             doc_id=other_doc,
-        ).single()["n"]
+        )
+        n_other = (await result.single())["n"]
     assert n_target == 0
     assert n_other == 3
 
@@ -195,7 +199,7 @@ async def test_get_entities_by_chunk_returns_l6_vocabulary(
     """The L8 backfill helper reads back this doc's L6 vocabulary
     grouped by chunk_id. Useful so backfill_triples doesn't need to
     re-run L6 — it consults the existing :Entity nodes."""
-    chunk_id = _seed_chunk_and_entities(kg_client, SYNTHETIC_DOC_ID, SYNTHETIC_ENTITIES)
+    chunk_id = await _seed_chunk_and_entities(kg_client, SYNTHETIC_DOC_ID, SYNTHETIC_ENTITIES)
 
     by_chunk = await kg_client.get_entities_by_chunk(SYNTHETIC_DOC_ID)
     assert chunk_id in by_chunk

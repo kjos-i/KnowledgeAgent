@@ -59,25 +59,25 @@ async def test_write_chunks_creates_focal_and_chunks_with_part_of_edges(
     ok = await kg_client.write_chunks(SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper")
     assert ok is None  # success: returns None (typed-errors contract)
 
-    with kg_client.driver.session() as session:
+    async with kg_client.driver.session() as session:
         # Focal :Document:Paper with in_corpus flag.
-        focal = session.run(
+        result = await session.run(
             "MATCH (d:Document:Paper {doc_id: $doc_id}) RETURN d.in_corpus AS flag",
             doc_id=SYNTHETIC_DOC_ID,
-        ).single()
+        )
+        focal = await result.single()
         assert focal is not None
         assert focal["flag"] is True
 
         # 3 :Chunk nodes with the expected chunk_id pattern + properties.
-        chunks = list(
-            session.run(
-                "MATCH (c:Chunk)-[:PART_OF]->(d:Document {doc_id: $doc_id}) "
-                "RETURN c.chunk_id AS chunk_id, c.chunk_index AS idx, "
-                "c.section AS section, c.page AS page, "
-                "c.content_type AS ctype ORDER BY c.chunk_index",
-                doc_id=SYNTHETIC_DOC_ID,
-            )
+        result = await session.run(
+            "MATCH (c:Chunk)-[:PART_OF]->(d:Document {doc_id: $doc_id}) "
+            "RETURN c.chunk_id AS chunk_id, c.chunk_index AS idx, "
+            "c.section AS section, c.page AS page, "
+            "c.content_type AS ctype ORDER BY c.chunk_index",
+            doc_id=SYNTHETIC_DOC_ID,
         )
+        chunks = [r async for r in result]
     assert len(chunks) == 3
     assert chunks[0]["chunk_id"] == make_chunk_id(SYNTHETIC_DOC_ID, 0)
     assert chunks[0]["section"] == "Introduction"
@@ -96,15 +96,17 @@ async def test_write_chunks_is_idempotent(
     await kg_client.write_chunks(SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper")
     await kg_client.write_chunks(SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper")
 
-    with kg_client.driver.session() as session:
-        n_chunks = session.run(
+    async with kg_client.driver.session() as session:
+        result = await session.run(
             "MATCH (c:Chunk {doc_id: $doc_id}) RETURN count(c) AS n",
             doc_id=SYNTHETIC_DOC_ID,
-        ).single()["n"]
-        n_part_of = session.run(
+        )
+        n_chunks = (await result.single())["n"]
+        result = await session.run(
             "MATCH (:Chunk {doc_id: $doc_id})-[r:PART_OF]->(:Document) RETURN count(r) AS n",
             doc_id=SYNTHETIC_DOC_ID,
-        ).single()["n"]
+        )
+        n_part_of = (await result.single())["n"]
     assert n_chunks == 3
     assert n_part_of == 3
 
@@ -118,15 +120,17 @@ async def test_write_chunks_with_empty_list_is_noop(
     ok = await kg_client.write_chunks(SYNTHETIC_DOC_ID, [], "Document", "Paper")
     assert ok is None  # success: returns None (typed-errors contract)
 
-    with kg_client.driver.session() as session:
-        focal = session.run(
+    async with kg_client.driver.session() as session:
+        result = await session.run(
             "MATCH (d:Document {doc_id: $doc_id}) RETURN d",
             doc_id=SYNTHETIC_DOC_ID,
-        ).single()
-        n_chunks = session.run(
+        )
+        focal = await result.single()
+        result = await session.run(
             "MATCH (c:Chunk {doc_id: $doc_id}) RETURN count(c) AS n",
             doc_id=SYNTHETIC_DOC_ID,
-        ).single()["n"]
+        )
+        n_chunks = (await result.single())["n"]
 
     assert focal is None
     assert n_chunks == 0
@@ -144,15 +148,17 @@ async def test_delete_chunks_wipes_only_target_doc(
     ok = await kg_client.delete_chunks_by_doc_id(SYNTHETIC_DOC_ID)
     assert ok is None  # success: returns None (typed-errors contract)
 
-    with kg_client.driver.session() as session:
-        n_target = session.run(
+    async with kg_client.driver.session() as session:
+        result = await session.run(
             "MATCH (c:Chunk {doc_id: $doc_id}) RETURN count(c) AS n",
             doc_id=SYNTHETIC_DOC_ID,
-        ).single()["n"]
-        n_other = session.run(
+        )
+        n_target = (await result.single())["n"]
+        result = await session.run(
             "MATCH (c:Chunk {doc_id: $doc_id}) RETURN count(c) AS n",
             doc_id=other_doc,
-        ).single()["n"]
+        )
+        n_other = (await result.single())["n"]
     assert n_target == 0
     assert n_other == 3
 
@@ -173,11 +179,12 @@ async def test_write_chunks_preserves_existing_focal_labels(
     # Then: write_chunks should not clobber the :Paper label.
     await kg_client.write_chunks(SYNTHETIC_DOC_ID, SYNTHETIC_CHUNKS, "Document", "Paper")
 
-    with kg_client.driver.session() as session:
-        labels = session.run(
+    async with kg_client.driver.session() as session:
+        result = await session.run(
             "MATCH (d:Document {doc_id: $doc_id}) RETURN labels(d) AS lbls",
             doc_id=SYNTHETIC_DOC_ID,
-        ).single()["lbls"]
+        )
+        labels = (await result.single())["lbls"]
     assert "Document" in labels
     assert "Paper" in labels
 

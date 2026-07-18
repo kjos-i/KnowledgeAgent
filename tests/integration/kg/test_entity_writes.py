@@ -38,12 +38,12 @@ SYNTHETIC_DOC_ID = "integ-doc-l6-001"
 pytestmark = pytest.mark.integration
 
 
-def _seed_chunk(client: Any, doc_id: str, chunk_index: int = 0) -> str:
+async def _seed_chunk(client: Any, doc_id: str, chunk_index: int = 0) -> str:
     """Create the focal :Document + one :Chunk so write_entities has a
     target. Returns chunk_id."""
     chunk_id = make_chunk_id(doc_id, chunk_index)
-    with client.driver.session() as session:
-        session.run(
+    async with client.driver.session() as session:
+        await session.run(
             "MERGE (d:Document {doc_id: $doc_id}) "
             "ON CREATE SET d.in_corpus = true, d:Paper "
             "MERGE (c:Chunk {chunk_id: $chunk_id}) "
@@ -78,19 +78,18 @@ async def test_write_entities_creates_entity_nodes_and_mentions_edges(
     AND fire from the same chunk — so they collapse to ONE :Entity
     AND ONE :MENTIONS edge (the MERGE on (chunk, entity) deduplicates).
     """
-    chunk_id = _seed_chunk(kg_client, SYNTHETIC_DOC_ID)
+    chunk_id = await _seed_chunk(kg_client, SYNTHETIC_DOC_ID)
     ok = await kg_client.write_entities(SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_MENTIONS)])
     assert ok is None  # success: returns None (typed-errors contract)
 
-    with kg_client.driver.session() as session:
-        rows = list(
-            session.run(
-                "MATCH (c:Chunk {chunk_id: $chunk_id})-[m:MENTIONS]->(e:Entity) "
-                "RETURN e.key AS key, e.entity_type AS type, m.offset AS offset "
-                "ORDER BY m.offset",
-                chunk_id=chunk_id,
-            )
+    async with kg_client.driver.session() as session:
+        result = await session.run(
+            "MATCH (c:Chunk {chunk_id: $chunk_id})-[m:MENTIONS]->(e:Entity) "
+            "RETURN e.key AS key, e.entity_type AS type, m.offset AS offset "
+            "ORDER BY m.offset",
+            chunk_id=chunk_id,
         )
+        rows = [r async for r in result]
     # 3 distinct entities + 3 :MENTIONS edges (aspirin dedupes).
     assert len(rows) == 3
     distinct_entities = {(r["key"], r["type"]) for r in rows}
@@ -113,7 +112,7 @@ async def test_write_entities_lowercases_keys(
 
     All three mentions are from the same chunk → the :MENTIONS MERGE
     dedupes to a single edge."""
-    chunk_id = _seed_chunk(kg_client, SYNTHETIC_DOC_ID)
+    chunk_id = await _seed_chunk(kg_client, SYNTHETIC_DOC_ID)
     mentions = [
         Mention(raw_text="EGFR", entity_type="gene", offset=0),
         Mention(raw_text="egfr", entity_type="gene", offset=10),
@@ -121,14 +120,14 @@ async def test_write_entities_lowercases_keys(
     ]
     await kg_client.write_entities(SYNTHETIC_DOC_ID, [(chunk_id, mentions)])
 
-    with kg_client.driver.session() as session:
-        n_entities = session.run(
-            "MATCH (e:Entity {entity_type: 'gene'}) RETURN count(e) AS n"
-        ).single()["n"]
-        n_mentions = session.run(
+    async with kg_client.driver.session() as session:
+        result = await session.run("MATCH (e:Entity {entity_type: 'gene'}) RETURN count(e) AS n")
+        n_entities = (await result.single())["n"]
+        result = await session.run(
             "MATCH (c:Chunk {chunk_id: $chunk_id})-[m:MENTIONS]->(:Entity) RETURN count(m) AS n",
             chunk_id=chunk_id,
-        ).single()["n"]
+        )
+        n_mentions = (await result.single())["n"]
     assert n_entities == 1
     assert n_mentions == 1  # MERGE dedupes within the chunk
 
@@ -138,16 +137,18 @@ async def test_write_entities_is_idempotent(
 ) -> None:
     """Re-running write_entities on the same chunk_mentions does NOT
     duplicate :Entity nodes or :MENTIONS edges."""
-    chunk_id = _seed_chunk(kg_client, SYNTHETIC_DOC_ID)
+    chunk_id = await _seed_chunk(kg_client, SYNTHETIC_DOC_ID)
     await kg_client.write_entities(SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_MENTIONS)])
     await kg_client.write_entities(SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_MENTIONS)])
 
-    with kg_client.driver.session() as session:
-        n_entities = session.run("MATCH (e:Entity) RETURN count(e) AS n").single()["n"]
-        n_mentions = session.run(
+    async with kg_client.driver.session() as session:
+        result = await session.run("MATCH (e:Entity) RETURN count(e) AS n")
+        n_entities = (await result.single())["n"]
+        result = await session.run(
             "MATCH (c:Chunk {chunk_id: $chunk_id})-[m:MENTIONS]->(:Entity) RETURN count(m) AS n",
             chunk_id=chunk_id,
-        ).single()["n"]
+        )
+        n_mentions = (await result.single())["n"]
     assert n_entities == 3
     # 4 mentions → 3 distinct (chunk, entity) pairs since "Aspirin" +
     # "aspirin" share a chunk + key and the :MENTIONS MERGE dedupes.
@@ -160,18 +161,20 @@ async def test_delete_entities_by_doc_id_orphan_gcs_entities(
     """delete_entities_by_doc_id drops :MENTIONS from this doc's
     chunks AND garbage-collects :Entity nodes that have no remaining
     inbound :MENTIONS edges from any chunk."""
-    chunk_id = _seed_chunk(kg_client, SYNTHETIC_DOC_ID)
+    chunk_id = await _seed_chunk(kg_client, SYNTHETIC_DOC_ID)
     await kg_client.write_entities(SYNTHETIC_DOC_ID, [(chunk_id, SYNTHETIC_MENTIONS)])
 
     ok = await kg_client.delete_entities_by_doc_id(SYNTHETIC_DOC_ID)
     assert ok is None  # success: returns None (typed-errors contract)
 
-    with kg_client.driver.session() as session:
-        n_entities = session.run("MATCH (e:Entity) RETURN count(e) AS n").single()["n"]
-        n_mentions = session.run(
+    async with kg_client.driver.session() as session:
+        result = await session.run("MATCH (e:Entity) RETURN count(e) AS n")
+        n_entities = (await result.single())["n"]
+        result = await session.run(
             "MATCH (c:Chunk {doc_id: $doc_id})-[m:MENTIONS]->() RETURN count(m) AS n",
             doc_id=SYNTHETIC_DOC_ID,
-        ).single()["n"]
+        )
+        n_mentions = (await result.single())["n"]
     # All 3 entities had only this doc's mentions → all gone.
     assert n_entities == 0
     assert n_mentions == 0
@@ -191,14 +194,14 @@ async def test_delete_entities_gcs_orphan_with_outgoing_canonical_to_edge(
     plain-DELETE bug.
     """
     term_id = "MESH:D001943"
-    chunk_id = _seed_chunk(kg_client, SYNTHETIC_DOC_ID)
+    chunk_id = await _seed_chunk(kg_client, SYNTHETIC_DOC_ID)
     await kg_client.write_entities(
         SYNTHETIC_DOC_ID,
         [(chunk_id, [Mention(raw_text="BRCA1", entity_type="gene", offset=0)])],
     )
     # Simulate the L7 canonical link: (:Entity)-[:CANONICAL_TO]->(:OntologyTerm).
-    with kg_client.driver.session() as session:
-        session.run(
+    async with kg_client.driver.session() as session:
+        await session.run(
             "MATCH (e:Entity {key: 'brca1', entity_type: 'gene'}) "
             "MERGE (t:OntologyTerm {id: $term_id}) "
             "SET e.canonicalised = true "
@@ -212,11 +215,13 @@ async def test_delete_entities_gcs_orphan_with_outgoing_canonical_to_edge(
     ok = await kg_client.delete_entities_by_doc_id(SYNTHETIC_DOC_ID)
     assert ok is None
 
-    with kg_client.driver.session() as session:
-        n_entities = session.run("MATCH (e:Entity) RETURN count(e) AS n").single()["n"]
-        n_terms = session.run(
+    async with kg_client.driver.session() as session:
+        result = await session.run("MATCH (e:Entity) RETURN count(e) AS n")
+        n_entities = (await result.single())["n"]
+        result = await session.run(
             "MATCH (t:OntologyTerm {id: $term_id}) RETURN count(t) AS n", term_id=term_id
-        ).single()["n"]
+        )
+        n_terms = (await result.single())["n"]
     assert n_entities == 0  # orphan GC'd despite its outgoing :CANONICAL_TO edge
     assert n_terms == 1  # the shared ontology term survives (DETACH deletes only the edge)
 
@@ -227,8 +232,8 @@ async def test_delete_entities_preserves_entities_shared_with_other_docs(
     """When :Entity has remaining inbound :MENTIONS from OTHER docs'
     chunks, deletion of this doc's mentions must NOT GC the entity."""
     other_doc = "integ-doc-l6-other"
-    chunk_a = _seed_chunk(kg_client, SYNTHETIC_DOC_ID, 0)
-    chunk_b = _seed_chunk(kg_client, other_doc, 0)
+    chunk_a = await _seed_chunk(kg_client, SYNTHETIC_DOC_ID, 0)
+    chunk_b = await _seed_chunk(kg_client, other_doc, 0)
 
     shared = [
         Mention(raw_text="aspirin", entity_type="drug", offset=0),
@@ -239,14 +244,14 @@ async def test_delete_entities_preserves_entities_shared_with_other_docs(
     # Delete only SYNTHETIC_DOC_ID's mentions.
     await kg_client.delete_entities_by_doc_id(SYNTHETIC_DOC_ID)
 
-    with kg_client.driver.session() as session:
-        n_entities = session.run("MATCH (e:Entity {key: 'aspirin'}) RETURN count(e) AS n").single()[
-            "n"
-        ]
-        n_mentions_other = session.run(
+    async with kg_client.driver.session() as session:
+        result = await session.run("MATCH (e:Entity {key: 'aspirin'}) RETURN count(e) AS n")
+        n_entities = (await result.single())["n"]
+        result = await session.run(
             "MATCH (c:Chunk {doc_id: $doc_id})-[m:MENTIONS]->(:Entity) RETURN count(m) AS n",
             doc_id=other_doc,
-        ).single()["n"]
+        )
+        n_mentions_other = (await result.single())["n"]
     assert n_entities == 1  # survived because other_doc still mentions it
     assert n_mentions_other == 1
 
@@ -259,22 +264,21 @@ async def test_write_entities_dedupes_same_entity_across_docs(
     edge from EACH doc's chunk — the property the L9 cross-doc pass relies on.
     """
     other_doc = "integ-doc-l6-other"
-    chunk_a = _seed_chunk(kg_client, SYNTHETIC_DOC_ID, 0)
-    chunk_b = _seed_chunk(kg_client, other_doc, 0)
+    chunk_a = await _seed_chunk(kg_client, SYNTHETIC_DOC_ID, 0)
+    chunk_b = await _seed_chunk(kg_client, other_doc, 0)
     shared = [Mention(raw_text="Metformin", entity_type="drug", offset=0)]
     await kg_client.write_entities(SYNTHETIC_DOC_ID, [(chunk_a, shared)])
     await kg_client.write_entities(other_doc, [(chunk_b, shared)])
 
-    with kg_client.driver.session() as session:
-        n_nodes = session.run(
+    async with kg_client.driver.session() as session:
+        result = await session.run(
             "MATCH (e:Entity {key: 'metformin', entity_type: 'drug'}) RETURN count(e) AS n"
-        ).single()["n"]
-        mentioning_docs = sorted(
-            r["doc_id"]
-            for r in session.run(
-                "MATCH (c:Chunk)-[:MENTIONS]->(:Entity {key: 'metformin'}) "
-                "RETURN DISTINCT c.doc_id AS doc_id"
-            )
         )
+        n_nodes = (await result.single())["n"]
+        result = await session.run(
+            "MATCH (c:Chunk)-[:MENTIONS]->(:Entity {key: 'metformin'}) "
+            "RETURN DISTINCT c.doc_id AS doc_id"
+        )
+        mentioning_docs = sorted([r["doc_id"] async for r in result])
     assert n_nodes == 1  # ONE shared node, not one per doc
     assert mentioning_docs == sorted([SYNTHETIC_DOC_ID, other_doc])  # both docs cite it
