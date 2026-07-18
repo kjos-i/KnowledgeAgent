@@ -55,7 +55,9 @@ def _parse_line_delimited(path: Path) -> list[ParsedChunk]:
     silently so they don't leave gaps in chunk_index.
     """
     chunks: list[ParsedChunk] = []
-    text = path.read_text(encoding="utf-8")
+    # utf-8-sig strips a leading BOM if present (some editors add one); plain
+    # utf-8 leaves it on the first line and corrupts that line's JSON object.
+    text = path.read_text(encoding="utf-8-sig")
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped:
@@ -80,7 +82,9 @@ def _parse_json_document(path: Path) -> list[ParsedChunk]:
     whole-doc case we keep the original file text verbatim - cheaper, and
     preserves any meaningful whitespace.
     """
-    text = path.read_text(encoding="utf-8")
+    # utf-8-sig strips a leading BOM if present; plain utf-8 keeps it as a
+    # U+FEFF char so json.loads then fails ("Expecting value: line 1 column 1").
+    text = path.read_text(encoding="utf-8-sig")
     data = json.loads(text)
     if isinstance(data, list):
         chunks = [

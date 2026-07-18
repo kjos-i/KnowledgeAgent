@@ -56,6 +56,30 @@ def test_json_array_handles_unicode_without_escaping(tmp_path: Path):
     assert "\\u00e5" not in chunks[0].text
 
 
+def test_json_with_utf8_bom_parses(tmp_path: Path):
+    """A .json file saved with a UTF-8 BOM (common from Windows editors) must
+    parse. Regression: reading as plain utf-8 left the BOM as a leading
+    char and json.loads crashed on it."""
+    payload = [{"id": "C001", "name": "Aspirin"}]
+    path = tmp_path / "bom.json"
+    path.write_text(json.dumps(payload), encoding="utf-8-sig")  # writes a leading BOM
+    assert path.read_bytes().startswith(b"\xef\xbb\xbf")  # sanity: BOM present
+    chunks = json_parser.parse(path)
+    assert len(chunks) == 1
+    assert json.loads(chunks[0].text) == {"id": "C001", "name": "Aspirin"}
+
+
+def test_jsonl_with_utf8_bom_parses(tmp_path: Path):
+    """A .jsonl file with a UTF-8 BOM must parse — the BOM must not corrupt the
+    first line's JSON object (its raw text becomes the chunk)."""
+    path = tmp_path / "bom.jsonl"
+    path.write_text('{"a": 1}\n{"b": 2}\n', encoding="utf-8-sig")
+    assert path.read_bytes().startswith(b"\xef\xbb\xbf")
+    chunks = json_parser.parse(path)
+    assert len(chunks) == 2
+    assert json.loads(chunks[0].text) == {"a": 1}  # no BOM leaked into the text
+
+
 def test_json_empty_array_emits_no_chunks(tmp_path: Path):
     path = tmp_path / "empty.json"
     path.write_text("[]", encoding="utf-8")
