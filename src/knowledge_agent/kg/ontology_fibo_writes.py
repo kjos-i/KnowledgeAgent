@@ -189,7 +189,7 @@ async def import_fibo(
     if not terms:
         raise RuntimeError(f"{_ONTOLOGY_NAME}: extracted 0 terms - unexpected, aborting write")
 
-    await write_terms(client, terms)
+    await write_terms(client, terms, xrefs_mode=xrefs_mode)
     return True
 
 

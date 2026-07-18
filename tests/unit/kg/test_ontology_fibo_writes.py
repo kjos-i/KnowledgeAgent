@@ -295,6 +295,32 @@ async def test_import_fibo_propagates_when_force_delete_fails():
     mock_walk.assert_not_called()
 
 
+async def test_import_fibo_forwards_xrefs_mode_to_write_terms():
+    """import_fibo must forward its `xrefs_mode` down to write_terms, else the
+    L7 xref pass never runs and FIBO xref edges/props are silently dropped
+    (write_terms defaults to 'none'). Regression: the write_terms call omitted
+    xrefs_mode, so a caller's 'use'/'collect_only' was lost — FIBO was the ONLY
+    ontology that failed to forward it (mesh + generic import_ontology_data
+    do)."""
+    driver = RecordingDriver(
+        canned_results_per_session=[[_RecordingResult(rows=[{"present": False}])]]
+    )
+    client = _client_with_driver(driver)
+    fake_terms = [_term("FIBO:Money", "money")]
+    with (
+        patch.object(
+            ontology_fibo_writes,
+            "require_cached",
+            return_value=Path("/fake/cache/fibo"),
+        ),
+        patch.object(ontology_fibo_writes, "_read_and_extract", return_value=fake_terms),
+        patch.object(ontology_fibo_writes, "write_terms", new_callable=AsyncMock) as mock_write,
+    ):
+        result = await ontology_fibo_writes.import_fibo(client, force=False, xrefs_mode="use")
+    assert result is True
+    mock_write.assert_awaited_once_with(client, fake_terms, xrefs_mode="use")
+
+
 # ---- delete_imported ----
 
 
