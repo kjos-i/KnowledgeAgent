@@ -7,6 +7,7 @@ deps and verify only the config-driven dispatch logic - which KG writes
 are called vs skipped for a given `CorpusConfig`.
 """
 
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -2398,6 +2399,79 @@ async def test_ingest_document_runs_all_kg_writes_when_both_layers_on(
     mock_kg.write_venue.assert_called_once()
     mock_kg.write_topics.assert_called_once()
     mock_kg.write_chunks.assert_called_once()
+
+
+@patch(
+    "knowledge_agent.ingestion.pipeline.compute_doc_id",
+    return_value="doc-abc",
+)
+@patch("knowledge_agent.ingestion.pipeline.parse_document")
+@patch("knowledge_agent.ingestion.pipeline.resolve_metadata", new_callable=AsyncMock)
+@patch(
+    "knowledge_agent.ingestion.pipeline.collect_doi_candidates",
+    return_value=[],
+)
+@patch(
+    "knowledge_agent.ingestion.pipeline.embed_chunks",
+    new_callable=AsyncMock,
+    return_value=None,
+)
+@patch("knowledge_agent.ingestion.pipeline.get_kg_client")
+async def test_ingest_document_awaits_citations_before_gathering_l2_l4(
+    mock_get_kg,
+    _mock_embed,
+    _mock_extract_doi,
+    mock_resolve,
+    mock_parse,
+    _mock_doc_id,
+):
+    """L1 write_citations creates the focal :Document that L2-L4 MATCH,
+    so it MUST complete before they start. Running all four in one
+    asyncio.gather races the focal's creation -> L2-L4 MATCH nothing ->
+    silently dropped :AUTHORED / :PUBLISHED_IN / :ABOUT_TOPIC edges.
+
+    Regression guard: assert citations fully completes before any of
+    authorships / venue / topics begins. Fails on the old all-four-gather
+    (their :start interleaves before citations' :end at the first await).
+    """
+    mock_parse.return_value = [_chunk(0, "hello")]
+    mock_resolve.return_value = _DUMMY_WORK
+    mock_kg = _make_mock_kg()
+    mock_get_kg.return_value = mock_kg
+
+    order: list[str] = []
+
+    def _record(name: str):
+        async def _side(*_args, **_kwargs):
+            order.append(f"{name}:start")
+            # Yield control several times: if L1 were gathered alongside
+            # L2-L4, their :start would interleave here before L1's :end.
+            for _ in range(5):
+                await asyncio.sleep(0)
+            order.append(f"{name}:end")
+            return True
+
+        return _side
+
+    mock_kg.write_citations = AsyncMock(side_effect=_record("citations"))
+    mock_kg.write_authorships = AsyncMock(side_effect=_record("authorships"))
+    mock_kg.write_venue = AsyncMock(side_effect=_record("venue"))
+    mock_kg.write_topics = AsyncMock(side_effect=_record("topics"))
+
+    config = CorpusConfig(
+        allowed_types=["Paper"],
+        layers=LayerFlags(openalex_papers=True, chunks=False),
+    )
+    await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
+
+    # write_citations must fully complete before any of L2-L4 begins.
+    assert "citations:end" in order
+    citations_end = order.index("citations:end")
+    for name in ("authorships", "venue", "topics"):
+        assert f"{name}:start" in order
+        assert citations_end < order.index(f"{name}:start"), (
+            f"{name} started before citations completed - focal-creation race (order={order})"
+        )
 
 
 @patch(

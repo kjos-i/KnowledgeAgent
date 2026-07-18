@@ -1122,7 +1122,9 @@ async def ingest_document(
             exc,
         )
 
-    # 6a. L1-L4 OpenAlex writes (4 independent writes -> gather)
+    # 6a. L1-L4 OpenAlex writes. L1 (write_citations) creates the focal
+    # :Document; L2-L4 each MATCH that focal to attach their edges, so L1
+    # MUST complete first - only L2-L4 are mutually independent.
     kg_citations_ok: bool = False
     kg_citations_error: ErrorDetail | None = None
     kg_authorships_ok: bool = False
@@ -1132,14 +1134,16 @@ async def ingest_document(
     kg_topics_ok: bool = False
     kg_topics_error: ErrorDetail | None = None
     if is_doi_eligible(sub_label) and config.layers.openalex_papers and work is not None:
+        # L1 first: it creates the focal the next three MATCH.
+        (kg_citations_ok, kg_citations_error) = await _try_kg_write(
+            kg_client.write_citations,
+            doc_id,
+            work,
+            log_prefix="KG L1 citations",
+            doc_id=doc_id,
+        )
+        # L2-L4 are independent of each other -> gather.
         results = await asyncio.gather(
-            _try_kg_write(
-                kg_client.write_citations,
-                doc_id,
-                work,
-                log_prefix="KG L1 citations",
-                doc_id=doc_id,
-            ),
             _try_kg_write(
                 kg_client.write_authorships,
                 doc_id,
@@ -1162,10 +1166,9 @@ async def ingest_document(
                 doc_id=doc_id,
             ),
         )
-        (kg_citations_ok, kg_citations_error) = results[0]
-        (kg_authorships_ok, kg_authorships_error) = results[1]
-        (kg_venue_ok, kg_venue_error) = results[2]
-        (kg_topics_ok, kg_topics_error) = results[3]
+        (kg_authorships_ok, kg_authorships_error) = results[0]
+        (kg_venue_ok, kg_venue_error) = results[1]
+        (kg_topics_ok, kg_topics_error) = results[2]
 
     # 6b. L5 chunks
     kg_chunks_ok = False
