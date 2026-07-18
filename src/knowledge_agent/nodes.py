@@ -411,14 +411,24 @@ def _extract_doc_ids_from_kg_hits(kg_hits: list[KGHit]) -> list[str]:
     Used by `lancedb_retriever_node` in mode `neo4j_then_lancedb` to build
     the `doc_id IN (...)` filter. Order is the order of first appearance
     in `kg_hits`. Missing or empty `doc_id` values are dropped.
+
+    LLM-generated Cypher can return a `doc_id` as a LIST (e.g.
+    `collect(d.doc_id)`) rather than a scalar. Such values are flattened so
+    each contained id becomes its own filter entry, and any non-string entry is
+    skipped. This keeps the function TOTAL — a malformed kg_hit can never raise
+    `TypeError: unhashable type: 'list'` here, which previously crashed the
+    whole retriever node (this runs BEFORE the search try/except).
     """
     seen: set[str] = set()
     out: list[str] = []
     for hit in kg_hits:
-        doc_id = hit.data.get("doc_id")
-        if doc_id and doc_id not in seen:
-            seen.add(doc_id)
-            out.append(doc_id)
+        raw = hit.data.get("doc_id")
+        # Normalize scalar-or-list into a flat candidate sequence.
+        candidates = raw if isinstance(raw, (list, tuple)) else [raw]
+        for doc_id in candidates:
+            if isinstance(doc_id, str) and doc_id and doc_id not in seen:
+                seen.add(doc_id)
+                out.append(doc_id)
     return out
 
 

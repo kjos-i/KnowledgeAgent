@@ -693,6 +693,32 @@ def test_retriever_mode4_extracts_doc_ids_from_kg_hits_and_filters():
     assert call_kwargs["filters"] == {"doc_id": ["W1", "W2"]}
 
 
+def test_extract_doc_ids_flattens_list_valued_doc_id():
+    """LLM-generated Cypher can return a list-valued doc_id (e.g.
+    collect(d.doc_id)). The extractor must flatten it, deduped, not crash.
+    Regression: `doc_id not in seen` raised TypeError: unhashable type: 'list'
+    here — OUTSIDE the retriever's search try/except — crashing the whole
+    query."""
+    kg_hits = [
+        KGHit(data={"doc_id": ["W1", "W2"]}),
+        KGHit(data={"doc_id": "W3"}),
+        KGHit(data={"doc_id": ["W2", "W4"]}),  # W2 already seen -> deduped
+    ]
+    assert _extract_doc_ids_from_kg_hits(kg_hits) == ["W1", "W2", "W3", "W4"]
+
+
+def test_extract_doc_ids_skips_non_string_values():
+    """Non-string doc_id entries (ints, None, and non-str items inside a list)
+    are dropped, never added to the hashable `seen` set."""
+    kg_hits = [
+        KGHit(data={"doc_id": 123}),
+        KGHit(data={"doc_id": None}),
+        KGHit(data={"doc_id": ["ok", 5, None]}),
+        KGHit(data={"other": "x"}),
+    ]
+    assert _extract_doc_ids_from_kg_hits(kg_hits) == ["ok"]
+
+
 def test_retriever_mode4_empty_kg_hits_falls_back_to_unfiltered():
     mock_client = MagicMock()
     mock_client.retrieve = AsyncMock(return_value=[])
