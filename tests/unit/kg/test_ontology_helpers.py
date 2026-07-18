@@ -836,6 +836,23 @@ async def test_write_ontology_terms_batches_large_node_writes(monkeypatch):
     assert all(len(p["rows"]) <= 2 for (_q, p) in node_calls)
 
 
+async def test_delete_ontology_terms_resets_canonicalised_on_orphaned_entities():
+    """DETACH DELETE removes the :CANONICAL_TO edges but leaves e.canonicalised
+    true. The delete query must ALSO reset canonicalised=false on entities left
+    with no remaining canonical link. Semantics validated live against Neo4j
+    (e linked to another ontology keeps the flag); this pins the query structure
+    so the reset can't be silently dropped."""
+    from knowledge_agent.kg import ontology_writes
+
+    client = _StubClient()
+    await ontology_writes.delete_ontology_terms(client, term_label="XTerm", ontology_name="X")
+    cypher, _ = client.driver.session_obj.calls[0]
+    assert ":XTerm" in cypher
+    assert "DETACH DELETE" in cypher
+    assert "CANONICAL_TO" in cypher
+    assert "e.canonicalised = false" in cypher
+
+
 async def test_write_ontology_terms_collect_only_writes_dangling_xrefs_no_edges():
     """`xrefs_mode="collect_only"`: 3rd pass stores dangling_xrefs but
     no resolved edges are written (no MERGE-edge pass)."""

@@ -38,6 +38,11 @@ import logging
 from typing import Any
 
 from knowledge_agent.kg.ontology_helpers import OntologyTerm, require_cached
+from knowledge_agent.kg.schema import (
+    CANONICAL_TO_REL,
+    ENTITY_LABEL,
+    ONTOLOGY_TERM_LABEL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,10 +101,25 @@ async def delete_ontology_terms(
     Generic for any per-ontology module routing through this family.
     Idempotent — safe to call when the ontology was never imported.
 
+    Also resets `canonicalised=false` on any :Entity that is left with NO
+    `:CANONICAL_TO` link once these terms are gone — otherwise DETACH DELETE
+    removes the edge but leaves the flag, falsely marking the entity canonical.
+    An entity still linked to ANOTHER ontology keeps `canonicalised=true`.
+
     Cypher failures propagate to the caller (typed-errors contract).
     """
     async with client.driver.session() as session:
-        await session.run(f"MATCH (t:{term_label}) DETACH DELETE t")
+        await session.run(
+            f"MATCH (t:{term_label}) "
+            f"OPTIONAL MATCH (e:{ENTITY_LABEL})-[:{CANONICAL_TO_REL}]->(t) "
+            f"WITH collect(DISTINCT t) AS terms, collect(DISTINCT e) AS affected "
+            f"FOREACH (x IN terms | DETACH DELETE x) "
+            f"WITH affected "
+            f"UNWIND affected AS e "
+            f"WITH DISTINCT e "
+            f"WHERE NOT (e)-[:{CANONICAL_TO_REL}]->(:{ONTOLOGY_TERM_LABEL}) "
+            f"SET e.canonicalised = false"
+        )
     logger.info(
         "%s: deleted all :%s nodes + edges",
         ontology_name,
