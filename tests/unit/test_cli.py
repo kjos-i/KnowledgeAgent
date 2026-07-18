@@ -249,6 +249,65 @@ async def test_cmd_query_prints_answer_text(tmp_path):
     assert "The answer is 42." in out.getvalue()
 
 
+async def test_cmd_query_forwards_auto_mode_so_classifier_runs(tmp_path):
+    """`--mode auto` must forward retrieval_mode="auto" so the graph router runs
+    the mode classifier. Regression: the CLI set retrieval_mode ONLY when mode
+    != "auto", so "auto" left it unset -> the router fell back to
+    settings.default_retrieval_mode (lancedb_only) and never classified."""
+    config_path = tmp_path / "corpus.toml"
+    config_path.write_text("dummy", encoding="utf-8")
+    args = argparse.Namespace(
+        query="what is X?",
+        config=str(config_path),
+        mode="auto",
+        json=False,
+        output=None,
+        format="md",
+    )
+    with (
+        patch("knowledge_agent.kg.corpus_config.load_corpus_config", return_value=MagicMock()),
+        patch("knowledge_agent.kg.corpus_config.apply_corpus_embedding_to_env"),
+        patch("knowledge_agent.config.reset_after_key_change"),
+        patch(
+            "knowledge_agent.graph.graph.ainvoke",
+            new_callable=AsyncMock,
+            return_value={"final_answer": MagicMock(chunk_sources=[], kg_sources=[])},
+        ) as mock_ainvoke,
+        redirect_stdout(io.StringIO()),
+    ):
+        rc = await _cmd_query(args)
+    assert rc == 0
+    initial_state = mock_ainvoke.call_args.args[0]
+    assert initial_state["retrieval_mode"] == "auto"  # forwarded -> router classifies
+
+
+async def test_cmd_query_forwards_concrete_mode(tmp_path):
+    """A concrete --mode reaches the graph state verbatim (unchanged path)."""
+    config_path = tmp_path / "corpus.toml"
+    config_path.write_text("dummy", encoding="utf-8")
+    args = argparse.Namespace(
+        query="q",
+        config=str(config_path),
+        mode="neo4j_only",
+        json=False,
+        output=None,
+        format="md",
+    )
+    with (
+        patch("knowledge_agent.kg.corpus_config.load_corpus_config", return_value=MagicMock()),
+        patch("knowledge_agent.kg.corpus_config.apply_corpus_embedding_to_env"),
+        patch("knowledge_agent.config.reset_after_key_change"),
+        patch(
+            "knowledge_agent.graph.graph.ainvoke",
+            new_callable=AsyncMock,
+            return_value={"final_answer": MagicMock(chunk_sources=[], kg_sources=[])},
+        ) as mock_ainvoke,
+        redirect_stdout(io.StringIO()),
+    ):
+        await _cmd_query(args)
+    assert mock_ainvoke.call_args.args[0]["retrieval_mode"] == "neo4j_only"
+
+
 async def test_cmd_query_output_saves_answer_files(tmp_path):
     """--output DIR saves the answer via the backend renderers (--format list)."""
     config_path = tmp_path / "corpus.toml"

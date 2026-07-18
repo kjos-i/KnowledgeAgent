@@ -171,9 +171,13 @@ async def _cmd_query(args: argparse.Namespace) -> int:
     initial_state: dict[str, Any] = {
         "query": args.query,
         "corpus_config": corpus_config,
+        # Always forward the mode, INCLUDING "auto": the graph router runs the
+        # mode classifier only when retrieval_mode == "auto". Skipping it left
+        # retrieval_mode unset, so the router fell back to
+        # settings.default_retrieval_mode (lancedb_only) and the classifier
+        # never ran — `--mode auto` silently behaved like `--mode lancedb_only`.
+        "retrieval_mode": args.mode,
     }
-    if args.mode != "auto":
-        initial_state["retrieval_mode"] = args.mode
 
     final_state = await graph.ainvoke(initial_state)
     answer = final_state.get("final_answer")
