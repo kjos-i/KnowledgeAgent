@@ -427,11 +427,14 @@ def _build_terms_from_sink(sink: _MeshStreamSink) -> list[OntologyTerm]:
     in tests) but operating on the sink's dict-of-strings representation
     instead of an rdflib.Graph.
     """
-    descriptor_type = f"{_MESHV}TopicalDescriptor"
     terms: list[OntologyTerm] = []
 
     for subject_uri, record in sink.records.items():
-        if descriptor_type not in record["types"]:
+        # Keep records carrying ANY configured descriptor type. Use the
+        # _DESCRIPTOR_TYPES SSOT (not a hardcoded single type) so this streaming
+        # path matches the Graph path (_extract_descriptors) and picks up
+        # newly-configured types instead of silently dropping them.
+        if not any(dt in record["types"] for dt in _DESCRIPTOR_TYPES):
             continue
 
         label = _pick_english_or_untagged(record["labels"])

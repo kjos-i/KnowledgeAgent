@@ -622,6 +622,35 @@ def test_build_terms_skips_subjects_without_descriptor_type():
     assert "MESH:C100" not in {t.id for t in terms}
 
 
+def test_build_terms_from_sink_respects_configured_descriptor_types(monkeypatch):
+    """The streaming build path must honor the _DESCRIPTOR_TYPES SSOT, not a
+    hardcoded single type. Regression: _build_terms_from_sink hardcoded
+    TopicalDescriptor, so extending _DESCRIPTOR_TYPES to keep another descriptor
+    class silently dropped those records in production while the Graph path kept
+    them."""
+    meshv = ontology_mesh_writes._MESHV
+    geo_type = f"{meshv}GeographicalDescriptor"
+    ntriples = (
+        f"<http://id.nlm.nih.gov/mesh/D888888> "
+        f"<http://www.w3.org/1999/02/22-rdf-syntax-ns#type> "
+        f"<{geo_type}> .\n"
+        f"<http://id.nlm.nih.gov/mesh/D888888> "
+        f"<http://www.w3.org/2000/01/rdf-schema#label> "
+        f'"Norway"@en .\n'
+    ).encode()
+    sink = _stream_parse(ntriples)
+
+    # Add the second type to the SSOT; before the fix the hardcoded single type
+    # ignores this and drops D888888.
+    monkeypatch.setattr(
+        ontology_mesh_writes,
+        "_DESCRIPTOR_TYPES",
+        (f"{meshv}TopicalDescriptor", geo_type),
+    )
+    terms = ontology_mesh_writes._build_terms_from_sink(sink)
+    assert "MESH:D888888" in {t.id for t in terms}
+
+
 def test_build_terms_skips_descriptors_without_label():
     """A subject typed as a Descriptor but with no rdfs:label is
     silently dropped (can't write a term without a label)."""
