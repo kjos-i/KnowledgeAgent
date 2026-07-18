@@ -107,6 +107,21 @@ async def delete_ontology_terms(
     )
 
 
+_WRITE_BATCH_SIZE = 10_000
+"""Rows per UNWIND transaction. A single UNWIND over an entire large ontology
+(NCBITaxon is ~2.74M terms) holds the whole write in ONE transaction and
+exhausts Neo4j's transaction memory; batching bounds each transaction."""
+
+
+async def _run_unwind_batched(session: Any, cypher: str, rows: list[dict[str, Any]]) -> None:
+    """Run a `UNWIND $rows ...` write over `rows` in bounded slices — one
+    transaction per `_WRITE_BATCH_SIZE` rows — so a huge ontology can't exhaust
+    Neo4j's transaction memory. Batch order is irrelevant for these idempotent
+    MERGE / SET writes."""
+    for start in range(0, len(rows), _WRITE_BATCH_SIZE):
+        await session.run(cypher, rows=rows[start : start + _WRITE_BATCH_SIZE])
+
+
 async def write_ontology_terms(
     client,
     terms: list[OntologyTerm],
@@ -180,32 +195,35 @@ async def write_ontology_terms(
     n_resolved_edges = 0
 
     async with client.driver.session() as session:
-        await session.run(
+        await _run_unwind_batched(
+            session,
             f"UNWIND $rows AS row "
             f"MERGE (t:OntologyTerm:{term_label} "
             f"  {{id: row.id}}) "
             f"SET t.label = row.label, "
             f"    t.synonyms = row.synonyms, "
             f"    t.definition = row.definition",
-            rows=node_rows,
+            node_rows,
         )
         if hierarchy_rows:
-            await session.run(
+            await _run_unwind_batched(
+                session,
                 f"UNWIND $rows AS row "
                 f"MATCH (c:{term_label} {{id: row.child}}) "
                 f"MATCH (p:{term_label} {{id: row.parent}}) "
                 f"MERGE (c)-[:{hierarchy_rel}]->(p)",
-                rows=hierarchy_rows,
+                hierarchy_rows,
             )
         if xref_rows:
             # Pass 3a: store the verbatim xref list on each source
             # term as `dangling_xrefs`. Always done when the layer
             # is active in any mode.
-            await session.run(
+            await _run_unwind_batched(
+                session,
                 f"UNWIND $rows AS row "
                 f"MATCH (s:{term_label} {{id: row.source_id}}) "
                 f"SET s.dangling_xrefs = row.xrefs",
-                rows=xref_rows,
+                xref_rows,
             )
             if xrefs_mode == "use":
                 # Pass 3b: write resolved edges to any xref targets
@@ -216,17 +234,18 @@ async def write_ontology_terms(
                 # returns the count of edges actually written so we
                 # can log it (resolved count differs from xref_rows
                 # count whenever some xrefs don't resolve yet).
-                result = await session.run(
-                    f"UNWIND $rows AS row "
-                    f"MATCH (s:{term_label} {{id: row.source_id}}) "
-                    f"UNWIND row.xrefs AS xref_id "
-                    f"MATCH (t:OntologyTerm {{id: xref_id}}) "
-                    f"MERGE (s)-[r:{xref_rel}]->(t) "
-                    f"RETURN count(r) AS n",
-                    rows=xref_rows,
-                )
-                row = await result.single()
-                n_resolved_edges = int(row["n"]) if row else 0
+                for start in range(0, len(xref_rows), _WRITE_BATCH_SIZE):
+                    result = await session.run(
+                        f"UNWIND $rows AS row "
+                        f"MATCH (s:{term_label} {{id: row.source_id}}) "
+                        f"UNWIND row.xrefs AS xref_id "
+                        f"MATCH (t:OntologyTerm {{id: xref_id}}) "
+                        f"MERGE (s)-[r:{xref_rel}]->(t) "
+                        f"RETURN count(r) AS n",
+                        rows=xref_rows[start : start + _WRITE_BATCH_SIZE],
+                    )
+                    row = await result.single()
+                    n_resolved_edges += int(row["n"]) if row else 0
 
     logger.info(
         "%s: wrote %d :%s nodes + %d :%s edges",

@@ -813,6 +813,29 @@ async def test_write_ontology_terms_default_xrefs_mode_is_none_no_extra_pass():
     assert len(client.driver.session_obj.calls) == 2
 
 
+async def test_write_ontology_terms_batches_large_node_writes(monkeypatch):
+    """A huge ontology (NCBITaxon ~2.74M terms) must not go into one UNWIND
+    transaction — that exhausts Neo4j's tx memory. The node write is split into
+    batches of <= _WRITE_BATCH_SIZE rows. Regression: a single session.run
+    carried ALL node_rows."""
+    from knowledge_agent.kg import ontology_writes
+
+    monkeypatch.setattr(ontology_writes, "_WRITE_BATCH_SIZE", 2)
+    client = _StubClient()
+    terms = [_term_with_xrefs(f"X:{i}") for i in range(5)]  # no parents / xrefs
+    await write_ontology_terms(
+        client, terms, term_label="XTerm", hierarchy_rel="X_IS_A", ontology_name="X"
+    )
+    # Only the node pass runs (no hierarchy / xref rows). 5 rows at 2 per batch
+    # -> 3 batches (2, 2, 1), each within the cap.
+    node_calls = [
+        (q, p) for (q, p) in client.driver.session_obj.calls if "MERGE (t:OntologyTerm" in q
+    ]
+    assert len(node_calls) == 3
+    assert [len(p["rows"]) for (_q, p) in node_calls] == [2, 2, 1]
+    assert all(len(p["rows"]) <= 2 for (_q, p) in node_calls)
+
+
 async def test_write_ontology_terms_collect_only_writes_dangling_xrefs_no_edges():
     """`xrefs_mode="collect_only"`: 3rd pass stores dangling_xrefs but
     no resolved edges are written (no MERGE-edge pass)."""
