@@ -80,6 +80,20 @@ def test_jsonl_with_utf8_bom_parses(tmp_path: Path):
     assert json.loads(chunks[0].text) == {"a": 1}  # no BOM leaked into the text
 
 
+def test_jsonl_does_not_split_on_unicode_line_separators(tmp_path: Path):
+    """JSONL is newline-delimited. A U+2028 line separator INSIDE a JSON string
+    value must not split the record. Regression: splitlines() broke on U+2028 /
+    U+2029 / U+0085 / vertical-tab / form-feed, shredding the object into
+    invalid fragments."""
+    record_a = '{"id": "A", "text": "before after"}'
+    path = tmp_path / "sep.jsonl"
+    path.write_text(record_a + "\n" + '{"id": "B"}\n', encoding="utf-8")
+    chunks = json_parser.parse(path)
+    assert len(chunks) == 2  # two records, NOT three
+    assert json.loads(chunks[0].text) == {"id": "A", "text": "before after"}
+    assert json.loads(chunks[1].text) == {"id": "B"}
+
+
 def test_json_empty_array_emits_no_chunks(tmp_path: Path):
     path = tmp_path / "empty.json"
     path.write_text("[]", encoding="utf-8")

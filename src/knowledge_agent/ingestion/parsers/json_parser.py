@@ -58,7 +58,11 @@ def _parse_line_delimited(path: Path) -> list[ParsedChunk]:
     # utf-8-sig strips a leading BOM if present (some editors add one); plain
     # utf-8 leaves it on the first line and corrupts that line's JSON object.
     text = path.read_text(encoding="utf-8-sig")
-    for line in text.splitlines():
+    # Split on newline ONLY (JSONL is newline-delimited). str.splitlines() also
+    # breaks on U+2028 / U+2029 / U+0085 / vertical-tab / form-feed, which are
+    # valid characters INSIDE a JSON string value and would wrongly shred a
+    # record. `.strip()` below still drops any trailing \r from CRLF files.
+    for line in text.split("\n"):
         stripped = line.strip()
         if not stripped:
             continue
