@@ -84,6 +84,30 @@ async def kg_client(_test_env_loaded: None) -> AsyncIterator[Any]:
         await client.close()
 
 
+@pytest.fixture(autouse=True)
+def _fresh_client_singletons(_test_env_loaded: None) -> Iterator[None]:
+    """Clear the process-wide client singletons around every integration test.
+
+    `graph.ainvoke` / `ingest_document` / the bulk_ops reach Neo4j + LanceDB
+    through the `get_kg_client` / `get_search_client` lru-cache singletons.
+    pytest-asyncio (auto) gives each test its OWN event loop, and a cached
+    `AsyncDriver` built in an earlier test's (now-dead) loop crashes on Windows
+    (`'NoneType' object has no attribute 'send'` from the dead proactor) the
+    moment a later test reuses it. Clearing the caches before each test forces
+    the singleton to be rebuilt on the current test's loop. (Tests that use the
+    `kg_client` / `lance_client` FIXTURES construct their own client and are
+    unaffected — this only resets the shared singletons the production code
+    reaches for.)"""
+    from knowledge_agent.kg.client import get_kg_client
+    from knowledge_agent.search.client import get_search_client
+
+    get_kg_client.cache_clear()
+    get_search_client.cache_clear()
+    yield
+    get_kg_client.cache_clear()
+    get_search_client.cache_clear()
+
+
 @pytest.fixture(scope="session")
 def ensure_constraints(_test_env_loaded: None) -> None:
     """Install schema constraints once at the start of the integration

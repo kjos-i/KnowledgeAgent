@@ -59,7 +59,7 @@ def _minimal_corpus_config() -> CorpusConfig:
 
 
 @pytest.fixture
-def clean_both_stores(kg_client: Any, lance_client: Any, ensure_constraints: None) -> Any:
+async def clean_both_stores(kg_client: Any, lance_client: Any, ensure_constraints: None) -> Any:
     """Wipe both stores before each pipeline test.
 
     The pipeline writes to both LanceDB and Neo4j, so per-test
@@ -67,11 +67,9 @@ def clean_both_stores(kg_client: Any, lance_client: Any, ensure_constraints: Non
     separately because their teardown order matters (drop lance
     before clear KG is fine; we do KG first then lance for symmetry).
     """
-    import asyncio
-
-    with kg_client.driver.session() as session:
-        session.run("MATCH (n) DETACH DELETE n")
-    asyncio.run(lance_client.drop_chunks_table())
+    async with kg_client.driver.session() as session:
+        await session.run("MATCH (n) DETACH DELETE n")
+    await lance_client.drop_chunks_table()
     return None
 
 
@@ -130,11 +128,12 @@ async def test_ingest_document_writes_chunks_to_both_stores(
     assert len(lance_rows) == result.n_chunks
 
     # Neo4j side.
-    with kg_client.driver.session() as session:
-        n_kg_chunks = session.run(
+    async with kg_client.driver.session() as session:
+        result_cursor = await session.run(
             "MATCH (c:Chunk {doc_id: $doc_id}) RETURN count(c) AS n",
             doc_id=doc_id,
-        ).single()["n"]
+        )
+        n_kg_chunks = (await result_cursor.single())["n"]
     assert n_kg_chunks == result.n_chunks
 
 
@@ -161,11 +160,12 @@ async def test_ingest_document_is_idempotent_on_doc_id(
     assert len(lance_rows) == first.n_chunks
 
     # Neo4j: chunk count matches (not 2x).
-    with kg_client.driver.session() as session:
-        n_kg = session.run(
+    async with kg_client.driver.session() as session:
+        result_cursor = await session.run(
             "MATCH (c:Chunk {doc_id: $doc_id}) RETURN count(c) AS n",
             doc_id=doc_id,
-        ).single()["n"]
+        )
+        n_kg = (await result_cursor.single())["n"]
     assert n_kg == first.n_chunks
 
 
@@ -183,11 +183,12 @@ async def test_delete_doc_wipes_both_stores(
 
     # Pre-condition: data present in both stores.
     assert await lance_client.get_chunks_by_doc_id(doc_id)
-    with kg_client.driver.session() as session:
-        n_pre = session.run(
+    async with kg_client.driver.session() as session:
+        result_cursor = await session.run(
             "MATCH (d:Document {doc_id: $doc_id}) RETURN count(d) AS n",
             doc_id=doc_id,
-        ).single()["n"]
+        )
+        n_pre = (await result_cursor.single())["n"]
     assert n_pre == 1
 
     ok = await delete_doc(doc_id)
@@ -196,9 +197,10 @@ async def test_delete_doc_wipes_both_stores(
     # Post: both stores empty for this doc.
     lance_rows = await lance_client.get_chunks_by_doc_id(doc_id) or []
     assert len(lance_rows) == 0
-    with kg_client.driver.session() as session:
-        n_post = session.run(
+    async with kg_client.driver.session() as session:
+        result_cursor = await session.run(
             "MATCH (d:Document {doc_id: $doc_id}) RETURN count(d) AS n",
             doc_id=doc_id,
-        ).single()["n"]
+        )
+        n_post = (await result_cursor.single())["n"]
     assert n_post == 0

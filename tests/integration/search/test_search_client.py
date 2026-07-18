@@ -67,11 +67,12 @@ def _synthetic_chunk(index: int, text: str) -> dict[str, Any]:
 
 async def test_ensure_schema_creates_table(lance_client: Any, clean_lance: None) -> None:
     """ensure_schema creates the chunks table when it doesn't exist."""
-    assert CHUNKS_TABLE not in lance_client.conn.table_names()
+    conn = await lance_client._ensure_conn()
+    assert CHUNKS_TABLE not in await conn.table_names()
 
     # success: returns None (typed-errors contract)
     assert await lance_client.ensure_schema() is None
-    assert CHUNKS_TABLE in lance_client.conn.table_names()
+    assert CHUNKS_TABLE in await conn.table_names()
 
 
 async def test_ensure_schema_is_idempotent(lance_client: Any, clean_lance: None) -> None:
@@ -79,7 +80,8 @@ async def test_ensure_schema_is_idempotent(lance_client: Any, clean_lance: None)
     await lance_client.ensure_schema()
     # success: returns None (typed-errors contract)
     assert await lance_client.ensure_schema() is None
-    assert CHUNKS_TABLE in lance_client.conn.table_names()
+    conn = await lance_client._ensure_conn()
+    assert CHUNKS_TABLE in await conn.table_names()
 
 
 async def test_drop_chunks_table_is_idempotent_on_missing(
@@ -104,8 +106,9 @@ async def test_write_chunks_appends_rows(lance_client: Any, clean_lance: None) -
     # success: returns None (typed-errors contract)
     assert await lance_client.write_chunks(chunks) is None
 
-    table = lance_client.conn.open_table(CHUNKS_TABLE)
-    assert table.count_rows() == 3
+    conn = await lance_client._ensure_conn()
+    table = await conn.open_table(CHUNKS_TABLE)
+    assert await table.count_rows() == 3
 
 
 async def test_write_chunks_empty_batch_succeeds_without_append(
@@ -116,8 +119,9 @@ async def test_write_chunks_empty_batch_succeeds_without_append(
     # success: returns None (typed-errors contract)
     assert await lance_client.write_chunks([]) is None
 
-    table = lance_client.conn.open_table(CHUNKS_TABLE)
-    assert table.count_rows() == 0
+    conn = await lance_client._ensure_conn()
+    table = await conn.open_table(CHUNKS_TABLE)
+    assert await table.count_rows() == 0
 
 
 async def test_get_chunks_by_doc_id_returns_only_matching_rows(
@@ -157,13 +161,15 @@ async def test_delete_chunks_by_doc_id_removes_only_target_doc(
     other["chunk_id"] = "integ-doc-lance-OTHER#0"
     chunks.append(other)
     await lance_client.write_chunks(chunks)
-    assert lance_client.conn.open_table(CHUNKS_TABLE).count_rows() == 3
+    conn = await lance_client._ensure_conn()
+    table = await conn.open_table(CHUNKS_TABLE)
+    assert await table.count_rows() == 3
 
     # success: returns None (typed-errors contract)
     assert await lance_client.delete_chunks_by_doc_id(SYNTHETIC_DOC_ID) is None
 
-    table = lance_client.conn.open_table(CHUNKS_TABLE)
-    assert table.count_rows() == 1
+    table = await conn.open_table(CHUNKS_TABLE)
+    assert await table.count_rows() == 1
     remaining = await lance_client.get_chunks_by_doc_id("integ-doc-lance-OTHER")
     assert len(remaining) == 1
 

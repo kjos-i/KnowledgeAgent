@@ -122,19 +122,20 @@ async def main() -> None:
     print("  ensure_schema -> ok")
 
     print(f"Clearing any leftover smoke chunks for doc_id={SYNTHETIC_DOC_ID!r}...")
-    _cleanup_synthetic_chunks(client)
+    await _cleanup_synthetic_chunks(client)
 
     print(f"Writing {len(SYNTHETIC_CHUNKS)} chunks...")
     await client.write_chunks(SYNTHETIC_CHUNKS)
     print(f"  write_chunks -> ok ({len(SYNTHETIC_CHUNKS)} chunks)")
 
-    table = client.conn.open_table(CHUNKS_TABLE)
-    total = table.count_rows()
+    conn = await client._ensure_conn()
+    table = await conn.open_table(CHUNKS_TABLE)
+    total = await table.count_rows()
     print()
     print(f"Total rows in {CHUNKS_TABLE!r}: {total}")
     print()
     print(f"Chunks for doc_id={SYNTHETIC_DOC_ID!r}:")
-    rows = [r for r in table.to_arrow().to_pylist() if r["doc_id"] == SYNTHETIC_DOC_ID]
+    rows = await client.get_chunks_by_doc_id(SYNTHETIC_DOC_ID)
     for r in rows:
         print(f"  {r['chunk_id']}: section={r['section']!r}, text={r['text']!r}")
     print()
@@ -148,7 +149,7 @@ async def main() -> None:
         return
 
     print("Deleting smoke chunks...")
-    _cleanup_synthetic_chunks(client)
+    await _cleanup_synthetic_chunks(client)
     print("Done.")
     await client.close()
 
