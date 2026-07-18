@@ -63,6 +63,47 @@ def test_keyword_in_middle_of_query_rejects():
     assert not is_cypher_read_only(cypher)
 
 
+# ---- is_cypher_read_only: procedure / bulk-load / namespace hardening ----
+
+
+def test_call_procedure_rejected():
+    """CALL reaches any procedure (apoc.load.* = SSRF/file-read, dbms.*), so
+    it's rejected even though it's not a write keyword."""
+    cypher = "CALL apoc.load.json('http://169.254.169.254/latest/') YIELD value RETURN value"
+    assert not is_cypher_read_only(cypher)
+
+
+def test_load_csv_rejected():
+    """LOAD CSV pulls a remote/local file into the read transaction."""
+    assert not is_cypher_read_only("LOAD CSV FROM 'file:///etc/passwd' AS row RETURN row")
+
+
+def test_apoc_inline_function_rejected():
+    """apoc.cypher.* is an INLINE function (no CALL) that runs an arbitrary
+    Cypher string — the namespace check catches it where the keyword list
+    can't. (Embedded read here so the rejection is driven ONLY by the `apoc.`
+    namespace, not a keyword leaking from the payload.)"""
+    cypher = "RETURN apoc.cypher.runFirstColumn('MATCH (n) RETURN n LIMIT 1', {}) AS x"
+    assert not is_cypher_read_only(cypher)
+
+
+def test_dbms_namespace_rejected():
+    assert not is_cypher_read_only("CALL dbms.components() YIELD name RETURN name")
+    assert not is_cypher_read_only("RETURN dbms.database.state('neo4j') AS s")
+
+
+def test_call_and_load_are_case_insensitive():
+    assert not is_cypher_read_only("caLL apoc.load.jdbc('jdbc:...')")
+    assert not is_cypher_read_only("load csv from 'x' as r return r")
+
+
+def test_db_variable_is_not_a_false_positive():
+    """`db` is a common node/var name; only `apoc.`/`dbms.` are namespace-
+    blocked and `db.*` procedures need CALL (already blocked), so a plain
+    `MATCH (db:Database) RETURN db.name` read still passes."""
+    assert is_cypher_read_only("MATCH (db:Database) RETURN db.name LIMIT 10")
+
+
 # ---- wrap_with_limit ----
 
 
