@@ -4,9 +4,11 @@ Uses a recording Connection/Table stub so tests don't touch a real LanceDB
 dataset. The schema function is exercised by reading the returned `pa.Schema`.
 """
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+import lancedb
 import pyarrow as pa
 import pytest
 from lancedb.rerankers import RRFReranker
@@ -244,6 +246,29 @@ async def test_ensure_conn_refuses_no_corpus_sentinel():
         await client._ensure_conn()
     # Nothing was cached — a later call with a real path would still work.
     assert client._conn is None
+
+
+async def test_ensure_conn_opens_one_connection_under_concurrency(tmp_path, monkeypatch):
+    """Every read + write funnels through `_ensure_conn`, often several at once
+    (asyncio.gather over search legs). Two cold callers must not BOTH open a
+    connection: the check-then-await had no lock, so both saw `_conn is None`,
+    both connected, and the loser leaked. Assert concurrent first-connects call
+    connect_async exactly once and share the one connection."""
+    calls = 0
+
+    async def fake_connect(path, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0)  # yield so the concurrent caller interleaves here
+        return RecordingConnection()
+
+    monkeypatch.setattr(lancedb, "connect_async", fake_connect)
+    client = LanceClient(settings=_configured_settings(lancedb_path=str(tmp_path)))
+
+    conns = await asyncio.gather(client._ensure_conn(), client._ensure_conn())
+
+    assert calls == 1  # one connection despite two concurrent cold callers
+    assert conns[0] is conns[1]  # both callers share the single connection
 
 
 # ---- ensure_schema ----

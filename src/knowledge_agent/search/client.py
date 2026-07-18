@@ -34,6 +34,7 @@ Cross-store RRF (for the future `parallel_fused` agent mode) lives in the
 agent code, not here.
 """
 
+import asyncio
 import logging
 import math
 from functools import lru_cache
@@ -106,6 +107,12 @@ class LanceClient:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
         self._conn: AsyncConnection | None = None
+        # Serialises the first-connect: every read + write funnels through
+        # `_ensure_conn` (often several at once via asyncio.gather), so without
+        # this two cold callers would each open a connection and leak the loser.
+        # Binds to the running loop on first await; the client lives on one loop
+        # per app / CLI run (cache_clear drops it on corpus switch).
+        self._conn_lock = asyncio.Lock()
 
     # ---- lifecycle ----
 
@@ -123,15 +130,20 @@ class LanceClient:
         phantom store. As the one choke point every read and write flows
         through, this single guard covers them all.
         """
-        if self._conn is None:
-            if str(self._settings.lancedb_path) == NO_CORPUS_SENTINEL:
-                raise NoActiveCorpusError(
-                    "No active corpus — create or select one in Library before using the index."
+        if self._conn is not None:
+            return self._conn
+        async with self._conn_lock:
+            # Re-check under the lock: a caller we queued behind may have opened
+            # the connection while we were awaiting the lock.
+            if self._conn is None:
+                if str(self._settings.lancedb_path) == NO_CORPUS_SENTINEL:
+                    raise NoActiveCorpusError(
+                        "No active corpus — create or select one in Library before using the index."
+                    )
+                self._settings.lancedb_path.mkdir(parents=True, exist_ok=True)
+                self._conn = await lancedb.connect_async(
+                    str(self._settings.lancedb_path),
                 )
-            self._settings.lancedb_path.mkdir(parents=True, exist_ok=True)
-            self._conn = await lancedb.connect_async(
-                str(self._settings.lancedb_path),
-            )
         return self._conn
 
     async def close(self) -> None:
