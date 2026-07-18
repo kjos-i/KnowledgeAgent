@@ -376,6 +376,20 @@ def test_mmr_lambda_below_zero_rejected() -> None:
         )
 
 
+def test_http_max_retries_negative_rejected() -> None:
+    """A negative retry budget makes the request loop `range(retries + 1)`
+    empty, so no attempt runs and `response` is unbound (UnboundLocalError on
+    every request). `ge=0` fails it fast at config load instead."""
+    with pytest.raises(ValidationError, match="http_max_retries"):
+        Settings(**_minimal_required(http_max_retries=-1))  # type: ignore[arg-type]
+
+
+def test_http_max_retries_zero_allowed() -> None:
+    """0 is valid — it disables retries (a single attempt, no retry)."""
+    s = Settings(**_minimal_required(http_max_retries=0))  # type: ignore[arg-type]
+    assert s.http_max_retries == 0
+
+
 # ---------------------------------------------------------------------------
 # reset_after_key_change() closes the evicted Neo4j driver (verify-11 HIGH,
 # config.py:874). Evicting the get_kg_client cache without closing the old

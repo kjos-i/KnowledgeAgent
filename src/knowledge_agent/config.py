@@ -671,10 +671,13 @@ class Settings(BaseSettings):
     )
     http_max_retries: int = Field(
         default=3,
+        ge=0,
         description=(
             "Max retry attempts on retryable HTTP failures (429, 5xx, "
             "network errors). 0 disables retries. Stream() does NOT retry "
-            "regardless — partial-download replays are unsafe."
+            "regardless — partial-download replays are unsafe. Must be >= 0: a "
+            "negative value makes the request loop `range(retries + 1)` empty, "
+            "so no attempt runs and every request raises UnboundLocalError."
         ),
     )
     http_user_agent: str = Field(
