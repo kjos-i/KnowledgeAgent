@@ -51,6 +51,25 @@ from knowledge_agent.kg.schema import (
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 
+def _skip_unless_downloaded(cache_name: str, ontology_name: str) -> None:
+    """Skip when the ontology's source file/dir isn't in the downloads dir.
+
+    These `slow` tests import a REAL ontology and never auto-download
+    (`require_cached` is the read-only, never-fetch probe). In a bare
+    environment (fresh clone / CI) the file is absent — skip with the same
+    actionable message ingest surfaces, rather than hard-fail. On a machine
+    where the ontology was downloaded via Library → Installs, the test runs."""
+    from knowledge_agent.kg.ontology_helpers import (
+        OntologyNotDownloadedError,
+        require_cached,
+    )
+
+    try:
+        require_cached(cache_name, ontology_name)
+    except OntologyNotDownloadedError as exc:
+        pytest.skip(str(exc))
+
+
 # ---------------------------------------------------------------------------
 # pronto OBO path: HPO (~30 MB, smallest of the 13 pronto ontologies).
 # ---------------------------------------------------------------------------
@@ -62,6 +81,8 @@ async def test_import_hpo_writes_term_nodes_via_pronto_obo_path(
 ) -> None:
     """import_hpo downloads + parses the OBO + writes :HPOTerm nodes.
     Asserts > 0 terms imported and the is_imported helper agrees."""
+    _skip_unless_downloaded(ontology_hpo_writes.HPO_CACHE_FILENAME, "HPO")
+
     # Clean: drop any prior HPO state so the test exercises the
     # write path (not the already-imported short-circuit).
     await ontology_hpo_writes.delete_imported(kg_client)
@@ -93,6 +114,7 @@ async def test_hpo_import_idempotent_via_ensure_imported(
 ) -> None:
     """Calling import_hpo a second time without force=True should
     short-circuit via is_imported and not duplicate any nodes."""
+    _skip_unless_downloaded(ontology_hpo_writes.HPO_CACHE_FILENAME, "HPO")
     await ontology_hpo_writes.delete_imported(kg_client)
     await ontology_hpo_writes.import_hpo(kg_client, force=True)
 
@@ -115,6 +137,7 @@ async def test_hpo_delete_imported_drops_every_term_node(
 ) -> None:
     """delete_imported runs the full :HPOTerm wipe + relationship
     cleanup. After call, is_imported returns False."""
+    _skip_unless_downloaded(ontology_hpo_writes.HPO_CACHE_FILENAME, "HPO")
     await ontology_hpo_writes.import_hpo(kg_client, force=True)
     assert await ontology_hpo_writes.is_imported(kg_client) is True
 
@@ -140,6 +163,7 @@ async def test_import_efo_writes_term_nodes_via_rdflib_owl_path(
     oboInOwl synonyms on OWL files, so we built `extract_terms_owl`
     + `read_rdf` separately for the 3 OWL ontologies). Asserts > 0
     terms imported."""
+    _skip_unless_downloaded(ontology_efo_writes.EFO_CACHE_FILENAME, "EFO")
     await ontology_efo_writes.delete_imported(kg_client)
     ok = await ontology_efo_writes.import_efo(kg_client, force=True)
     assert ok is True
@@ -163,6 +187,7 @@ async def test_import_mesh_writes_term_nodes_via_streaming_n_triples_path(
 ) -> None:
     """import_mesh exercises the custom streaming N-Triples sink
     (~600 MB download). Asserts > 0 :MeSHTerm nodes after import."""
+    _skip_unless_downloaded(ontology_mesh_writes.MESH_CACHE_FILENAME, "MeSH")
     await ontology_mesh_writes.delete_imported(kg_client)
     ok = await ontology_mesh_writes.import_mesh(kg_client, force=True)
     assert ok is True
@@ -187,6 +212,7 @@ async def test_import_fibo_writes_term_nodes_via_multi_file_walker_path(
     """import_fibo exercises the GitHub walker that fetches ~70
     `.rdf` files and loads them into one rdflib Graph. Asserts > 0
     :FIBOTerm nodes after import."""
+    _skip_unless_downloaded(ontology_fibo_writes.FIBO_CACHE_SUBDIR, "FIBO")
     await ontology_fibo_writes.delete_imported(kg_client)
     ok = await ontology_fibo_writes.import_fibo(kg_client, force=True)
     assert ok is True

@@ -89,23 +89,33 @@ def _fresh_client_singletons(_test_env_loaded: None) -> Iterator[None]:
     """Clear the process-wide client singletons around every integration test.
 
     `graph.ainvoke` / `ingest_document` / the bulk_ops reach Neo4j + LanceDB
-    through the `get_kg_client` / `get_search_client` lru-cache singletons.
-    pytest-asyncio (auto) gives each test its OWN event loop, and a cached
-    `AsyncDriver` built in an earlier test's (now-dead) loop crashes on Windows
-    (`'NoneType' object has no attribute 'send'` from the dead proactor) the
-    moment a later test reuses it. Clearing the caches before each test forces
-    the singleton to be rebuilt on the current test's loop. (Tests that use the
-    `kg_client` / `lance_client` FIXTURES construct their own client and are
-    unaffected — this only resets the shared singletons the production code
-    reaches for.)"""
+    through the `get_kg_client` / `get_search_client` lru-cache singletons, and
+    OpenAlex / ontology / Ollama traffic through the shared
+    `_http_client._client` (one `httpx.AsyncClient` per process). pytest-asyncio
+    (auto) gives each test its OWN event loop, and a cached client built in an
+    earlier test's (now-dead) loop crashes the moment a later test reuses it —
+    on Windows the driver raises `'NoneType' object has no attribute 'send'`
+    from the dead proactor, and httpx raises `RuntimeError: Event loop is
+    closed`. Resetting the singletons before each test forces them to rebuild
+    on the current test's loop.
+
+    The httpx client is cleared by dropping the reference (NOT `await
+    close()`): `aclose()` on a client bound to a dead loop would itself hit the
+    closed loop. The abandoned client is GC'd. (Tests that use the `kg_client`
+    / `lance_client` FIXTURES construct their own client and are unaffected —
+    this only resets the shared singletons the production code reaches for.)"""
+    from knowledge_agent import _http_client
     from knowledge_agent.kg.client import get_kg_client
     from knowledge_agent.search.client import get_search_client
 
-    get_kg_client.cache_clear()
-    get_search_client.cache_clear()
+    def _reset() -> None:
+        get_kg_client.cache_clear()
+        get_search_client.cache_clear()
+        _http_client._client = None
+
+    _reset()
     yield
-    get_kg_client.cache_clear()
-    get_search_client.cache_clear()
+    _reset()
 
 
 @pytest.fixture(scope="session")

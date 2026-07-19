@@ -25,11 +25,23 @@ run so the fast integration tests stay fast).
 
 from __future__ import annotations
 
+import importlib.util
+
 import pytest
 
 from knowledge_agent.entity_extractors import get_extractor
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
+
+
+def _gliner_available() -> bool:
+    """True when the `gliner` extractor extra is importable."""
+    return importlib.util.find_spec("gliner") is not None
+
+
+def _flair_available() -> bool:
+    """True when the `flair` (HunFlair2) extractor extra is importable."""
+    return importlib.util.find_spec("flair") is not None
 
 
 # Biomedical text rich in entities — exercises each adapter's
@@ -46,12 +58,13 @@ BIOMED_TEXT = (
 )
 
 
-def test_gliner_extracts_real_entities_with_default_labels() -> None:
+@pytest.mark.skipif(not _gliner_available(), reason="gliner extractor extra not installed")
+async def test_gliner_extracts_real_entities_with_default_labels() -> None:
     """GLiNER zero-shot — pass empty entity_types tuple so it uses
     the adapter's DEFAULT_LABELS. Asserts > 0 mentions returned with
     valid `raw_text` + `entity_type`."""
     extractor = get_extractor("gliner")
-    mentions = extractor.extract(BIOMED_TEXT, ())
+    mentions = await extractor.extract(BIOMED_TEXT, ())
     assert len(mentions) > 0
     # Every mention has the required attributes.
     for m in mentions:
@@ -59,12 +72,13 @@ def test_gliner_extracts_real_entities_with_default_labels() -> None:
         assert m.entity_type  # non-empty
 
 
-def test_gliner_biomed_extracts_real_entities_with_default_labels() -> None:
+@pytest.mark.skipif(not _gliner_available(), reason="gliner extractor extra not installed")
+async def test_gliner_biomed_extracts_real_entities_with_default_labels() -> None:
     """GLiNER-BioMed — biomedical zero-shot. Asserts entity types
     include at least one of DISEASE / CHEMICAL / GENE / PROTEIN
     (the adapter's biomedical DEFAULT_LABELS)."""
     extractor = get_extractor("gliner_biomed")
-    mentions = extractor.extract(BIOMED_TEXT, ())
+    mentions = await extractor.extract(BIOMED_TEXT, ())
     assert len(mentions) > 0
 
     types = {m.entity_type.upper() for m in mentions}
@@ -82,13 +96,16 @@ def test_gliner_biomed_extracts_real_entities_with_default_labels() -> None:
     assert types & biomedical
 
 
-def test_hunflair2_extracts_real_entities_via_locked_label_set() -> None:
+@pytest.mark.skipif(
+    not _flair_available(), reason="flair (hunflair2) extractor extra not installed"
+)
+async def test_hunflair2_extracts_real_entities_via_locked_label_set() -> None:
     """HunFlair2 — Flair PrefixedSequenceTagger with locked 5 labels
     (DISEASE / CHEMICAL / GENE / SPECIES / CELL_LINE). The adapter
     ignores `entity_types` since the model emits only its trained
     set; we just verify mentions come back with one of those labels."""
     extractor = get_extractor("hunflair2")
-    mentions = extractor.extract(BIOMED_TEXT, ())
+    mentions = await extractor.extract(BIOMED_TEXT, ())
     assert len(mentions) > 0
 
     types = {m.entity_type.upper() for m in mentions}
@@ -97,13 +114,14 @@ def test_hunflair2_extracts_real_entities_via_locked_label_set() -> None:
     assert types.issubset(hunflair2_set)
 
 
-def test_each_adapter_returns_mentions_with_offsets_when_supported() -> None:
+@pytest.mark.skipif(not _gliner_available(), reason="gliner extractor extra not installed")
+async def test_each_adapter_returns_mentions_with_offsets_when_supported() -> None:
     """NER adapters set the `offset` field when their underlying
     model exposes token-level position info. GLiNER + HunFlair2
     both support this; LLM does not. This test asserts that
     GLiNER-BioMed (the simplest case) sets offsets on every mention."""
     extractor = get_extractor("gliner_biomed")
-    mentions = extractor.extract(BIOMED_TEXT, ())
+    mentions = await extractor.extract(BIOMED_TEXT, ())
     with_offset = [m for m in mentions if m.offset is not None]
     # Every GLiNER mention should have an offset.
     assert len(with_offset) == len(mentions)
