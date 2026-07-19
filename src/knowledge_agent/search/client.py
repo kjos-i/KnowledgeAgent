@@ -170,7 +170,7 @@ class LanceClient:
         reports via `IngestResult.lancedb_error`.
         """
         conn = await self._ensure_conn()
-        if CHUNKS_TABLE in await conn.table_names():
+        if CHUNKS_TABLE in (await conn.list_tables()).tables:
             return
         await conn.create_table(CHUNKS_TABLE, schema=chunks_schema())
         logger.info("LanceDB: created table %r", CHUNKS_TABLE)
@@ -189,7 +189,7 @@ class LanceClient:
         / disk failures propagate to the caller.
         """
         conn = await self._ensure_conn()
-        if CHUNKS_TABLE not in await conn.table_names():
+        if CHUNKS_TABLE not in (await conn.list_tables()).tables:
             return
         await conn.drop_table(CHUNKS_TABLE)
         logger.info("LanceDB: dropped table %r", CHUNKS_TABLE)
@@ -227,7 +227,7 @@ class LanceClient:
         if not doc_id:
             raise ValueError("LanceDB: delete_chunks_by_doc_id called with no doc_id")
         conn = await self._ensure_conn()
-        if CHUNKS_TABLE not in await conn.table_names():
+        if CHUNKS_TABLE not in (await conn.list_tables()).tables:
             return
         table = await conn.open_table(CHUNKS_TABLE)
         await table.delete(f"doc_id = '{doc_id}'")
@@ -261,7 +261,7 @@ class LanceClient:
         if not fields:
             raise ValueError("LanceDB: update_doc_metadata called with no fields")
         conn = await self._ensure_conn()
-        if CHUNKS_TABLE not in await conn.table_names():
+        if CHUNKS_TABLE not in (await conn.list_tables()).tables:
             raise RuntimeError("LanceDB: update_doc_metadata: chunks table doesn't exist")
         table = await conn.open_table(CHUNKS_TABLE)
         # lancedb 0.33 `AsyncTable.update` takes `updates=` for the literal
@@ -297,7 +297,7 @@ class LanceClient:
         errors propagate to the caller.
         """
         conn = await self._ensure_conn()
-        if CHUNKS_TABLE not in await conn.table_names():
+        if CHUNKS_TABLE not in (await conn.list_tables()).tables:
             return []
         table = await conn.open_table(CHUNKS_TABLE)
         query = (
@@ -382,7 +382,7 @@ class LanceClient:
         if not doc_id:
             raise ValueError("LanceDB: get_chunks_by_doc_id called with no doc_id")
         conn = await self._ensure_conn()
-        if CHUNKS_TABLE not in await conn.table_names():
+        if CHUNKS_TABLE not in (await conn.list_tables()).tables:
             return []
         table = await conn.open_table(CHUNKS_TABLE)
         query = table.query().where(f"doc_id = '{doc_id}'").limit(_LANCEDB_SCAN_LIMIT)

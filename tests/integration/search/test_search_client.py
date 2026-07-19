@@ -68,11 +68,11 @@ def _synthetic_chunk(index: int, text: str) -> dict[str, Any]:
 async def test_ensure_schema_creates_table(lance_client: Any, clean_lance: None) -> None:
     """ensure_schema creates the chunks table when it doesn't exist."""
     conn = await lance_client._ensure_conn()
-    assert CHUNKS_TABLE not in await conn.table_names()
+    assert CHUNKS_TABLE not in (await conn.list_tables()).tables
 
     # success: returns None (typed-errors contract)
     assert await lance_client.ensure_schema() is None
-    assert CHUNKS_TABLE in await conn.table_names()
+    assert CHUNKS_TABLE in (await conn.list_tables()).tables
 
 
 async def test_ensure_schema_is_idempotent(lance_client: Any, clean_lance: None) -> None:
@@ -81,7 +81,7 @@ async def test_ensure_schema_is_idempotent(lance_client: Any, clean_lance: None)
     # success: returns None (typed-errors contract)
     assert await lance_client.ensure_schema() is None
     conn = await lance_client._ensure_conn()
-    assert CHUNKS_TABLE in await conn.table_names()
+    assert CHUNKS_TABLE in (await conn.list_tables()).tables
 
 
 async def test_drop_chunks_table_is_idempotent_on_missing(

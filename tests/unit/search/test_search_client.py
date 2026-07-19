@@ -6,6 +6,7 @@ dataset. The schema function is exercised by reading the returned `pa.Schema`.
 
 import asyncio
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
 
 import lancedb
@@ -176,8 +177,10 @@ class RecordingConnection:
     raise_on_open: Exception | None = None
     raise_on_drop: Exception | None = None
 
-    async def table_names(self) -> list[str]:
-        return list(self.tables.keys())
+    async def list_tables(self) -> Any:
+        # Mirror lancedb's paginated `list_tables`: a response object whose
+        # `.tables` holds the name list (replaces the deprecated `table_names`).
+        return SimpleNamespace(tables=list(self.tables.keys()), page_token=None)
 
     async def create_table(self, name: str, schema: Any = None, **_kwargs: Any) -> RecordingTable:
         if self.raise_on_create is not None:

@@ -110,7 +110,7 @@ async def _check_lancedb() -> ComponentStatus:
 
         client = get_search_client()
         conn = await client._ensure_conn()
-        tables = await conn.table_names()
+        tables = (await conn.list_tables()).tables
         return ComponentStatus(
             "lancedb",
             True,

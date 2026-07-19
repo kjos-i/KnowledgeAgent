@@ -12,6 +12,7 @@ uncaught exception bubbling out of `system_status()`.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -112,7 +113,9 @@ async def test_check_neo4j_catches_driver_exception_returns_fail():
 
 async def test_check_lancedb_returns_ok_with_table_count():
     fake_conn = MagicMock()
-    fake_conn.table_names = AsyncMock(return_value=["chunks", "indexes"])
+    fake_conn.list_tables = AsyncMock(
+        return_value=SimpleNamespace(tables=["chunks", "indexes"], page_token=None)
+    )
     fake_client = MagicMock()
     fake_client._ensure_conn = AsyncMock(return_value=fake_conn)
     with patch(
@@ -184,7 +187,7 @@ async def test_system_status_returns_four_components_in_display_order():
     fake_kg = MagicMock()
     fake_kg.read_query = AsyncMock(return_value=[{"ok": 1}])
     fake_conn = MagicMock()
-    fake_conn.table_names = AsyncMock(return_value=[])
+    fake_conn.list_tables = AsyncMock(return_value=SimpleNamespace(tables=[], page_token=None))
     fake_search = MagicMock()
     fake_search._ensure_conn = AsyncMock(return_value=fake_conn)
     fake_settings = MagicMock(
@@ -218,7 +221,7 @@ async def test_system_status_all_ok_false_when_neo4j_fails():
     fake_kg = MagicMock()
     fake_kg.read_query = AsyncMock(side_effect=RuntimeError("conn"))
     fake_conn = MagicMock()
-    fake_conn.table_names = AsyncMock(return_value=[])
+    fake_conn.list_tables = AsyncMock(return_value=SimpleNamespace(tables=[], page_token=None))
     fake_search = MagicMock()
     fake_search._ensure_conn = AsyncMock(return_value=fake_conn)
     fake_settings = MagicMock(
@@ -249,7 +252,7 @@ async def test_system_status_local_provider_skips_key_check():
     fake_kg = MagicMock()
     fake_kg.read_query = AsyncMock(return_value=[{"ok": 1}])
     fake_conn = MagicMock()
-    fake_conn.table_names = AsyncMock(return_value=[])
+    fake_conn.list_tables = AsyncMock(return_value=SimpleNamespace(tables=[], page_token=None))
     fake_search = MagicMock()
     fake_search._ensure_conn = AsyncMock(return_value=fake_conn)
     fake_settings = MagicMock(
