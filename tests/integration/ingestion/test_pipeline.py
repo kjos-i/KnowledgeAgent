@@ -77,19 +77,26 @@ async def test_ingest_document_full_l1_l5_path(
     kg_client: Any,
     lance_client: Any,
     clean_both_stores: None,
-    sample_pdf: Path,
+    doi_pdf: Path,
 ) -> None:
     """A real PDF ingest with L1-L5 enabled produces a successful
     IngestResult with all expected `_ok` flags True + non-zero counts
-    on both stores."""
+    on both stores.
+
+    Uses the dedicated `doi_pdf` fixture (a real paper with a
+    resolvable DOI), NOT the rotating `sample_pdf` — the L1-L4 KG
+    writes (citations / authorships / venue / topics) and the
+    `metadata_status == "enriched"` assertion all require a real
+    OpenAlex `work`, which the fictional corpus `sample_pdf` lacks
+    (see the fixture docs in conftest)."""
     config = _minimal_corpus_config()
-    result = await ingest_document(sample_pdf, config, "Document", "Paper")
+    result = await ingest_document(doi_pdf, config, "Document", "Paper")
 
     # The doc was parsed.
     assert result.n_chunks > 0
     # doc_id is deterministic.
-    assert result.doc_id == compute_doc_id(sample_pdf)
-    # Metadata resolution worked (the sample PDF has a DOI).
+    assert result.doc_id == compute_doc_id(doi_pdf)
+    # Metadata resolution worked (the doi_pdf carries a real DOI).
     assert result.metadata_status == "enriched"
     assert result.work is not None
     # Embedding + LanceDB write.

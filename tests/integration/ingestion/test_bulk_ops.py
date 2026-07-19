@@ -132,14 +132,13 @@ def _minimal_corpus_config() -> CorpusConfig:
 
 
 @pytest.fixture
-def clean_both_stores(kg_client: Any, lance_client: Any, ensure_constraints: None) -> None:
+async def clean_both_stores(kg_client: Any, lance_client: Any, ensure_constraints: None) -> Any:
     """Same pattern as test_pipeline.py: wipe both stores before each
     bulk_ops test so multi-doc plans start from empty state."""
-    import asyncio
-
-    with kg_client.driver.session() as session:
-        session.run("MATCH (n) DETACH DELETE n")
-    asyncio.run(lance_client.drop_chunks_table())
+    async with kg_client.driver.session() as session:
+        await session.run("MATCH (n) DETACH DELETE n")
+    await lance_client.drop_chunks_table()
+    return None
 
 
 @pytest.fixture
@@ -150,6 +149,23 @@ def fresh_corpus_dir(tmp_path: Path, sample_pdf: Path) -> Path:
     target = tmp_path / "corpus"
     target.mkdir()
     shutil.copy(sample_pdf, target / sample_pdf.name)
+    return target
+
+
+@pytest.fixture
+def doi_corpus_dir(tmp_path: Path, doi_pdf: Path) -> Path:
+    """Like `fresh_corpus_dir` but seeds the real DOI-bearing paper
+    (`doi_pdf`) instead of the rotating `sample_pdf`.
+
+    Used by the content-dependent bulk_ops tests (entity extraction)
+    that assert real domain entities get created — the fictional
+    corpus `sample_pdf` (a made-up mission brief) yields no
+    extractable disease/drug/gene/protein entities, so those
+    assertions need a real research paper. See the `doi_pdf` fixture
+    docs in conftest."""
+    target = tmp_path / "corpus"
+    target.mkdir()
+    shutil.copy(doi_pdf, target / doi_pdf.name)
     return target
 
 
@@ -190,11 +206,12 @@ async def test_ingest_folder_execute_runs_pipeline_per_file(
     doc_id = compute_doc_id(fresh_corpus_dir / sample_pdf.name)
     lance_rows = await lance_client.get_chunks_by_doc_id(doc_id)
     assert lance_rows
-    with kg_client.driver.session() as session:
-        n_kg = session.run(
+    async with kg_client.driver.session() as session:
+        result_cursor = await session.run(
             "MATCH (d:Document {doc_id: $doc_id}) RETURN count(d) AS n",
             doc_id=doc_id,
-        ).single()["n"]
+        )
+        n_kg = (await result_cursor.single())["n"]
     assert n_kg == 1
 
 
@@ -309,11 +326,12 @@ async def test_delete_doc_execute_wipes_both_stores(
     # Both stores empty for this doc.
     lance_rows = await lance_client.get_chunks_by_doc_id(doc_id) or []
     assert len(lance_rows) == 0
-    with kg_client.driver.session() as session:
-        n_kg = session.run(
+    async with kg_client.driver.session() as session:
+        result_cursor = await session.run(
             "MATCH (d:Document {doc_id: $doc_id}) RETURN count(d) AS n",
             doc_id=doc_id,
-        ).single()["n"]
+        )
+        n_kg = (await result_cursor.single())["n"]
     assert n_kg == 0
 
 
@@ -460,7 +478,7 @@ async def test_bulk_re_embed_execute_preserves_chunk_count(
     pre_count = len(await lance_client.get_chunks_by_doc_id(doc_id) or [])
 
     plan = await bulk_re_embed_plan()
-    result = await bulk_re_embed_execute(plan)
+    result = await bulk_re_embed_execute(plan, _minimal_corpus_config())
     assert result.n_succeeded == 1
     assert result.n_failed == 0
 
@@ -499,16 +517,22 @@ async def test_bulk_backfill_chunks_succeeds_after_chunks_layer_enabled(
 
 
 async def test_bulk_backfill_entities_creates_entity_nodes(
-    fresh_corpus_dir: Path,
+    doi_corpus_dir: Path,
     kg_client: Any,
     lance_client: Any,
     clean_both_stores: None,
-    sample_pdf: Path,
+    doi_pdf: Path,
 ) -> None:
     """Ingest with entities=False, then enable entities and backfill.
     The L6 pass writes :Entity nodes + :MENTIONS edges. Cost: one
-    Haiku call per chunk via the LLM adapter."""
-    iplan = await ingest_folder_plan(fresh_corpus_dir, "Document", "Paper")
+    Haiku call per chunk via the LLM adapter.
+
+    Uses the real `doi_pdf` paper (via `doi_corpus_dir`), NOT the
+    fictional `sample_pdf`: `_entities_corpus_config` extracts
+    disease/drug/gene/protein entities, which a made-up mission brief
+    doesn't contain — so the `n_entities > 0` assertion needs a real
+    (biomedical) research paper to be meaningful."""
+    iplan = await ingest_folder_plan(doi_corpus_dir, "Document", "Paper")
     base = _minimal_corpus_config()  # entities=False at ingest time
     await ingest_folder_execute(iplan, base)
 
@@ -520,13 +544,14 @@ async def test_bulk_backfill_entities_creates_entity_nodes(
     assert result.n_failed == 0
 
     # At least some entities exist in the KG now.
-    doc_id = compute_doc_id(fresh_corpus_dir / sample_pdf.name)
-    with kg_client.driver.session() as session:
-        n_entities = session.run(
+    doc_id = compute_doc_id(doi_corpus_dir / doi_pdf.name)
+    async with kg_client.driver.session() as session:
+        result_cursor = await session.run(
             "MATCH (c:Chunk {doc_id: $doc_id})-[:MENTIONS]->(e:Entity) "
             "RETURN count(DISTINCT e) AS n",
             doc_id=doc_id,
-        ).single()["n"]
+        )
+        n_entities = (await result_cursor.single())["n"]
     assert n_entities > 0
 
 
@@ -554,7 +579,7 @@ async def test_bulk_backfill_ontology_links_entities_to_pre_seeded_mesh_terms(
     # via is_imported=True. Use real-looking IDs + lowercased labels
     # that may match entities the LLM extracted from a nutrition /
     # chronic-disease PDF.
-    with kg_client.driver.session() as session:
+    async with kg_client.driver.session() as session:
         for term_id, label in [
             ("D003920", "diabetes mellitus"),
             ("D006973", "hypertension"),
@@ -562,7 +587,7 @@ async def test_bulk_backfill_ontology_links_entities_to_pre_seeded_mesh_terms(
             ("D008659", "metabolism"),
             ("D009765", "nutritional status"),
         ]:
-            session.run(
+            await session.run(
                 f"MERGE (t:{ONTOLOGY_TERM_LABEL}:{MESH_TERM_LABEL} "
                 f"{{id: $id}}) SET t.label = $label",
                 id=term_id,
@@ -643,13 +668,13 @@ async def test_backfill_xrefs_resolves_dangling_xrefs(
     """Pre-seed two :OntologyTerm nodes where one has a dangling_xref
     pointing at the other; backfill_xrefs creates the resolved edge."""
     # Clean state then seed.
-    with kg_client.driver.session() as session:
-        session.run("MATCH (n) DETACH DELETE n")
-        session.run(
+    async with kg_client.driver.session() as session:
+        await session.run("MATCH (n) DETACH DELETE n")
+        await session.run(
             f"MERGE (t:{ONTOLOGY_TERM_LABEL}:{MESH_TERM_LABEL} "
             f"{{id: 'MESH:D008659'}}) SET t.label = 'metabolism'"
         )
-        session.run(
+        await session.run(
             f"MERGE (t:{ONTOLOGY_TERM_LABEL}:{MONDO_TERM_LABEL} "
             f"{{id: 'MONDO:0005066'}}) "
             f"SET t.label = 'metabolic disease', "
@@ -674,12 +699,13 @@ async def test_backfill_xrefs_resolves_dangling_xrefs(
     assert result.per_ontology_counts is not None
 
     # The :MONDO_XREF edge from MONDO:0005066 → MESH:D008659 exists.
-    with kg_client.driver.session() as session:
-        row = session.run(
+    async with kg_client.driver.session() as session:
+        result_cursor = await session.run(
             f"MATCH (s:{MONDO_TERM_LABEL} {{id: 'MONDO:0005066'}})"
             f"-[:MONDO_XREF]->(t:{MESH_TERM_LABEL} {{id: 'MESH:D008659'}}) "
             f"RETURN s.id AS sid"
-        ).single()
+        )
+        row = await result_cursor.single()
     assert row is not None
 
 
@@ -722,11 +748,11 @@ async def test_recompute_cross_doc_xrefs_writes_edges_with_synthetic_setup(
     """Pre-seed 2 docs sharing canonical MeSH terms, enable L10 +
     xrefs=use, run recompute. Edge count > 0."""
     # Clean + seed two docs with shared canonical concepts.
-    with kg_client.driver.session() as session:
-        session.run("MATCH (n) DETACH DELETE n")
+    async with kg_client.driver.session() as session:
+        await session.run("MATCH (n) DETACH DELETE n")
         for doc_id in ("integ-doc-l10-A", "integ-doc-l10-B"):
             chunk_id = make_chunk_id(doc_id, 0)
-            session.run(
+            await session.run(
                 "MERGE (d:Document {doc_id: $doc_id}) "
                 "ON CREATE SET d.in_corpus = true, d:Paper "
                 "MERGE (c:Chunk {chunk_id: $chunk_id}) "
@@ -773,10 +799,10 @@ async def test_clear_xref_edges_drops_target_ontology_edges(
 ) -> None:
     """Pre-seed a :MONDO_XREF edge, then clear_xref_edges_execute
     drops it but preserves other ontologies' edges."""
-    with kg_client.driver.session() as session:
-        session.run("MATCH (n) DETACH DELETE n")
+    async with kg_client.driver.session() as session:
+        await session.run("MATCH (n) DETACH DELETE n")
         # MONDO term with a MONDO_XREF edge.
-        session.run(
+        await session.run(
             f"MERGE (s:{ONTOLOGY_TERM_LABEL}:{MONDO_TERM_LABEL} "
             f"{{id: 'MONDO:0001'}}) "
             f"MERGE (t:{ONTOLOGY_TERM_LABEL}:{MESH_TERM_LABEL} "
@@ -784,7 +810,7 @@ async def test_clear_xref_edges_drops_target_ontology_edges(
             f"MERGE (s)-[:MONDO_XREF]->(t)"
         )
         # MeSH source with a MESH_XREF edge (different ontology).
-        session.run(
+        await session.run(
             f"MERGE (s:{ONTOLOGY_TERM_LABEL}:{MESH_TERM_LABEL} "
             f"{{id: 'MESH:D002'}}) "
             f"MERGE (t:{ONTOLOGY_TERM_LABEL}:{MONDO_TERM_LABEL} "
@@ -799,8 +825,10 @@ async def test_clear_xref_edges_drops_target_ontology_edges(
     assert result.n_cleared is not None and result.n_cleared >= 1
 
     # MONDO_XREF gone; MESH_XREF survives.
-    with kg_client.driver.session() as session:
-        n_mondo = session.run("MATCH ()-[r:MONDO_XREF]->() RETURN count(r) AS n").single()["n"]
-        n_mesh = session.run("MATCH ()-[r:MESH_XREF]->() RETURN count(r) AS n").single()["n"]
+    async with kg_client.driver.session() as session:
+        result_cursor = await session.run("MATCH ()-[r:MONDO_XREF]->() RETURN count(r) AS n")
+        n_mondo = (await result_cursor.single())["n"]
+        result_cursor = await session.run("MATCH ()-[r:MESH_XREF]->() RETURN count(r) AS n")
+        n_mesh = (await result_cursor.single())["n"]
     assert n_mondo == 0
     assert n_mesh == 1

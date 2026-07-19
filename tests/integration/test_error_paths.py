@@ -51,19 +51,20 @@ async def test_embed_texts_propagates_voyage_exception(
     under the typed-errors contract. The pipeline orchestrator's
     try/except is what flips `embed_ok=False` and records the typed
     error on `IngestResult.embed_error`."""
+    from knowledge_agent import embedder_factory
     from knowledge_agent.ingestion import embed
 
     def boom(*_args: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("simulated Voyage outage")
 
     monkeypatch.setattr(
-        embed._get_client(),
+        embedder_factory._build_voyage_client(),
         "multimodal_embed",
         boom,
     )
 
     with pytest.raises(RuntimeError, match="simulated Voyage outage"):
-        embed.embed_texts(["any text"])
+        await embed.embed_texts(["any text"])
 
 
 async def test_embed_texts_propagates_voyage_http_error(
@@ -71,19 +72,20 @@ async def test_embed_texts_propagates_voyage_http_error(
 ) -> None:
     """A network-level exception (e.g. timeout) from the Voyage
     client also propagates under typed-errors."""
+    from knowledge_agent import embedder_factory
     from knowledge_agent.ingestion import embed
 
     def timeout(*_args: Any, **_kwargs: Any) -> Any:
         raise httpx.ConnectError("simulated connection reset")
 
     monkeypatch.setattr(
-        embed._get_client(),
+        embedder_factory._build_voyage_client(),
         "multimodal_embed",
         timeout,
     )
 
     with pytest.raises(httpx.ConnectError, match="simulated connection reset"):
-        embed.embed_texts(["any text"])
+        await embed.embed_texts(["any text"])
 
 
 async def test_embed_texts_empty_input_does_not_call_voyage(
@@ -93,6 +95,7 @@ async def test_embed_texts_empty_input_does_not_call_voyage(
     Voyage. Even if Voyage would raise, we return [] without ever
     touching the client. Protects against accidental API charges
     for no-op calls."""
+    from knowledge_agent import embedder_factory
     from knowledge_agent.ingestion import embed
 
     called: list[Any] = []
@@ -102,12 +105,12 @@ async def test_embed_texts_empty_input_does_not_call_voyage(
         raise RuntimeError("should not be called")
 
     monkeypatch.setattr(
-        embed._get_client(),
+        embedder_factory._build_voyage_client(),
         "multimodal_embed",
         track,
     )
 
-    result = embed.embed_texts([])
+    result = await embed.embed_texts([])
     assert result == []
     assert called == []
 
@@ -201,13 +204,13 @@ async def test_kg_chunk_write_propagates_when_session_raises(
     from knowledge_agent.kg import chunk_writes
 
     class _FakeSession:
-        def __enter__(self) -> _FakeSession:
+        async def __aenter__(self) -> _FakeSession:
             return self
 
-        def __exit__(self, *args: Any) -> None:
+        async def __aexit__(self, *args: Any) -> None:
             return None
 
-        def run(self, *_args: Any, **_kwargs: Any) -> Any:
+        async def run(self, *_args: Any, **_kwargs: Any) -> Any:
             raise RuntimeError("simulated Neo4j connection drop")
 
     class _FakeDriver:
@@ -239,13 +242,13 @@ async def test_kg_delete_chunks_propagates_when_session_raises() -> None:
     from knowledge_agent.kg import chunk_writes
 
     class _FakeSession:
-        def __enter__(self) -> _FakeSession:
+        async def __aenter__(self) -> _FakeSession:
             return self
 
-        def __exit__(self, *args: Any) -> None:
+        async def __aexit__(self, *args: Any) -> None:
             return None
 
-        def run(self, *_args: Any, **_kwargs: Any) -> Any:
+        async def run(self, *_args: Any, **_kwargs: Any) -> Any:
             raise RuntimeError("simulated drop")
 
     class _FakeDriver:
