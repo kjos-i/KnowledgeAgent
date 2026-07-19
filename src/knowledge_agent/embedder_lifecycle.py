@@ -709,31 +709,6 @@ def download_hf_model_execute(plan: DownloadHFModelPlan) -> DownloadHFModelResul
 # ---- switch_embedder_provider (with dimension-change guard) ----
 
 
-def _detect_corpus_dim() -> int | None:
-    """Read the current LanceDB chunks-table vector dim, or None.
-
-    Returns the dim of the existing table if present + non-empty,
-    None when no table exists yet (no destructive switch possible).
-    Empty table = also None (caller can switch freely; the next
-    `ensure_schema` will create with the new dim).
-
-    Defensive: LanceDB / disk failures bubble up as the underlying
-    exception — the GUI's switch handler wraps via typed-error.
-    """
-    from knowledge_agent.search.client import get_search_client
-    from knowledge_agent.search.schema import CHUNKS_TABLE
-
-    client = get_search_client()
-    if CHUNKS_TABLE not in client.conn.table_names():
-        return None
-    table = client.conn.open_table(CHUNKS_TABLE)
-    if table.count_rows() == 0:
-        return None
-    embedding_field = table.schema.field("embedding")
-    # pyarrow.list_(float32, dim) — list_size is the pinned dim.
-    return embedding_field.type.list_size
-
-
 @dataclass(frozen=True)
 class SwitchEmbedderPlan:
     """Plan for switching the active embedding provider.
@@ -790,13 +765,18 @@ class SwitchEmbedderPlan:
         )
 
 
-def switch_embedder_plan(to_provider: str) -> SwitchEmbedderPlan:
+async def switch_embedder_plan(to_provider: str) -> SwitchEmbedderPlan:
     """Build a plan for switching to `to_provider`.
 
-    Reads the current corpus's vector dim from the LanceDB schema
-    (if a table exists) and compares against the new provider's
-    default dim. The plan surfaces both the destructive flag and
-    the row count so the GUI can warn appropriately.
+    Reads the current corpus's vector dim + row count from the LanceDB
+    chunks table (if one exists) and compares against the new provider's
+    default dim. The plan surfaces both the destructive flag and the row
+    count so the GUI can warn appropriately.
+
+    Async because the LanceDB read goes through the native-async
+    `LanceClient` (`_ensure_conn` — there is no sync connection path
+    since the 2026-06 async refactor). The GUI calls this from its async
+    embedding-model handler.
     """
     settings = get_settings()
     from_provider = settings.embedding_provider
@@ -810,11 +790,12 @@ def switch_embedder_plan(to_provider: str) -> SwitchEmbedderPlan:
         from knowledge_agent.search.schema import CHUNKS_TABLE
 
         client = get_search_client()
-        if CHUNKS_TABLE in client.conn.table_names():
-            table = client.conn.open_table(CHUNKS_TABLE)
-            existing_rows = int(table.count_rows())
+        conn = await client._ensure_conn()
+        if CHUNKS_TABLE in (await conn.list_tables()).tables:
+            table = await conn.open_table(CHUNKS_TABLE)
+            existing_rows = int(await table.count_rows())
             if existing_rows > 0:
-                from_dim = table.schema.field("embedding").type.list_size
+                from_dim = (await table.schema()).field("embedding").type.list_size
     except Exception as exc:
         # If LanceDB isn't reachable we cannot tell — treat as "no
         # dim known", surface this as a safe-default plan that does

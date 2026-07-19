@@ -6,6 +6,7 @@ dimension-change guard which is unique to embedders (the LanceDB
 chunks-table vector field pins its dimension at creation).
 """
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -279,11 +280,42 @@ def test_unknown_hf_model_raises():
 # ---- dimension-change guard ----
 
 
-def test_switch_plan_no_data_means_safe_switch():
+def _fake_async_search_client(
+    *, tables: list[str], row_count: int = 0, dim: int = 1024
+) -> MagicMock:
+    """Fake LanceClient mirroring the ASYNC surface `switch_embedder_plan`
+    reads: `_ensure_conn()` -> conn with `list_tables()` (paginated, so the
+    name list lives on `.tables`) + `open_table()`; the table exposes async
+    `count_rows()` and `schema()`.
+
+    Deliberately shaped after the real async client — the old sync
+    `client.conn.table_names()` path (removed in the async refactor) was
+    the bug, so a faithful fake exercises `_ensure_conn` instead of a
+    fictional `.conn`."""
+    fake_field = MagicMock()
+    fake_field.type.list_size = dim
+    fake_schema = MagicMock()
+    fake_schema.field.return_value = fake_field
+
+    fake_table = MagicMock()
+    fake_table.count_rows = AsyncMock(return_value=row_count)
+    fake_table.schema = AsyncMock(return_value=fake_schema)
+
+    fake_conn = MagicMock()
+    fake_conn.list_tables = AsyncMock(
+        return_value=SimpleNamespace(tables=list(tables), page_token=None)
+    )
+    fake_conn.open_table = AsyncMock(return_value=fake_table)
+
+    fake_client = MagicMock()
+    fake_client._ensure_conn = AsyncMock(return_value=fake_conn)
+    return fake_client
+
+
+async def test_switch_plan_no_data_means_safe_switch():
     """When the LanceDB chunks table doesn't exist or is empty,
     switching is always safe — no rows to wipe."""
-    fake_client = MagicMock()
-    fake_client.conn.table_names.return_value = []  # no tables
+    fake_client = _fake_async_search_client(tables=[])  # no tables
     with (
         patch(
             "knowledge_agent.embedder_lifecycle.get_settings",
@@ -294,7 +326,7 @@ def test_switch_plan_no_data_means_safe_switch():
             return_value=fake_client,
         ),
     ):
-        plan = switch_embedder_plan("openai")
+        plan = await switch_embedder_plan("openai")
     assert plan.from_provider == "voyage"
     assert plan.to_provider == "openai"
     assert plan.existing_rows == 0
@@ -302,18 +334,9 @@ def test_switch_plan_no_data_means_safe_switch():
     assert "No data yet" in plan.summary
 
 
-def test_switch_plan_destructive_when_dims_differ_with_existing_rows():
+async def test_switch_plan_destructive_when_dims_differ_with_existing_rows():
     """voyage (1024) → google (768) with existing rows = destructive."""
-    fake_table = MagicMock()
-    fake_table.count_rows.return_value = 1234
-    fake_field = MagicMock()
-    fake_field.type.list_size = 1024
-    fake_table.schema.field.return_value = fake_field
-
-    fake_client = MagicMock()
-    fake_client.conn.table_names.return_value = ["chunks"]
-    fake_client.conn.open_table.return_value = fake_table
-
+    fake_client = _fake_async_search_client(tables=["chunks"], row_count=1234, dim=1024)
     with (
         patch(
             "knowledge_agent.embedder_lifecycle.get_settings",
@@ -324,7 +347,7 @@ def test_switch_plan_destructive_when_dims_differ_with_existing_rows():
             return_value=fake_client,
         ),
     ):
-        plan = switch_embedder_plan("google")
+        plan = await switch_embedder_plan("google")
 
     assert plan.from_dim == 1024
     assert plan.to_dim == 768
@@ -334,19 +357,10 @@ def test_switch_plan_destructive_when_dims_differ_with_existing_rows():
     assert "1234" in plan.summary
 
 
-def test_switch_plan_same_dim_keeps_data_no_destructive_flag():
+async def test_switch_plan_same_dim_keeps_data_no_destructive_flag():
     """voyage (1024) → huggingface (1024 default) — dims align, no
     destructive flag; just a softer "consider re-embedding" hint."""
-    fake_table = MagicMock()
-    fake_table.count_rows.return_value = 500
-    fake_field = MagicMock()
-    fake_field.type.list_size = 1024
-    fake_table.schema.field.return_value = fake_field
-
-    fake_client = MagicMock()
-    fake_client.conn.table_names.return_value = ["chunks"]
-    fake_client.conn.open_table.return_value = fake_table
-
+    fake_client = _fake_async_search_client(tables=["chunks"], row_count=500, dim=1024)
     with (
         patch(
             "knowledge_agent.embedder_lifecycle.get_settings",
@@ -357,16 +371,15 @@ def test_switch_plan_same_dim_keeps_data_no_destructive_flag():
             return_value=fake_client,
         ),
     ):
-        plan = switch_embedder_plan("huggingface")
+        plan = await switch_embedder_plan("huggingface")
 
     assert plan.dim_mismatch is False
     assert plan.existing_rows == 500
     assert "DESTRUCTIVE" not in plan.summary
 
 
-def test_switch_plan_same_provider_summary_says_no_change():
-    fake_client = MagicMock()
-    fake_client.conn.table_names.return_value = []
+async def test_switch_plan_same_provider_summary_says_no_change():
+    fake_client = _fake_async_search_client(tables=[])
     with (
         patch(
             "knowledge_agent.embedder_lifecycle.get_settings",
@@ -377,5 +390,5 @@ def test_switch_plan_same_provider_summary_says_no_change():
             return_value=fake_client,
         ),
     ):
-        plan = switch_embedder_plan("voyage")
+        plan = await switch_embedder_plan("voyage")
     assert "no change" in plan.summary.lower()

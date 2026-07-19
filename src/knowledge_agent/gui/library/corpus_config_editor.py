@@ -44,6 +44,7 @@ of the sections.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -229,6 +230,11 @@ class CorpusConfigEditor:
     def __init__(self, app: GuiApp) -> None:
         self.app = app
         self.status: ft.Text | None = None
+        # Anchor for background tasks spawned from sync Flet handlers (the
+        # embedding dim-guard reads LanceDB async). Mirrors the Library
+        # views' `_spawn` pattern — a set keeps each task referenced so the
+        # GC can't drop it mid-run.
+        self._bg_tasks: set[asyncio.Task] = set()
         # In-memory config being edited + which corpus it's for. Toggles
         # mutate this in memory only — nothing writes to corpus.toml until
         # an Ingest action fires. `_baseline_config` snapshots the on-disk
@@ -2395,7 +2401,22 @@ class CorpusConfigEditor:
         if self.embedding_model_field is not None:
             self.embedding_model_field.options = embedding_model_options()
 
+    def _spawn(self, coro) -> None:
+        """Run a coroutine as a tracked background task, anchored in
+        `_bg_tasks` so the GC can't drop it mid-run. Matches the other
+        Library views' async-dispatch helper."""
+        task = asyncio.create_task(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
     def _on_embedding_model_selected(self, e: ft.Event) -> None:
+        """Sync Flet on_blur entry. The dimension guard needs an async
+        LanceDB read (`switch_embedder_plan`), so the body runs as a
+        spawned background task — the Library views' async-dispatch
+        pattern (no bare async on_blur handler is used anywhere here)."""
+        self._spawn(self._resolve_embedding_model_change())
+
+    async def _resolve_embedding_model_change(self) -> None:
         """Stage a composite provider:model embedding choice — the provider
         comes with the picked model (options span installed embedders).
 
@@ -2429,7 +2450,7 @@ class CorpusConfigEditor:
         # existing row count) when the dim actually changes.
         if dims is not None and cur_dims is not None and dims != cur_dims:
             try:
-                plan = switch_embedder_plan(provider)
+                plan = await switch_embedder_plan(provider)
             except Exception as exc:
                 logger.warning(
                     "switch_embedder_plan(%s) failed (%r); switching without dim guard",
