@@ -75,5 +75,9 @@ def test_on_tap_link_scrolls_to_anchor(fake_app: MagicMock, tmp_path: Path):
 
 def test_on_tap_link_opens_external_url(fake_app: MagicMock, tmp_path: Path):
     doc = InfoDoc(fake_app, tmp_path / "d.md")
+    # launch_url is a coroutine in Flet 0.85 — the async handler must AWAIT it,
+    # or the browser never opens. AsyncMock + assert_awaited catches a missing
+    # `await`; a plain MagicMock (called-but-not-awaited) would silently pass.
+    fake_app.page.launch_url = AsyncMock()
     asyncio.run(doc._on_tap_link(SimpleNamespace(data="https://example.com")))
-    fake_app.page.launch_url.assert_called_once_with("https://example.com")
+    fake_app.page.launch_url.assert_awaited_once_with("https://example.com")

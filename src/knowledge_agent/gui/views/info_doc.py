@@ -107,4 +107,4 @@ class InfoDoc:
             if self._scroll is not None:
                 await self._scroll.scroll_to(scroll_key=href[1:], duration=300)
         elif href:
-            self.app.page.launch_url(href)
+            await self.app.page.launch_url(href)

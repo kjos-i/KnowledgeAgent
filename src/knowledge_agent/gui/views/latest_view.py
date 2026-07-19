@@ -122,7 +122,7 @@ class LatestView:
             src=cs.image_ref,
             width=_THUMB_WIDTH,
             height=_THUMB_HEIGHT,
-            fit=ft.ImageFit.CONTAIN,
+            fit=ft.BoxFit.CONTAIN,
         )
         return ft.Container(
             content=ft.Column(
@@ -140,7 +140,7 @@ class LatestView:
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             ),
             padding=4,
-            border=ft.border.all(1, ft.Colors.GREY_700),
+            border=ft.Border.all(1, ft.Colors.GREY_700),
             border_radius=4,
             on_click=(
                 (lambda e, s=cs: self._show_full_image_dialog(s)) if self.page is not None else None
@@ -193,7 +193,7 @@ class LatestView:
                             src=cs.image_ref,
                             width=_MODAL_MAX_WIDTH,
                             height=_MODAL_MAX_HEIGHT,
-                            fit=ft.ImageFit.CONTAIN,
+                            fit=ft.BoxFit.CONTAIN,
                         ),
                         ft.Divider(),
                         *metadata_rows,
