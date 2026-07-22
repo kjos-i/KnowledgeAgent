@@ -9,7 +9,7 @@ Two backends by sensitivity (mirrors ResearchArticlesAgent):
     lives in a JSON file at the platform-conventional config dir
     (`platformdirs`).
 
-`APP_ID` is the single source for both the keyring service name and
+`APP_NAME` is the single source for both the keyring service name and
 the config directory — kept distinct from sibling apps so a Voyage
 key entered in one app doesn't surface in another.
 
@@ -38,7 +38,7 @@ import keyring.errors
 from platformdirs import user_config_dir
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from knowledge_agent.config import PROVIDER_NODE_DEFAULTS
+from knowledge_agent.config import APP_NAME, PROVIDER_NODE_DEFAULTS
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +47,9 @@ logger = logging.getLogger(__name__)
 _ANTHROPIC_NODE_DEFAULTS = PROVIDER_NODE_DEFAULTS["anthropic"]
 
 
-# Single source for the keyring service + config-dir name. Distinct from
-# sibling apps (ResearchArticlesAgent, ResearchFundingAgent) so secrets
-# never collide.
-APP_ID = "knowledge-agent"
+# The keyring service name + config dir both use APP_NAME (imported from
+# config — the single app-identity source). Distinct from sibling apps
+# (ResearchArticlesAgent, ResearchFundingAgent) so secrets never collide.
 
 # Keyring identifiers stored in the OS credential store and shown in
 # Settings → Keys. Order is the display order in the Settings form.
@@ -569,7 +568,7 @@ def _config_dir() -> Path:
     Creates it if missing — `user_config_dir` resolves to a string;
     we materialise the directory so the JSON write below is safe.
     """
-    path = Path(user_config_dir(APP_ID, appauthor=False, ensure_exists=True))
+    path = Path(user_config_dir(APP_NAME, appauthor=False, ensure_exists=True))
     return path
 
 
@@ -641,7 +640,7 @@ def get_api_key(name: str) -> str | None:
     the field as empty and the user re-enters it.
     """
     try:
-        return keyring.get_password(APP_ID, name)
+        return keyring.get_password(APP_NAME, name)
     except keyring.errors.KeyringError as exc:
         logger.warning("keyring read failed for %r: %r", name, exc)
         return None
@@ -666,7 +665,7 @@ def set_api_key(name: str, value: str) -> None:
     """Write a secret to the OS keyring. Empty string deletes."""
     if not value:
         try:
-            keyring.delete_password(APP_ID, name)
+            keyring.delete_password(APP_NAME, name)
         except keyring.errors.PasswordDeleteError:
             # Already absent — fine.
             pass
@@ -674,7 +673,7 @@ def set_api_key(name: str, value: str) -> None:
             raise ConfigError(f"could not delete keyring entry {name!r}: {exc}") from exc
         return
     try:
-        keyring.set_password(APP_ID, name, value)
+        keyring.set_password(APP_NAME, name, value)
     except keyring.errors.KeyringError as exc:
         raise ConfigError(f"could not save keyring entry {name!r}: {exc}") from exc
 

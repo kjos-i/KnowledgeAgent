@@ -7,8 +7,8 @@ DISTRIBUTION_NAME = "knowledge-agent"
 
 Single source for every `pip install <DISTRIBUTION_NAME>[extra]` install
 target and `importlib.metadata` lookup, so a future rename touches ONE line.
-Deliberately NOT the same constant as the config/keyring app id
-(`gui.config_store.APP_ID`), which stays independent so a dist rename never
+Deliberately NOT the same constant as the config/keyring app identity
+(`config.APP_NAME`), which stays independent so a dist rename never
 relocates a user's stored settings / keyring entries."""
 
 __all__ = ["DISTRIBUTION_NAME", "__version__"]

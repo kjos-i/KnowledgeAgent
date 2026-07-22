@@ -111,6 +111,8 @@ import platformdirs
 import tomlkit
 from pydantic import BaseModel, Field, field_validator
 
+from knowledge_agent.config import APP_NAME
+
 # Re-exported for backward compatibility — dictConfig dotted-path
 # strings + existing test imports + GUI code can still reach these
 # at their original `knowledge_agent.logging_setup.X` paths.
@@ -172,9 +174,6 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Module-level constants (single source of truth — not user-facing knobs).
 # ---------------------------------------------------------------------------
-
-APP_NAME = "KnowledgeAgent"
-"""Pascal-case name used by platformdirs for the OS-standard folder."""
 
 LOG_FILE_NAME = "kagent.log"
 CRASH_SUBDIR = "crashes"

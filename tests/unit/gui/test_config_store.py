@@ -17,7 +17,7 @@ import pytest
 
 from knowledge_agent.gui import config_store
 from knowledge_agent.gui.config_store import (
-    APP_ID,
+    APP_NAME,
     KEYRING_TO_ENV,
     ConfigError,
     GuiConfig,
@@ -224,14 +224,14 @@ def test_get_api_key_returns_none_on_backend_error():
 def test_set_api_key_writes_to_keyring():
     with patch("keyring.set_password") as mock_set:
         set_api_key("anthropic", "sk-new")
-    mock_set.assert_called_once_with(APP_ID, "anthropic", "sk-new")
+    mock_set.assert_called_once_with(APP_NAME, "anthropic", "sk-new")
 
 
 def test_set_api_key_empty_value_deletes():
     """Empty string is the GUI's signal to remove a stored secret."""
     with patch("keyring.delete_password") as mock_del:
         set_api_key("anthropic", "")
-    mock_del.assert_called_once_with(APP_ID, "anthropic")
+    mock_del.assert_called_once_with(APP_NAME, "anthropic")
 
 
 def test_set_api_key_delete_missing_is_idempotent():

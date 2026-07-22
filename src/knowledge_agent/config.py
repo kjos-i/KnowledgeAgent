@@ -15,6 +15,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, get_args
 
+from platformdirs import user_cache_dir
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -47,18 +48,20 @@ def register_key_change_hook(fn: Callable[[], None]) -> None:
 LlmProvider = Literal["anthropic", "openai", "google", "ollama"]
 LLM_PROVIDERS: tuple[LlmProvider, ...] = get_args(LlmProvider)
 
-# Absolute path to the developer's keys file. Shared with the sibling projects
-# in this workspace — one file holds all dev secrets so we don't duplicate
-# them per-project.
-_ENV_FILE = Path(r"C:\Users\kjosi\dotenv\.env")
+# OS-standard app identity — the SINGLE name for this app's platformdirs
+# folders (cache / data / log) AND the keyring service. Defined here in the
+# leaf module so logging_setup + gui.config_store import it and can't drift.
+APP_NAME = "KnowledgeAgent"
 
-# Companion file holding credentials for a SEPARATE Neo4j Desktop instance
-# dedicated to smoke tests. Loaded by `load_test_env()` (NOT auto-loaded).
-# Workflow: real-data instance + `.env` for normal app use; test instance
-# + `.env.test` for smokes. Both instances share bolt port 7687 but
-# different passwords, so a wrong-credentials cross-connect fails at
-# authentication rather than silently corrupting real data.
-_ENV_TEST_FILE = Path(r"C:\Users\kjosi\dotenv\.env.test")
+# Dev env files, resolved RELATIVE to the project root (gitignored, never
+# committed). No absolute/machine path lives in shipped config — a dev just
+# drops their own `.env` in the project folder. The GUI reads NEITHER (it uses
+# the keyring); these are the CLI/dev (`.env`) and test-suite (`.env.test`)
+# paths only. `.env.test` targets a SEPARATE Neo4j test instance whose
+# different password makes a wrong-instance cross-connect fail auth rather
+# than corrupt real data.
+_ENV_FILE = Path(".env")
+_ENV_TEST_FILE = Path(".env.test")
 
 # Process-level toggle. When True, `get_settings()` bypasses the .env file
 # and consults only OS env vars (so a future keyring bridge still works).
@@ -300,16 +303,14 @@ class Settings(BaseSettings):
     # ----- Ontology downloads (L7). Source ontology files (MeSH RDF, GO
     # OBO, ChEBI, etc.) are downloaded once and reused across ingestion runs.
     ontology_downloads_dir: Path = Field(
-        default=(Path.home() / ".research-literature-agent" / "ontology-downloads"),
+        default=(Path(user_cache_dir(APP_NAME, appauthor=False)) / "ontology-downloads"),
         description=(
             "Directory for downloaded ontology source files. Each enabled "
             "L7 ontology layer downloads its file here on first use; "
             "subsequent ingestions reuse the local copy. Safe to delete — "
             "files re-download on next ingest. Default sits under the "
-            "user home directory (not in the repo); override via "
-            "ONTOLOGY_DOWNLOADS_DIR for a custom location. Renamed from "
-            "ontology_cache_dir on 2026-07-02 — 'cache' was misleading "
-            "given the size (100s of MB) and lifetime (persistent)."
+            "OS-standard cache dir (platformdirs user_cache_dir); override "
+            "via ONTOLOGY_DOWNLOADS_DIR for a custom location."
         ),
     )
 
