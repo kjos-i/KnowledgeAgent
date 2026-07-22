@@ -27,6 +27,11 @@ dependencies = [
     "tomlkit>=0.13,<1",
     "pronto>=2.7,<3",
     "rdflib>=7,<8",
+    # Hardened XML parsing for untrusted document metadata (JATS DOI extraction);
+    # blocks entity-expansion / external-entity attacks that stdlib ElementTree
+    # would process. Drop-in via defusedxml.ElementTree. Already present
+    # transitively (rdflib), declared here so the security import can't vanish.
+    "defusedxml>=0.7,<1",
     "platformdirs>=4.2,<5",
     # GUI dependencies — Flet desktop shell + OS-keyring for secrets.
     # Both are imported only when the GUI launches; the CLI / smoke

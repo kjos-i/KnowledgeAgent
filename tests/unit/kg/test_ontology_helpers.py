@@ -184,6 +184,21 @@ async def test_ensure_cached_returns_existing_file(tmp_path: Path):
     mock_stream.assert_not_called()
 
 
+async def test_ensure_cached_rejects_path_traversal(tmp_path: Path):
+    """C20: a filename that escapes the downloads dir (e.g. '../evil') is
+    refused before any download. `filename` may legitimately be nested (FIBO
+    ships 'fibo/FND/.../foo.rdf'), but must never resolve outside the cache."""
+    target = tmp_path / "ontology-cache"
+    target.mkdir()
+    with (
+        patch("knowledge_agent.kg.ontology_helpers.get_settings") as mock_settings,
+        _patch_http_stream(chunks=[b"evil"]),
+    ):
+        mock_settings.return_value.ontology_downloads_dir = target
+        with pytest.raises(ValueError):
+            await ensure_cached("https://example.com/x.rdf", "../evil.rdf")
+
+
 async def test_ensure_cached_downloads_when_missing(tmp_path: Path):
     """Cache miss: file is downloaded via _http_client.stream and written."""
     target = tmp_path / "ontology-cache"

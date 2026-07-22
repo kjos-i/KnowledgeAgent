@@ -124,6 +124,12 @@ async def ensure_cached(url: str, filename: str, *, force: bool = False) -> Path
     """
     downloads = get_downloads_dir()
     dest = downloads / filename
+    # Refuse a filename that escapes the downloads dir (path traversal).
+    # `filename` may legitimately be nested (FIBO ships "fibo/FND/.../foo.rdf"),
+    # but must never resolve outside the cache — guards against a hostile /
+    # compromised multi-file source supplying a "../" entry.
+    if not dest.resolve().is_relative_to(downloads.resolve()):
+        raise ValueError(f"ontology download path escapes cache dir: {filename!r}")
     if dest.exists() and not force:
         logger.info("ontology download hit: %s", dest)
         return dest

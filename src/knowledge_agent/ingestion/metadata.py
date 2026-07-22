@@ -24,9 +24,11 @@ OTHER papers that appear later in the document.
 
 import logging
 import re
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
+
+import defusedxml.ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 from knowledge_agent import _http_client
 from knowledge_agent.config import get_settings
@@ -100,13 +102,14 @@ def doi_from_jats(path: Path) -> str | None:
     local tag name) so it works whether or not the file declares a default
     JATS namespace.
 
-    Uses stdlib ElementTree — fine for the user's own corpus files. An
-    adversarial XML could abuse entity expansion; swap in `defusedxml` if
-    untrusted sources ever get ingested.
+    Uses `defusedxml` (not stdlib ElementTree): a hostile XML that abuses
+    entity expansion / external entities raises instead of being processed,
+    and is caught below as 'no DOI' rather than crashing ingestion — matters
+    once untrusted sources (e.g. multi-user uploads) are ingested.
     """
     try:
         root = ET.parse(path).getroot()
-    except (ET.ParseError, OSError) as exc:
+    except (ET.ParseError, DefusedXmlException, OSError) as exc:
         logger.info("doi_from_jats: could not parse %s: %r", path, exc)
         return None
     for elem in root.iter():

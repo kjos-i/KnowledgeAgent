@@ -41,6 +41,23 @@ def _chunk(index: int, text: str) -> ParsedChunk:
     return ParsedChunk(chunk_index=index, text=text)
 
 
+def test_doi_from_jats_rejects_xml_entity_expansion(tmp_path: Path):
+    """C19: a hostile JATS file that builds its DOI from an XML ENTITY must not
+    be expanded. stdlib ElementTree expands ``&x;`` and would return the DOI;
+    with defusedxml the entity is forbidden, so we return None (treated as
+    'no DOI') rather than expanding it or crashing ingestion."""
+    p = tmp_path / "evil.xml"
+    p.write_text(
+        "<?xml version='1.0'?>\n"
+        "<!DOCTYPE article [<!ENTITY x '10.1234/evil'>]>\n"
+        "<article><front><article-meta>"
+        "<article-id pub-id-type='doi'>&x;</article-id>"
+        "</article-meta></front></article>",
+        encoding="utf-8",
+    )
+    assert doi_from_jats(p) is None
+
+
 # ---- extract_doi_candidates ----
 
 
