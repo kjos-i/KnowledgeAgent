@@ -86,7 +86,7 @@ logger = logging.getLogger(__name__)
 # =========================================================================
 
 _MODE_CLASSIFIER_SYSTEM = """\
-You are a retrieval-mode classifier for a research literature agent.
+You are a retrieval-mode classifier for a research assistant.
 
 Read the user's question and pick the ONE retrieval mode that best fits.
 Output ONLY the mode name from the allowed list.

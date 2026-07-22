@@ -43,7 +43,7 @@ Run via `pytest -m integration tests/integration/kg/`.
 import argparse
 import asyncio
 
-# Switch to the smoke-test Neo4j instance BEFORE any other RLA import.
+# Switch to the smoke-test Neo4j instance BEFORE any other knowledge_agent import.
 from knowledge_agent.config import load_test_env
 
 load_test_env()

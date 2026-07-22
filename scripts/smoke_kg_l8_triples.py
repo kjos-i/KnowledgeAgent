@@ -46,7 +46,7 @@ Run via `pytest -m integration tests/integration/kg/`.
 import argparse
 import asyncio
 
-# Switch to the smoke-test Neo4j instance BEFORE any other RLA
+# Switch to the smoke-test Neo4j instance BEFORE any other knowledge_agent
 # import. Per [[test-instance-setup]] the test instance has a
 # different password — wrong-instance state fails auth rather than
 # corrupting real data.

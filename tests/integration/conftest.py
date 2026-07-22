@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 @pytest.fixture(scope="session")
 def _test_env_loaded() -> None:
     """Switch the process to the smoke-test Neo4j instance ONCE per
-    pytest session, before any other RLA import that might trigger
+    pytest session, before any other knowledge_agent import that might trigger
     `get_settings()` against the real `.env`.
 
     The test instance has a different password so a wrong-instance

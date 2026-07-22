@@ -21,7 +21,7 @@ one process would conflate failures and triple the wall time.
 
 Requires Neo4j running and NEO4J_PASSWORD set in `.env.test` per
 [[test-instance-setup]]. The script switches to the test instance
-BEFORE any other RLA import that might trigger `get_settings()`.
+BEFORE any other knowledge_agent import that might trigger `get_settings()`.
 
 Lifecycle (matches the clear-at-start + pause + optional-cleanup-at-
 end convention — see [[feedback-smoke-test-cleanup]]):
@@ -54,7 +54,7 @@ import argparse
 import asyncio
 
 # Switch the process to the smoke-test Neo4j instance BEFORE any other
-# RLA import that might trigger `get_settings()`. Per
+# knowledge_agent import that might trigger `get_settings()`. Per
 # [[test-instance-setup]] the test instance has a different password
 # so a wrong-instance state fails auth rather than corrupting real
 # data.

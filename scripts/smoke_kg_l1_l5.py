@@ -38,7 +38,7 @@ import asyncio
 from dataclasses import dataclass
 
 # Switch the process to the smoke-test Neo4j instance BEFORE any other
-# RLA import that might trigger `get_settings()`. The test instance's
+# knowledge_agent import that might trigger `get_settings()`. The test instance's
 # password mismatches the real instance, so a wrong-instance-running
 # state fails at authentication rather than corrupting real data.
 from knowledge_agent.config import load_test_env

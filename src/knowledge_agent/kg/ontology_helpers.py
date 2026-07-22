@@ -95,8 +95,8 @@ class OntologyTerm:
 def get_downloads_dir() -> Path:
     """Return the ontology downloads directory, creating it if missing.
 
-    Resolves from `Settings.ontology_downloads_dir` (defaults to
-    `~/.research-literature-agent/ontology-downloads/`). The directory
+    Resolves from `Settings.ontology_downloads_dir` (defaults to the
+    OS cache dir, via platformdirs `user_cache_dir`). The directory
     is created on first call — safe to call repeatedly.
     """
     downloads = get_settings().ontology_downloads_dir

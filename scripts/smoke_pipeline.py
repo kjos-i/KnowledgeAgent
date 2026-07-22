@@ -12,7 +12,7 @@ would have in its `corpus.toml`.
 
 Hits real services: docling (local models), OpenAlex (HTTP), Voyage (HTTP),
 Anthropic Haiku (HTTP, L6 extraction), NLM MeSH download (~600 MB, first
-run only - cached to `~/.research-literature-agent/ontology-cache/`),
+run only - cached under the OS cache dir),
 LanceDB (local files), Neo4j (local Bolt). Requires:
   - Neo4j running with NEO4J_PASSWORD set in .env
   - Internet access for OpenAlex + Voyage + Anthropic + NLM
@@ -61,7 +61,7 @@ import asyncio
 from pathlib import Path
 
 # Switch the process to the smoke-test Neo4j instance BEFORE any other
-# RLA import that might trigger `get_settings()`. The test instance's
+# knowledge_agent import that might trigger `get_settings()`. The test instance's
 # password mismatches the real instance, so a wrong-instance-running
 # state fails at authentication rather than corrupting real data.
 from knowledge_agent.config import load_test_env

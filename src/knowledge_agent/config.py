@@ -135,7 +135,7 @@ PROVIDER_NODE_DEFAULTS: dict[str, dict[str, str]] = {
 
 
 class Settings(BaseSettings):
-    """Runtime configuration for the research literature agent.
+    """Runtime configuration for KnowledgeAgent.
 
     Loaded from environment variables or the developer's `.env` file (path
     above, NOT inside the project tree). Required keys raise a validation
@@ -963,7 +963,7 @@ def reset_after_key_change() -> None:
 def load_test_env() -> None:
     """Load `.env.test` so smokes target the test Neo4j instance.
 
-    Call this at the very top of a smoke script, BEFORE any other RLA
+    Call this at the very top of a smoke script, BEFORE any other knowledge_agent
     imports that might trigger `get_settings()`. `.env.test` should
     carry credentials for a SEPARATE Neo4j Desktop instance dedicated
     to smoke runs - if you accidentally have the wrong instance

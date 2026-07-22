@@ -551,7 +551,7 @@ class GuiConfig(BaseModel):
             "(MeSH RDF, GO OBO, ChEBI, etc.). Bridged to "
             "`ONTOLOGY_DOWNLOADS_DIR` at GUI startup. None keeps the "
             "backend Settings default "
-            "(`~/.research-literature-agent/ontology-downloads`). "
+            "(the OS cache dir, via platformdirs user_cache_dir). "
             "Editable via Library → Installs."
         ),
     )
@@ -953,8 +953,8 @@ def apply_ontology_downloads_dir_to_env(cfg: GuiConfig) -> None:
     """Bridge `GuiConfig.ontology_downloads_dir` to `ONTOLOGY_DOWNLOADS_DIR`.
 
     None (the default) — env var is DELETED so backend Settings falls
-    back to its own default (`~/.research-literature-agent/ontology-
-    downloads`). Set — env var carries the user's chosen path so
+    back to its own default (the OS cache dir, via platformdirs
+    user_cache_dir). Set — env var carries the user's chosen path so
     `get_settings().ontology_downloads_dir` sees it.
 
     Call after `disable_env_file()` alongside the other apply_*_to_env

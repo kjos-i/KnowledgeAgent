@@ -8,7 +8,7 @@ For a high-level pitch see [README.md](README.md). For per-feature deep-dives, e
 
 ## What it is
 
-A desktop research-literature agent that ingests documents in many formats, stores them in two complementary backends, and lets the user query the result via a LangGraph agent that picks one of several retrieval topologies.
+A desktop research-knowledge agent that ingests documents in many formats, stores them in two complementary backends, and lets the user query the result via a LangGraph agent that picks one of several retrieval topologies.
 
 Two storage backends serve different query shapes:
 

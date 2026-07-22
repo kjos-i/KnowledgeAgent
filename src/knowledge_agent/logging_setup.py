@@ -42,7 +42,7 @@ Resolved via `platformdirs.user_log_dir("KnowledgeAgent",
 appauthor=False)`:
 - Windows: `%LOCALAPPDATA%\\KnowledgeAgent\\Logs\\`
 - macOS:   `~/Library/Logs/KnowledgeAgent/`
-- Linux:   `~/.local/state/research-literature-agent/log/`
+- Linux:   `~/.local/state/KnowledgeAgent/log/`
 
 Override via `KAGENT_LOG_DIR` env var (typical dev use: point at
 `./logs/` inside the repo).
