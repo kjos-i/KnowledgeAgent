@@ -12,6 +12,7 @@ fall back to the developer's keys.
 
 import asyncio
 import logging
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, get_args
@@ -23,6 +24,23 @@ if TYPE_CHECKING:
     from knowledge_agent.kg.client import Neo4jClient
 
 logger = logging.getLogger(__name__)
+
+
+# Zero-arg callbacks invoked at the END of every reset_after_key_change().
+# Lets GUI-only caches (e.g. the chat-router lru_cache — which config.py must
+# NOT import, per layering) get cleared on every key/provider/corpus change from
+# a SINGLE place, without config.py depending on gui. The gui side registers.
+_KEY_CHANGE_HOOKS: list[Callable[[], None]] = []
+
+
+def register_key_change_hook(fn: Callable[[], None]) -> None:
+    """Register a zero-arg callback run at the end of reset_after_key_change().
+
+    Idempotent — registering the same callable twice is a no-op.
+    """
+    if fn not in _KEY_CHANGE_HOOKS:
+        _KEY_CHANGE_HOOKS.append(fn)
+
 
 # The valid LLM providers — the SINGLE SOURCE for this set. The `llm_provider`
 # field below, the factory's `provider:model` parser, and any provider
@@ -927,6 +945,14 @@ def reset_after_key_change() -> None:
 
     if old_kg_client is not None:
         _drain_kg_client(old_kg_client)
+
+    # GUI-registered cache clearers (e.g. the chat-router lru_cache) — run last
+    # so a fixed key / switched provider isn't served from a stale cache.
+    for hook in _KEY_CHANGE_HOOKS:
+        try:
+            hook()
+        except Exception as exc:
+            logger.warning("reset_after_key_change: hook %r failed: %r", hook, exc)
 
 
 def load_test_env() -> None:

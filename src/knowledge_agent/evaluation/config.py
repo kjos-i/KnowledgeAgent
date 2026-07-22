@@ -39,6 +39,12 @@ DEFAULT_ENABLED_GROUPS: frozenset[str] = frozenset({"source", "chunk", "kg"})
 # keyring for the GUI), so nothing is ever uploaded unless a run opts in.
 DEFAULT_LANGSMITH_PROJECT = "knowledge-agent-eval"
 
+# Gate-threshold defaults — the SINGLE source shared by EvalConfig (here) and
+# EvalRecipe (models.py imports these), so retuning one can't silently diverge.
+DEFAULT_JUDGE_THRESHOLD = 0.5
+DEFAULT_METADATA_MATCH_THRESHOLD = 0.8
+DEFAULT_REQUIRED_KEYWORD_THRESHOLD = 0.5
+
 
 @dataclass(frozen=True, slots=True)
 class EvalConfig:
@@ -60,9 +66,9 @@ class EvalConfig:
     """Which toggleable metric groups run this session (see ALL_TOGGLE_GROUPS)."""
 
     # ---- gate thresholds -------------------------------------------------
-    judge_threshold: float = 0.5
-    metadata_match_threshold: float = 0.8
-    required_keyword_threshold: float = 0.5
+    judge_threshold: float = DEFAULT_JUDGE_THRESHOLD
+    metadata_match_threshold: float = DEFAULT_METADATA_MATCH_THRESHOLD
+    required_keyword_threshold: float = DEFAULT_REQUIRED_KEYWORD_THRESHOLD
 
     # ---- judge (Phase 3; used only when "judge" is enabled) --------------
     judge_models: tuple[str, ...] = ()

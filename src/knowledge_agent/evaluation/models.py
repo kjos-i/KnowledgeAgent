@@ -25,7 +25,12 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from knowledge_agent.config import check_window_ordering
-from knowledge_agent.evaluation.config import DEFAULT_ENABLED_GROUPS
+from knowledge_agent.evaluation.config import (
+    DEFAULT_ENABLED_GROUPS,
+    DEFAULT_JUDGE_THRESHOLD,
+    DEFAULT_METADATA_MATCH_THRESHOLD,
+    DEFAULT_REQUIRED_KEYWORD_THRESHOLD,
+)
 
 RetrievalMode = Literal[
     "auto",
@@ -311,9 +316,13 @@ class EvalRecipe(BaseModel):
             "in enabled_groups."
         ),
     )
-    judge_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
-    metadata_match_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
-    required_keyword_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    judge_threshold: float = Field(default=DEFAULT_JUDGE_THRESHOLD, ge=0.0, le=1.0)
+    metadata_match_threshold: float = Field(
+        default=DEFAULT_METADATA_MATCH_THRESHOLD, ge=0.0, le=1.0
+    )
+    required_keyword_threshold: float = Field(
+        default=DEFAULT_REQUIRED_KEYWORD_THRESHOLD, ge=0.0, le=1.0
+    )
 
 
 class EvalDataset(BaseModel):

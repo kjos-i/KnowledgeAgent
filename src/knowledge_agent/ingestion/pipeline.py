@@ -219,12 +219,27 @@ async def delete_doc(doc_id: str) -> bool:
     # NOT change to asyncio.gather without re-checking that constraint.
     results = [
         await _safe("lancedb.delete_chunks", search_client.delete_chunks_by_doc_id(doc_id)),
-        await _safe("kg.delete_doc", kg_client.delete_doc(doc_id)),
-        await _safe("kg.delete_chunks", kg_client.delete_chunks_by_doc_id(doc_id)),
-        await _safe("kg.delete_triples", kg_client.delete_triples_by_doc_id(doc_id)),
-        await _safe("kg.delete_entities", kg_client.delete_entities_by_doc_id(doc_id)),
     ]
+    for label, method in _doc_kg_delete_steps(kg_client):
+        results.append(await _safe(label, method(doc_id)))
     return all(results)
+
+
+def _doc_kg_delete_steps(kg_client: Any) -> list[tuple[str, Any]]:
+    """The load-bearing KG delete sequence for one doc, as (label, bound-method)
+    pairs in the ONE order that works: L1-L4 doc -> L5 chunks -> L8 triples ->
+    L6 entity GC. L8 MUST precede the entity GC — the GC's plain DELETE errors
+    on an :Entity still joined by a surviving L8 edge. Single source shared by
+    delete_doc (above) and re-ingest's pre-wipe (`_kg_wipe`), so a new KG layer
+    can't be added to only one site. Returns bound METHODS (not coroutines) so
+    the CALLER owns the `await` — the sync helper creates no un-awaited coroutine
+    (which the async-consistency guard rightly forbids)."""
+    return [
+        ("kg.delete_doc", kg_client.delete_doc),
+        ("kg.delete_chunks", kg_client.delete_chunks_by_doc_id),
+        ("kg.delete_triples", kg_client.delete_triples_by_doc_id),
+        ("kg.delete_entities", kg_client.delete_entities_by_doc_id),
+    ]
 
 
 async def re_embed(doc_id: str, config: CorpusConfig) -> dict[str, Any]:
@@ -1034,10 +1049,9 @@ async def ingest_document(
     # entity orphan GC (the GC uses plain DELETE which errors on
     # entities still connected to surviving L8 edges).
     async def _kg_wipe() -> None:
-        await kg_client.delete_doc(doc_id)  # L1-L4
-        await kg_client.delete_chunks_by_doc_id(doc_id)  # L5
-        await kg_client.delete_triples_by_doc_id(doc_id)  # L8
-        await kg_client.delete_entities_by_doc_id(doc_id)  # L6
+        # Single source of the load-bearing order — see _doc_kg_delete_steps.
+        for _label, method in _doc_kg_delete_steps(kg_client):
+            await method(doc_id)
 
     await asyncio.gather(
         search_client.delete_chunks_by_doc_id(doc_id),

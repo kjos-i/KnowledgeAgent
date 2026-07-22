@@ -599,7 +599,10 @@ class LanceClient:
         failures propagate (typed-errors contract).
         """
         settings = self._settings
-        top_k = top_k or settings.top_k
+        # `is not None` (not `or`): an explicit top_k=0 must NOT fall back to the
+        # default — mirrors vector_search. (Unreachable today via the ge=1
+        # Pydantic constraint, but consistent + correct if that ever loosens.)
+        top_k = top_k if top_k is not None else settings.top_k
         conn = await self._ensure_conn()
         table = await conn.open_table(CHUNKS_TABLE)
         search = table.query().nearest_to_text(query).limit(top_k)

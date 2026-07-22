@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -52,7 +53,7 @@ def _report() -> dict:
 
 def test_creates_tables_and_indexes(tmp_path):
     EvalLedger(tmp_path / "l.db")
-    with sqlite3.connect(tmp_path / "l.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "l.db")) as conn, conn:
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         idx = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
     assert {"eval_runs", "eval_cases"} <= tables
@@ -61,7 +62,7 @@ def test_creates_tables_and_indexes(tmp_path):
 
 def test_case_columns_match_registry(tmp_path):
     EvalLedger(tmp_path / "l.db")
-    with sqlite3.connect(tmp_path / "l.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "l.db")) as conn, conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(eval_cases)")}
     for col, _ in R.case_sql_columns():
         assert col in cols
@@ -69,7 +70,7 @@ def test_case_columns_match_registry(tmp_path):
 
 def test_run_columns_include_per_metric_n(tmp_path):
     EvalLedger(tmp_path / "l.db")
-    with sqlite3.connect(tmp_path / "l.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "l.db")) as conn, conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(eval_runs)")}
     for col, _ in R.run_n_columns():
         assert col in cols
@@ -88,7 +89,7 @@ def test_save_run_roundtrip(tmp_path):
     led = EvalLedger(tmp_path / "l.db")
     run_id = led.save_run(_report())
     assert run_id == 1
-    with sqlite3.connect(tmp_path / "l.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "l.db")) as conn, conn:
         conn.row_factory = sqlite3.Row
         run = conn.execute("SELECT * FROM eval_runs").fetchone()
         assert run["pass_count"] == 1
@@ -125,7 +126,7 @@ def test_save_run_persists_filter_columns(tmp_path):
     report["results"][0]["origin"] = "search"
     report["results"][1]["origin"] = "llm"
     led.save_run(report)
-    with sqlite3.connect(tmp_path / "l.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "l.db")) as conn, conn:
         conn.row_factory = sqlite3.Row
         run = conn.execute("SELECT * FROM eval_runs").fetchone()
         assert run["dataset_name"] == "escrt_bootstrap"
@@ -216,7 +217,7 @@ def test_save_run_filter_columns_default_when_absent(tmp_path):
     an error — save_run reads the new keys defensively."""
     led = EvalLedger(tmp_path / "l.db")
     led.save_run(_report())  # _report() carries none of the new keys
-    with sqlite3.connect(tmp_path / "l.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "l.db")) as conn, conn:
         conn.row_factory = sqlite3.Row
         run = conn.execute("SELECT * FROM eval_runs").fetchone()
         assert run["dataset_name"] is None
@@ -237,7 +238,7 @@ def test_save_run_persists_per_metric_n(tmp_path):
     report["summary"]["n_hit_at_k"] = 2
     report["summary"]["n_chunk_hit_at_k"] = 1
     led.save_run(report)
-    with sqlite3.connect(tmp_path / "l.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "l.db")) as conn, conn:
         conn.row_factory = sqlite3.Row
         run = conn.execute("SELECT * FROM eval_runs").fetchone()
         assert run["n_hit_at_k"] == 2

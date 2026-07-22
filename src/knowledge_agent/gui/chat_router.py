@@ -98,3 +98,11 @@ def get_chat_router(model: str, temperature: float = 0.0) -> Any:
     """
     llm = get_llm_ref(model, temperature)
     return llm.with_structured_output(ChatTurnOutput)
+
+
+# Clear this GUI-only lru_cache on every key/provider/corpus change. config.py's
+# reset_after_key_change() must not import gui (layering), so the gui registers
+# itself here — fixes a fixed/rotated API key being ignored until app restart.
+from knowledge_agent.config import register_key_change_hook  # noqa: E402
+
+register_key_change_hook(get_chat_router.cache_clear)
