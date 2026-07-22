@@ -1,11 +1,9 @@
 """Settings loaded from environment / .env file.
 
-Mirrors the convention used by the sibling projects in this workspace
-(ResearchArticlesAgent, ResearchFundingAgent): the `.env` file lives OUTSIDE
-the project tree so it cannot be accidentally committed, and required keys
-fail-fast at first access rather than at import time.
+The `.env` file lives OUTSIDE the project tree so it cannot be accidentally committed,
+and required keys fail-fast at first access rather than at import time.
 
-Only the CLI is expected to read the .env file. A future GUI should call
+Only the CLI is expected to read the .env file. The GUI should call
 `disable_env_file()` at startup so an unconfigured GUI process cannot silently
 fall back to the developer's keys.
 """
@@ -17,7 +15,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, get_args
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if TYPE_CHECKING:
@@ -198,6 +196,13 @@ class Settings(BaseSettings):
             "— user installs it manually from https://ollama.com."
         ),
     )
+
+    @field_validator("ollama_base_url")
+    @classmethod
+    def _strip_ollama_url_trailing_slash(cls, v: str) -> str:
+        """Strip trailing slash(es) so a downstream `f"{base}/api/..."`
+        join can't produce a double slash (e.g. `.../api//tags`)."""
+        return v.rstrip("/")
 
     # ----- Provider selection. Two independent toggles so users can mix
     # (Anthropic LLM + OpenAI embeddings is a real pairing). Defaults
@@ -394,9 +399,8 @@ class Settings(BaseSettings):
 
     # ----- LanceDB retrieval knobs. All query-time tunables - changing any of
     # these does NOT require re-ingest or re-embed (they only affect how
-    # search runs). Mirrors the ResearchArticlesAgent ES retrieval set, with
-    # one addition (lancedb_search_mode for within-store mode selection,
-    # distinct from default_retrieval_mode which is the agent-level mode).
+    # search runs). lancedb_search_mode for within-store mode selection,
+    # distinct from default_retrieval_mode which is the agent-level mode.
     top_k: int = Field(
         default=5,
         ge=1,

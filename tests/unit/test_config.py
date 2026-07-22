@@ -108,6 +108,26 @@ def test_settings_minimal_required_construct_succeeds() -> None:
     assert s.lancedb_path == Path("/tmp/test-lance")
 
 
+def test_ollama_base_url_strips_trailing_slash() -> None:
+    """Trailing slash(es) on ollama_base_url are stripped so a downstream
+    f-string join like f"{base}/api/tags" can't yield `.../api//tags`."""
+    assert (
+        Settings(  # type: ignore[arg-type]
+            **_minimal_required(ollama_base_url="http://localhost:11434/")
+        ).ollama_base_url
+        == "http://localhost:11434"
+    )
+    # No trailing slash is unchanged; multiple trailing slashes all strip.
+    assert (
+        Settings(**_minimal_required(ollama_base_url="http://h:1")).ollama_base_url  # type: ignore[arg-type]
+        == "http://h:1"
+    )
+    assert (
+        Settings(**_minimal_required(ollama_base_url="http://h:1//")).ollama_base_url  # type: ignore[arg-type]
+        == "http://h:1"
+    )
+
+
 @pytest.mark.parametrize(
     "missing_field",
     [
