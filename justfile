@@ -1,4 +1,4 @@
-# ResearchLiteratureAgent task runner.
+# KnowledgeAgent task runner.
 #
 # Install `just` once (Windows): winget install --id Casey.Just
 # Run `just` (no args) to list available recipes.
