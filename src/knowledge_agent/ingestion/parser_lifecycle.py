@@ -130,8 +130,7 @@ PARSER_LIFECYCLE_REGISTRY: dict[str, dict[str, Any]] = {
     "asr": {
         # Audio-only path — for a video file we transcribe the audio
         # track but DO NOT capture visual frame content (slides shown
-        # on screen are not OCRed). Tracked in
-        # [[deferred-video-frame-extraction]].
+        # on screen are not OCRed); frame-OCR is a deferred extension.
         # ffmpeg ships bundled via imageio-ffmpeg (declared in the
         # `parsers-asr` extra), so there is NO system-binary dep —
         # installing the extra is the one and only step.

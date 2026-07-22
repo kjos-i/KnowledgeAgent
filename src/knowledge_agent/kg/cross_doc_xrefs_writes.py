@@ -2,7 +2,7 @@
 materialised `:RELATED_BY_XREF` edges between documents that share at
 least N canonical concepts equivalent via L7 xref edges.
 
-Design (see [[researchliteratureagent-xrefs-l10-spec]]):
+Design:
 
   - **Edge shape**: undirected (one edge per pair, MERGE on the
     undirected pattern). Properties: `shared_concepts` (list of

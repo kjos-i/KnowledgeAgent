@@ -30,9 +30,8 @@ pinned for docling 2.96):
 is passed in, docling extracts the audio track via ffmpeg and runs
 Whisper ASR on it. Visual content — slides shown on screen, diagrams,
 demonstrations, charts — is NOT captured. A silent video (or one with
-music-only audio) produces zero useful chunks. See
-[[deferred-video-frame-extraction]] for the planned frame-OCR /
-multimodal-embedding extension that would close this gap; until that
+music-only audio) produces zero useful chunks. A planned frame-OCR /
+multimodal-embedding extension would close this gap; until that
 ships, treat video as "transcript-only".
 
 **XML: modern JATS only.** Docling parses the newer JATS `.xml` /

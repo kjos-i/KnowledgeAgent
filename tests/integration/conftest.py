@@ -3,9 +3,8 @@
 Scope: tests under `tests/integration/` — hit real Neo4j (via the
 test-instance credentials in `.env.test`), real LanceDB (at
 `LANCEDB_PATH` from `.env.test`), real Voyage/Anthropic when needed.
-Per [[test-instance-setup]] the test instance is isolated by
-password from the real corpus so a cross-connect fails auth rather
-than corrupting real data.
+The test instance is isolated by password from the real corpus so a
+cross-connect fails auth rather than corrupting real data.
 
 Every test in this tier MUST be decorated with `@pytest.mark.integration`
 — the default `pytest` run skips this tier (`-m "not integration and
@@ -55,9 +54,8 @@ def _test_env_loaded() -> None:
     pytest session, before any other RLA import that might trigger
     `get_settings()` against the real `.env`.
 
-    Per [[test-instance-setup]] the test instance has a different
-    password so a wrong-instance state fails auth rather than
-    corrupting real data.
+    The test instance has a different password so a wrong-instance
+    state fails auth rather than corrupting real data.
     """
     load_test_env()
 
@@ -142,9 +140,8 @@ async def clean_kg(kg_client: Any) -> AsyncIterator[None]:
     """Wipe the test KG before each test that uses this fixture.
 
     Pattern: `MATCH (n) DETACH DELETE n`. The test instance is for
-    test artefacts only; per [[test-instance-setup]] it's isolated
-    by password from the real corpus, so a wipe here cannot reach
-    real data.
+    test artefacts only; it's isolated by password from the real
+    corpus, so a wipe here cannot reach real data.
 
     Async because `Neo4jClient.driver` is an `AsyncDriver` (its
     sessions are `AsyncSession`; there is no sync context-manager
@@ -423,8 +420,8 @@ def sample_audio() -> Path:
 def sample_video() -> Path:
     """First video file (mp4 / mov / avi / mkv / webm). Same caveat
     as `sample_audio` — parse path needs the `parsers-asr` extra
-    (audio track gets transcribed; visual frames are NOT OCRed today,
-    see [[deferred-video-frame-extraction]])."""
+    (audio track gets transcribed; visual frames are NOT OCRed
+    today)."""
     p = _pick_first_of(".mp4", ".mov", ".avi", ".mkv", ".webm")
     if p is None:
         pytest.skip(f"no video fixtures in {TEST_DOCS}")

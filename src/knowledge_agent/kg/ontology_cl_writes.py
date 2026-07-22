@@ -13,7 +13,7 @@ What we write to Neo4j (multi-label):
 CL IDs come with their canonical prefix already ("CL:0000540"), so
 we store IDs verbatim. We materialise only the within-CL is_a
 hierarchy here; cross-ontology references (CL -> UBERON, CL -> GO)
-are the [[deferred-cross-ontology-xrefs]] work item.
+are a deferred work item.
 
 Lifecycle delegates to the shared `write_ontology_terms` family helpers in
 `ontology_helpers.py`.

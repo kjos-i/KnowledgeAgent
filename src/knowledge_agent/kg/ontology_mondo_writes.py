@@ -20,8 +20,7 @@ Lifecycle delegates to the shared `write_ontology_terms` family helpers in
 
 Note: MONDO carries rich xrefs to other disease vocabularies (DOID,
 OMIM, ICD-11, etc.) in the source data. Today we discard those at
-import time - promoting them to graph edges is the
-[[deferred-cross-ontology-xrefs]] work item.
+import time - promoting them to graph edges is a deferred work item.
 """
 
 from __future__ import annotations

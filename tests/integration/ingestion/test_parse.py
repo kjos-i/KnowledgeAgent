@@ -229,8 +229,7 @@ def test_parse_video_returns_chunks(sample_video: Path) -> None:
     (bundled by imageio-ffmpeg) then transcribed via Whisper.
 
     Visual frames are NOT OCRed today — slides shown in a recording
-    are invisible to the parser. Tracked in
-    [[deferred-video-frame-extraction]]."""
+    are invisible to the parser."""
     chunks = parse_document(sample_video, _CONFIG)
     assert len(chunks) > 0
     assert all(c.text for c in chunks)

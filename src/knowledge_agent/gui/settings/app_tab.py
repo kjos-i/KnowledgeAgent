@@ -227,8 +227,8 @@ class AppTab:
         )
 
         # Block 3: DB connection — all READ-ONLY. Post-Slice-3 the
-        # active corpus's connection lives in `GuiConfig.corpora`
-        # (see [[gui-slice3-library-design]]); this tab just displays
+        # active corpus's connection lives in `GuiConfig.corpora`;
+        # this tab just displays
         # what's active. Edits happen via Library → Select Dataset
         # (switch active corpus) or Library → Create New Dataset (add
         # a new corpus).
@@ -274,7 +274,7 @@ class AppTab:
     # ----- public API -------------------------------------------------------
 
     def build(self) -> ft.Control:
-        # First-show fetches per [[gui-view-startup]] — no work in
+        # First-show fetches — no work in
         # _create_controls; defer expensive reads to here. Check for a
         # running loop BEFORE constructing the coroutine so test env
         # (no loop) doesn't leave an unawaited-coroutine warning.

@@ -29,8 +29,7 @@ Ollama is the partial-install case:
      `pull_ollama_model_*` ops. Each model in the curated menu has
      its own provenance.
 
-Curated menus locked 2026-06-29 (4 entries each, see memory
-[[llm-embedder-provider-swap]]):
+Curated menus locked 2026-06-29 (4 entries each):
 
   - Anthropic models: Haiku (cheap) + Sonnet (smart) + Opus (top).
   - OpenAI models: GPT-4o-mini + GPT-4o + GPT-4o-2024-11-20.
@@ -636,8 +635,7 @@ async def uninstall_llm_provider_execute(
     """Pip-uninstall the provider's adapter package.
 
     No-ops when bundled / not installed / active. The active-provider
-    block is the policy guard from
-    [[llm-embedder-provider-swap]] — symmetric with the
+    block is the policy guard — symmetric with the
     parser_lifecycle and ontology_lifecycle delete-while-active
     guards.
     """

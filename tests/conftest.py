@@ -31,7 +31,7 @@ Three tiers, mirroring `src/knowledge_agent/` subdir-for-subdir:
   list in pyproject the single source of truth.
 
 THE SAFETY INVARIANT — tests/smokes only ever touch the TEST instance,
-never real data ([[tests-never-touch-real-instance]], [[test-instance-setup]]):
+never real data:
 
   - Any tier that touches a real service calls `config.load_test_env()`
     FIRST, which loads `.env.test` (a separate Neo4j Desktop instance +
@@ -54,7 +54,7 @@ WIPE conventions:
     them — no after-wipe (next test's before-wipe covers it).
   - smokes (persistent-write): clear-at-start → write → PAUSE for manual
     inspection → optional cleanup-at-end (Enter cleans, Ctrl+C keeps).
-    See [[feedback-smoke-test-cleanup]] and scripts/smoke_kg_l1_l5.py.
+    See scripts/smoke_kg_l1_l5.py.
   - install smokes: a different lifecycle (plan → confirm → install →
     verify → pause → offer-uninstall); see scripts/_install_smoke_lib.py.
 

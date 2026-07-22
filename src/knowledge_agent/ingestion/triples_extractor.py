@@ -5,8 +5,7 @@ vocabulary mined from this chunk, and emits triples constrained to
 that vocabulary and to the 15 fixed predicates in
 `schema.TRIPLE_PREDICATE_RELS`.
 
-Key design (see [[researchliteratureagent-l8-l9-specs]] for the locked
-design rationale):
+Key design (locked rationale):
 
   - **Constrained subject + object vocabulary.** The chunk's L6
     entity keys are passed into the prompt; the LLM is told to use ONLY

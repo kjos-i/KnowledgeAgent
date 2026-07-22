@@ -23,7 +23,7 @@ values interpreted as heights.
 State (`_current_size`) lives on the instance for the session — not
 persisted to disk. Persist to GuiConfig if user demand justifies it.
 
-Close-button / collapse-to-strip pattern is deferred — see [[gui-slice3-library-design]]'s open questions for the discussion.
+Close-button / collapse-to-strip pattern is deferred.
 """
 
 from __future__ import annotations

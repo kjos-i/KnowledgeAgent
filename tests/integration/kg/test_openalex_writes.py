@@ -23,8 +23,8 @@ same scenarios, but pauses for inspection in Neo4j Desktop and
 prints state instead of asserting. Use the smoke when you want to
 eyeball what landed; use this file for regression catching.
 
-Requires the test Neo4j instance from `.env.test` per
-[[test-instance-setup]]. Skipped by default; opt in via
+Requires the test Neo4j instance from `.env.test`. Skipped by
+default; opt in via
 `pytest -m integration`.
 """
 

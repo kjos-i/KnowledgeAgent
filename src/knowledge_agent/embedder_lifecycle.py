@@ -31,8 +31,7 @@ HuggingFace is the 2-step case:
      entry has its own provenance with pinned commit SHA, size, and
      safetensors flag.
 
-Curated HF menu locked 2026-06-29 (4 entries, see memory
-[[llm-embedder-provider-swap]]):
+Curated HF menu locked 2026-06-29 (4 entries):
 
   - BAAI/bge-m3              — multilingual default (1024-dim, 2.3 GB)
   - mixedbread-ai/mxbai-...  — English top-tier (1024-dim, 1.3 GB)

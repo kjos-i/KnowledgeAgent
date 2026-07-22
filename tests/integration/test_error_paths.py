@@ -7,12 +7,12 @@ at one boundary client (Voyage, OpenAlex, Neo4j driver, LanceDB,
 Anthropic) and asserts the layer above handles it according to the
 documented contract.
 
-Contract today (per `[[deferred-error-handling]]` memory): every
+Contract today: every
 layer fails soft with sentinels — embed returns None, KG writes
 return False, OpenAlex resolution returns None, agent nodes set
-state fields without raising. The typed-errors refactor (parked in
-`[[researchliteratureagent-typed-errors-plan]]`) will eventually
-change this contract — when that ships, these tests need updating
+state fields without raising. The typed-errors refactor (a parked
+plan) will eventually change this contract — when that ships, these
+tests need updating
 to assert the typed `ErrorDetail` carries the right message instead
 of just the sentinel.
 

@@ -13,8 +13,7 @@ What we write to Neo4j (multi-label):
 
 We materialise only the is_a hierarchy (NOT part_of or develops_from)
 to match the existing per-ontology pattern. part_of / develops_from
-cross-references can be added later via the
-[[deferred-cross-ontology-xrefs]] work item.
+cross-references can be added later as a deferred work item.
 
 Lifecycle delegates to the shared `write_ontology_terms` family helpers in
 `ontology_helpers.py`.

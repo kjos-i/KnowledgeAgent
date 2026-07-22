@@ -2,8 +2,7 @@
 `:RELATED_TO` edges between documents that share at least N L6
 entities.
 
-Design (see [[researchliteratureagent-l8-l9-specs]] for the locked
-rationale):
+Design (locked rationale):
 
   - **Edge shape**: undirected (one edge per pair, written via MERGE
     on the undirected pattern). Properties: `shared_entities` (list

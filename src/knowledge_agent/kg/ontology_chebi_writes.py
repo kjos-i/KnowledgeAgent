@@ -23,7 +23,7 @@ Lifecycle delegates to the shared `write_ontology_terms` family helpers in
 Note: ChEBI carries rich xrefs to other resources (RHEA reactions,
 KEGG compounds, UniProt-bound ligands, etc.) in the source data.
 Today we discard those at import time - promoting them to graph edges
-is the [[deferred-cross-ontology-xrefs]] work item.
+is a deferred work item.
 """
 
 from __future__ import annotations

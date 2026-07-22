@@ -127,7 +127,7 @@ async def _cmd_ingest(args: argparse.Namespace) -> int:
 
     if not args.yes:
         # Stdin prompt — the CLI is the only layer allowed to ask.
-        # Backend per [[backend-no-ui-prompts]] never prompts.
+        # The backend never prompts.
         reply = input("Continue? [y/N] ").strip().lower()
         if reply not in ("y", "yes"):
             print("Cancelled.")

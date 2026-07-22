@@ -233,8 +233,8 @@ class Settings(BaseSettings):
     # are required-no-default by design. Forcing the user to set them
     # explicitly in `.env` (and `.env.test`) eliminates the failure mode where
     # a forgotten config silently falls back to a default that points at the
-    # wrong instance / wrong directory. See [[researchliteratureagent-test-
-    # instance-setup]] for the test/real isolation pattern this enables.
+    # wrong instance / wrong directory. This is what enables the
+    # test/real isolation pattern (`.env.test` on a separate instance).
     neo4j_uri: str = Field(
         ...,
         description=(
