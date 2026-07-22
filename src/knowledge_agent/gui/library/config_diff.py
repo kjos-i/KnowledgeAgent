@@ -75,11 +75,20 @@ def config_diff(baseline: CorpusConfig, draft: CorpusConfig) -> list[ConfigChang
         if b != d:
             diffs.append((f"ontology_{key} ({display})", _fmt_bool(b), _fmt_bool(d)))
 
-    # Extractor + entity_types (on the entities subsection).
-    base_extractor = baseline.entities.extractor if baseline.entities is not None else "—"
-    draft_extractor = draft.entities.extractor if draft.entities is not None else "—"
-    if base_extractor != draft_extractor:
-        diffs.append(("extractor", base_extractor, draft_extractor))
+    # Extractor(s) + entity_types + mode (on the entities subsection). Compare
+    # the FULL extractors list (not just extractors[0]) and entity_types_mode,
+    # so a secondary-extractor or Replace/Add change is never silently missed
+    # (which contradicted is_dirty() and let a re-ingest apply an unshown change).
+    base_extractors = (
+        ", ".join(baseline.entities.extractors) if baseline.entities is not None else "—"
+    )
+    draft_extractors = ", ".join(draft.entities.extractors) if draft.entities is not None else "—"
+    if base_extractors != draft_extractors:
+        diffs.append(("extractors", base_extractors, draft_extractors))
+    base_mode = baseline.entities.entity_types_mode if baseline.entities is not None else "—"
+    draft_mode = draft.entities.entity_types_mode if draft.entities is not None else "—"
+    if base_mode != draft_mode:
+        diffs.append(("entity_types_mode", base_mode, draft_mode))
     base_types = (
         ", ".join(baseline.entities.entity_types) if baseline.entities is not None else "—"
     ) or "(default)"

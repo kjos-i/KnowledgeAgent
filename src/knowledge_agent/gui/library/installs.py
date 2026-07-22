@@ -1150,7 +1150,7 @@ class InstallsTab:
             title=f"Download {name}?",
             body=plan.summary,
             confirm_label="Download",
-            on_confirm=lambda: asyncio.create_task(self._run_ontology_download(name)),
+            on_confirm=lambda: self._spawn(self._run_ontology_download(name)),
         )
 
     async def _run_ontology_download(self, name: str) -> None:
@@ -1211,7 +1211,7 @@ class InstallsTab:
             title=f"Delete {name} download?",
             body=plan.summary,
             confirm_label="Delete download",
-            on_confirm=lambda: asyncio.create_task(self._run_ontology_delete(name)),
+            on_confirm=lambda: self._spawn(self._run_ontology_delete(name)),
         )
 
     async def _run_ontology_delete(self, name: str) -> None:
@@ -1246,7 +1246,7 @@ class InstallsTab:
             title=f"Install {name}?",
             body=plan.summary,
             confirm_label="Install",
-            on_confirm=lambda: asyncio.create_task(self._run_extractor_install(name)),
+            on_confirm=lambda: self._spawn(self._run_extractor_install(name)),
         )
 
     async def _run_extractor_install(self, name: str) -> None:
@@ -1275,7 +1275,7 @@ class InstallsTab:
             title=f"Uninstall {name}?",
             body=plan.summary,
             confirm_label="Uninstall",
-            on_confirm=lambda: asyncio.create_task(self._run_extractor_uninstall(name)),
+            on_confirm=lambda: self._spawn(self._run_extractor_uninstall(name)),
         )
 
     async def _run_extractor_uninstall(self, name: str) -> None:
@@ -1299,7 +1299,7 @@ class InstallsTab:
             title=f"Download {name} weights?",
             body=plan.summary,
             confirm_label="Download weights",
-            on_confirm=lambda: asyncio.create_task(self._run_extractor_download(name)),
+            on_confirm=lambda: self._spawn(self._run_extractor_download(name)),
         )
 
     async def _run_extractor_download(self, name: str) -> None:
@@ -1360,7 +1360,7 @@ class InstallsTab:
             title=f"Delete {name} weights?",
             body=summary,
             confirm_label="Delete weights",
-            on_confirm=lambda: asyncio.create_task(self._run_extractor_delete(name)),
+            on_confirm=lambda: self._spawn(self._run_extractor_delete(name)),
         )
 
     async def _run_extractor_delete(self, name: str) -> None:
@@ -1387,7 +1387,7 @@ class InstallsTab:
             title=f"Install parser extra {name}?",
             body=plan.summary,
             confirm_label="Install",
-            on_confirm=lambda: asyncio.create_task(self._run_parser_install(name)),
+            on_confirm=lambda: self._spawn(self._run_parser_install(name)),
         )
 
     async def _run_parser_install(self, name: str) -> None:
@@ -1416,7 +1416,7 @@ class InstallsTab:
             title=f"Uninstall parser extra {name}?",
             body=plan.summary,
             confirm_label="Uninstall",
-            on_confirm=lambda: asyncio.create_task(self._run_parser_uninstall(name)),
+            on_confirm=lambda: self._spawn(self._run_parser_uninstall(name)),
         )
 
     async def _run_parser_uninstall(self, name: str) -> None:
@@ -1447,7 +1447,7 @@ class InstallsTab:
             title=f"Install {plan.display_name}?",
             body=plan.summary,
             confirm_label="Install",
-            on_confirm=lambda: asyncio.create_task(self._run_embedder_provider_install(name)),
+            on_confirm=lambda: self._spawn(self._run_embedder_provider_install(name)),
         )
 
     async def _run_embedder_provider_install(self, name: str) -> None:
@@ -1471,7 +1471,7 @@ class InstallsTab:
             title=f"Uninstall {plan.display_name}?",
             body=plan.summary,
             confirm_label="Uninstall",
-            on_confirm=lambda: asyncio.create_task(self._run_embedder_provider_uninstall(name)),
+            on_confirm=lambda: self._spawn(self._run_embedder_provider_uninstall(name)),
         )
 
     async def _run_embedder_provider_uninstall(self, name: str) -> None:
@@ -1500,7 +1500,7 @@ class InstallsTab:
             title=f"Install {plan.display_name}?",
             body=plan.summary,
             confirm_label="Install",
-            on_confirm=lambda: asyncio.create_task(self._run_llm_provider_install(name)),
+            on_confirm=lambda: self._spawn(self._run_llm_provider_install(name)),
         )
 
     async def _run_llm_provider_install(self, name: str) -> None:
@@ -1524,7 +1524,7 @@ class InstallsTab:
             title=f"Uninstall {plan.display_name}?",
             body=plan.summary,
             confirm_label="Uninstall",
-            on_confirm=lambda: asyncio.create_task(self._run_llm_provider_uninstall(name)),
+            on_confirm=lambda: self._spawn(self._run_llm_provider_uninstall(name)),
         )
 
     async def _run_llm_provider_uninstall(self, name: str) -> None:

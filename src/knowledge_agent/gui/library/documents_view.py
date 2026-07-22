@@ -688,12 +688,17 @@ class DocumentsView:
                 getattr(plan, "doc_id", "?"),
                 exc,
             )
+            # Surface the failure + reload so the card doesn't linger looking
+            # deleted when it wasn't (previously this only logged and returned).
+            self._set_op_status(f"Delete failed: {exc}")
+            await self.reload(force=True)
             return
         if not result.ok:
             logger.warning(
                 "DocumentsView: delete_doc_execute(%s) reported not-ok",
                 getattr(plan, "doc_id", "?"),
             )
+            self._set_op_status("Delete reported a problem — see log for details.")
         await self.reload(force=True)
 
 

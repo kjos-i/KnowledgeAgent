@@ -591,6 +591,10 @@ class CreateNewDatasetTab:
         try:
             set_corpus_password(name, password)
         except ConfigError as exc:
+            # Don't leave an orphan corpus.toml — the create guard refuses to
+            # re-create a corpus whose toml already exists, so a half-finished
+            # create would otherwise block retrying under the same name.
+            toml_path.unlink(missing_ok=True)
             self.status.value = f"could not save Neo4j password: {exc}"
             self.create_button.disabled = False
             self.app.page.update()
@@ -619,6 +623,8 @@ class CreateNewDatasetTab:
         try:
             save_config(self.app.gui_config)
         except ConfigError as exc:
+            # Same orphan-toml cleanup as the keyring failure above.
+            toml_path.unlink(missing_ok=True)
             self.status.value = f"could not save registry: {exc}"
             self.create_button.disabled = False
             self.app.page.update()
