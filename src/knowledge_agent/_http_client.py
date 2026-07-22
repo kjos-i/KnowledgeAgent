@@ -130,11 +130,18 @@ def _backoff_seconds(attempt: int) -> float:
     return float(2**attempt)
 
 
+# Sentinel distinguishing "caller passed nothing" (-> the configured
+# http_default_timeout) from an explicit `timeout=None` (-> no timeout, for
+# long streaming downloads). Typed Any so the `timeout: float | None` default
+# stays type-clean; a real caller only ever passes a float or None.
+_UNSET_TIMEOUT: Any = object()
+
+
 async def request(
     url: str,
     *,
     params: dict[str, Any] | None = None,
-    timeout: float | None = None,
+    timeout: float | None = _UNSET_TIMEOUT,
     max_retries: int | None = None,
 ) -> httpx.Response:
     """Async GET with exponential-backoff retry on 429/5xx/network errors.
@@ -157,6 +164,7 @@ async def request(
     use only for streams).
     """
     settings = get_settings()
+    resolved_timeout = settings.http_default_timeout if timeout is _UNSET_TIMEOUT else timeout
     retries = settings.http_max_retries if max_retries is None else max_retries
     client = _get_client()
     last_exc: Exception | None = None
@@ -165,7 +173,7 @@ async def request(
             response = await client.get(
                 url,
                 params=params,
-                timeout=timeout if timeout is not None else settings.http_default_timeout,
+                timeout=resolved_timeout,
             )
         except (httpx.NetworkError, httpx.TimeoutException) as exc:
             last_exc = exc
@@ -207,7 +215,7 @@ async def stream(
     url: str,
     *,
     method: str = "GET",
-    timeout: float | None = None,
+    timeout: float | None = _UNSET_TIMEOUT,
 ) -> AsyncIterator[httpx.Response]:
     """Async streaming context manager. NEVER retries — see module docstring.
 
@@ -219,10 +227,7 @@ async def stream(
     large ontology downloads that legitimately take minutes.
     """
     settings = get_settings()
+    resolved_timeout = settings.http_default_timeout if timeout is _UNSET_TIMEOUT else timeout
     client = _get_client()
-    async with client.stream(
-        method,
-        url,
-        timeout=timeout if timeout is not None else settings.http_default_timeout,
-    ) as response:
+    async with client.stream(method, url, timeout=resolved_timeout) as response:
         yield response

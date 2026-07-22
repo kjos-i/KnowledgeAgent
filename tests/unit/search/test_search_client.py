@@ -8,6 +8,7 @@ import asyncio
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import lancedb
 import pyarrow as pa
@@ -19,6 +20,7 @@ from knowledge_agent.search.client import (
     NO_CORPUS_SENTINEL,
     LanceClient,
     NoActiveCorpusError,
+    _embed_query,
     _filters_to_sql,
     _sql_literal,
 )
@@ -28,6 +30,20 @@ from knowledge_agent.search.schema import (
     METADATA_STATUS_VALUES,
     chunks_schema,
 )
+
+
+async def test_embed_query_propagates_embedder_failure():
+    """C9: an embedder outage must PROPAGATE, not be swallowed into None. The
+    old code caught it and returned None, which vector_search turned into [] —
+    indistinguishable from an empty corpus, hiding the real failure. The
+    retriever node in nodes.py is the layer that types the error."""
+    with patch(
+        "knowledge_agent.search.client.embed_texts",
+        AsyncMock(side_effect=RuntimeError("embedder down")),
+    ):
+        with pytest.raises(RuntimeError, match="embedder down"):
+            await _embed_query("some query")
+
 
 # ---- Test harness ----
 

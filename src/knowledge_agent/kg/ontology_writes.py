@@ -34,6 +34,7 @@ Four public functions + two internal helpers:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -361,7 +362,9 @@ async def import_ontology_data(
     # write failures still propagate so the caller can tell them apart. `url`
     # is unused now (kept in the signature for the download op's provenance).
     path = require_cached(cache_filename, ontology_name)
-    terms = read_and_extract(path)
+    # Offload the synchronous pronto/rdflib parse (seconds-to-minutes on large
+    # ontologies) to a worker thread so the event loop / GUI stays responsive.
+    terms = await asyncio.to_thread(read_and_extract, path)
 
     if not terms:
         raise RuntimeError(f"{ontology_name}: extracted 0 terms - unexpected, aborting write")

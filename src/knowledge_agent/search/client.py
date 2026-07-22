@@ -680,18 +680,16 @@ def get_search_client() -> LanceClient:
 async def _embed_query(text: str) -> list[float] | None:
     """Embed a query string with `input_type='query'` via the ingest embedder.
 
-    Returns the single 1024-dim vector, or None on Voyage failure / empty
-    result. Voyage exceptions are caught here so the agent's search path
-    stays fail-soft (returns `[]` on embed failure); the typed-errors
-    wiring for the read path lives in `nodes.py` (Phase D). The SAME
-    multimodal model used at ingest time produces query vectors so they
-    share a latent space with the indexed chunks.
+    Returns the single 1024-dim vector, or None only when the embedder returns
+    an EMPTY result. Embedder EXCEPTIONS (outage / bad key / dim mismatch)
+    PROPAGATE unchanged: `vector_search`'s contract is "failures propagate
+    (typed-errors)", and the retriever node in `nodes.py` turns them into a
+    typed retrieval error. Swallowing them here made an embedder outage
+    indistinguishable from an empty corpus (both -> []), silently hiding real
+    failures. The SAME multimodal model used at ingest time produces query
+    vectors so they share a latent space with the indexed chunks.
     """
-    try:
-        embeddings = await embed_texts([text], input_type="query")
-    except Exception as exc:
-        logger.warning("LanceDB: _embed_query Voyage call failed: %r", exc)
-        return None
+    embeddings = await embed_texts([text], input_type="query")
     if not embeddings:
         return None
     return embeddings[0]
