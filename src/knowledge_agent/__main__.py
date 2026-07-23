@@ -1,4 +1,4 @@
-"""`python -m knowledge_agent` entry — same as the `kg` console script."""
+"""`python -m knowledge_agent` entry — same as the `ka` console script."""
 
 import sys
 

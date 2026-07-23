@@ -1,4 +1,4 @@
-"""KnowledgeAgent — LangGraph agent for research literature with LanceDB + Neo4j."""
+"""KnowledgeAgent — LangGraph agent for knowledge base search with LanceDB + Neo4j."""
 
 __version__ = "0.1.0"
 
