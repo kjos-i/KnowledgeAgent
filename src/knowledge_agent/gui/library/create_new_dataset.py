@@ -59,6 +59,7 @@ from knowledge_agent.gui._styles import (
     labeled_field,
     panel_box,
 )
+from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.config_store import (
     ConfigError,
     CorpusEntry,
@@ -268,13 +269,18 @@ class CreateNewDatasetTab:
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                 spacing=10,
                 controls=[
-                    ft.Text(
-                        "One Neo4j instance + one LanceDB path per "
-                        "corpus. Set the Neo4j DBMS up in Neo4j Desktop "
-                        "first, then enter its connection details below.",
-                        size=12,
-                        color=ft.Colors.GREY_500,
-                        italic=True,
+                    ft.Row(
+                        controls=[
+                            ft.Text(
+                                "How to fill this in:",
+                                size=12,
+                                color=ft.Colors.GREY_500,
+                                italic=True,
+                            ),
+                            info(self.app, "library.create_dataset"),
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=6,
                     ),
                     labeled_field("Corpus name", self.name_field),
                     labeled_field("Neo4j URI", self.uri_field),
