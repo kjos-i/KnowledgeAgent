@@ -27,6 +27,7 @@ results/
 # LanceDB on-disk datasets (created by the search layer)
 lance_data/
 lance_data_test/
+test_lancedb/
 
 # Evaluation harness output (SQLite ledger + JSON/CSV reports)
 eval_output/
