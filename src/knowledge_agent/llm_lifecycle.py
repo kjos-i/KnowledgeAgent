@@ -1,9 +1,11 @@
 """GUI-facing LLM provider lifecycle ops (install / uninstall / model pull).
 
 Same plan/execute UI contract as `ingestion/parser_lifecycle.py` and
-`entity_extractors/extractor_lifecycle.py`. Manages the three
-non-default LLM providers (OpenAI / Google / Ollama); Anthropic is
-the bundled default and has no install/uninstall ops.
+`entity_extractors/extractor_lifecycle.py`. Manages all four LLM
+providers (Anthropic / OpenAI / Google / Ollama) — none is bundled:
+each ships as a `llm-*` pip extra, installed only when the user picks
+it. Anthropic was the bundled default pre-2026-06-29; it is now a
+provider like any other (see `_anthropic_is_installed`).
 
 LOCKED RULE 2026-06-29 — NO AUTO-INSTALL.
 Picking a provider in Settings is settings-only. The GUI surfaces a
@@ -29,11 +31,12 @@ Ollama is the partial-install case:
      `pull_ollama_model_*` ops. Each model in the curated menu has
      its own provenance.
 
-Curated menus locked 2026-06-29 (4 entries each):
+Curated model menus locked 2026-06-29. This module owns only the
+Ollama menu (`OLLAMA_MODELS` below) — each Ollama model is a distinct
+local download with its own size/licence provenance. The cloud model
+choices (Anthropic / OpenAI / Google) live with the config defaults
+(`config.PROVIDER_NODE_DEFAULTS`) and the GUI pickers, not here:
 
-  - Anthropic models: Haiku (cheap) + Sonnet (smart) + Opus (top).
-  - OpenAI models: GPT-4o-mini + GPT-4o + GPT-4o-2024-11-20.
-  - Google models: Gemini 1.5 Flash + 1.5 Pro + 2.0 Flash.
   - Ollama models: llama3.2:3b / qwen2.5:7b / qwen2.5:14b /
     llama3.3:70b (laptop / mid / high / workstation tiers).
 
