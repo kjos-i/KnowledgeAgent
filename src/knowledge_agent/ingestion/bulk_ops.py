@@ -39,12 +39,10 @@ from knowledge_agent.ingestion.sync_diff import (
     SyncBuckets,
     classify,
 )
-from knowledge_agent.kg import (
-    cross_doc_xrefs_writes,
-    ontology_xrefs,
-)
+from knowledge_agent.kg import cross_doc_xrefs_writes
 from knowledge_agent.kg.client import get_kg_client
-from knowledge_agent.kg.ontology_linking import ONTOLOGY_REGISTRY
+from knowledge_agent.kg.ontologies import xrefs
+from knowledge_agent.kg.ontologies.linking import ONTOLOGY_REGISTRY
 from knowledge_agent.kg.reconcile import (
     reconcile_cross_doc_to_config,
     reconcile_cross_doc_xrefs_to_config,
@@ -1454,7 +1452,7 @@ class BackfillXrefsResult:
     at plan time — the execute is a documented no-op, NOT a failure.
 
     `per_ontology_counts` is the dict returned by
-    `kg.ontology_xrefs.backfill_resolved_xrefs` — keyed by term
+    `kg.ontologies.xrefs.backfill_resolved_xrefs` — keyed by term
     sub-label, each value `{"n_edges_attempted": int,
     "n_sources_cleaned": int}`. None when the underlying call hit
     a session-level error.
@@ -1480,7 +1478,7 @@ async def backfill_xrefs_plan(config: CorpusConfig) -> BackfillXrefsPlan:
     total_dangling = 0
     for term_label in ONTOLOGY_SUB_LABELS:
         try:
-            total_dangling += await ontology_xrefs.count_dangling_xrefs(
+            total_dangling += await xrefs.count_dangling_xrefs(
                 kg_client,
                 term_label,
             )
@@ -1520,7 +1518,7 @@ async def backfill_xrefs_execute(
     """Perform the backfill promised by `plan`.
 
     Two-phase:
-      1. Always: `await ontology_xrefs.backfill_resolved_xrefs(client)` —
+      1. Always: `await xrefs.backfill_resolved_xrefs(client)` —
          the per-ontology resolve + strip passes.
       2. Conditional on `plan.will_recompute_l10`:
          `await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(
@@ -1541,7 +1539,7 @@ async def backfill_xrefs_execute(
 
     kg_client = get_kg_client()
     try:
-        per_ontology = await ontology_xrefs.backfill_resolved_xrefs(kg_client)
+        per_ontology = await xrefs.backfill_resolved_xrefs(kg_client)
     except Exception as exc:
         logger.warning(
             "backfill_xrefs_execute: backfill_resolved_xrefs failed: %r",
@@ -1756,7 +1754,7 @@ class ClearXrefEdgesResult:
     """Outcome of `clear_xref_edges_execute`.
 
     `n_cleared` is the sum of (edges deleted + properties removed)
-    returned by `ontology_xrefs.clear_xref_edges_for_ontology`. None
+    returned by `xrefs.clear_xref_edges_for_ontology`. None
     on Cypher failure (logged).
     """
 
@@ -1783,7 +1781,7 @@ async def clear_xref_edges_plan(ontology_name: str) -> ClearXrefEdgesPlan:
 
     kg_client = get_kg_client()
     try:
-        n_edges = await ontology_xrefs.count_xref_edges(kg_client, term_label)
+        n_edges = await xrefs.count_xref_edges(kg_client, term_label)
     except Exception as exc:
         logger.warning(
             "clear_xref_edges_plan: count_xref_edges(%s) failed: %r",
@@ -1792,7 +1790,7 @@ async def clear_xref_edges_plan(ontology_name: str) -> ClearXrefEdgesPlan:
         )
         n_edges = 0
     try:
-        n_dangling = await ontology_xrefs.count_dangling_xrefs(
+        n_dangling = await xrefs.count_dangling_xrefs(
             kg_client,
             term_label,
         )
@@ -1817,7 +1815,7 @@ async def clear_xref_edges_execute(
     """Perform the wipe promised by `plan`."""
     kg_client = get_kg_client()
     try:
-        n = await ontology_xrefs.clear_xref_edges_for_ontology(
+        n = await xrefs.clear_xref_edges_for_ontology(
             kg_client,
             plan.term_label,
         )

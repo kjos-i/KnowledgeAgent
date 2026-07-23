@@ -97,7 +97,7 @@ modules for how installs are planned/executed from the GUI.
 | Neo4j driver / write+read facade | `kg/client.py` |
 | Neo4j labels / edges / indexes | `kg/schema.py` |
 | Neo4j schema → Cypher-gen prompt; Cypher safety | `kg/schema_as_prompt.py`; `kg/cypher_safety.py` (read-only + LIMIT wrap) |
-| KG write layers L1–L10 | `kg/openalex_writes.py` (L1–4), `kg/chunk_writes.py` (L5), `kg/entity_writes.py` (L6), `kg/ontology_*_writes.py` + `ontology_helpers.py` + `ontology_xrefs.py` (L7), `kg/triples_writes.py` (L8), `kg/cross_doc_writes.py` (L9), `kg/cross_doc_xrefs_writes.py` (L10) |
+| KG write layers L1–L10 | `kg/openalex_writes.py` (L1–4), `kg/chunk_writes.py` (L5), `kg/entity_writes.py` (L6), `kg/ontologies/*_writes.py` + `helpers.py` + `xrefs.py` (L7), `kg/triples_writes.py` (L8), `kg/cross_doc_writes.py` (L9), `kg/cross_doc_xrefs_writes.py` (L10) |
 | NER extractors (L6) | `entity_extractors/` (base, dispatcher, llm, gliner, gliner_biomed, hunflair2) |
 | LLM / embedder dispatch | `llm_factory.py` / `embedder_factory.py` (lazy key validation) |
 | Install/uninstall of providers, extractors, parsers, ontologies | the five `*_lifecycle.py` (plan/execute pattern) |

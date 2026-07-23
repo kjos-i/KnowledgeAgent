@@ -2,8 +2,8 @@
 
 Covers the construction contract (Settings → AsyncClient kwargs) plus
 the `request()` retry policy on retryable status codes / network
-errors. The 4 production call sites (metadata, ontology_helpers,
-ontology_fibo_writes, llm_lifecycle) own their own behaviour tests
+errors. The 4 production call sites (metadata, helpers,
+fibo_writes, llm_lifecycle) own their own behaviour tests
 against this surface; here we pin only what _http_client guarantees.
 """
 

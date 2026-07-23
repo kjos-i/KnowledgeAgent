@@ -1,6 +1,6 @@
 """GUI-facing extractor lifecycle ops (Python-environment admin).
 
-Same plan/execute UI contract as `kg/ontology_lifecycle.py`, but
+Same plan/execute UI contract as `kg/ontologies/lifecycle.py`, but
 operates on the user's Python environment (pip-installed packages +
 model cache files), not on the KG. Lives in `entity_extractors/`
 because the per-extractor lifecycle details (pip extras name, cache
@@ -426,7 +426,7 @@ class InstallExtractorPlan:
     instead of a per-label mapping.
 
     Filled by `install_extractor_plan` via
-    `kg.ontology_lifecycle.get_canonicalization_candidates`."""
+    `kg.ontologies.lifecycle.get_canonicalization_candidates`."""
 
     @property
     def summary(self) -> str:
@@ -556,9 +556,9 @@ def install_extractor_plan(extractor_name: str) -> InstallExtractorPlan:
     already_installed = bool(entry["is_installed_fn"]())
     # Pre-compute the cross-link surface at plan-build time. Lazy
     # import avoids the import-graph cycle: extractor_lifecycle is a
-    # leaf module that kg/ontology_lifecycle imports from, so we
+    # leaf module that kg/ontologies/lifecycle imports from, so we
     # can't have a reverse top-level import here without cycling.
-    from knowledge_agent.kg.ontology_lifecycle import (
+    from knowledge_agent.kg.ontologies.lifecycle import (
         get_canonicalization_candidates,
     )
 

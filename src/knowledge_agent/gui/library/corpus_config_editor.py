@@ -2616,7 +2616,7 @@ class CorpusConfigEditor:
         error so a transient failure doesn't wrongly block the whole list
         (the ingest path hard-guards regardless)."""
         try:
-            from knowledge_agent.kg.ontology_lifecycle import is_ontology_downloaded
+            from knowledge_agent.kg.ontologies.lifecycle import is_ontology_downloaded
 
             return bool(is_ontology_downloaded(key))
         except Exception:

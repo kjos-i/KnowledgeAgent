@@ -56,9 +56,7 @@ src/knowledge_agent/
 │   ├── openalex_writes.py    # L1-L4: papers, authors, citations, topics
 │   ├── chunk_writes.py      # L5: per-chunk :Chunk nodes
 │   ├── entity_writes.py      # L6: extracted entities
-│   ├── ontology_*_writes.py  # L7: 18 ontology importers (one file per ontology)
-│   ├── ontology_helpers.py   # Shared pronto + rdflib + Neo4j-write primitives
-│   ├── ontology_xrefs.py     # L7 xref edges (MONDO ↔ MeSH, etc.)
+│   ├── ontologies/           # L7: 18 ontology importers + shared helpers/linking/xrefs
 │   ├── triples_writes.py     # L8: 15 typed entity-to-entity relations
 │   ├── cross_doc_writes.py   # L9: :RELATED_TO via shared entities
 │   ├── cross_doc_xrefs_writes.py  # L10: :RELATED_BY_XREF via shared canonicals
@@ -148,7 +146,7 @@ When the user (or a bulk op) ingests one document:
                           (joined through L7 ontology xref edges)
 ```
 
-Each L7 ontology lives in its own write module ([kg/ontology_*_writes.py](src/knowledge_agent/kg/)). All 18 use shared helpers in [kg/ontology_helpers.py](src/knowledge_agent/kg/ontology_helpers.py).
+Each L7 ontology lives in its own write module ([kg/ontologies/*_writes.py](src/knowledge_agent/kg/ontologies/)). All 18 use shared helpers in [kg/ontologies/helpers.py](src/knowledge_agent/kg/ontologies/helpers.py).
 
 Each layer is independently toggleable via [`corpus.toml`](corpus.toml.example).
 
@@ -210,7 +208,7 @@ A recurring pattern. Each lifecycle file owns a registry of installable things +
 
 | File | Manages | Registry size |
 |---|---|---|
-| [kg/ontology_lifecycle.py](src/knowledge_agent/kg/ontology_lifecycle.py) | L7 ontology import / link / delete | 18 ontologies |
+| [kg/ontologies/lifecycle.py](src/knowledge_agent/kg/ontologies/lifecycle.py) | L7 ontology import / link / delete | 18 ontologies |
 | [entity_extractors/extractor_lifecycle.py](src/knowledge_agent/entity_extractors/extractor_lifecycle.py) | L6 NER extractor pip install | 4 extractors |
 | [ingestion/parser_lifecycle.py](src/knowledge_agent/ingestion/parser_lifecycle.py) | parsers-asr / parsers-code extras | 2 extras |
 | [llm_lifecycle.py](src/knowledge_agent/llm_lifecycle.py) | 4 LLM providers + Ollama model pulls | 4 providers + 4 models |

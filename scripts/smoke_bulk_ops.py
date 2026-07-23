@@ -1,4 +1,4 @@
-"""Smoke test for bulk_ops + ontology_lifecycle plan/execute pattern.
+"""Smoke test for bulk_ops + lifecycle plan/execute pattern.
 
 Exercises a realistic GUI workflow end-to-end against real LanceDB +
 Neo4j + (one) OpenAlex lookup, with a controlled `test_documents/`
@@ -21,7 +21,7 @@ Workflow (mirrors what a user does in the Library tab):
      metadata-stage iteration.
   6. `bulk_ops.delete_doc_plan(doc_id)` -> execute. Verifies the
      unified delete (LanceDB + KG L1-L4 + L5 + L6).
-  7. `ontology_lifecycle.delete_ontology_plan("mesh")` -> execute.
+  7. `lifecycle.delete_ontology_plan("mesh")` -> execute.
      Verifies the surgical wipe path.
 
 Lifecycle (matches the clear-at-start + pause + optional-cleanup-at-end
@@ -78,7 +78,7 @@ from knowledge_agent.corpus_config import (  # noqa: E402
 )
 from knowledge_agent.ingestion import bulk_ops, pipeline  # noqa: E402
 from knowledge_agent.ingestion.ids import compute_doc_id  # noqa: E402
-from knowledge_agent.kg import ontology_lifecycle  # noqa: E402
+from knowledge_agent.kg.ontologies import lifecycle  # noqa: E402
 from knowledge_agent.search.client import get_search_client  # noqa: E402
 
 TEST_DOCS = Path(__file__).resolve().parent.parent / "test_documents"
@@ -187,8 +187,8 @@ async def main() -> None:
         assert result.ok, "delete_doc returned ok=False"
 
     # 6. ONTOLOGY LIFECYCLE -----------------------------------------------
-    print("\n[ontology_lifecycle] inspecting MeSH state")
-    mesh_plan = await ontology_lifecycle.delete_ontology_plan("mesh")
+    print("\n[lifecycle] inspecting MeSH state")
+    mesh_plan = await lifecycle.delete_ontology_plan("mesh")
     _print_plan("delete_ontology_plan('mesh')", mesh_plan)
 
     # 7. PAUSE FOR INSPECTION + OPTIONAL CLEANUP -------------------------
@@ -204,7 +204,7 @@ async def main() -> None:
         return
 
     if mesh_plan.is_imported:
-        result = await ontology_lifecycle.delete_ontology_execute(mesh_plan)
+        result = await lifecycle.delete_ontology_execute(mesh_plan)
         _print_result("delete_ontology_execute", result)
 
 

@@ -55,7 +55,7 @@ def test_ontology_checkbox_hard_disabled_when_not_downloaded(fake_app):
     a downloaded one stays enabled. Ingest never auto-downloads."""
     ed = _editor(fake_app)
     with patch(
-        "knowledge_agent.kg.ontology_lifecycle.is_ontology_downloaded",
+        "knowledge_agent.kg.ontologies.lifecycle.is_ontology_downloaded",
         side_effect=lambda key: key == "go",  # only GO is on disk
     ):
         _load(ed, extractors=["llm"])  # entities layer on

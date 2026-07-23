@@ -25,7 +25,7 @@ Flow:
 
 Counterpart automation: there's no parallel unit test for the
 download+parse path (that's a real network call); unit tests in
-`tests/unit/kg/test_ontology_*_writes.py` cover the parsing logic
+`tests/unit/kg/ontologies/test_*_writes.py` cover the parsing logic
 with mocked file inputs.
 
 REQUIRES the smoke-test Neo4j instance running. This script calls
@@ -60,7 +60,7 @@ from _install_smoke_lib import (  # noqa: E402
     print_result,
 )
 
-from knowledge_agent.kg.ontology_lifecycle import (  # noqa: E402
+from knowledge_agent.kg.ontologies.lifecycle import (  # noqa: E402
     delete_ontology_execute,
     delete_ontology_plan,
     import_ontology_execute,

@@ -1792,7 +1792,7 @@ async def test_backfill_xrefs_plan_aggregates_dangling_across_all_sub_labels():
             return_value=kg_mock,
         ),
         patch(
-            "knowledge_agent.ingestion.bulk_ops.ontology_xrefs.count_dangling_xrefs",
+            "knowledge_agent.ingestion.bulk_ops.xrefs.count_dangling_xrefs",
             side_effect=lambda c, lbl: counts.get(lbl, 0),
         ),
     ):
@@ -1810,7 +1810,7 @@ async def test_backfill_xrefs_plan_flags_l10_when_layer_on():
             return_value=kg_mock,
         ),
         patch(
-            "knowledge_agent.ingestion.bulk_ops.ontology_xrefs.count_dangling_xrefs",
+            "knowledge_agent.ingestion.bulk_ops.xrefs.count_dangling_xrefs",
             return_value=0,
         ),
     ):
@@ -1838,7 +1838,7 @@ async def test_backfill_xrefs_execute_skips_when_layer_off():
             "knowledge_agent.ingestion.bulk_ops.get_kg_client",
         ) as get_client,
         patch(
-            "knowledge_agent.ingestion.bulk_ops.ontology_xrefs.backfill_resolved_xrefs",
+            "knowledge_agent.ingestion.bulk_ops.xrefs.backfill_resolved_xrefs",
         ) as backfill,
     ):
         result = await backfill_xrefs_execute(plan, _config_xrefs("none"))
@@ -1863,7 +1863,7 @@ async def test_backfill_xrefs_execute_calls_resolve_when_layer_on():
             return_value=MagicMock(),
         ),
         patch(
-            "knowledge_agent.ingestion.bulk_ops.ontology_xrefs.backfill_resolved_xrefs",
+            "knowledge_agent.ingestion.bulk_ops.xrefs.backfill_resolved_xrefs",
             return_value=fake_counts,
         ) as backfill,
         patch(
@@ -1895,7 +1895,7 @@ async def test_backfill_xrefs_execute_calls_l10_recompute_when_layer_on():
             return_value=MagicMock(),
         ),
         patch(
-            "knowledge_agent.ingestion.bulk_ops.ontology_xrefs.backfill_resolved_xrefs",
+            "knowledge_agent.ingestion.bulk_ops.xrefs.backfill_resolved_xrefs",
             return_value=fake_counts,
         ),
         patch(
@@ -2043,11 +2043,11 @@ async def test_clear_xref_edges_plan_carries_counts_and_term_label():
             return_value=MagicMock(),
         ),
         patch(
-            "knowledge_agent.ingestion.bulk_ops.ontology_xrefs.count_xref_edges",
+            "knowledge_agent.ingestion.bulk_ops.xrefs.count_xref_edges",
             return_value=12,
         ),
         patch(
-            "knowledge_agent.ingestion.bulk_ops.ontology_xrefs.count_dangling_xrefs",
+            "knowledge_agent.ingestion.bulk_ops.xrefs.count_dangling_xrefs",
             return_value=7,
         ),
     ):
@@ -2074,7 +2074,7 @@ def test_clear_xref_edges_plan_summary_mentions_outbound_only():
 
 
 async def test_clear_xref_edges_execute_delegates_to_kg_helper():
-    """Execute calls `ontology_xrefs.clear_xref_edges_for_ontology` with
+    """Execute calls `xrefs.clear_xref_edges_for_ontology` with
     the plan's term_label and returns the sum."""
     plan = ClearXrefEdgesPlan(
         ontology_name="mesh",
@@ -2088,7 +2088,7 @@ async def test_clear_xref_edges_execute_delegates_to_kg_helper():
             return_value=MagicMock(),
         ),
         patch(
-            "knowledge_agent.ingestion.bulk_ops.ontology_xrefs.clear_xref_edges_for_ontology",
+            "knowledge_agent.ingestion.bulk_ops.xrefs.clear_xref_edges_for_ontology",
             return_value=14,
         ) as clear_fn,
     ):
@@ -2114,7 +2114,7 @@ async def test_clear_xref_edges_execute_fail_soft_when_helper_returns_none():
             return_value=MagicMock(),
         ),
         patch(
-            "knowledge_agent.ingestion.bulk_ops.ontology_xrefs.clear_xref_edges_for_ontology",
+            "knowledge_agent.ingestion.bulk_ops.xrefs.clear_xref_edges_for_ontology",
             return_value=None,
         ),
     ):

@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import logging
 
-from knowledge_agent.kg.ontology_linking import ONTOLOGY_REGISTRY
+from knowledge_agent.kg.ontologies.linking import ONTOLOGY_REGISTRY
 from knowledge_agent.kg.schema import (
     ENTITY_LABEL,
     RELATED_BY_XREF_REL,

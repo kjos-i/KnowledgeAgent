@@ -327,7 +327,7 @@ class LayerFlags(BaseModel):
             "Biological organism taxonomy (species, genus, family, ...). "
             "WARNING: ~2.74M classes, ~440 MB source - by far the "
             "largest ontology on the menu. Budget several GB of RAM "
-            "for the first-time import; see ontology_ncbitaxon_writes "
+            "for the first-time import; see ncbitaxon_writes "
             "module docstring."
         ),
     )
@@ -370,7 +370,7 @@ class LayerFlags(BaseModel):
             "WARNING: ~700K classes, ~220 MB OWL source - second-"
             "largest ontology on the menu after NCBITaxon. Budget "
             "several GB of RAM for the first-time import; see "
-            "ontology_dron_writes module docstring."
+            "dron_writes module docstring."
         ),
     )
     ontology_fibo: bool = Field(

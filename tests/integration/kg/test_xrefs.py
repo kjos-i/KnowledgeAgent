@@ -1,4 +1,4 @@
-"""Integration tests for `kg/ontology_xrefs` (L7 cross-ontology xref
+"""Integration tests for `kg/ontologies/xrefs` (L7 cross-ontology xref
 edges).
 
 Exercises the backfill / clear / count primitives against a real
@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from knowledge_agent.kg import ontology_xrefs
+from knowledge_agent.kg.ontologies import xrefs
 from knowledge_agent.kg.schema import (
     HPO_TERM_LABEL,
     MESH_TERM_LABEL,
@@ -74,7 +74,7 @@ async def test_backfill_resolves_dangling_xrefs_when_target_exists(
         ],
     )
 
-    result = await ontology_xrefs.backfill_resolved_xrefs(kg_client)
+    result = await xrefs.backfill_resolved_xrefs(kg_client)
     assert result is not None
 
     # The MONDO entry shows 1 edge attempted + 1 source cleaned.
@@ -115,8 +115,8 @@ async def test_backfill_is_idempotent(
         ],
     )
 
-    await ontology_xrefs.backfill_resolved_xrefs(kg_client)
-    second = await ontology_xrefs.backfill_resolved_xrefs(kg_client)
+    await xrefs.backfill_resolved_xrefs(kg_client)
+    second = await xrefs.backfill_resolved_xrefs(kg_client)
     assert second is not None
 
     # Edge-level idempotency is the load-bearing contract: a second
@@ -125,7 +125,7 @@ async def test_backfill_is_idempotent(
     # touches the source node again with an idempotent SET — that's
     # a noisy count, not a state change. The MERGE not duplicating
     # is what matters.)
-    n_edges = await ontology_xrefs.count_xref_edges(kg_client, MONDO_TERM_LABEL)
+    n_edges = await xrefs.count_xref_edges(kg_client, MONDO_TERM_LABEL)
     assert n_edges == 1
 
 
@@ -144,10 +144,10 @@ async def test_count_xref_edges_returns_per_ontology_count(
             ("MONDO:0002", ["MESH:D002"]),
         ],
     )
-    await ontology_xrefs.backfill_resolved_xrefs(kg_client)
+    await xrefs.backfill_resolved_xrefs(kg_client)
 
-    n_mondo = await ontology_xrefs.count_xref_edges(kg_client, MONDO_TERM_LABEL)
-    n_mesh = await ontology_xrefs.count_xref_edges(kg_client, MESH_TERM_LABEL)
+    n_mondo = await xrefs.count_xref_edges(kg_client, MONDO_TERM_LABEL)
+    n_mesh = await xrefs.count_xref_edges(kg_client, MESH_TERM_LABEL)
     assert n_mondo == 2
     assert n_mesh == 0  # MeSH terms had no dangling_xrefs themselves
 
@@ -167,11 +167,11 @@ async def test_count_dangling_xrefs_counts_source_nodes(
             ("MONDO:0002", ["MESH:UNKNOWN_2"]),
         ],
     )
-    await ontology_xrefs.backfill_resolved_xrefs(kg_client)
+    await xrefs.backfill_resolved_xrefs(kg_client)
 
     # MONDO:0001 still has MESH:UNKNOWN_1 dangling; MONDO:0002 still
     # has MESH:UNKNOWN_2 dangling — both count.
-    n_dangling = await ontology_xrefs.count_dangling_xrefs(kg_client, MONDO_TERM_LABEL)
+    n_dangling = await xrefs.count_dangling_xrefs(kg_client, MONDO_TERM_LABEL)
     assert n_dangling == 2
 
 
@@ -196,17 +196,17 @@ async def test_clear_xref_edges_for_ontology_drops_only_target(
             ("HPO:0001", ["MESH:D001"]),
         ],
     )
-    await ontology_xrefs.backfill_resolved_xrefs(kg_client)
+    await xrefs.backfill_resolved_xrefs(kg_client)
 
     # Pre-clear: both MONDO and HPO have 1 outgoing edge.
-    assert await ontology_xrefs.count_xref_edges(kg_client, MONDO_TERM_LABEL) == 1
-    assert await ontology_xrefs.count_xref_edges(kg_client, HPO_TERM_LABEL) == 1
+    assert await xrefs.count_xref_edges(kg_client, MONDO_TERM_LABEL) == 1
+    assert await xrefs.count_xref_edges(kg_client, HPO_TERM_LABEL) == 1
 
-    n_cleared = await ontology_xrefs.clear_xref_edges_for_ontology(kg_client, MONDO_TERM_LABEL)
+    n_cleared = await xrefs.clear_xref_edges_for_ontology(kg_client, MONDO_TERM_LABEL)
     # n_cleared = edges deleted + dangling_xrefs props removed
     # = 1 (MONDO->MESH edge) + 1 (MONDO:0001 dangling_xrefs prop) = 2.
     assert n_cleared == 2
 
     # Post-clear: MONDO empty, HPO untouched.
-    assert await ontology_xrefs.count_xref_edges(kg_client, MONDO_TERM_LABEL) == 0
-    assert await ontology_xrefs.count_xref_edges(kg_client, HPO_TERM_LABEL) == 1
+    assert await xrefs.count_xref_edges(kg_client, MONDO_TERM_LABEL) == 0
+    assert await xrefs.count_xref_edges(kg_client, HPO_TERM_LABEL) == 1

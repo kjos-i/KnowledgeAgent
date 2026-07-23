@@ -54,7 +54,7 @@ stacked.
 Startup rule (per `gui-view-startup` feedback memory): no work in
 `_create_controls`; all lifecycle queries defer to the first `build()`
 call. Ontology state is a disk probe (via
-`ontology_lifecycle.is_ontology_downloaded` / `get_ontology_download_bytes`),
+`lifecycle.is_ontology_downloaded` / `get_ontology_download_bytes`),
 so the tab renders synchronously — no background task needed.
 """
 
@@ -111,7 +111,7 @@ from knowledge_agent.ingestion.parser_lifecycle import (
     uninstall_parser_extra_execute,
     uninstall_parser_extra_plan,
 )
-from knowledge_agent.kg.ontology_linking import ONTOLOGY_REGISTRY
+from knowledge_agent.kg.ontologies.linking import ONTOLOGY_REGISTRY
 from knowledge_agent.llm_factory import parse_model_ref
 from knowledge_agent.llm_lifecycle import (
     LLM_PROVIDER_REGISTRY,
@@ -724,7 +724,7 @@ class InstallsTab:
         """
         # Local import: keeps neo4j out of GUI startup (warmed by the graph
         # pre-warm). See app.py `_prewarm_graph`.
-        from knowledge_agent.kg.ontology_lifecycle import _safe_downloads_dir
+        from knowledge_agent.kg.ontologies.lifecycle import _safe_downloads_dir
 
         if self.effective_downloads_display is not None:
             effective = _safe_downloads_dir()
@@ -1038,7 +1038,7 @@ class InstallsTab:
         bulk_ops. Here we tell the user whether the source *file* is
         on disk (and how big) so they can decide to download or wipe.
         """
-        from knowledge_agent.kg.ontology_lifecycle import (
+        from knowledge_agent.kg.ontologies.lifecycle import (
             get_ontology_download_bytes,
             is_ontology_downloaded,
         )
@@ -1143,7 +1143,7 @@ class InstallsTab:
 
     # --- Ontology (fully wired to disk-only download / delete) ---
     def _on_ontology_download(self, name: str) -> None:
-        from knowledge_agent.kg.ontology_lifecycle import download_ontology_download_plan
+        from knowledge_agent.kg.ontologies.lifecycle import download_ontology_download_plan
 
         plan = download_ontology_download_plan(name)
         self._show_confirm_dialog(
@@ -1154,7 +1154,7 @@ class InstallsTab:
         )
 
     async def _run_ontology_download(self, name: str) -> None:
-        from knowledge_agent.kg.ontology_lifecycle import (
+        from knowledge_agent.kg.ontologies.lifecycle import (
             download_ontology_download_execute,
             download_ontology_download_plan,
             get_ontology_download_bytes,
@@ -1204,7 +1204,7 @@ class InstallsTab:
         self._safe_update()
 
     def _on_ontology_delete(self, name: str) -> None:
-        from knowledge_agent.kg.ontology_lifecycle import delete_ontology_download_plan
+        from knowledge_agent.kg.ontologies.lifecycle import delete_ontology_download_plan
 
         plan = delete_ontology_download_plan(name)
         self._show_confirm_dialog(
@@ -1215,7 +1215,7 @@ class InstallsTab:
         )
 
     async def _run_ontology_delete(self, name: str) -> None:
-        from knowledge_agent.kg.ontology_lifecycle import (
+        from knowledge_agent.kg.ontologies.lifecycle import (
             delete_ontology_download_execute,
             delete_ontology_download_plan,
         )

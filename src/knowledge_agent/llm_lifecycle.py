@@ -639,7 +639,7 @@ async def uninstall_llm_provider_execute(
 
     No-ops when bundled / not installed / active. The active-provider
     block is the policy guard — symmetric with the
-    parser_lifecycle and ontology_lifecycle delete-while-active
+    parser_lifecycle and lifecycle delete-while-active
     guards.
     """
     if plan.bundled or not plan.installed or plan.is_active:

@@ -1,6 +1,6 @@
 """GUI-facing parser lifecycle ops (Python-env + system-dep admin).
 
-Same plan/execute UI contract as `kg/ontology_lifecycle.py` and
+Same plan/execute UI contract as `kg/ontologies/lifecycle.py` and
 `entity_extractors/extractor_lifecycle.py`. Lives in `ingestion/`
 because the per-parser lifecycle details (pip extras name, install
 check, system binaries) belong with the parser-strategy package.

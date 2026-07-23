@@ -88,14 +88,14 @@ from knowledge_agent.logging_setup import init_logging  # noqa: E402
 
 init_logging()
 
-from knowledge_agent.kg import (  # noqa: E402
-    cross_doc_xrefs_writes,
-    ontology_hpo_writes,
-    ontology_mesh_writes,
-    ontology_mondo_writes,
-    ontology_xrefs,
-)
+from knowledge_agent.kg import cross_doc_xrefs_writes  # noqa: E402
 from knowledge_agent.kg.client import get_kg_client  # noqa: E402
+from knowledge_agent.kg.ontologies import (  # noqa: E402
+    hpo_writes,
+    mesh_writes,
+    mondo_writes,
+    xrefs,
+)
 from knowledge_agent.kg.schema import (  # noqa: E402
     HPO_TERM_LABEL,
     MESH_TERM_LABEL,
@@ -106,18 +106,18 @@ from knowledge_agent.kg.schema import (  # noqa: E402
 
 def _count_all_xref_edges(client) -> int:
     """Live count of every `:<X>_XREF` edge across all 18 types via
-    the pipe-union diagnostic from `kg.ontology_xrefs`."""
-    n = ontology_xrefs.count_xref_edges(client, None)
+    the pipe-union diagnostic from `kg.ontologies.xrefs`."""
+    n = xrefs.count_xref_edges(client, None)
     return n if n is not None else 0
 
 
 def _count_one_xref_type(client, term_label: str) -> int:
-    n = ontology_xrefs.count_xref_edges(client, term_label)
+    n = xrefs.count_xref_edges(client, term_label)
     return n if n is not None else 0
 
 
 def _count_dangling(client, term_label: str) -> int:
-    n = ontology_xrefs.count_dangling_xrefs(client, term_label)
+    n = xrefs.count_dangling_xrefs(client, term_label)
     return n if n is not None else 0
 
 
@@ -125,9 +125,9 @@ def _clear_terms(client) -> None:
     """Wipe the three ontologies we're about to (re)import. Idempotent
     — DETACH DELETE on empty match-set is a no-op."""
     for delete_fn, name in (
-        (ontology_hpo_writes.delete_imported, "HPO"),
-        (ontology_mondo_writes.delete_imported, "MONDO"),
-        (ontology_mesh_writes.delete_imported, "MeSH"),
+        (hpo_writes.delete_imported, "HPO"),
+        (mondo_writes.delete_imported, "MONDO"),
+        (mesh_writes.delete_imported, "MeSH"),
     ):
         ok = delete_fn(client)
         print(f"  clear {name} -> {ok}")
@@ -188,7 +188,7 @@ async def main() -> None:
     print()
     print("Importing HPO with xrefs_mode='use'...")
     try:
-        ontology_hpo_writes.import_hpo(
+        hpo_writes.import_hpo(
             client,
             force=True,
             xrefs_mode="use",
@@ -200,7 +200,7 @@ async def main() -> None:
     print()
     print("Importing MONDO with xrefs_mode='use'...")
     try:
-        ontology_mondo_writes.import_mondo(
+        mondo_writes.import_mondo(
             client,
             force=True,
             xrefs_mode="use",
@@ -212,7 +212,7 @@ async def main() -> None:
     print()
     print("Importing MeSH with xrefs_mode='use'...")
     try:
-        await ontology_mesh_writes.import_mesh(
+        await mesh_writes.import_mesh(
             client,
             force=True,
             xrefs_mode="use",
@@ -228,7 +228,7 @@ async def main() -> None:
 
     print()
     print("Running backfill_resolved_xrefs (call #1)...")
-    first = ontology_xrefs.backfill_resolved_xrefs(client)
+    first = xrefs.backfill_resolved_xrefs(client)
     if first is None:
         print("  backfill returned None — session error.", file=sys.stderr)
         await client.close()
@@ -242,7 +242,7 @@ async def main() -> None:
 
     print()
     print("Running backfill_resolved_xrefs (call #2 — idempotency check)...")
-    second = ontology_xrefs.backfill_resolved_xrefs(client)
+    second = xrefs.backfill_resolved_xrefs(client)
     if second is None:
         print("  backfill returned None on call #2.", file=sys.stderr)
         await client.close()
@@ -264,7 +264,7 @@ async def main() -> None:
     print("Demonstrating clear_xref_edges_for_ontology(MeSHTerm)...")
     pre_mesh = _count_one_xref_type(client, MESH_TERM_LABEL)
     print(f"  before clear: {pre_mesh} outgoing :MESH_XREF edges")
-    n_cleared = await ontology_xrefs.clear_xref_edges_for_ontology(
+    n_cleared = await xrefs.clear_xref_edges_for_ontology(
         client,
         MESH_TERM_LABEL,
     )
