@@ -21,6 +21,7 @@ dialog shape, and the global show/hide behaviour in ONE place.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple
 
 import flet as ft
@@ -108,6 +109,31 @@ def info_icon(
         _tier_icon(app, tier, title=title, text=body) for tier, body in tier_text.items() if body
     ]
     return ft.Row(icons, spacing=2, tight=True)
+
+
+@dataclass(frozen=True)
+class InfoText:
+    """All the text for one help point, across tiers — the shape stored in
+    `info_text.INFO`. `title` is the dialog header; `standard` / `beginner` /
+    `technical` are the three tier bodies (any may be None). Render one with
+    `info_point(app, spec)`, or from the registry via `info_text.info(app, key)`."""
+
+    title: str
+    standard: str | None = None
+    beginner: str | None = None
+    technical: str | None = None
+
+
+def info_point(app: GuiApp, spec: InfoText) -> ft.Control:
+    """Render the (i) icon row for an `InfoText` spec — the keyed path used by
+    `info_text.info(app, key)`. Same as `info_icon` with the spec spread out."""
+    return info_icon(
+        app,
+        title=spec.title,
+        text=spec.standard,
+        beginner=spec.beginner,
+        technical=spec.technical,
+    )
 
 
 def section_header(

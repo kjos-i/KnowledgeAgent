@@ -53,6 +53,7 @@ from knowledge_agent.gui._styles import (
     section_divider,
 )
 from knowledge_agent.gui._widgets.info_icon import info_icon, section_header, tier_icon_sample
+from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.config_store import ConfigError, save_config
 from knowledge_agent.gui.views._frame import view_header
 from knowledge_agent.health import system_status
@@ -363,10 +364,17 @@ class AppTab:
                         spacing=4,
                     ),
                     ft.Container(height=8),
-                    ft.Text(
-                        "System health — Neo4j, LanceDB, active provider keys:",
-                        size=12,
-                        color=ft.Colors.GREY_400,
+                    ft.Row(
+                        controls=[
+                            ft.Text(
+                                "System health — Neo4j, LanceDB, active provider keys:",
+                                size=12,
+                                color=ft.Colors.GREY_400,
+                            ),
+                            info(self.app, "diagnostics.system_health"),
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=6,
                     ),
                     self.chips_row,
                     ft.Row(controls=[self.rerun_button]),
