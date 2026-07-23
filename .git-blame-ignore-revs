@@ -8,3 +8,7 @@
 # Move corpus_config out of kg/ to package root: repo-wide import-path
 # rewrite, no logic change (2026-07-23)
 edcff7ae498774f1754708e49532dd47db7ae0ad
+
+# Move ontology modules into kg/ontologies/ subpackage + drop ontology_
+# prefix: structural rename, no logic change (2026-07-23)
+15baccd61b5103d57c26ca46e8a52fa110ae0f69
