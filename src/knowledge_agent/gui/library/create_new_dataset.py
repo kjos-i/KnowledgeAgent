@@ -36,12 +36,13 @@ On [Create corpus]:
      `active_corpus_name` to the new name; mirror URI / user / paths
      to the top-level `GuiConfig` fields; bridge to env; drop
      cached factories.
-  6. Chat-panel status message + a hint to open Select Dataset to
-     tune the corpus's config.
+  6. Chat-panel status message + a hint to open Ingest to configure
+     the corpus and run the first ingest.
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 from pathlib import Path
@@ -573,7 +574,15 @@ class CreateNewDatasetTab:
         toml_path = corpus_folder / "corpus.toml"
 
         try:
-            ping_err = await self._ping_neo4j(uri, user, password)
+            ping_err = await asyncio.wait_for(
+                self._ping_neo4j(uri, user, password),
+                timeout=_NEO4J_PING_TIMEOUT,
+            )
+        except TimeoutError:
+            ping_err = (
+                f"no response within {_NEO4J_PING_TIMEOUT:.0f}s — check the URI "
+                f"and that the Neo4j database is running."
+            )
         except Exception as exc:
             logger.warning("neo4j ping crashed: %r", exc)
             ping_err = f"{type(exc).__name__}: {exc}"
@@ -651,8 +660,8 @@ class CreateNewDatasetTab:
             logger.warning("reset_after_key_change failed: %r", exc)
 
         self.status.value = (
-            f"corpus {name!r} created + active. Open Select Dataset "
-            f"to tune its config (ontologies, layer flags, extractor)."
+            f"corpus {name!r} created + active. Open Ingest to configure it "
+            f"(ontologies, layer flags, extractor) and run your first ingest."
         )
         self.app.chat_panel.append_system(
             f"created corpus {name!r} — connection saved, corpus.toml written at {toml_path}"
