@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from knowledge_agent.health import (
     ComponentStatus,
@@ -23,6 +24,7 @@ from knowledge_agent.health import (
     _check_lancedb,
     _check_neo4j,
     _check_provider_key,
+    config_error_message,
     render_report_text,
     system_status,
 )
@@ -61,6 +63,27 @@ def test_status_report_all_ok_true_for_empty_components():
     """Vacuous: no components → no failures → all_ok=True. Documents
     the corner case so future renderers don't crash on an empty list."""
     assert StatusReport(components=()).all_ok is True
+
+
+def test_status_report_all_ok_false_when_config_error_set():
+    """A config_error means Settings couldn't load — not healthy, even
+    with no failing components (empty is vacuously all-ok only when
+    config_error is None)."""
+    assert StatusReport(components=(), config_error="Neo4j password not set").all_ok is False
+
+
+def test_config_error_message_maps_missing_field_to_guidance():
+    """A pydantic 'missing' error for a known field → its actionable hint."""
+    exc = ValidationError.from_exception_data(
+        "Settings",
+        [{"type": "missing", "loc": ("neo4j_password",), "input": {}}],
+    )
+    assert config_error_message(exc) == "Neo4j password not set — create a corpus in Library"
+
+
+def test_config_error_message_falls_back_for_non_validation_error():
+    """Non-pydantic errors → class name + message, not a crash."""
+    assert config_error_message(RuntimeError("boom")) == "RuntimeError: boom"
 
 
 # ---- _check_neo4j ----
@@ -276,6 +299,22 @@ async def test_system_status_local_provider_skips_key_check():
     assert "local" in llm_key.detail
 
 
+async def test_system_status_returns_config_error_when_settings_unbuildable():
+    """No active corpus → get_settings() raises ValidationError (missing
+    neo4j_password). system_status must NOT raise: it returns a report with
+    config_error set + no components, and all_ok False."""
+    exc = ValidationError.from_exception_data(
+        "Settings",
+        [{"type": "missing", "loc": ("neo4j_password",), "input": {}}],
+    )
+    with patch("knowledge_agent.health.get_settings", side_effect=exc):
+        report = await system_status()
+
+    assert report.components == ()
+    assert report.config_error == "Neo4j password not set — create a corpus in Library"
+    assert report.all_ok is False
+
+
 # ---- render_report_text ----
 
 
@@ -296,3 +335,12 @@ def test_render_report_text_one_line_per_component():
 def test_render_report_text_empty_components_returns_placeholder():
     text = render_report_text(StatusReport(components=()))
     assert "no components" in text.lower()
+
+
+def test_render_report_text_shows_config_error():
+    """config_error set → the CLI renderer prints just that hint, not the
+    empty-components placeholder."""
+    report = StatusReport(
+        components=(), config_error="Neo4j password not set — create a corpus in Library"
+    )
+    assert render_report_text(report) == "Neo4j password not set — create a corpus in Library"

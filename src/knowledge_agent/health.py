@@ -21,9 +21,10 @@ Checks today:
 
 Each check fail-soft: if the underlying call raises (Neo4j down,
 LanceDB directory missing), the check catches and reports `ok=False`
-with the exception repr in `detail`. The orchestrator
-(`system_status`) never raises — the only failure mode is "report
-says one or more components are not OK".
+with the exception repr in `detail`. The orchestrator (`system_status`)
+never raises: if `Settings` can't even be built (e.g. no active corpus,
+so NEO4J_PASSWORD isn't bridged), it comes back as `report.config_error`
+with no components; otherwise failures surface as `ok=False` components.
 
 Component checks run concurrently via `asyncio.gather` — the slowest
 check (Neo4j network round-trip) doesn't gate the others. Wall-time
@@ -35,6 +36,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+
+from pydantic import ValidationError
 
 from knowledge_agent.config import Settings, get_settings
 
@@ -69,13 +72,19 @@ class StatusReport:
     order (Neo4j first, then LanceDB, then LLM key, then embedder key).
     `all_ok` is a derived convenience for "should the green chip light
     up at the top of the Diagnostics panel".
+
+    `config_error` is set when `Settings` couldn't be built at all (e.g.
+    no active corpus, so NEO4J_PASSWORD isn't bridged into the env). It's
+    a one-line actionable hint; when set, `components` is empty and the
+    checks did not run — renderers show the hint instead of chips.
     """
 
     components: tuple[ComponentStatus, ...]
+    config_error: str | None = None
 
     @property
     def all_ok(self) -> bool:
-        return all(c.ok for c in self.components)
+        return self.config_error is None and all(c.ok for c in self.components)
 
 
 # =============================================================================
@@ -173,15 +182,53 @@ def _check_provider_key(
 # =============================================================================
 
 
-async def system_status() -> StatusReport:
-    """Run all checks concurrently; return a snapshot.
+# Human-readable guidance per known required-no-default field, so a config
+# failure renders "missing X — do Y" instead of a raw pydantic error. The
+# Neo4j params + LanceDB path are per-corpus, hence "create a corpus".
+_FIELD_GUIDANCE: dict[str, str] = {
+    "neo4j_password": "Neo4j password not set — create a corpus in Library",
+    "neo4j_uri": "Neo4j URI not set — create a corpus in Library",
+    "neo4j_user": "Neo4j user not set — create a corpus in Library",
+    "lancedb_path": "LanceDB path not set — create a corpus in Library",
+}
 
-    NEVER raises — every component's failure surfaces in its
-    `ComponentStatus.ok = False`. Callers branch on
-    `report.all_ok` (full green) or iterate `report.components` (per-
-    component rendering).
+
+def config_error_message(exc: Exception) -> str:
+    """Translate a `get_settings()` failure into a one-line actionable hint.
+
+    Pydantic missing-field errors map to `_FIELD_GUIDANCE` (the most
+    actionable thing right now); other errors fall back to the class name +
+    message. The caller logs the raw `repr(exc)` so debug info isn't lost.
     """
-    settings = get_settings()
+    if isinstance(exc, ValidationError):
+        missing = [
+            str(err["loc"][-1])
+            for err in exc.errors()
+            if err.get("type") == "missing" and err.get("loc")
+        ]
+        for field in missing:
+            if field in _FIELD_GUIDANCE:
+                return _FIELD_GUIDANCE[field]
+        if missing:
+            return f"missing required setting(s): {', '.join(missing)}"
+    return f"{type(exc).__name__}: {exc}"
+
+
+async def system_status() -> StatusReport:
+    """Run all checks concurrently; return a snapshot. NEVER raises.
+
+    If `Settings` can't be built — e.g. no active corpus, so NEO4J_PASSWORD
+    isn't bridged into the env — this returns a report with `config_error`
+    set (a one-line hint) and no components, rather than raising. Otherwise
+    every component's failure surfaces in its `ComponentStatus.ok = False`.
+    Callers branch on `report.config_error` first (show the hint), then
+    `report.all_ok` / `report.components`.
+    """
+    try:
+        settings = get_settings()
+    except Exception as exc:
+        logger.warning("system_status: could not build Settings: %r", exc)
+        return StatusReport(components=(), config_error=config_error_message(exc))
 
     llm_provider = settings.llm_provider
     embed_provider = settings.embedding_provider
@@ -220,6 +267,8 @@ def render_report_text(report: StatusReport) -> str:
     Format: one line per component, `<name>: <OK|FAIL> <detail>`, aligned
     so the OK/FAIL column lines up across rows.
     """
+    if report.config_error:
+        return report.config_error
     if not report.components:
         return "(no components in report)"
     name_width = max(len(c.name) for c in report.components)

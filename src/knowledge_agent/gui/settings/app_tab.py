@@ -41,7 +41,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import flet as ft
-from pydantic import ValidationError
 
 from knowledge_agent.artifacts import ANSWER_FORMATS, CHAT_FORMATS, FORMAT_LABELS
 from knowledge_agent.config import get_settings
@@ -644,26 +643,29 @@ class AppTab:
         await self._refresh_diagnostics()
 
     async def _refresh_diagnostics(self) -> None:
-        """Fetch system_status(); paint chips. Never raises out."""
+        """Fetch system_status(); paint chips, or the config hint when the
+        report can't be built yet (no active corpus). `system_status()`
+        never raises — a config failure comes back as `report.config_error`,
+        so there's no separate catch here (one common catch lives there)."""
         if self.chips_row is None or self.rerun_button is None:
             return
         self.rerun_button.disabled = True
         self.app.page.update()
         try:
             report = await system_status()
-            self.chips_row.controls = [
-                _status_chip(c.name, c.ok, c.detail) for c in report.components
-            ]
-        except Exception as exc:
-            logger.warning("system_status() failed: %r", exc)
-            self.chips_row.controls = [
-                ft.Text(
-                    _missing_field_message(exc),
-                    size=12,
-                    color=ft.Colors.AMBER_300,
-                    italic=True,
-                ),
-            ]
+            if report.config_error:
+                self.chips_row.controls = [
+                    ft.Text(
+                        report.config_error,
+                        size=12,
+                        color=ft.Colors.AMBER_300,
+                        italic=True,
+                    ),
+                ]
+            else:
+                self.chips_row.controls = [
+                    _status_chip(c.name, c.ok, c.detail) for c in report.components
+                ]
         finally:
             self.rerun_button.disabled = False
             self.app.page.update()
@@ -731,41 +733,6 @@ class AppTab:
 # =============================================================================
 # Local widget helpers — kept private to the module since only AppTab uses them.
 # =============================================================================
-
-
-# Human-readable name per known required-no-default field. Used to render
-# clearer "missing X — set in Y tab" messages instead of raw pydantic errors.
-# NEO4J connection params all point at Library now — they're per-corpus.
-_FIELD_GUIDANCE: dict[str, str] = {
-    "neo4j_password": ("Neo4j password not set — create a corpus in Library"),
-    "neo4j_uri": ("Neo4j URI not set — create a corpus in Library"),
-    "neo4j_user": ("Neo4j user not set — create a corpus in Library"),
-    "lancedb_path": ("LanceDB path not set — create a corpus in Library"),
-}
-
-
-def _missing_field_message(exc: Exception) -> str:
-    """Translate a pydantic ValidationError into a one-line actionable hint.
-
-    For non-pydantic errors (Neo4j network down, etc.), falls back to the
-    exception class name + message — short and human-readable. The raw
-    `repr(exc)` is logged separately at WARNING level so debugging info
-    isn't lost.
-    """
-    if isinstance(exc, ValidationError):
-        missing = [
-            str(err["loc"][-1])
-            for err in exc.errors()
-            if err.get("type") == "missing" and err.get("loc")
-        ]
-        # Prefer the first missing field with specific guidance — that's
-        # the most actionable thing the user can do right now.
-        for field in missing:
-            if field in _FIELD_GUIDANCE:
-                return _FIELD_GUIDANCE[field]
-        if missing:
-            return f"missing required setting(s): {', '.join(missing)}"
-    return f"{type(exc).__name__}: {exc}"
 
 
 def _kv_row(label: str, value: object) -> ft.Control:
