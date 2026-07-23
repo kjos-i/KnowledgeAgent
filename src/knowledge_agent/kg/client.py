@@ -14,6 +14,10 @@ Per-layer write modules:
                                                          imports its source
                                                          file once + writes
                                                          canonical-term nodes.
+  - L8 (triples)      -> `kg/triples_writes.py` (typed entity->entity edges)
+  - L9 (cross-doc)    -> `kg/cross_doc_writes.py` (:RELATED_TO, shared entities)
+  - L10 (cross-doc xref) -> `kg/cross_doc_xrefs_writes.py` (:RELATED_BY_XREF,
+                                                         shared canonicals)
 
 `Neo4jClient` exposes each write function as a 1-line async wrapper
 method, so callers do `await client.write_citations(...)` and the

@@ -1,10 +1,10 @@
 """KG writes derived from OpenAlex `work` payloads.
 
-Each function here populates one layer of the knowledge graph from a
-single OpenAlex work JSON. They are module-level functions (not methods)
-so the per-layer code stays focused and `kg/client.py` stays small as
-more layers land. Future layer-specific writes (chunks for L5, entities
-for L6) follow the same module-per-concern pattern.
+Each function here populates one layer (L1-L4) of the knowledge graph from
+a single OpenAlex work JSON. They are module-level functions (not methods)
+so the per-layer code stays focused and `kg/client.py` stays small. The
+later layers follow the same module-per-concern pattern - chunks (L5) in
+`chunk_writes.py`, entities (L6) in `entity_writes.py`, and so on.
 
 `Neo4jClient` in `kg/client.py` exposes each function as a method via a
 1-line wrapper - callers still do `client.write_citations(...)` and the

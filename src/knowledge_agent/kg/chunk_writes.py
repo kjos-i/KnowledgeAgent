@@ -84,7 +84,7 @@ async def delete_chunks_by_doc_id(client, doc_id: str) -> None:
 
     Used by the ingestion pipeline before `write_chunks` so a re-chunk
     leaves no orphans. `DETACH DELETE` handles any edges chunks may have
-    accumulated (e.g., future L6 `:MENTIONS` edges to entities).
+    accumulated (e.g., L6 `:MENTIONS` edges to entities).
 
     Raises:
       - `ValueError` for an empty `doc_id`.

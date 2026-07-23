@@ -61,9 +61,9 @@ logger = logging.getLogger(__name__)
 
 # Default threshold: minimum number of distinct shared :Entity nodes
 # required to create a :RELATED_TO edge between two docs. Tuned to
-# filter the noise floor of single-shared generic terms ("patient",
+# filter the noise floor of single-shared generic terms ("method",
 # "model", "study") while keeping meaningful pairings (two shared
-# biomedical entities = real signal).
+# domain entities = real signal).
 DEFAULT_SHARED_COUNT_THRESHOLD = 2
 
 

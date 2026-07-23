@@ -1,9 +1,10 @@
 """Single source of truth for KG schema strings.
 
 Labels, relationship types, and the constraint statements applied at startup
-(via `Neo4jClient.ensure_constraints`) all live here. Future layers (domain
-entities, ...) extend the constants below and append their constraints -
-never define their own labels inline.
+(via `Neo4jClient.ensure_constraints`) all live here — the strings for every
+layer L1-L10 (OpenAlex entities, chunks, domain entities, ontology terms,
+typed triples, cross-document links). Any new layer extends the constants
+below and appends its constraints - never define labels inline.
 
 Neo4j unique constraints treat missing properties as fine - only nodes that
 HAVE the property must have unique values - so shadow documents without a
@@ -337,9 +338,9 @@ RELATED_BY_XREF_REL = "RELATED_BY_XREF"
 #   - Cypher generators (one MERGE per predicate type)
 #   - schema_as_prompt (block listing predicates for the agent)
 #   - delete_triples_by_doc_id (one MATCH per type)
-# Order is "common-first" for biomedical: regulatory verbs before
-# structural before methodological. Re-ordering is cosmetic; the LLM
-# treats them as a set.
+# Order is "common-first": regulatory/causal verbs before structural
+# before methodological. Re-ordering is cosmetic; the LLM treats them
+# as a set.
 TRIPLE_PREDICATE_RELS: tuple[str, ...] = (
     INHIBITS_REL,
     ACTIVATES_REL,

@@ -6,8 +6,11 @@ fabricating ones that don't exist.
 
 The renderer is config-aware: only the sections for layers + sub-labels
 the corpus actually uses are emitted. Two channels filter the prompt:
-  - `config.layers.openalex_papers` and `config.layers.chunks` gate the
-    L1-L4 OpenAlex blocks and the L5 chunk blocks respectively.
+  - `config.layers.*` gates each layer's blocks - every flag is honored:
+    `openalex_papers` (L1-L4), `chunks` (L5), `entities` (L6), each
+    enabled ontology + `xrefs="use"` (L7), `triples` (L8), `cross_doc`
+    (L9), and `cross_doc_xrefs` (L10). A layer that's off contributes
+    nothing to the prompt.
   - `config.allowed_types` controls which Document/Artifact sub-labels
     appear (a corpus that doesn't allow `Patent` won't tell the LLM
     about `:Patent`). Loose `:Document` / `:Artifact` (no sub-label) is
@@ -34,9 +37,9 @@ When you change the schema:
       corpus.toml's `allowed_types` includes it. Add a per-subtype
       property block here only if that subtype has properties beyond what
       the parent `:Document` / `:Artifact` already declares.
-    - Land L6 entities -> add a new block + gate it on the new layer flag
+    - Add a new layer -> add its block below + gate it on the layer's flag
       in `corpus_config.LayerFlags`, in lockstep with the schema + writes
-      changes.
+      changes (this is how L6-L10 were each added).
 
 Future hardening (NOT done): refactor property names + types into a single
 declarative manifest in `schema.py`, then iterate it here so adding a

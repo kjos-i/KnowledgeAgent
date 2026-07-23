@@ -12,8 +12,8 @@ Per-predicate edge types (the predicate IS the edge label):
     ...
 
 Idiomatic Neo4j: typed queries become one-hop index-backed traversals
-("what inhibits BRCA1?" = `MATCH (a)-[:INHIBITS]->(:Entity
-{key:"brca1"})`). Adding a new predicate means appending one constant
+("what inhibits corrosion?" = `MATCH (a)-[:INHIBITS]->(:Entity
+{key:"corrosion"})`). Adding a new predicate means appending one constant
 to `schema.TRIPLE_PREDICATE_RELS`; the writes here iterate that tuple.
 
 Provenance + edge-collapse policy:
@@ -72,8 +72,8 @@ class ExtractedTriple:
 
     `evidence_span` is a short verbatim snippet from the chunk that
     supports the assertion. Used for citations + diagnostic display
-    (the agent can show "asserted at: 'CRISPR was used to edit
-    BRCA1...'" when answering).
+    (the agent can show "asserted at: 'the subsidy accelerated solar
+    adoption...'" when answering).
     """
 
     subject_key: str
