@@ -42,7 +42,7 @@ from knowledge_agent.artifacts import (
     save_answer,
     save_chat,
 )
-from knowledge_agent.config import disable_env_file, get_settings, reset_after_key_change
+from knowledge_agent.config import Settings, disable_env_file, get_settings, reset_after_key_change
 from knowledge_agent.corpus_config import CorpusConfig, load_corpus_config
 from knowledge_agent.evaluation.models import RetrievalSettings
 from knowledge_agent.gui._widgets.retrieval_form import (
@@ -345,9 +345,13 @@ class GuiApp:
 
     # ----- API-key preflight ------------------------------------------------
 
-    def _missing_active_provider_key(self) -> str | None:
+    def _missing_active_provider_key(self, settings: Settings) -> str | None:
         """Return the env var name of a missing key the active LLM or
         embedder provider needs, or None when both are configured.
+
+        `settings` is passed in by the caller (already built inside its own
+        try/except) so this preflight never rebuilds Settings — the caller
+        owns the incomplete-config path.
 
         Local providers (Ollama, HuggingFace) don't need API keys; they
         report no missing key here. The key is checked via `get_api_key`
@@ -355,7 +359,6 @@ class GuiApp:
         """
         import os
 
-        settings = get_settings()
         # LLM provider.
         llm_provider = settings.llm_provider
         llm_env = {
@@ -470,7 +473,22 @@ class GuiApp:
         if not text:
             return
 
-        missing_env = self._missing_active_provider_key()
+        # Building Settings needs a configured connection — an active corpus
+        # bridges its Neo4j password into the env. With nothing set up yet,
+        # get_settings() raises; surface that as a friendly chat prompt
+        # instead of letting it bubble up as an app-level crash.
+        try:
+            settings = get_settings()
+        except Exception as exc:
+            logger.info("on_send blocked — settings not configured yet: %r", exc)
+            self.chat_panel.append_system(
+                "No corpus is set up yet. Create or select a corpus in the "
+                "Library tab — and set your Neo4j connection + API keys in "
+                "Settings — before chatting."
+            )
+            return
+
+        missing_env = self._missing_active_provider_key(settings)
         if missing_env:
             self.chat_panel.append_system(
                 f"missing API key: set {missing_env} in Settings before querying."

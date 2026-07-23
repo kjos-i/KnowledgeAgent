@@ -52,11 +52,8 @@ def test_missing_key_returns_env_var_when_anthropic_key_absent(
         llm_provider="anthropic",
         embedding_provider="voyage",
     )
-    with (
-        patch("knowledge_agent.gui.app.get_settings", return_value=fake_settings),
-        patch("knowledge_agent.gui.app.get_api_key", return_value=None),
-    ):
-        result = app._missing_active_provider_key()
+    with patch("knowledge_agent.gui.app.get_api_key", return_value=None):
+        result = app._missing_active_provider_key(fake_settings)
     assert result == "ANTHROPIC_API_KEY"
 
 
@@ -71,11 +68,8 @@ def test_missing_key_returns_none_when_local_provider(
         llm_provider="ollama",
         embedding_provider="huggingface",
     )
-    with (
-        patch("knowledge_agent.gui.app.get_settings", return_value=fake_settings),
-        patch("knowledge_agent.gui.app.get_api_key", return_value=None),
-    ):
-        result = app._missing_active_provider_key()
+    with patch("knowledge_agent.gui.app.get_api_key", return_value=None):
+        result = app._missing_active_provider_key(fake_settings)
     assert result is None
 
 
@@ -92,11 +86,8 @@ def test_missing_key_accepts_env_var_set(
         llm_provider="anthropic",
         embedding_provider="voyage",
     )
-    with (
-        patch("knowledge_agent.gui.app.get_settings", return_value=fake_settings),
-        patch("knowledge_agent.gui.app.get_api_key", return_value=None),
-    ):
-        assert app._missing_active_provider_key() is None
+    with patch("knowledge_agent.gui.app.get_api_key", return_value=None):
+        assert app._missing_active_provider_key(fake_settings) is None
 
 
 def test_missing_key_checks_embedder_when_llm_ok(
@@ -111,11 +102,8 @@ def test_missing_key_checks_embedder_when_llm_ok(
         llm_provider="anthropic",
         embedding_provider="voyage",
     )
-    with (
-        patch("knowledge_agent.gui.app.get_settings", return_value=fake_settings),
-        patch("knowledge_agent.gui.app.get_api_key", return_value=None),
-    ):
-        assert app._missing_active_provider_key() == "VOYAGE_API_KEY"
+    with patch("knowledge_agent.gui.app.get_api_key", return_value=None):
+        assert app._missing_active_provider_key(fake_settings) == "VOYAGE_API_KEY"
 
 
 # ---- _load_corpus_config ----
@@ -442,6 +430,7 @@ async def test_on_send_direct_cypher_skips_router_and_invokes_graph(fake_page: M
     fake_graph = MagicMock()
     fake_graph.ainvoke = AsyncMock(return_value={})  # no final_answer branch
     with (
+        patch("knowledge_agent.gui.app.get_settings", return_value=MagicMock()),
         patch.object(app, "_missing_active_provider_key", return_value=None),
         patch.object(app, "_load_corpus_config", return_value=MagicMock()),
         patch.object(app, "_diag"),
@@ -477,6 +466,7 @@ async def test_on_send_conversational_runs_router_and_gates_retrieval(fake_page:
     fake_graph = MagicMock()
     fake_graph.ainvoke = AsyncMock(return_value={})
     with (
+        patch("knowledge_agent.gui.app.get_settings", return_value=MagicMock()),
         patch.object(app, "_missing_active_provider_key", return_value=None),
         patch.object(app, "_load_corpus_config", return_value=MagicMock()),
         patch.object(app, "_diag"),
@@ -489,6 +479,25 @@ async def test_on_send_conversational_runs_router_and_gates_retrieval(fake_page:
     router.ainvoke.assert_awaited_once()
     fake_graph.ainvoke.assert_not_awaited()  # not ready → no retrieval leg
     app.chat_panel.append_assistant.assert_called_once_with("Could you clarify?")
+
+
+async def test_on_send_no_config_shows_friendly_message_not_crash(fake_page: MagicMock):
+    """Regression: with nothing configured yet, get_settings() raises —
+    on_send must surface a friendly chat prompt and return, NOT let the
+    error bubble up as an app-level crash (the "1 validation error for
+    Settings" banner)."""
+    app = _make_app(fake_page)
+    app.busy = False
+    app.messages = []
+    app.chat_panel.get_input_text = MagicMock(return_value="hello")
+    with patch(
+        "knowledge_agent.gui.app.get_settings",
+        side_effect=Exception("1 validation error for Settings"),
+    ):
+        await app.on_send(MagicMock())
+    app.chat_panel.append_system.assert_called_once()
+    assert "corpus" in app.chat_panel.append_system.call_args.args[0].lower()
+    assert app.busy is False  # never entered the send path
 
 
 # ---- select_corpus (global corpus switch orchestration) ----
