@@ -41,7 +41,7 @@ INFO: dict[str, InfoText] = {
         ),
         beginner=(
             "A quick self-test of the app's plumbing. Until you've created a "
-            "corpus — your own searchable collection of documents — the app has "
+            "corpus (your own searchable collection of documents) the app has "
             "no database to connect to, so instead of the check results it shows "
             "a reminder to make one. Create a corpus in the Library tab, press "
             "Re-run, and each working part lights up green."
