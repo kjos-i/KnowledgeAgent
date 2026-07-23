@@ -4,3 +4,7 @@
 
 # Adopt ruff across the repo: format + lint cleanup (2026-07-04)
 46ce3f9499373e6c79ff34c63b473210ec6a076b
+
+# Move corpus_config out of kg/ to package root: repo-wide import-path
+# rewrite, no logic change (2026-07-23)
+edcff7ae498774f1754708e49532dd47db7ae0ad
