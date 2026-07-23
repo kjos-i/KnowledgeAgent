@@ -12,7 +12,7 @@ Stage-by-stage policy:
   - metadata: returns None when no DOI candidate is found OR the candidate
     doesn't resolve. The pipeline continues - chunks still get written to
     LanceDB with `metadata_status = "baseline"` or `"pending"` and no KG
-    write happens for that document.
+    write happens for that document. ##########
   - embed: returns None on Voyage API failure. The pipeline aborts the
     LanceDB write for that document (chunks need vectors) but still
     attempts the KG write if metadata resolved.
@@ -59,7 +59,7 @@ from knowledge_agent.ingestion.metadata_resolution import (
 # implementations live next door. Re-exported below (via redundant
 # alias) for backward compatibility so `pipeline.resolve_openalex(...)`,
 # `lookup_known_doi` and `_build_authors_display` still work — bulk_ops
-# + tests reach them through pipeline.
+# + tests reach them through pipeline. ###############
 from knowledge_agent.ingestion.metadata_resolution import (
     _doc_metadata_fields_from_work,
 )

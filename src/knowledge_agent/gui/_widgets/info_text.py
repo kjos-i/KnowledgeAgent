@@ -96,6 +96,55 @@ INFO: dict[str, InfoText] = {
             "Ingest tab, not here."
         ),
     ),
+    "library.corpus_folder": InfoText(
+        title="Why one folder per corpus",
+        standard=(
+            "A corpus keeps its files together in one folder — its config "
+            "(corpus.toml) and vector store (lancedb/), plus figures/ for "
+            "multimodal ingests — so a whole corpus can be moved or backed up as "
+            "a unit. (The Neo4j graph and your API keys live outside it: in Neo4j "
+            "Desktop and the OS keyring.) Keeping your source documents in this "
+            "folder too is optional — the app reads them wherever they are, in "
+            "place, and never copies them — but doing so makes the corpus fully "
+            "self-contained and makes Sync and Re-ingest reliable. Only corpus.toml "
+            "(plus lancedb/ once you ingest) is truly required; the documents are "
+            "up to you."
+        ),
+        beginner=(
+            "The idea: everything a corpus needs sits in one folder, so it's easy "
+            "to find, move, or back up. The app puts its own files there — a small "
+            "settings file (corpus.toml) and the search index (lancedb/), plus a "
+            "figures folder if your documents contain pictures. Two things stay "
+            "outside: the Neo4j database (it lives in Neo4j Desktop) and your API "
+            "keys (kept in your system's secure keychain). You can also keep your "
+            "actual documents in this folder — that's optional, the app can read "
+            "them from anywhere — but if you do, two things work more smoothly: "
+            "Sync (noticing when you add, change, or remove documents) and Re-ingest "
+            "(re-reading a document), because both need to find your original files. "
+            "The part you can't skip is the corpus's own settings and index files — "
+            "those ARE the corpus."
+        ),
+        technical=(
+            "The folder holds the app-managed artifacts: `corpus.toml` (the config "
+            "`load_corpus_config` requires — no corpus without it) and `lancedb/` "
+            "(the vector store, created on first ingest), plus `figures/<doc_id>/` "
+            "beside lancedb when `extract_figures` is on. (Eval runs add "
+            "`eval_output/` + dataset JSON; the GUI adds `.ka_session.json` — all "
+            "situational.) The Neo4j graph stays in Neo4j Desktop (only URI/user are "
+            "stored; the password is in the OS keyring), so the folder isn't "
+            "literally everything. Source files are never copied — ingest records "
+            "each file's path and reads it in place from any folder you point at. "
+            "Keeping them in a stable, corpus-owned location matters for Sync (it "
+            "hashes the folder's files and compares stored paths -> "
+            "NEW/MOVED/EDITED/ORPHAN; a moved-away or missing path shows as ORPHAN) "
+            "and per-document Re-ingest (which re-reads the stored path and fails if "
+            "it's gone). Re-embed and the backfills read chunk text from LanceDB, so "
+            "they don't need the source file. Adopt-mode is the payoff: point 'Use "
+            "the selected folder as the corpus home' at a folder that already holds "
+            "your documents and the app writes lancedb/ + corpus.toml + figures/ "
+            "alongside — a fully self-contained, portable corpus."
+        ),
+    ),
 }
 
 

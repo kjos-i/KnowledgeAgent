@@ -330,6 +330,19 @@ class CreateNewDatasetTab:
                         size=12,
                         color=ft.Colors.GREY_400,
                     ),
+                    ft.Row(
+                        controls=[
+                            ft.Text(
+                                "Why one folder?",
+                                size=12,
+                                color=ft.Colors.GREY_400,
+                                italic=True,
+                            ),
+                            info(self.app, "library.corpus_folder"),
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=6,
+                    ),
                     ft.Divider(),
                     ft.Text(
                         "After creation",
