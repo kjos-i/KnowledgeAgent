@@ -8,7 +8,7 @@ the agent's query-side embedding call.
 Per-corpus resolution: `embedding_provider` / `embedding_model` /
 `embedding_dims` are read from `get_settings()`, but those globals are
 bridged from the ACTIVE corpus's `corpus.toml` (see
-`kg.corpus_config.apply_corpus_embedding_to_env`) — the embedder is
+`corpus_config.apply_corpus_embedding_to_env`) — the embedder is
 per-corpus because LanceDB pins the vector dimension at ingest. The
 factory reads `settings.embedding_model` for the resolved model on
 EVERY provider (single source); the per-provider Settings fields

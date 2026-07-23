@@ -484,8 +484,8 @@ class IngestTab:
         self._spawn(self._run_bulk_op(op_name))
 
     async def _run_bulk_op(self, op_name: str) -> None:
+        from knowledge_agent.corpus_config import load_corpus_config
         from knowledge_agent.ingestion import bulk_ops
-        from knowledge_agent.kg.corpus_config import load_corpus_config
 
         cfg_path = self.app.gui_config.corpus_config_path
         if cfg_path is None:
@@ -869,8 +869,8 @@ class IngestTab:
         """
 
         def _import_ingest_backend():
+            from knowledge_agent.corpus_config import load_corpus_config
             from knowledge_agent.ingestion import bulk_ops
-            from knowledge_agent.kg.corpus_config import load_corpus_config
 
             return bulk_ops, load_corpus_config
 

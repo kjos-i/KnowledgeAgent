@@ -22,7 +22,7 @@ When L6 lands (entities), append its properties + label constants to
 the lists below AND add layer-gating tests for the new flag.
 """
 
-from knowledge_agent.kg.corpus_config import (
+from knowledge_agent.corpus_config import (
     CorpusConfig,
     EntityConfig,
     LayerFlags,
@@ -620,7 +620,7 @@ def test_cross_doc_block_covers_both_document_and_artifact():
 def _config_with_xrefs(mode: str) -> CorpusConfig:
     """Build a config with the xrefs layer in the given mode and
     one ontology enabled (so the corpus is realistic)."""
-    from knowledge_agent.kg.corpus_config import OntologyConfig
+    from knowledge_agent.corpus_config import OntologyConfig
 
     return CorpusConfig(
         allowed_types=["Paper"],
@@ -698,7 +698,7 @@ def _config_with_cross_doc_xrefs() -> CorpusConfig:
     """Minimal L10-enabled config. L10 requires entities=true AND
     xrefs="use" plus at least one ontology (validator enforces the
     chain)."""
-    from knowledge_agent.kg.corpus_config import OntologyConfig
+    from knowledge_agent.corpus_config import OntologyConfig
 
     return CorpusConfig(
         allowed_types=["Paper"],
@@ -766,7 +766,7 @@ def test_cross_doc_xrefs_block_calls_out_parallel_to_l9():
 def test_cross_doc_xrefs_can_be_enabled_alongside_l9():
     """Both L9 and L10 can be on simultaneously - the prompt renders
     both edge blocks (they're complementary signals)."""
-    from knowledge_agent.kg.corpus_config import OntologyConfig
+    from knowledge_agent.corpus_config import OntologyConfig
 
     config = CorpusConfig(
         layers=LayerFlags(

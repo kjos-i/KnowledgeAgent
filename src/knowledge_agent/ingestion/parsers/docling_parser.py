@@ -92,11 +92,11 @@ from docling.document_converter import (
 )
 from docling_core.types.io import DocumentStream
 
+from knowledge_agent.corpus_config import CorpusConfig
 from knowledge_agent.ingestion.parser_lifecycle import (
     ensure_bundled_ffmpeg_on_path,
 )
 from knowledge_agent.ingestion.parsers.base import ParsedChunk
-from knowledge_agent.kg.corpus_config import CorpusConfig
 
 logger = logging.getLogger(__name__)
 

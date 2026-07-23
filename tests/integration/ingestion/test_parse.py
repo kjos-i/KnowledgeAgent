@@ -20,12 +20,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from knowledge_agent.corpus_config import CorpusConfig
 from knowledge_agent.ingestion.parse import (
     UnsupportedFormatError,
     parse_document,
     supported_extensions,
 )
-from knowledge_agent.kg.corpus_config import CorpusConfig
 
 if TYPE_CHECKING:
     from pathlib import Path

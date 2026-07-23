@@ -35,9 +35,9 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from knowledge_agent.corpus_config import CorpusConfig, LayerFlags
 from knowledge_agent.graph import graph
 from knowledge_agent.ingestion.pipeline import ingest_document
-from knowledge_agent.kg.corpus_config import CorpusConfig, LayerFlags
 from knowledge_agent.models import AgentAnswer
 
 if TYPE_CHECKING:

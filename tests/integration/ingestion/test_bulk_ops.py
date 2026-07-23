@@ -57,6 +57,13 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from knowledge_agent.corpus_config import (
+    CorpusConfig,
+    CrossDocConfig,
+    EntityConfig,
+    LayerFlags,
+    OntologyConfig,
+)
 from knowledge_agent.ingestion.bulk_ops import (
     BackfillXrefsPlan,
     BulkBackfillPlan,
@@ -95,13 +102,6 @@ from knowledge_agent.ingestion.bulk_ops import (
     sync_plan,
 )
 from knowledge_agent.ingestion.ids import compute_doc_id, make_chunk_id
-from knowledge_agent.kg.corpus_config import (
-    CorpusConfig,
-    CrossDocConfig,
-    EntityConfig,
-    LayerFlags,
-    OntologyConfig,
-)
 from knowledge_agent.kg.schema import (
     MESH_TERM_LABEL,
     MONDO_TERM_LABEL,

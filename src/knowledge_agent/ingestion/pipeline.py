@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from knowledge_agent.config import get_settings
+from knowledge_agent.corpus_config import CorpusConfig
 from knowledge_agent.entity_extractors import (
     extract_union,
     validate_entity_types,
@@ -74,7 +75,6 @@ from knowledge_agent.ingestion.parse import (
     supported_extensions,
 )
 from knowledge_agent.kg.client import get_kg_client
-from knowledge_agent.kg.corpus_config import CorpusConfig
 from knowledge_agent.kg.reconcile import (
     reconcile_cross_doc_to_config,
     reconcile_cross_doc_xrefs_to_config,

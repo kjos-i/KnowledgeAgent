@@ -19,12 +19,12 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from knowledge_agent.gui.library.corpus_config_editor import CorpusConfigEditor
-from knowledge_agent.kg.corpus_config import (
+from knowledge_agent.corpus_config import (
     CorpusConfig,
     EntityConfig,
     LayerFlags,
 )
+from knowledge_agent.gui.library.corpus_config_editor import CorpusConfigEditor
 
 
 def _editor(fake_app):

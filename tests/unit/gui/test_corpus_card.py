@@ -8,12 +8,12 @@ from types import SimpleNamespace
 
 import flet as ft
 
-from knowledge_agent.gui.library.corpus_card import build_corpus_card
-from knowledge_agent.kg.corpus_config import (
+from knowledge_agent.corpus_config import (
     CorpusConfig,
     EntityConfig,
     LayerFlags,
 )
+from knowledge_agent.gui.library.corpus_card import build_corpus_card
 
 
 def _entry(tmp_path):

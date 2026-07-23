@@ -139,12 +139,12 @@ async def test_cmd_ingest_empty_folder_returns_zero(tmp_path):
     )
     with (
         patch(
-            "knowledge_agent.kg.corpus_config.load_corpus_config",
+            "knowledge_agent.corpus_config.load_corpus_config",
             return_value=MagicMock(),
         ),
         # Per-corpus embedder bridge + cache reset are glue the CLI now
         # composes; no-op them here (covered by their own suites).
-        patch("knowledge_agent.kg.corpus_config.apply_corpus_embedding_to_env"),
+        patch("knowledge_agent.corpus_config.apply_corpus_embedding_to_env"),
         patch("knowledge_agent.config.reset_after_key_change"),
         patch(
             "knowledge_agent.ingestion.bulk_ops.ingest_folder_plan",
@@ -183,12 +183,12 @@ async def test_cmd_ingest_propagates_failure_count_to_exit_code(tmp_path):
     )
     with (
         patch(
-            "knowledge_agent.kg.corpus_config.load_corpus_config",
+            "knowledge_agent.corpus_config.load_corpus_config",
             return_value=MagicMock(),
         ),
         # Per-corpus embedder bridge + cache reset are glue the CLI now
         # composes; no-op them here (covered by their own suites).
-        patch("knowledge_agent.kg.corpus_config.apply_corpus_embedding_to_env"),
+        patch("knowledge_agent.corpus_config.apply_corpus_embedding_to_env"),
         patch("knowledge_agent.config.reset_after_key_change"),
         patch(
             "knowledge_agent.ingestion.bulk_ops.ingest_folder_plan",
@@ -229,12 +229,12 @@ async def test_cmd_query_prints_answer_text(tmp_path):
     )
     with (
         patch(
-            "knowledge_agent.kg.corpus_config.load_corpus_config",
+            "knowledge_agent.corpus_config.load_corpus_config",
             return_value=MagicMock(),
         ),
         # Per-corpus embedder bridge + cache reset are glue the CLI now
         # composes; no-op them here (covered by their own suites).
-        patch("knowledge_agent.kg.corpus_config.apply_corpus_embedding_to_env"),
+        patch("knowledge_agent.corpus_config.apply_corpus_embedding_to_env"),
         patch("knowledge_agent.config.reset_after_key_change"),
         patch(
             "knowledge_agent.graph.graph.ainvoke",
@@ -265,8 +265,8 @@ async def test_cmd_query_forwards_auto_mode_so_classifier_runs(tmp_path):
         format="md",
     )
     with (
-        patch("knowledge_agent.kg.corpus_config.load_corpus_config", return_value=MagicMock()),
-        patch("knowledge_agent.kg.corpus_config.apply_corpus_embedding_to_env"),
+        patch("knowledge_agent.corpus_config.load_corpus_config", return_value=MagicMock()),
+        patch("knowledge_agent.corpus_config.apply_corpus_embedding_to_env"),
         patch("knowledge_agent.config.reset_after_key_change"),
         patch(
             "knowledge_agent.graph.graph.ainvoke",
@@ -294,8 +294,8 @@ async def test_cmd_query_forwards_concrete_mode(tmp_path):
         format="md",
     )
     with (
-        patch("knowledge_agent.kg.corpus_config.load_corpus_config", return_value=MagicMock()),
-        patch("knowledge_agent.kg.corpus_config.apply_corpus_embedding_to_env"),
+        patch("knowledge_agent.corpus_config.load_corpus_config", return_value=MagicMock()),
+        patch("knowledge_agent.corpus_config.apply_corpus_embedding_to_env"),
         patch("knowledge_agent.config.reset_after_key_change"),
         patch(
             "knowledge_agent.graph.graph.ainvoke",
@@ -324,12 +324,12 @@ async def test_cmd_query_output_saves_answer_files(tmp_path):
     )
     with (
         patch(
-            "knowledge_agent.kg.corpus_config.load_corpus_config",
+            "knowledge_agent.corpus_config.load_corpus_config",
             return_value=MagicMock(),
         ),
         # Per-corpus embedder bridge + cache reset are glue the CLI now
         # composes; no-op them here (covered by their own suites).
-        patch("knowledge_agent.kg.corpus_config.apply_corpus_embedding_to_env"),
+        patch("knowledge_agent.corpus_config.apply_corpus_embedding_to_env"),
         patch("knowledge_agent.config.reset_after_key_change"),
         patch(
             "knowledge_agent.graph.graph.ainvoke",
@@ -362,12 +362,12 @@ async def test_cmd_query_output_invalid_format_returns_one(tmp_path):
     )
     with (
         patch(
-            "knowledge_agent.kg.corpus_config.load_corpus_config",
+            "knowledge_agent.corpus_config.load_corpus_config",
             return_value=MagicMock(),
         ),
         # Per-corpus embedder bridge + cache reset are glue the CLI now
         # composes; no-op them here (covered by their own suites).
-        patch("knowledge_agent.kg.corpus_config.apply_corpus_embedding_to_env"),
+        patch("knowledge_agent.corpus_config.apply_corpus_embedding_to_env"),
         patch("knowledge_agent.config.reset_after_key_change"),
         patch(
             "knowledge_agent.graph.graph.ainvoke",
@@ -396,12 +396,12 @@ async def test_cmd_query_returns_one_when_no_answer(tmp_path):
     )
     with (
         patch(
-            "knowledge_agent.kg.corpus_config.load_corpus_config",
+            "knowledge_agent.corpus_config.load_corpus_config",
             return_value=MagicMock(),
         ),
         # Per-corpus embedder bridge + cache reset are glue the CLI now
         # composes; no-op them here (covered by their own suites).
-        patch("knowledge_agent.kg.corpus_config.apply_corpus_embedding_to_env"),
+        patch("knowledge_agent.corpus_config.apply_corpus_embedding_to_env"),
         patch("knowledge_agent.config.reset_after_key_change"),
         patch(
             "knowledge_agent.graph.graph.ainvoke",

@@ -34,8 +34,8 @@ from knowledge_agent.evaluation.registry import metric_fmts, metric_labels, summ
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from knowledge_agent.corpus_config import CorpusConfig
     from knowledge_agent.evaluation.config import EvalConfig
-    from knowledge_agent.kg.corpus_config import CorpusConfig
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ class SuiteRunResult:
 def _load_corpus_config(cfg: EvalConfig) -> CorpusConfig | None:
     if cfg.corpus_config_path is None:
         return None
-    from knowledge_agent.kg.corpus_config import load_corpus_config
+    from knowledge_agent.corpus_config import load_corpus_config
 
     return load_corpus_config(cfg.corpus_config_path)
 
@@ -148,7 +148,7 @@ async def run(
         # query vectors must match the model the corpus was ingested with),
         # overriding any global / .env embedder.
         from knowledge_agent.config import reset_after_key_change
-        from knowledge_agent.kg.corpus_config import apply_corpus_embedding_to_env
+        from knowledge_agent.corpus_config import apply_corpus_embedding_to_env
 
         apply_corpus_embedding_to_env(corpus_config)
         reset_after_key_change()

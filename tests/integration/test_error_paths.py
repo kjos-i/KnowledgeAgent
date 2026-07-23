@@ -413,11 +413,11 @@ async def test_resolve_metadata_returns_none_when_all_candidates_404(
 async def test_ingest_document_rejects_unsupported_extension(tmp_path: Any) -> None:
     """ingest_document validates extension BEFORE side effects
     (parse, embed, write). Catches misuse before any cost is paid."""
-    from knowledge_agent.ingestion.pipeline import ingest_document
-    from knowledge_agent.kg.corpus_config import (
+    from knowledge_agent.corpus_config import (
         CorpusConfig,
         LayerFlags,
     )
+    from knowledge_agent.ingestion.pipeline import ingest_document
 
     bogus = tmp_path / "data.zzz"
     bogus.write_text("hello")
@@ -431,11 +431,11 @@ async def test_ingest_document_rejects_unsupported_extension(tmp_path: Any) -> N
 async def test_ingest_document_rejects_invalid_main_label(tmp_path: Any) -> None:
     """Validates main_label up front. Same rationale as the extension
     check — fail before parsing."""
-    from knowledge_agent.ingestion.pipeline import ingest_document
-    from knowledge_agent.kg.corpus_config import (
+    from knowledge_agent.corpus_config import (
         CorpusConfig,
         LayerFlags,
     )
+    from knowledge_agent.ingestion.pipeline import ingest_document
 
     fake = tmp_path / "data.pdf"
     fake.write_text("not really a pdf, but the extension check passes")

@@ -26,10 +26,10 @@ from knowledge_agent.evaluation.registry import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from knowledge_agent.corpus_config import CorpusConfig
     from knowledge_agent.evaluation.adapter import CaseRun
     from knowledge_agent.evaluation.config import EvalConfig
     from knowledge_agent.evaluation.models import EvalCase
-    from knowledge_agent.kg.corpus_config import CorpusConfig
 
 _DECIMALS = metric_decimals()
 

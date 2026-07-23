@@ -25,12 +25,12 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from knowledge_agent.corpus_config import CorpusConfig
 from knowledge_agent.ingestion.metadata import (
     extract_doi_candidates,
     resolve_doi,
 )
 from knowledge_agent.ingestion.parse import parse_document
-from knowledge_agent.kg.corpus_config import CorpusConfig
 
 TEST_DOCS = Path(__file__).resolve().parent.parent / "test_documents"
 

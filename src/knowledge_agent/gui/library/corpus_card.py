@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
+from knowledge_agent.corpus_config import load_corpus_config
 from knowledge_agent.gui.library.select_dataset import (
     _LAYER_BADGES,
     _ONTOLOGY_ANY,
@@ -31,12 +32,11 @@ from knowledge_agent.gui.library.select_dataset import (
     _ocr_str,
     _ontologies_str,
 )
-from knowledge_agent.kg.corpus_config import load_corpus_config
 
 if TYPE_CHECKING:
+    from knowledge_agent.corpus_config import CorpusConfig
     from knowledge_agent.gui.app import GuiApp
     from knowledge_agent.gui.config_store import CorpusEntry
-    from knowledge_agent.kg.corpus_config import CorpusConfig
 
 logger = logging.getLogger(__name__)
 

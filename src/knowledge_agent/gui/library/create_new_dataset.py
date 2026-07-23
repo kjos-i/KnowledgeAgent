@@ -51,6 +51,7 @@ import flet as ft
 import tomlkit
 
 from knowledge_agent.config import reset_after_key_change
+from knowledge_agent.corpus_config import CorpusConfig
 from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     PANEL_BG,
@@ -67,7 +68,6 @@ from knowledge_agent.gui.config_store import (
     set_corpus_password,
 )
 from knowledge_agent.gui.views._frame import view_header
-from knowledge_agent.kg.corpus_config import CorpusConfig
 
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
@@ -696,7 +696,7 @@ def _write_corpus_toml(path: Path, cfg: CorpusConfig) -> None:
     """Serialise a `CorpusConfig` to TOML at `path`.
 
     Lives on the GUI side because only the GUI writes corpus.toml
-    today — the backend's `kg.corpus_config` module is the reader.
+    today — the backend's `corpus_config` module is the reader.
     If a CLI ever needs to write corpus.toml, this moves to the
     backend.
 

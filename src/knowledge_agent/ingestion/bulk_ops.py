@@ -29,6 +29,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from knowledge_agent.corpus_config import CorpusConfig
 from knowledge_agent.ingestion import parse, pipeline
 from knowledge_agent.ingestion.ids import compute_doc_id
 from knowledge_agent.ingestion.metadata import is_doi_eligible
@@ -43,7 +44,6 @@ from knowledge_agent.kg import (
     ontology_xrefs,
 )
 from knowledge_agent.kg.client import get_kg_client
-from knowledge_agent.kg.corpus_config import CorpusConfig
 from knowledge_agent.kg.ontology_linking import ONTOLOGY_REGISTRY
 from knowledge_agent.kg.reconcile import (
     reconcile_cross_doc_to_config,

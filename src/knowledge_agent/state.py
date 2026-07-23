@@ -31,8 +31,8 @@ each node is documented at the field, not enforced by the type.
 from typing import TypedDict
 
 from knowledge_agent.config import Settings
+from knowledge_agent.corpus_config import CorpusConfig
 from knowledge_agent.errors import ErrorDetail
-from knowledge_agent.kg.corpus_config import CorpusConfig
 from knowledge_agent.models import AgentAnswer, KGHit, RetrievedChunk
 
 

@@ -15,6 +15,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from knowledge_agent.corpus_config import (
+    CorpusConfig,
+    EntityConfig,
+    LayerFlags,
+    OntologyConfig,
+)
 from knowledge_agent.entity_extractors.base import Mention
 from knowledge_agent.ingestion.parse import ParsedChunk
 from knowledge_agent.ingestion.pipeline import (
@@ -35,12 +41,6 @@ from knowledge_agent.ingestion.pipeline import (
     resolve_openalex,
 )
 from knowledge_agent.kg.client import Neo4jClient
-from knowledge_agent.kg.corpus_config import (
-    CorpusConfig,
-    EntityConfig,
-    LayerFlags,
-    OntologyConfig,
-)
 from knowledge_agent.kg.triples_writes import ExtractedTriple
 from knowledge_agent.search.client import LanceClient
 
@@ -3438,7 +3438,7 @@ def _cross_doc_xrefs_enabled_config(
     Optionally overrides the threshold by passing it in the
     [cross_doc_xrefs] settings section.
     """
-    from knowledge_agent.kg.corpus_config import (
+    from knowledge_agent.corpus_config import (
         CrossDocXrefsConfig,
     )
 

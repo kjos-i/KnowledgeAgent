@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import flet as ft
 
+from knowledge_agent.corpus_config import CorpusConfig
 from knowledge_agent.gui.library.corpus_config_editor import CorpusConfigEditor
-from knowledge_agent.kg.corpus_config import CorpusConfig
 
 _EDITOR = "knowledge_agent.gui.library.corpus_config_editor"
 

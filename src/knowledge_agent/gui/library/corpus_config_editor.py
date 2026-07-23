@@ -55,6 +55,15 @@ from knowledge_agent.config import (
     Settings,
     get_settings,
 )
+from knowledge_agent.corpus_config import (
+    CorpusConfig,
+    CrossDocConfig,
+    CrossDocXrefsConfig,
+    EntityConfig,
+    LayerFlags,
+    OntologyConfig,
+    load_corpus_config,
+)
 from knowledge_agent.embedder_lifecycle import (
     EMBEDDER_PROVIDER_REGISTRY,
     HF_EMBEDDING_MODELS,
@@ -77,15 +86,6 @@ from knowledge_agent.gui._widgets.info_icon import info_icon
 from knowledge_agent.gui.library.create_new_dataset import _write_corpus_toml
 from knowledge_agent.gui.library.session_state import load_session, update_draft
 from knowledge_agent.gui.settings.llm_tab import model_options
-from knowledge_agent.kg.corpus_config import (
-    CorpusConfig,
-    CrossDocConfig,
-    CrossDocXrefsConfig,
-    EntityConfig,
-    LayerFlags,
-    OntologyConfig,
-    load_corpus_config,
-)
 from knowledge_agent.kg.schema import (
     DOCUMENT_LABEL,
     MAIN_LABELS,

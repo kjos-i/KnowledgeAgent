@@ -45,17 +45,17 @@ from knowledge_agent.config import load_test_env
 
 load_test_env()
 
+from knowledge_agent.corpus_config import (  # noqa: E402
+    CorpusConfig,
+    EntityConfig,
+    LayerFlags,
+)
 from knowledge_agent.entity_extractors.extractor_lifecycle import (  # noqa: E402
     is_extractor_ready,
 )
 from knowledge_agent.ingestion.ids import compute_doc_id  # noqa: E402
 from knowledge_agent.ingestion.pipeline import ingest_document  # noqa: E402
 from knowledge_agent.kg.client import get_kg_client  # noqa: E402
-from knowledge_agent.kg.corpus_config import (  # noqa: E402
-    CorpusConfig,
-    EntityConfig,
-    LayerFlags,
-)
 from knowledge_agent.kg.schema import (  # noqa: E402
     AUTHOR_LABEL,
     AUTHORED_REL,

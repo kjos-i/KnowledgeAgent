@@ -12,6 +12,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from knowledge_agent.corpus_config import (
+    CorpusConfig,
+    LayerFlags,
+)
 from knowledge_agent.ingestion.bulk_ops import (
     AddPlan,
     AddResult,
@@ -64,10 +68,6 @@ from knowledge_agent.ingestion.sync_diff import (
     DiskFile,
     IndexedDoc,
     SyncBuckets,
-)
-from knowledge_agent.kg.corpus_config import (
-    CorpusConfig,
-    LayerFlags,
 )
 
 # ---- DeleteDocPlan dataclass + summary string ----
@@ -1718,7 +1718,7 @@ def _config_xrefs(
     enabled so the config validator is happy (xrefs without any
     ontology is technically allowed; including ontology_mesh keeps
     the corpus "realistic")."""
-    from knowledge_agent.kg.corpus_config import (
+    from knowledge_agent.corpus_config import (
         CrossDocXrefsConfig,
         EntityConfig,
         OntologyConfig,

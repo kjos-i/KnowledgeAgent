@@ -224,7 +224,7 @@ def _dispatcher_config():
     parsers don't read from it; we pass a minimal instance so the
     signature is satisfied.
     """
-    from knowledge_agent.kg.corpus_config import CorpusConfig, LayerFlags
+    from knowledge_agent.corpus_config import CorpusConfig, LayerFlags
 
     return CorpusConfig(
         allowed_types=["Paper"],

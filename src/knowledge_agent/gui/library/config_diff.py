@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from knowledge_agent.gui.library.corpus_config_editor import _ONTOLOGY_DISPLAY
 
 if TYPE_CHECKING:
-    from knowledge_agent.kg.corpus_config import CorpusConfig
+    from knowledge_agent.corpus_config import CorpusConfig
 
 # (field_label, baseline_str, draft_str)
 ConfigChange = tuple[str, str, str]

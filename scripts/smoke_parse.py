@@ -20,8 +20,8 @@ Run via `pytest -m integration tests/integration/ingestion/`.
 
 from pathlib import Path
 
+from knowledge_agent.corpus_config import CorpusConfig
 from knowledge_agent.ingestion.parse import parse_document
-from knowledge_agent.kg.corpus_config import CorpusConfig
 
 TEST_DOCS = Path(__file__).resolve().parent.parent / "test_documents"
 

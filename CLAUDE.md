@@ -86,7 +86,7 @@ modules for how installs are planned/executed from the GUI.
 | Topic | Authoritative file(s) |
 |---|---|
 | Every runtime setting / knob | `config.py` (Pydantic Settings — SSOT) |
-| Per-corpus layer toggles / extractor / ontologies | `kg/corpus_config.py` + each corpus's `corpus.toml` |
+| Per-corpus layer toggles / extractor / ontologies | `corpus_config.py` + each corpus's `corpus.toml` |
 | Agent loop / query topology (retrieval modes) | `graph.py` + `nodes.py`; per-run state in `state.py` |
 | Public data shapes (Mention, KGHit, RetrievedChunk, AgentAnswer) | `models.py` |
 | Ingest pipeline (parse → embed → write) | `ingestion/pipeline.py` |

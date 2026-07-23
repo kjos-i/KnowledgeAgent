@@ -43,6 +43,7 @@ from knowledge_agent.artifacts import (
     save_chat,
 )
 from knowledge_agent.config import disable_env_file, get_settings, reset_after_key_change
+from knowledge_agent.corpus_config import CorpusConfig, load_corpus_config
 from knowledge_agent.evaluation.models import RetrievalSettings
 from knowledge_agent.gui._widgets.retrieval_form import (
     query_mode_to_knobs,
@@ -78,7 +79,6 @@ from knowledge_agent.gui.tabs.info_tab import InfoTab
 from knowledge_agent.gui.tabs.library_tab import LibraryTab
 from knowledge_agent.gui.tabs.log_tab import LogTab
 from knowledge_agent.gui.tabs.search_tab import SearchTab
-from knowledge_agent.kg.corpus_config import CorpusConfig, load_corpus_config
 
 if TYPE_CHECKING:
     from knowledge_agent.models import AgentAnswer

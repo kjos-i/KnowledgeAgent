@@ -19,11 +19,11 @@ import importlib
 from pathlib import Path
 from types import ModuleType
 
+from knowledge_agent.corpus_config import CorpusConfig
 from knowledge_agent.ingestion.parsers.base import (
     ParsedChunk,
     UnsupportedFormatError,
 )
-from knowledge_agent.kg.corpus_config import CorpusConfig
 
 # Names of parser strategy modules within this package. Order is
 # dispatch priority - first match wins. As new parsers ship, append

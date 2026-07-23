@@ -597,8 +597,8 @@ class DocumentsView:
         self.app.page.update()
 
     async def _do_reingest(self, row: dict[str, Any]) -> None:
+        from knowledge_agent.corpus_config import load_corpus_config
         from knowledge_agent.ingestion import pipeline
-        from knowledge_agent.kg.corpus_config import load_corpus_config
 
         source_path = (row.get("source_path") or "").strip()
         name = row.get("title") or _basename(source_path) or "document"

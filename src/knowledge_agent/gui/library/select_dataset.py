@@ -50,6 +50,7 @@ import flet as ft
 from pydantic import ValidationError
 
 from knowledge_agent.config import reset_after_key_change
+from knowledge_agent.corpus_config import CorpusConfig, load_corpus_config
 from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     LEFT_COLUMN_WIDTH,
@@ -69,7 +70,6 @@ from knowledge_agent.gui.config_store import (
 from knowledge_agent.gui.library.config_diff import config_diff
 from knowledge_agent.gui.library.documents_view import DocumentsView
 from knowledge_agent.gui.library.session_state import load_session
-from knowledge_agent.kg.corpus_config import CorpusConfig, load_corpus_config
 
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp

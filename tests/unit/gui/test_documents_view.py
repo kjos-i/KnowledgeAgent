@@ -195,7 +195,7 @@ def test_do_reingest_happy_path_runs_pipeline_and_reloads(fake_app):
     fake_config = object()
     with (
         patch(
-            "knowledge_agent.kg.corpus_config.load_corpus_config",
+            "knowledge_agent.corpus_config.load_corpus_config",
             return_value=fake_config,
         ),
         patch(

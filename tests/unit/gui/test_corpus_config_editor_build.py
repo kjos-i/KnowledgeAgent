@@ -11,12 +11,12 @@ from __future__ import annotations
 
 import flet as ft
 
-from knowledge_agent.gui.library.corpus_config_editor import CorpusConfigEditor
-from knowledge_agent.kg.corpus_config import (
+from knowledge_agent.corpus_config import (
     CorpusConfig,
     EntityConfig,
     LayerFlags,
 )
+from knowledge_agent.gui.library.corpus_config_editor import CorpusConfigEditor
 
 
 def _cfg() -> CorpusConfig:
@@ -68,7 +68,7 @@ def test_refresh_availability_greys_section_fields_when_layer_off(fake_app):
     off (so it's clear those settings won't apply), and re-enabled when on.
     The `entity_types_field` is excluded — `_refresh_extractor_groups` owns
     its disabled state."""
-    from knowledge_agent.kg.corpus_config import EntityConfig, LayerFlags
+    from knowledge_agent.corpus_config import EntityConfig, LayerFlags
 
     ed = CorpusConfigEditor(fake_app)  # __init__ builds the controls
 

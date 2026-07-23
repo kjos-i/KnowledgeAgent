@@ -36,6 +36,7 @@ from knowledge_agent.config import load_test_env
 
 load_test_env()
 
+from knowledge_agent.corpus_config import CorpusConfig, LayerFlags  # noqa: E402
 from knowledge_agent.evaluation.config import EvalConfig  # noqa: E402
 from knowledge_agent.evaluation.models import (  # noqa: E402
     EvalCase,
@@ -46,7 +47,6 @@ from knowledge_agent.evaluation.models import (  # noqa: E402
 from knowledge_agent.evaluation.runner import run as run_eval  # noqa: E402
 from knowledge_agent.ingestion.ids import compute_doc_id  # noqa: E402
 from knowledge_agent.ingestion.pipeline import ingest_document  # noqa: E402
-from knowledge_agent.kg.corpus_config import CorpusConfig, LayerFlags  # noqa: E402
 from knowledge_agent.search.client import get_search_client  # noqa: E402
 
 TEST_DOCS = Path(__file__).resolve().parent.parent / "test_documents"

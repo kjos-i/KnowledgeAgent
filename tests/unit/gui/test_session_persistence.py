@@ -15,6 +15,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from knowledge_agent.corpus_config import (
+    CorpusConfig,
+    EntityConfig,
+    LayerFlags,
+)
 from knowledge_agent.gui.library.corpus_config_editor import CorpusConfigEditor
 from knowledge_agent.gui.library.ingest import IngestTab
 from knowledge_agent.gui.library.select_dataset import SelectDatasetTab
@@ -23,11 +28,6 @@ from knowledge_agent.gui.library.session_state import (
     update_draft,
     update_last_file,
     update_last_folder,
-)
-from knowledge_agent.kg.corpus_config import (
-    CorpusConfig,
-    EntityConfig,
-    LayerFlags,
 )
 
 

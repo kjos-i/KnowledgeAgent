@@ -191,7 +191,7 @@ def test_malformed_json_raises_through_to_caller(tmp_path: Path):
 
 def _dispatcher_config():
     """CorpusConfig instance whose fields the json parser ignores."""
-    from knowledge_agent.kg.corpus_config import CorpusConfig, LayerFlags
+    from knowledge_agent.corpus_config import CorpusConfig, LayerFlags
 
     return CorpusConfig(
         allowed_types=["Paper"],

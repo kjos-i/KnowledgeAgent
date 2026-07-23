@@ -1,4 +1,4 @@
-"""Tests for kg.corpus_config - CorpusConfig + LayerFlags + load_corpus_config.
+"""Tests for corpus_config - CorpusConfig + LayerFlags + load_corpus_config.
 
 The model defines the SHAPE of per-corpus settings; `corpus.toml` files
 in each corpus folder hold the VALUES. These tests cover defaults,
@@ -18,7 +18,7 @@ import pytest
 from pydantic import ValidationError
 from tomlkit.exceptions import ParseError
 
-from knowledge_agent.kg.corpus_config import (
+from knowledge_agent.corpus_config import (
     CorpusConfig,
     CrossDocConfig,
     CrossDocXrefsConfig,

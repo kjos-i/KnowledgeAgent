@@ -44,7 +44,7 @@ property in one place propagates everywhere. Bigger change; revisit when
 the schema grows past a handful of properties.
 """
 
-from knowledge_agent.kg.corpus_config import CorpusConfig
+from knowledge_agent.corpus_config import CorpusConfig
 from knowledge_agent.kg.schema import (
     ABOUT_TOPIC_REL,
     ARTIFACT_LABEL,

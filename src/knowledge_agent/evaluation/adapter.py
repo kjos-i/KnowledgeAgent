@@ -33,8 +33,8 @@ from langchain_core.callbacks import UsageMetadataCallbackHandler
 from knowledge_agent.kg.cypher_safety import is_cypher_read_only
 
 if TYPE_CHECKING:
+    from knowledge_agent.corpus_config import CorpusConfig
     from knowledge_agent.evaluation.models import EvalCase
-    from knowledge_agent.kg.corpus_config import CorpusConfig
 
 
 @dataclass(slots=True)

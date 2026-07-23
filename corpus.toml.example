@@ -4,7 +4,7 @@
 # edit to match the desired layers, and the ingest pipeline + agent
 # will pick it up at startup.
 #
-# Shape lives in `src/knowledge_agent/kg/corpus_config.py`
+# Shape lives in `src/knowledge_agent/corpus_config.py`
 # (Pydantic models). Unknown fields are rejected so typos surface as
 # errors rather than silently being ignored.
 #

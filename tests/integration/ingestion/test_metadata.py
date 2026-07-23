@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from knowledge_agent.corpus_config import CorpusConfig
 from knowledge_agent.ingestion.metadata import (
     doi_from_jats,
     extract_doi_candidates,
@@ -31,7 +32,6 @@ from knowledge_agent.ingestion.metadata import (
     resolve_metadata,
 )
 from knowledge_agent.ingestion.parse import parse_document
-from knowledge_agent.kg.corpus_config import CorpusConfig
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

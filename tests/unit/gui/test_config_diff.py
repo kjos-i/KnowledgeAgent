@@ -8,12 +8,12 @@ guards both against silent divergence.
 
 from __future__ import annotations
 
-from knowledge_agent.gui.library.config_diff import config_diff
-from knowledge_agent.kg.corpus_config import (
+from knowledge_agent.corpus_config import (
     CorpusConfig,
     EntityConfig,
     LayerFlags,
 )
+from knowledge_agent.gui.library.config_diff import config_diff
 
 
 def _cfg(**overrides) -> CorpusConfig:

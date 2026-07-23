@@ -239,7 +239,7 @@ Two `.env` files supported by design:
 - `.env` — real corpus, real Neo4j instance
 - `.env.test` — separate Neo4j instance + separate LanceDB folder for smokes (different password = a wrong-instance cross-connect fails authentication instead of silently corrupting real data)
 
-Per-corpus settings (which layers are on, which extractor, which ontologies) live in each corpus folder's `corpus.toml` — schema in [kg/corpus_config.py](src/knowledge_agent/kg/corpus_config.py).
+Per-corpus settings (which layers are on, which extractor, which ontologies) live in each corpus folder's `corpus.toml` — schema in [corpus_config.py](src/knowledge_agent/corpus_config.py).
 
 ---
 

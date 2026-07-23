@@ -70,11 +70,11 @@ from knowledge_agent.config import load_test_env
 
 load_test_env()
 
+from knowledge_agent.corpus_config import CorpusConfig, LayerFlags  # noqa: E402
 from knowledge_agent.graph import graph  # noqa: E402
 from knowledge_agent.ingestion.ids import compute_doc_id  # noqa: E402
 from knowledge_agent.ingestion.pipeline import ingest_document  # noqa: E402
 from knowledge_agent.kg.client import get_kg_client  # noqa: E402
-from knowledge_agent.kg.corpus_config import CorpusConfig, LayerFlags  # noqa: E402
 from knowledge_agent.kg.schema import (  # noqa: E402
     AUTHOR_LABEL,
     AUTHORED_REL,

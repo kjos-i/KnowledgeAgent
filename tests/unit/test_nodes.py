@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from knowledge_agent.kg.corpus_config import CorpusConfig, LayerFlags
+from knowledge_agent.corpus_config import CorpusConfig, LayerFlags
 from knowledge_agent.models import (
     AgentAnswer,
     ChunkSource,

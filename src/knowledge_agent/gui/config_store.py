@@ -868,7 +868,7 @@ def apply_active_corpus_embedding_to_env(cfg: GuiConfig) -> None:
     if path is None or not Path(path).is_file():
         return
     try:
-        from knowledge_agent.kg.corpus_config import (
+        from knowledge_agent.corpus_config import (
             apply_corpus_embedding_to_env,
             load_corpus_config,
         )
