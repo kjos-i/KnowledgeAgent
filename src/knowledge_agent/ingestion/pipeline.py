@@ -11,8 +11,10 @@ Stage-by-stage policy:
     whether to skip or report.
   - metadata: returns None when no DOI candidate is found OR the candidate
     doesn't resolve. The pipeline continues - chunks still get written to
-    LanceDB with `metadata_status = "baseline"` or `"pending"` and no KG
-    write happens for that document. ##########
+    LanceDB with `metadata_status = "baseline"` or `"pending"`, and only the
+    L1-L4 OpenAlex-derived KG writes (citations / authors / venue / topics)
+    are skipped. The metadata-independent layers (L5 chunks, L6 entities,
+    ...) still write if enabled.
   - embed: returns None on Voyage API failure. The pipeline aborts the
     LanceDB write for that document (chunks need vectors) but still
     attempts the KG write if metadata resolved.
@@ -59,7 +61,7 @@ from knowledge_agent.ingestion.metadata_resolution import (
 # implementations live next door. Re-exported below (via redundant
 # alias) for backward compatibility so `pipeline.resolve_openalex(...)`,
 # `lookup_known_doi` and `_build_authors_display` still work — bulk_ops
-# + tests reach them through pipeline. ###############
+# + tests reach them through pipeline.
 from knowledge_agent.ingestion.metadata_resolution import (
     _doc_metadata_fields_from_work,
 )
@@ -1023,11 +1025,6 @@ async def ingest_document(
     # ---- 2. Parse (CPU-bound, threaded) ----
     # Compute the per-doc figures directory. Multimodal-off corpora
     # get a None here — the parser skips all figure-related work.
-    # Figures live INSIDE the LanceDB dir at `<lancedb_path>/figures/
-    # <doc_id>/` (option 1 chosen 2026-07-03) so test data is
-    # self-contained in one folder and production has figures adjacent
-    # to LanceDB's own table folders (no collision — LanceDB uses
-    # named subfolders like `chunks.lance/` for its own state).
     figures_dir: Path | None = None
     if config.extract_figures:
         # Figures live BESIDE lancedb at `<corpus>/figures/<doc_id>/`
