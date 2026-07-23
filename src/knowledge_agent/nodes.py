@@ -94,37 +94,37 @@ Output ONLY the mode name from the allowed list.
 Available modes:
 
 - lancedb_only       - Semantic/content question. Lance hybrid search over
-                       paper chunks. Pick for "what does the literature say
+                       document chunks. Pick for "what do the documents say
                        about X" style questions where the answer lives in
-                       paper text, not graph relationships.
+                       document text, not graph relationships.
 
 - neo4j_only         - Pure structural/graph question. Cypher over the KG.
                        Pick for "who cites / who authored / how many authors"
                        style questions where the answer lives in graph
-                       relationships, not paper text.
+                       relationships, not document text.
 
 - lancedb_then_neo4j - Content question + want graph enrichment of the
-                       relevant papers. Pick when the user asks about a
-                       topic AND about authors/citations of papers on that
+                       relevant documents. Pick when the user asks about a
+                       topic AND about authors/citations of documents on that
                        topic.
 
-- neo4j_then_lancedb - Want chunks scoped to a KG-defined subset of papers.
-                       Pick when the user asks for content (paper text)
+- neo4j_then_lancedb - Want chunks scoped to a KG-defined subset of documents.
+                       Pick when the user asks for content (document text)
                        restricted to specific authors / years / sources.
 
 - parallel_fused     - Question genuinely needs both stores and there's no
                        clear sequential dependency. Pick for broad /
-                       exploratory questions where both paper text AND
+                       exploratory questions where both document text AND
                        graph structure inform the answer.
 
 Examples:
-  "What does the literature say about CRISPR?"               -> lancedb_only
-  "What are the main themes in cancer immunotherapy?"        -> lancedb_only
-  "Who cites paper W123456?"                                 -> neo4j_only
-  "How many corresponding authors per paper on average?"     -> neo4j_only
-  "Find chunks about CRISPR and show me who cites those"     -> lancedb_then_neo4j
-  "What do Smith's papers say about CRISPR?"                 -> neo4j_then_lancedb
-  "Comprehensive overview of CRISPR research"                -> parallel_fused
+  "What do the documents say about renewable energy?"        -> lancedb_only
+  "What are the main themes in supply-chain resilience?"     -> lancedb_only
+  "Who cites document W123456?"                              -> neo4j_only
+  "How many authors per document on average?"                -> neo4j_only
+  "Find chunks about renewable energy and who cites those"   -> lancedb_then_neo4j
+  "What do Smith's documents say about renewable energy?"    -> neo4j_then_lancedb
+  "Comprehensive overview of renewable-energy research"      -> parallel_fused
 """
 
 
@@ -167,26 +167,26 @@ async def mode_classifier_node(state: AgentState) -> dict[str, Any]:
 # =========================================================================
 
 _QUERY_BUILDER_SYSTEM = """\
-You are a search-query rewriter for a research literature corpus.
+You are a search-query rewriter for a document corpus.
 
 Take the user's question and rewrite it as a keyword-dense search query
-optimised for hybrid (BM25 + vector) retrieval over scientific papers:
+optimised for hybrid (BM25 + vector) retrieval over the document chunks:
 
 - Extract the domain terms and key concepts.
 - Drop conversational filler ("can you tell me", "I'd like to know").
 - Drop question marks and other punctuation.
-- Keep important qualifiers (year ranges, authors, organism, technique).
+- Keep important qualifiers (year ranges, names, places, sources).
 - Output ONLY the rewritten query - no preamble, no explanation.
 
 Examples:
-  User: "What does the literature say about apoptosis in cancer cells?"
-  -> "apoptosis cancer cells"
+  User: "What do the documents say about renewable energy adoption?"
+  -> "renewable energy adoption"
 
-  User: "Can you find papers about CRISPR screens for drug resistance from 2020 onwards?"
-  -> "CRISPR screens drug resistance 2020"
+  User: "Can you find reports about supply-chain disruptions from 2020 onwards?"
+  -> "supply-chain disruptions 2020"
 
-  User: "I want to learn about how BRCA1 mutations affect DNA repair pathways."
-  -> "BRCA1 mutations DNA repair pathways"
+  User: "I want to learn about how remote work affects team productivity."
+  -> "remote work team productivity"
 """
 
 
@@ -225,8 +225,8 @@ async def query_builder_node(state: AgentState) -> dict[str, Any]:
 # call time. Plain string + .replace() (not f-string) because Cypher syntax
 # uses `{}` heavily and an f-string would need every brace doubled.
 _CYPHER_BUILDER_SYSTEM_TEMPLATE = """\
-You are a Cypher query writer for a Neo4j knowledge graph of research
-literature. Read the user's question and produce a Cypher query that
+You are a Cypher query writer for a Neo4j knowledge graph of
+documents. Read the user's question and produce a Cypher query that
 returns the rows most relevant to the question. Output ONLY the Cypher
 string - no preamble, no explanation, no markdown fences.
 
@@ -239,21 +239,21 @@ Rules:
   Do NOT invent labels, relationship types, or property names.
 - Always include a LIMIT clause.<MODE_RULES>
 - If the question cannot be answered from this schema (e.g., the user
-  asks about paper content, abstracts, or topics that aren't stored in
+  asks about document content or topics that aren't stored in
   the KG), return a Cypher query that yields no rows:
     MATCH (x) WHERE false RETURN x LIMIT 0
 
 Examples:
 
-  Question: "Who cites paper W123456?"
+  Question: "Who cites document W123456?"
   -> MATCH (p:Document)-[:CITES]->(c:Document {openalex_id: 'W123456'})
      RETURN p.openalex_id, p.in_corpus LIMIT 50
 
-  Question: "Who are the authors of paper W123456?"
+  Question: "Who are the authors of document W123456?"
   -> MATCH (a:Author)-[:AUTHORED]->(d:Document {openalex_id: 'W123456'})
      RETURN a.display_name, a.openalex_id LIMIT 50
 
-  Question: "Which authors have the most papers in our corpus?"
+  Question: "Which authors have the most documents in our corpus?"
   -> MATCH (a:Author)-[:AUTHORED]->(d:Document)
      WHERE d.in_corpus = true
      RETURN a.display_name, count(d) AS paper_count
@@ -516,10 +516,10 @@ async def lancedb_retriever_node(state: AgentState) -> dict[str, Any]:
 # =========================================================================
 
 _SYNTHESIZER_SYSTEM = """\
-You are a research literature assistant. Answer the user's question using
+You are a research assistant. Answer the user's question using
 ONLY the evidence provided below. Two evidence sources may appear:
 
-- Chunks: passages of paper text. Each has a chunk_id, doc_id, optional
+- Chunks: passages of document text. Each has a chunk_id, doc_id, optional
   title/year/authors, and a body of text. Listed with [1], [2], ... markers.
 - KG rows: structured rows from the knowledge graph. Each is a dict of
   fields the Cypher query returned. Listed with [K0], [K1], ... markers.
