@@ -1435,6 +1435,26 @@ async def test_bulk_backfill_ontology_plan_uses_layer_name_ontology():
     assert plan.layer_name == "ontology"
 
 
+def _mock_downstream_reconciles():
+    """Patch all 5 reconcile_*_to_config in bulk_ops as async no-ops.
+
+    bulk_backfill_chunks_execute / bulk_backfill_entities_execute reconcile
+    every downstream layer (L6-L10) to config before looping, which runs real
+    Cypher. Unit tests must never touch a KG instance, so mock the reconciles
+    out. (get_kg_client stays unmocked — it is lazy; the sibling ontology /
+    triples / cross-doc execute tests leave it unmocked too.) SSOT: add a
+    layer here if a 6th reconcile is introduced.
+    """
+    return patch.multiple(
+        "knowledge_agent.ingestion.bulk_ops",
+        reconcile_ontologies_to_config=AsyncMock(),
+        reconcile_entities_to_config=AsyncMock(),
+        reconcile_triples_to_config=AsyncMock(),
+        reconcile_cross_doc_to_config=AsyncMock(),
+        reconcile_cross_doc_xrefs_to_config=AsyncMock(),
+    )
+
+
 async def test_bulk_backfill_chunks_execute_counts_chunks_ok_as_success():
     plan = BulkBackfillPlan(
         target_doc_ids=("d1", "d2", "d3"),
@@ -1445,9 +1465,12 @@ async def test_bulk_backfill_chunks_execute_counts_chunks_ok_as_success():
         {"chunks_ok": False, "entities": {}},
         RuntimeError("boom"),
     ]
-    with patch(
-        "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_chunks",
-        side_effect=side,
+    with (
+        _mock_downstream_reconciles(),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_chunks",
+            side_effect=side,
+        ),
     ):
         result = await bulk_backfill_chunks_execute(plan, _config())
 
@@ -1465,13 +1488,10 @@ async def test_bulk_backfill_entities_execute_counts_entities_ok_as_success():
         {"entities_ok": False, "n_mentions": 0, "ontology": {}},
     ]
     with (
+        _mock_downstream_reconciles(),
         patch(
             "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_entities",
             side_effect=side,
-        ),
-        patch(
-            "knowledge_agent.ingestion.bulk_ops.reconcile_entities_to_config",
-            new_callable=AsyncMock,
         ),
     ):
         result = await bulk_backfill_entities_execute(plan, _config())
@@ -1516,7 +1536,10 @@ async def test_bulk_backfill_ontology_execute_counts_any_import_ok_as_success():
 
 async def test_bulk_backfill_execute_returns_result_dataclass():
     plan = BulkBackfillPlan(target_doc_ids=(), layer_name="chunks")
-    with patch("knowledge_agent.ingestion.bulk_ops.pipeline.backfill_chunks"):
+    with (
+        _mock_downstream_reconciles(),
+        patch("knowledge_agent.ingestion.bulk_ops.pipeline.backfill_chunks"),
+    ):
         result = await bulk_backfill_chunks_execute(plan, _config())
     assert isinstance(result, BulkBackfillResult)
 
