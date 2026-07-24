@@ -1307,7 +1307,7 @@ async def test_bulk_resolve_openalex_execute_counts_three_buckets():
         },
     ]
     with patch(
-        "knowledge_agent.ingestion.bulk_ops.pipeline.resolve_openalex",
+        "knowledge_agent.ingestion.bulk_ops.resolve_openalex",
         side_effect=side,
     ):
         result = await bulk_resolve_openalex_execute(plan)
@@ -1328,7 +1328,7 @@ async def test_bulk_resolve_openalex_execute_per_doc_skip_manual_false():
         skip_manual=False,
     )
     with patch(
-        "knowledge_agent.ingestion.bulk_ops.pipeline.resolve_openalex",
+        "knowledge_agent.ingestion.bulk_ops.resolve_openalex",
         return_value={"work_resolved": True, "new_status": "enriched"},
     ) as ro_mock:
         await bulk_resolve_openalex_execute(plan)

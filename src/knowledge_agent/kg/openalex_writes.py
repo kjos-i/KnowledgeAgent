@@ -435,7 +435,7 @@ async def delete_doc_l1_l4_edges(client, doc_id: str) -> None:
 
     Unlike `delete_doc` (full focal DETACH DELETE, which collateral-damages
     `:PART_OF` from `:Chunk`s and orphans the chunks from the doc), this
-    surgical wipe is for partial ops like `pipeline.resolve_openalex`
+    surgical wipe is for partial ops like `resolve_openalex`
     that need to refresh L1-L4 metadata WITHOUT touching L5 chunks.
 
     Removes four edge types incident to the focal `:Document`:

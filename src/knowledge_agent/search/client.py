@@ -235,7 +235,7 @@ class LanceClient:
     async def update_doc_metadata(self, doc_id: str, fields: dict[str, Any]) -> None:
         """Patch doc-level columns for every chunk row of a doc. Idempotent.
 
-        Used by `pipeline.resolve_openalex` and `pipeline.lookup_known_doi`
+        Used by `resolve_openalex` and `lookup_known_doi`
         to refresh the denormalized metadata cache (title, authors_display,
         year, doi, openalex_id, venue, source_url, language,
         metadata_status) without touching chunk text or embeddings.

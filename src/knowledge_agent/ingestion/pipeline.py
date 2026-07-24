@@ -53,23 +53,7 @@ from knowledge_agent.ingestion.metadata import (
     resolve_metadata,
 )
 from knowledge_agent.ingestion.metadata_resolution import (
-    _build_authors_display as _build_authors_display,
-)
-
-# OpenAlex resolution lives in its own module since 2026-06-29 — the
-# orchestrator (this file) now only USES these functions; the
-# implementations live next door. Re-exported below (via redundant
-# alias) for backward compatibility so `pipeline.resolve_openalex(...)`,
-# `lookup_known_doi` and `_build_authors_display` still work — bulk_ops
-# + tests reach them through pipeline.
-from knowledge_agent.ingestion.metadata_resolution import (
     _doc_metadata_fields_from_work,
-)
-from knowledge_agent.ingestion.metadata_resolution import (
-    lookup_known_doi as lookup_known_doi,
-)
-from knowledge_agent.ingestion.metadata_resolution import (
-    resolve_openalex as resolve_openalex,
 )
 from knowledge_agent.ingestion.parse import (
     ParsedChunk,

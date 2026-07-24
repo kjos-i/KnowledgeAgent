@@ -33,6 +33,7 @@ from knowledge_agent.corpus_config import CorpusConfig
 from knowledge_agent.ingestion import parse, pipeline
 from knowledge_agent.ingestion.ids import compute_doc_id
 from knowledge_agent.ingestion.metadata import is_doi_eligible
+from knowledge_agent.ingestion.metadata_resolution import resolve_openalex
 from knowledge_agent.ingestion.sync_diff import (
     DiskFile,
     IndexedDoc,
@@ -298,7 +299,7 @@ async def bulk_resolve_openalex_plan(
 async def bulk_resolve_openalex_execute(
     plan: BulkResolveOpenAlexPlan,
 ) -> BulkResolveOpenAlexResult:
-    """Iterate `plan.target_doc_ids`; call `pipeline.resolve_openalex`.
+    """Iterate `plan.target_doc_ids`; call `resolve_openalex`.
 
     Per-doc resolve_openalex is invoked with `skip_manual=False` -
     plan-side filtering already excluded the manual docs (or chose to
@@ -312,7 +313,7 @@ async def bulk_resolve_openalex_execute(
 
     for doc_id in plan.target_doc_ids:
         try:
-            result = await pipeline.resolve_openalex(doc_id, skip_manual=False)
+            result = await resolve_openalex(doc_id, skip_manual=False)
             if result.get("work_resolved"):
                 n_resolved += 1
             else:

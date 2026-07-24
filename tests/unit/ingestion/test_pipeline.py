@@ -22,12 +22,16 @@ from knowledge_agent.corpus_config import (
     OntologyConfig,
 )
 from knowledge_agent.entity_extractors.base import Mention
+from knowledge_agent.ingestion.metadata_resolution import (
+    _build_authors_display,
+    _doc_metadata_fields_from_work,
+    lookup_known_doi,
+    resolve_openalex,
+)
 from knowledge_agent.ingestion.parse import ParsedChunk
 from knowledge_agent.ingestion.pipeline import (
     IngestResult,
-    _build_authors_display,
     _build_lance_rows,
-    _doc_metadata_fields_from_work,
     backfill_chunks,
     backfill_cross_doc,
     backfill_cross_doc_xrefs,
@@ -36,9 +40,7 @@ from knowledge_agent.ingestion.pipeline import (
     backfill_triples,
     delete_doc,
     ingest_document,
-    lookup_known_doi,
     re_embed,
-    resolve_openalex,
 )
 from knowledge_agent.kg.client import Neo4jClient
 from knowledge_agent.kg.triples_writes import ExtractedTriple
