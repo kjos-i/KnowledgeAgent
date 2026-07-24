@@ -244,33 +244,12 @@ class IngestTab:
                     ),
                     ft.Row(
                         controls=[
-                            ft.Row(
-                                controls=[
-                                    self.ingest_folder_button,
-                                    info(self.app, "ingest.ingest_folder"),
-                                ],
-                                spacing=2,
-                                tight=True,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            ),
-                            ft.Row(
-                                controls=[
-                                    self.reingest_button,
-                                    info(self.app, "ingest.reingest"),
-                                ],
-                                spacing=2,
-                                tight=True,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            ),
-                            ft.Row(
-                                controls=[
-                                    self.sync_button,
-                                    info(self.app, "ingest.sync"),
-                                ],
-                                spacing=2,
-                                tight=True,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            ),
+                            self.ingest_folder_button,
+                            self.reingest_button,
+                            self.sync_button,
+                            # ONE help point for all three folder actions — its
+                            # three tier icons each explain the trio together.
+                            info(self.app, "ingest.folder_actions"),
                         ],
                         spacing=8,
                         wrap=True,

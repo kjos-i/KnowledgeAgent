@@ -60,6 +60,9 @@ def _tier_icon(app: GuiApp, tier: str, *, title: str, text: str) -> ft.IconButto
     def _open(_e: ft.Event) -> None:
         dialog = ft.AlertDialog(
             modal=True,
+            # scrollable so a long body (e.g. a combined multi-control note)
+            # scrolls within the dialog instead of clipping off-screen.
+            scrollable=True,
             title=ft.Text(title, weight=ft.FontWeight.BOLD),
             content=ft.Container(
                 width=440,
