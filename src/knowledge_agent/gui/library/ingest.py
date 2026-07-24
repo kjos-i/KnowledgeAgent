@@ -82,6 +82,9 @@ class IngestTab:
         self.app = app
         self.config_editor = CorpusConfigEditor(app)
         self.status: ft.Text | None = None
+        # Ingestion-summary diff card, wrapped in a container so it can
+        # live-refresh on config edits / Discard (see refresh_summary).
+        self.summary_container: ft.Container | None = None
 
         # Shared folder picker (used by Ingest / Re-ingest / Sync).
         self.folder_field: ft.TextField | None = None
@@ -110,6 +113,9 @@ class IngestTab:
         # Bulk-ops: Skip-manually-edited toggle for bulk_resolve_openalex
         # (relocated here from the Documents table).
         self.skip_manual_checkbox: ft.Checkbox | None = None
+        # Resolve-all-papers bulk button — held so it can be greyed when the
+        # openalex_papers (L1-L4) layer is off in the config draft.
+        self.resolve_button: ft.Button | None = None
         # Set by LibraryView — called after a successful ingest / bulk-op
         # so the Select sub-tab refreshes its counts + Documents list.
         self.on_ingest_complete: Callable[[], None] | None = None
@@ -290,8 +296,15 @@ class IngestTab:
                     self.progress_bar,
                     section_divider(),
                     # ============ Section: Ingestion summary (flat, no box) ============
-                    section_title("Ingestion summary"),
-                    self._build_diff_card(),
+                    ft.Row(
+                        controls=[
+                            section_title("Ingestion summary"),
+                            info(self.app, "ingest.ingestion_summary"),
+                        ],
+                        spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    self._summary_card(),
                     # Discard reverts the pending config changes shown above.
                     ft.Row(controls=[self.config_editor.discard_button]),
                     section_divider(),
@@ -369,6 +382,42 @@ class IngestTab:
 
     # ----- Diff card ------------------------------------------------------
 
+    def _summary_card(self) -> ft.Control:
+        """Ingestion-summary diff card wrapped in a refreshable container.
+
+        The container persists so `refresh_summary` can swap its content in
+        place when the config draft changes — without rebuilding the whole
+        tab (build() only re-runs on a corpus switch)."""
+        self.summary_container = ft.Container(content=self._build_diff_card())
+        return self.summary_container
+
+    def refresh_summary(self) -> None:
+        """Re-render the Ingestion summary from the config editor's current
+        draft-vs-baseline. Wired (via LibraryView) to the config editor's
+        `on_draft_changed`, so editing a setting or pressing Discard updates
+        this summary live — matching the Select tab's twin card, which
+        previously updated while this one went stale."""
+        if self.summary_container is not None:
+            self.summary_container.content = self._build_diff_card()
+            self.app.page.update()
+
+    def _openalex_layer_on(self) -> bool:
+        """True when the config draft has the openalex_papers (L1-L4) layer on
+        — gates the Resolve-all-papers bulk button (you can't resolve a layer
+        the corpus has turned off)."""
+        cfg = self.config_editor._corpus_config
+        return bool(cfg is not None and cfg.layers.openalex_papers)
+
+    def refresh_bulk_op_gating(self) -> None:
+        """Grey the layer-gated bulk-op buttons to match the config draft.
+        Wired (via LibraryView) to the config editor's on_draft_changed, so
+        toggling a layer off greys its bulk button immediately. Currently
+        gates Resolve all papers on openalex_papers; the other buttons get
+        their own gating as we reach them."""
+        if self.resolve_button is not None:
+            self.resolve_button.disabled = not self._openalex_layer_on()
+            self.app.page.update()
+
     def _build_diff_card(self) -> ft.Control:
         """Compact `field: current → new` summary of pending config
         changes. Only rows where the saved baseline differs from the
@@ -439,9 +488,9 @@ class IngestTab:
         `ingestion.bulk_ops` plan → confirm → execute flow via
         `_on_bulk_op_clicked`."""
 
-        def op_button(op_name: str) -> ft.Control:
+        def op_button(op_name: str, label: str | None = None) -> ft.Control:
             return ft.Button(
-                content=centered_label(op_name),
+                content=centered_label(label or op_name),
                 on_click=lambda e, n=op_name: self._on_bulk_op_clicked(n),
             )
 
@@ -457,15 +506,28 @@ class IngestTab:
 
         # openalex: the resolve button and its "Skip manually edited" toggle
         # share ONE line — the toggle governs what the button does, so they
-        # read as a pair.
-        openalex_row: list[ft.Control] = [op_button("bulk_resolve_openalex")]
+        # read as a pair. The button is greyed when the openalex_papers layer
+        # is off in the config draft (see refresh_bulk_op_gating).
+        self.resolve_button = ft.Button(
+            content=centered_label("Resolve all papers"),
+            on_click=lambda e: self._on_bulk_op_clicked("bulk_resolve_openalex"),
+            disabled=not self._openalex_layer_on(),
+        )
+        openalex_row: list[ft.Control] = [self.resolve_button]
         if self.skip_manual_checkbox is not None:
             openalex_row.append(self.skip_manual_checkbox)
 
         # One entry per layer sub-section — joined below with a thin rule.
         groups: list[list[ft.Control]] = [
             [
-                sub_section_title("openalex_papers (L1–L4)"),
+                ft.Row(
+                    controls=[
+                        sub_section_title("Resolve paper metadata (L1–L4)"),
+                        info(self.app, "ingest.bulk_resolve"),
+                    ],
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
                 ft.Row(
                     spacing=12,
                     controls=openalex_row,

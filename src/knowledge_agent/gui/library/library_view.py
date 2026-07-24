@@ -54,7 +54,17 @@ class LibraryView:
         # Cross-tab: while editing config on the Ingest tab, keep the Select
         # card's "changed since last ingest" section live (the config editor
         # fires this after each draft-persist).
-        self.ingest_tab.config_editor.on_draft_changed = self.select_tab.refresh_pending_changes
+        self.ingest_tab.config_editor.on_draft_changed = self._on_config_draft_changed
+
+    def _on_config_draft_changed(self) -> None:
+        """A config-editor draft edit (or Discard) keeps BOTH live 'pending
+        changes' views in sync: the Select card's section and the Ingest
+        tab's own Ingestion summary (both read the same baseline-vs-draft
+        diff, so they must never disagree). The Ingest summary previously
+        went stale because only the Select card was wired here."""
+        self.select_tab.refresh_pending_changes()
+        self.ingest_tab.refresh_summary()
+        self.ingest_tab.refresh_bulk_op_gating()
 
     def build(self) -> ft.Control:
         sub_bar = ft.TabBar(
