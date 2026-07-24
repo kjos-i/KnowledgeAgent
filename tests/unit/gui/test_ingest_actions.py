@@ -51,13 +51,35 @@ def test_fmt_sync_result():
         n_new_failed=0,
         n_edited_failed=1,
         n_moved=0,
-        failures=(),
+        # A real edited-failure is recorded in `failures` too (sync_execute
+        # appends on every failure), so the list length is the truth.
+        failures=(("EDITED bad.pdf", "boom"),),
     )
     msg = IngestTab._fmt_sync_result(r)
     assert "2 new" in msg
     assert "1 re-ingested" in msg
     assert "3 removed" in msg
-    assert "1 failed" in msg  # n_new_failed + n_edited_failed
+    assert "1 failed" in msg  # len(failures)
+
+
+def test_fmt_sync_result_counts_moved_and_orphan_failures():
+    """MOVED (path-patch) and ORPHAN (delete) failures live only in
+    `failures`, not in n_new_failed / n_edited_failed. The summary counts
+    the whole list so a failed move or delete never misreports '0 failed'."""
+    r = SimpleNamespace(
+        n_new_ingested=0,
+        n_edited_succeeded=0,
+        n_orphans_deleted=1,
+        n_new_failed=0,
+        n_edited_failed=0,
+        n_moved=0,
+        failures=(
+            ("MOVED a.pdf", "boom"),
+            ("ORPHAN b.pdf", "delete returned False"),
+        ),
+    )
+    msg = IngestTab._fmt_sync_result(r)
+    assert "2 failed" in msg  # both counted, though neither is new/edited
 
 
 # ---- busy / loop helpers (need construction) ----

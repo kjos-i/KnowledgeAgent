@@ -1220,7 +1220,10 @@ class IngestTab:
             f"Sync done: {result.n_new_ingested} new, "
             f"{result.n_edited_succeeded} re-ingested, "
             f"{result.n_orphans_deleted} removed, "
-            f"{result.n_new_failed + result.n_edited_failed} failed."
+            # Count the whole failures list — n_new_failed + n_edited_failed
+            # alone omits MOVED (path-patch) and ORPHAN (delete) failures, so
+            # a sync where one of those failed could misreport "0 failed".
+            f"{len(result.failures)} failed."
         )
 
     def _missing_ingest_key(self, config: object) -> str | None:
