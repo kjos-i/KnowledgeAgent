@@ -82,6 +82,7 @@ from knowledge_agent.kg.schema import (
     MONDO_TERM_LABEL,
     NCBITAXON_TERM_LABEL,
     OBI_TERM_LABEL,
+    ONTOLOGY_TERM_LABEL,
     PO_TERM_LABEL,
     PR_TERM_LABEL,
     SO_TERM_LABEL,
@@ -471,6 +472,55 @@ async def link_entities(
         len(entities),
     )
     return written
+
+
+async def delete_canonical_links_for_doc(
+    client,
+    ontology_name: str,
+    doc_id: str,
+) -> None:
+    """Delete one doc's entities' :CANONICAL_TO edges to ONE ontology.
+
+    Rebuild-prep for re-linking: `link_entities` MERGEs (append-only), so
+    without this a matching-mode change (e.g. fuzzy -> exact) would leave the
+    stale edges in place alongside the new ones. `backfill_ontology` calls
+    this before re-linking so the pass becomes a true rebuild.
+
+    Entities are corpus-shared and `:CANONICAL_TO` is entity->term (not
+    doc-scoped), so this clears the links of every entity THIS doc mentions;
+    the immediately-following linking pass re-creates them under the current
+    matching strategy, so the net effect is idempotent.
+
+    Mirrors `writes.delete_ontology_terms` bookkeeping: resets
+    `canonicalised=false` on any affected entity left with NO `:CANONICAL_TO`
+    to any ontology (one still linked elsewhere keeps `canonicalised=true`).
+    Idempotent; safe when the doc has no such links.
+    """
+    if ontology_name not in ONTOLOGY_REGISTRY:
+        raise ValueError(
+            f"Unknown ontology name {ontology_name!r}. Known: {sorted(ONTOLOGY_REGISTRY)}."
+        )
+    term_label = ONTOLOGY_REGISTRY[ontology_name]["term_label"]
+    async with client.driver.session() as session:
+        await session.run(
+            f"MATCH (e:{ENTITY_LABEL})<-[:{MENTIONS_REL}]-"
+            f"(:{CHUNK_LABEL} {{doc_id: $doc_id}}) "
+            f"WITH DISTINCT e "
+            f"OPTIONAL MATCH (e)-[r:{CANONICAL_TO_REL}]->(:{term_label}) "
+            f"WITH collect(DISTINCT e) AS affected, collect(r) AS rels "
+            f"FOREACH (x IN rels | DELETE x) "
+            f"WITH affected "
+            f"UNWIND affected AS e "
+            f"WITH DISTINCT e "
+            f"WHERE NOT (e)-[:{CANONICAL_TO_REL}]->(:{ONTOLOGY_TERM_LABEL}) "
+            f"SET e.canonicalised = false",
+            doc_id=doc_id,
+        )
+    logger.info(
+        "L7 unlink (%s): cleared doc %s's :CANONICAL_TO before re-link",
+        ontology_name,
+        doc_id,
+    )
 
 
 # ---------------------------------------------------------------------------

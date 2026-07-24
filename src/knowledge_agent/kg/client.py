@@ -921,6 +921,19 @@ class Neo4jClient:
             doc_id=doc_id,
         )
 
+    async def delete_canonical_links_for_doc(
+        self,
+        ontology_name: str,
+        *,
+        doc_id: str,
+    ) -> None:
+        """Delete one doc's :CANONICAL_TO edges to one ontology before a
+        re-link, so re-linking rebuilds rather than only MERGE-appending.
+
+        Delegates to `linking.delete_canonical_links_for_doc`.
+        """
+        await linking.delete_canonical_links_for_doc(self, ontology_name, doc_id)
+
     # ---- reads (agent path) ----
 
     async def read_query(self, cypher: str, **params: Any) -> list[dict[str, Any]]:

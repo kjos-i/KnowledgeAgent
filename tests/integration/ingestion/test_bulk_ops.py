@@ -818,7 +818,7 @@ async def test_clear_xref_edges_drops_target_ontology_edges(
             f"MERGE (s)-[:MESH_XREF]->(t)"
         )
 
-    plan = await clear_xref_edges_plan("mondo")
+    plan = await clear_xref_edges_plan("mondo", _minimal_corpus_config())
     assert isinstance(plan, ClearXrefEdgesPlan)
     result = await clear_xref_edges_execute(plan)
     # n_cleared = edges deleted + dangling_xrefs props removed.

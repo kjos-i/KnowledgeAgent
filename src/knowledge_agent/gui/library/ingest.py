@@ -116,6 +116,7 @@ class IngestTab:
         # Resolve-all-papers bulk button — held so it can be greyed when the
         # openalex_papers (L1-L4) layer is off in the config draft.
         self.resolve_button: ft.Button | None = None
+        self.triples_button: ft.Button | None = None
         # Set by LibraryView — called after a successful ingest / bulk-op
         # so the Select sub-tab refreshes its counts + Documents list.
         self.on_ingest_complete: Callable[[], None] | None = None
@@ -408,15 +409,25 @@ class IngestTab:
         cfg = self.config_editor._corpus_config
         return bool(cfg is not None and cfg.layers.openalex_papers)
 
+    def _triples_layer_on(self) -> bool:
+        """True when the config draft has the triples (L8) layer on — gates
+        the Re-extract-all-triples bulk button. Running it while the layer is
+        off just wipes all triples and reports every doc as a failure, so the
+        button is disabled instead."""
+        cfg = self.config_editor._corpus_config
+        return bool(cfg is not None and cfg.layers.triples)
+
     def refresh_bulk_op_gating(self) -> None:
         """Grey the layer-gated bulk-op buttons to match the config draft.
         Wired (via LibraryView) to the config editor's on_draft_changed, so
-        toggling a layer off greys its bulk button immediately. Currently
-        gates Resolve all papers on openalex_papers; the other buttons get
-        their own gating as we reach them."""
+        toggling a layer off greys its bulk button immediately. Gates Resolve
+        all papers on openalex_papers and Re-extract all triples on triples;
+        the remaining buttons get their own gating as we reach them."""
         if self.resolve_button is not None:
             self.resolve_button.disabled = not self._openalex_layer_on()
-            self.app.page.update()
+        if self.triples_button is not None:
+            self.triples_button.disabled = not self._triples_layer_on()
+        self.app.page.update()
 
     def _build_diff_card(self) -> ft.Control:
         """Compact `field: current → new` summary of pending config
@@ -517,6 +528,15 @@ class IngestTab:
         if self.skip_manual_checkbox is not None:
             openalex_row.append(self.skip_manual_checkbox)
 
+        # Re-extract all triples (L8): greyed when the triples layer is off in
+        # the config draft (running it while off just wipes triples and reports
+        # every doc as a failure — see refresh_bulk_op_gating).
+        self.triples_button = ft.Button(
+            content=centered_label("Re-extract all triples"),
+            on_click=lambda e: self._on_bulk_op_clicked("bulk_backfill_triples"),
+            disabled=not self._triples_layer_on(),
+        )
+
         # One entry per layer sub-section — joined below with a thin rule.
         groups: list[list[ft.Control]] = [
             [
@@ -569,11 +589,40 @@ class IngestTab:
                     ],
                 ),
             ],
-            layer_group(
-                "Ontology linking (L7)",
-                ["bulk_backfill_ontology", "backfill_xrefs", "clear_xref_edges"],
-            ),
-            layer_group("Triples (L8)", ["bulk_backfill_triples"]),
+            [
+                ft.Row(
+                    controls=[
+                        sub_section_title("Ontology linking (L7)"),
+                        info(self.app, "ingest.bulk_ontology"),
+                    ],
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                ft.Row(
+                    wrap=True,
+                    spacing=8,
+                    controls=[
+                        op_button("bulk_backfill_ontology", "Re-link all entities"),
+                        op_button("backfill_xrefs", "Materialize xref edges"),
+                        op_button("clear_xref_edges", "Clear xref edges…"),
+                    ],
+                ),
+            ],
+            [
+                ft.Row(
+                    controls=[
+                        sub_section_title("Triples (L8)"),
+                        info(self.app, "ingest.bulk_triples"),
+                    ],
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                ft.Row(
+                    wrap=True,
+                    spacing=8,
+                    controls=[self.triples_button],
+                ),
+            ],
             layer_group("Cross-doc (L9)", ["bulk_backfill_cross_doc"]),
             layer_group("Cross-doc xrefs (L10)", ["recompute_cross_doc_xrefs"]),
         ]
@@ -754,10 +803,20 @@ class IngestTab:
         self.app.page.update()
 
     async def _run_clear_xref(self, ontology_name: str) -> None:
+        from knowledge_agent.corpus_config import load_corpus_config
         from knowledge_agent.ingestion import bulk_ops
 
+        cfg_path = self.app.gui_config.corpus_config_path
+        if cfg_path is None:
+            self._set_status("No active corpus.")
+            return
         try:
-            plan = await bulk_ops.clear_xref_edges_plan(ontology_name)
+            config = load_corpus_config(cfg_path)
+        except Exception as exc:
+            self._set_status(f"could not load corpus.toml: {exc}")
+            return
+        try:
+            plan = await bulk_ops.clear_xref_edges_plan(ontology_name, config)
         except Exception as exc:
             self._set_status(f"clear_xref_edges: could not plan — {exc}")
             return

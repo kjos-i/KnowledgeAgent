@@ -619,6 +619,28 @@ async def bulk_backfill_ontology_execute(
             failures.append((doc_id, repr(exc)))
             n_failed += 1
 
+    # L10 :RELATED_BY_XREF rides on the :CANONICAL_TO surface just rebuilt,
+    # so refresh it once at the end when the layer is on (mirrors
+    # backfill_xrefs). L8/L9 read raw entities, not canonicals, so they are
+    # unaffected by re-linking and are NOT recomputed. Fail-soft: a recompute
+    # error is logged, not raised - the per-doc linking already succeeded.
+    if config.layers.cross_doc_xrefs:
+        threshold = (
+            config.cross_doc_xrefs.threshold
+            if config.cross_doc_xrefs is not None
+            else cross_doc_xrefs_writes.DEFAULT_SHARED_COUNT_THRESHOLD
+        )
+        try:
+            await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(
+                get_kg_client(),
+                threshold,
+            )
+        except Exception as exc:
+            logger.warning(
+                "bulk_backfill_ontology_execute: L10 recompute failed: %r",
+                exc,
+            )
+
     return BulkBackfillResult(
         n_succeeded=n_succeeded,
         n_failed=n_failed,
@@ -1749,16 +1771,22 @@ class ClearXrefEdgesPlan:
         this ontology's terms.
       - `n_dangling_sources`: source terms with non-empty
         `dangling_xrefs` (which will also be cleared).
+      - `will_recompute_l10`: True when `layers.cross_doc_xrefs=true`.
+        Clearing removes equivalence links L10 rides on, so execute
+        rebuilds L10 graph-wide afterwards to keep it consistent.
+      - `l10_threshold`: forwarded to the L10 recompute when applicable.
     """
 
     ontology_name: str
     term_label: str
     n_existing_edges: int
     n_dangling_sources: int
+    will_recompute_l10: bool = False
+    l10_threshold: int = cross_doc_xrefs_writes.DEFAULT_SHARED_COUNT_THRESHOLD
 
     @property
     def summary(self) -> str:
-        return (
+        base = (
             f"Clear {self.ontology_name} xref surface: delete "
             f"{self.n_existing_edges} outgoing :<X>_XREF edges and "
             f"strip `dangling_xrefs` from {self.n_dangling_sources} "
@@ -1768,6 +1796,14 @@ class ClearXrefEdgesPlan:
             f"Run this op for those ontologies in turn to wipe both "
             f"directions."
         )
+        if self.will_recompute_l10:
+            return (
+                f"{base} L10 cross_doc_xrefs is on, so :RELATED_BY_XREF "
+                f"edges are then rebuilt graph-wide "
+                f"(threshold={self.l10_threshold}) so they no longer "
+                f"reference the cleared equivalences."
+            )
+        return base
 
 
 @dataclass(frozen=True)
@@ -1783,10 +1819,14 @@ class ClearXrefEdgesResult:
     n_cleared: int | None
 
 
-async def clear_xref_edges_plan(ontology_name: str) -> ClearXrefEdgesPlan:
+async def clear_xref_edges_plan(
+    ontology_name: str,
+    config: CorpusConfig,
+) -> ClearXrefEdgesPlan:
     """Build the plan for clearing one ontology's xref surface.
 
-    Cheap: one edge count + one dangling-source count.
+    Cheap: one edge count + one dangling-source count + config
+    introspection. No mutation.
 
     Raises `ValueError` for an unknown ontology name (registry miss),
     matching the `import_ontology_plan` / `delete_ontology_plan`
@@ -1822,18 +1862,31 @@ async def clear_xref_edges_plan(ontology_name: str) -> ClearXrefEdgesPlan:
             exc,
         )
         n_dangling = 0
+    will_recompute_l10 = bool(config.layers.cross_doc_xrefs)
+    threshold = (
+        config.cross_doc_xrefs.threshold
+        if config.cross_doc_xrefs is not None
+        else cross_doc_xrefs_writes.DEFAULT_SHARED_COUNT_THRESHOLD
+    )
     return ClearXrefEdgesPlan(
         ontology_name=ontology_name,
         term_label=term_label,
         n_existing_edges=n_edges,
         n_dangling_sources=n_dangling,
+        will_recompute_l10=will_recompute_l10,
+        l10_threshold=threshold,
     )
 
 
 async def clear_xref_edges_execute(
     plan: ClearXrefEdgesPlan,
 ) -> ClearXrefEdgesResult:
-    """Perform the wipe promised by `plan`."""
+    """Perform the wipe promised by `plan`.
+
+    When `plan.will_recompute_l10` (corpus has `cross_doc_xrefs=true`),
+    rebuilds L10 :RELATED_BY_XREF graph-wide afterwards so it no longer
+    references the equivalence edges just cleared. Fail-soft on either step.
+    """
     kg_client = get_kg_client()
     try:
         n = await xrefs.clear_xref_edges_for_ontology(
@@ -1847,6 +1900,17 @@ async def clear_xref_edges_execute(
             exc,
         )
         n = None
+    if plan.will_recompute_l10:
+        try:
+            await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(
+                kg_client,
+                plan.l10_threshold,
+            )
+        except Exception as exc:
+            logger.warning(
+                "clear_xref_edges_execute: L10 recompute failed: %r",
+                exc,
+            )
     return ClearXrefEdgesResult(
         ontology_name=plan.ontology_name,
         n_cleared=n,

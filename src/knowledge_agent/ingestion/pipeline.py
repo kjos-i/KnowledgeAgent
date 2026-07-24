@@ -621,6 +621,15 @@ async def backfill_ontology(doc_id: str, config: CorpusConfig) -> dict[str, dict
                 # imported by this call, we scope linking to this doc - the
                 # caller is asking about ONE doc, not the whole corpus.
                 # bulk backfill (Layer 3) iterates over docs instead.
+                #
+                # Rebuild, not append: clear this doc's existing links to the
+                # ontology first, since link_entities MERGEs (append-only) and
+                # would otherwise leave stale edges when the matching mode
+                # changed. No-op on first-time linking.
+                await kg_client.delete_canonical_links_for_doc(
+                    ontology_name,
+                    doc_id=doc_id,
+                )
                 n_links = await kg_client.link_entities_to_ontology(
                     ontology_name,
                     ontology_cfg.matching,

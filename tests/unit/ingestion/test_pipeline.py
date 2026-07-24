@@ -367,6 +367,35 @@ async def test_backfill_ontology_empty_when_no_ontology_layers_enabled():
     kg_mock.link_entities_to_ontology.assert_not_called()
 
 
+async def test_backfill_ontology_deletes_links_before_relink():
+    """Re-link is a true rebuild: this doc's old :CANONICAL_TO for the
+    ontology is cleared BEFORE link_entities re-MERGEs, so a matching-mode
+    change (fuzzy -> exact) doesn't leave stale edges behind."""
+    call_order: list[str] = []
+    kg_mock = MagicMock(spec=Neo4jClient)
+    kg_mock.ensure_ontology_imported = AsyncMock(return_value=False)
+
+    async def _delete(*_a, **_k):
+        call_order.append("delete")
+
+    async def _link(*_a, **_k):
+        call_order.append("link")
+        return 4
+
+    kg_mock.delete_canonical_links_for_doc = AsyncMock(side_effect=_delete)
+    kg_mock.link_entities_to_ontology = AsyncMock(side_effect=_link)
+
+    config = _config_with_ontologies("mesh")
+    with patch(
+        "knowledge_agent.ingestion.pipeline.get_kg_client",
+        return_value=kg_mock,
+    ):
+        await backfill_ontology("doc-xyz", config)
+
+    kg_mock.delete_canonical_links_for_doc.assert_called_once_with("mesh", doc_id="doc-xyz")
+    assert call_order == ["delete", "link"]
+
+
 # ---- _doc_metadata_fields_from_work helper ----
 
 

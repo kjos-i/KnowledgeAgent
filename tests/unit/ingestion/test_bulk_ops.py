@@ -1534,6 +1534,67 @@ async def test_bulk_backfill_ontology_execute_counts_any_import_ok_as_success():
     assert result.failures[0][0] == "d2"
 
 
+async def test_bulk_backfill_ontology_execute_recomputes_l10_when_layer_on():
+    """Re-linking changes :CANONICAL_TO, which L10 rides on, so the op
+    rebuilds L10 :RELATED_BY_XREF at the end when the layer is on."""
+    plan = BulkBackfillPlan(target_doc_ids=("d1",), layer_name="ontology")
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.reconcile_ontologies_to_config",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.get_kg_client",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_ontology",
+            return_value={"mesh": {"import_ok": True, "n_links": 3}},
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops."
+            "cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global",
+            return_value=7,
+        ) as l10_recompute,
+    ):
+        result = await bulk_backfill_ontology_execute(
+            plan,
+            _config_xrefs("use", cross_doc_xrefs=True, cross_doc_xrefs_threshold=3),
+        )
+    l10_recompute.assert_called_once()
+    # threshold flows through positionally.
+    args, _ = l10_recompute.call_args
+    assert args[1] == 3
+    assert result.n_succeeded == 1
+
+
+async def test_bulk_backfill_ontology_execute_no_l10_when_layer_off():
+    """cross_doc_xrefs off -> no L10 recompute (L8/L9 never depend on
+    canonical links, so nothing downstream needs rebuilding)."""
+    plan = BulkBackfillPlan(target_doc_ids=("d1",), layer_name="ontology")
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.reconcile_ontologies_to_config",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.get_kg_client",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.backfill_ontology",
+            return_value={"mesh": {"import_ok": True, "n_links": 3}},
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops."
+            "cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global",
+        ) as l10_recompute,
+    ):
+        result = await bulk_backfill_ontology_execute(plan, _config())
+    l10_recompute.assert_not_called()
+    assert result.n_succeeded == 1
+
+
 async def test_bulk_backfill_execute_returns_result_dataclass():
     plan = BulkBackfillPlan(target_doc_ids=(), layer_name="chunks")
     with (
@@ -2054,7 +2115,7 @@ async def test_recompute_cross_doc_xrefs_execute_calls_global_recompute_when_on(
 
 async def test_clear_xref_edges_plan_unknown_ontology_raises():
     with pytest.raises(ValueError):
-        await clear_xref_edges_plan("not-a-real-ontology")
+        await clear_xref_edges_plan("not-a-real-ontology", _config())
 
 
 async def test_clear_xref_edges_plan_carries_counts_and_term_label():
@@ -2074,11 +2135,13 @@ async def test_clear_xref_edges_plan_carries_counts_and_term_label():
             return_value=7,
         ),
     ):
-        plan = await clear_xref_edges_plan("mesh")
+        plan = await clear_xref_edges_plan("mesh", _config())
     assert plan.ontology_name == "mesh"
     assert plan.term_label == "MeSHTerm"
     assert plan.n_existing_edges == 12
     assert plan.n_dangling_sources == 7
+    # _config() has cross_doc_xrefs off -> no L10 recompute planned.
+    assert plan.will_recompute_l10 is False
 
 
 def test_clear_xref_edges_plan_summary_mentions_outbound_only():
@@ -2144,3 +2207,63 @@ async def test_clear_xref_edges_execute_fail_soft_when_helper_returns_none():
         result = await clear_xref_edges_execute(plan)
     assert result.n_cleared is None
     assert result.ontology_name == "mesh"
+
+
+async def test_clear_xref_edges_plan_flags_l10_when_layer_on():
+    """Plan captures will_recompute_l10 + threshold from config so execute
+    can refresh L10 after clearing."""
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.get_kg_client",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.xrefs.count_xref_edges",
+            return_value=3,
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.xrefs.count_dangling_xrefs",
+            return_value=1,
+        ),
+    ):
+        plan = await clear_xref_edges_plan(
+            "mesh",
+            _config_xrefs("use", cross_doc_xrefs=True, cross_doc_xrefs_threshold=4),
+        )
+    assert plan.will_recompute_l10 is True
+    assert plan.l10_threshold == 4
+    assert "L10" in plan.summary
+
+
+async def test_clear_xref_edges_execute_recomputes_l10_when_planned():
+    """will_recompute_l10=True -> clearing is followed by an L10 global
+    rebuild with the plan's threshold, so L10 doesn't reference the
+    now-deleted equivalences."""
+    plan = ClearXrefEdgesPlan(
+        ontology_name="mesh",
+        term_label="MeSHTerm",
+        n_existing_edges=5,
+        n_dangling_sources=2,
+        will_recompute_l10=True,
+        l10_threshold=4,
+    )
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.get_kg_client",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.xrefs.clear_xref_edges_for_ontology",
+            return_value=5,
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops."
+            "cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global",
+            return_value=9,
+        ) as l10_recompute,
+    ):
+        result = await clear_xref_edges_execute(plan)
+    l10_recompute.assert_called_once()
+    args, _ = l10_recompute.call_args
+    assert args[1] == 4
+    assert result.n_cleared == 5
