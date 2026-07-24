@@ -954,7 +954,7 @@ class CorpusConfigEditor:
                 # ---- Section 2: openalex_papers (L1–L4) ----
                 ft.ExpansionTile(
                     title=self._section_title(
-                        "openalex_papers (L1–L4)",
+                        "Resolve paper metadata (L1–L4)",
                         "L1–L4 bundle: citation + author + venue + topic graph "
                         "from a single OpenAlex API lookup per doc. Turn on for "
                         "scientific papers.\n\n"
@@ -970,7 +970,7 @@ class CorpusConfigEditor:
                 # ---- Section 3: Chunks (L5) ----
                 ft.ExpansionTile(
                     title=self._section_title(
-                        "Chunks (L5)",
+                        "Chunks and embeddings (L5)",
                         "Per-chunk :Chunk nodes joinable with LanceDB via "
                         "`chunk_id`. Required for retrieval — effectively "
                         "always on.\n\n"
@@ -1020,6 +1020,34 @@ class CorpusConfigEditor:
                             content=labeled_field("Min figure bytes", self.min_figure_bytes_field),
                         ),
                         self.optimize_indexes_checkbox,
+                        # --- Sub-section: Embedding model (per-corpus) ---
+                        # The embedder that turns this corpus's chunks into
+                        # vectors — nested inside L5 because embeddings are part
+                        # of the chunk layer, not a layer of their own. Follows
+                        # the "Types to extract" pattern: the sub-header names
+                        # the field, so the dropdown below carries no label.
+                        sub_section_header(
+                            "Embedding model",
+                            trailing=info_icon(
+                                self.app,
+                                title="Embedding model",
+                                text=(
+                                    "Which embedder turns this corpus's chunks into "
+                                    "vectors. Per-corpus — LanceDB pins the vector "
+                                    "dimension at ingest, so a corpus is locked to the "
+                                    "embedder it was built with; changing it after "
+                                    "ingest is destructive (requires a Re-embed).\n\n"
+                                    "Install / uninstall providers in the Installs "
+                                    "tab. The vector dimension is derived from the "
+                                    "provider + model (not a raw field)."
+                                ),
+                            ),
+                        ),
+                        self.embedding_subtitle,
+                        ft.Container(
+                            padding=ft.Padding.symmetric(vertical=6),
+                            content=self.embedding_model_field,
+                        ),
                         _globals_block(
                             [
                                 (
@@ -1027,27 +1055,6 @@ class CorpusConfigEditor:
                                     self._read_global("min_rows_for_vector_index"),
                                 ),
                             ],
-                        ),
-                    ],
-                ),
-                # ---- Section 3b: Embedding (per-corpus) ----
-                ft.ExpansionTile(
-                    title=self._section_title(
-                        "Embedding",
-                        "Which embedder turns this corpus's chunks into "
-                        "vectors. Per-corpus — LanceDB pins the vector "
-                        "dimension at ingest, so a corpus is locked to the "
-                        "embedder it was built with; changing it after ingest "
-                        "is destructive (requires a Re-embed).\n\n"
-                        "Install / uninstall providers in the Installs tab. "
-                        "The vector dimension is derived from the provider + "
-                        "model (not a raw field).",
-                    ),
-                    subtitle=self.embedding_subtitle,
-                    controls=[
-                        ft.Container(
-                            padding=ft.Padding.symmetric(vertical=6),
-                            content=labeled_field("Embedding model", self.embedding_model_field),
                         ),
                     ],
                 ),

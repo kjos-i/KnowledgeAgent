@@ -473,11 +473,24 @@ async def bulk_backfill_chunks_execute(
 ) -> BulkBackfillResult:
     """Iterate targets; call `await pipeline.backfill_chunks(doc_id, config)`.
 
+    Reconciles the downstream layers to config first (like ingest + the
+    other backfill buttons): wipes L6-L10 data for any layer the config has
+    since turned off, so the rebuild doesn't leave stale entities / ontology
+    / triples / cross-doc data behind. The per-doc cascade
+    (`backfill_chunks` -> `backfill_entities` -> L7/L8/L9/L10) then rebuilds
+    only the layers still enabled. Fail-hard on a wipe error.
+
     Success criterion is `result["chunks_ok"]` - the per-doc function
     returns False when the chunks layer is disabled in the corpus
     config OR LanceDB has no chunks for the doc; those count as
     failures here.
     """
+    kg_client = get_kg_client()
+    await reconcile_ontologies_to_config(kg_client, config)
+    await reconcile_entities_to_config(kg_client, config)
+    await reconcile_triples_to_config(kg_client, config)
+    await reconcile_cross_doc_to_config(kg_client, config)
+    await reconcile_cross_doc_xrefs_to_config(kg_client, config)
     n_succeeded = 0
     n_failed = 0
     failures: list[tuple[str, str]] = []
@@ -517,12 +530,19 @@ async def bulk_backfill_entities_execute(
 ) -> BulkBackfillResult:
     """Iterate targets; call `await pipeline.backfill_entities(doc_id, config)`.
 
-    Reconciles entities-to-config at the top: wipes all :Entity
-    corpus-wide if `layers.entities=false`, or wipes entities of
-    types no longer in `config.entities.entity_types` when the layer
-    is on but the type list narrowed. Fail-hard on wipe error.
+    Reconciles L6-L10 to config first (like the chunks rebuild + ingest):
+    wipes data for any of entities / ontology / triples / cross-doc /
+    cross-doc-xrefs the config has turned off, so the per-doc cascade
+    (backfill_entities -> L7/L8/L9/L10) doesn't leave stale downstream data
+    behind. reconcile_entities also prunes entity types no longer allowed
+    when the layer stays on. Fail-hard on a wipe error.
     """
-    await reconcile_entities_to_config(get_kg_client(), config)
+    kg_client = get_kg_client()
+    await reconcile_ontologies_to_config(kg_client, config)
+    await reconcile_entities_to_config(kg_client, config)
+    await reconcile_triples_to_config(kg_client, config)
+    await reconcile_cross_doc_to_config(kg_client, config)
+    await reconcile_cross_doc_xrefs_to_config(kg_client, config)
     n_succeeded = 0
     n_failed = 0
     failures: list[tuple[str, str]] = []

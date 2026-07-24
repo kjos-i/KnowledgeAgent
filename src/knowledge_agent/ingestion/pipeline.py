@@ -363,8 +363,9 @@ async def backfill_chunks(doc_id: str, config: CorpusConfig) -> dict[str, Any]:
     Side effects:
       - Wipes existing KG `:Chunk` nodes for this doc.
       - Re-writes `:Chunk` nodes + `:PART_OF` edges from LanceDB row data.
-      - Chains into `backfill_entities` (which chains into
-        `backfill_ontology`) so the downstream layers stay aligned.
+      - Chains into `backfill_entities`, which cascades through the
+        downstream KG layers (L6 entities -> L7 ontology, L8 triples,
+        L9 cross-doc, L10 cross-doc xrefs) so they stay aligned.
 
     `main_label` and `sub_label` are recovered from the first LanceDB
     row - all chunks of one doc share the same doc-level fields.
@@ -444,13 +445,16 @@ async def backfill_entities(doc_id: str, config: CorpusConfig) -> dict[str, Any]
     Side effects:
       - Deletes existing :Entity orphans for this doc.
       - Writes new :Entity nodes + :MENTIONS edges.
-      - Chains into `backfill_ontology(doc_id, config)` so :CANONICAL_TO
-        edges stay aligned with the freshly-extracted entities.
+      - Chains into the downstream KG layers so they stay aligned with the
+        freshly-extracted entities: backfill_ontology (L7), backfill_triples
+        (L8), backfill_cross_doc (L9), backfill_cross_doc_xrefs (L10) — each
+        a no-op when its layer is off.
 
     Returns a dict with:
       - "entities_ok" (bool): whether the entity write succeeded.
       - "n_mentions" (int): total mentions written.
-      - "ontology" (dict): per-ontology results (empty when entities_ok=False).
+      - "ontology" / "triples" / "cross_doc" / "cross_doc_xrefs" (dict): the
+        downstream backfill results (empty when entities_ok=False).
     """
     if not config.layers.entities:
         logger.info(
@@ -536,6 +540,7 @@ async def backfill_entities(doc_id: str, config: CorpusConfig) -> dict[str, Any]
     ontology_results: dict[str, dict[str, Any]] = {}
     triples_result: dict[str, Any] = {}
     cross_doc_result: dict[str, Any] = {}
+    cross_doc_xrefs_result: dict[str, Any] = {}
     if entities_ok:
         ontology_results = await backfill_ontology(doc_id, config)
         # L8 depends on L6 entities only, so re-running entities
@@ -546,6 +551,10 @@ async def backfill_entities(doc_id: str, config: CorpusConfig) -> dict[str, Any]
         # entities invalidates the doc's :RELATED_TO edges - rebuild.
         # No-op when layers.cross_doc is off.
         cross_doc_result = await backfill_cross_doc(doc_id, config)
+        # L10 depends on L6 entities -> L7 :CANONICAL_TO + xref edges, so
+        # re-running entities invalidates the doc's :RELATED_BY_XREF edges -
+        # rebuild too (same argument as L9). No-op when cross_doc_xrefs is off.
+        cross_doc_xrefs_result = await backfill_cross_doc_xrefs(doc_id, config)
 
     return {
         "entities_ok": entities_ok,
@@ -553,6 +562,7 @@ async def backfill_entities(doc_id: str, config: CorpusConfig) -> dict[str, Any]
         "ontology": ontology_results,
         "triples": triples_result,
         "cross_doc": cross_doc_result,
+        "cross_doc_xrefs": cross_doc_xrefs_result,
     }
 
 

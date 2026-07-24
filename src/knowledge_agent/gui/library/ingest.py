@@ -534,8 +534,41 @@ class IngestTab:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
             ],
-            layer_group("Chunks (L5)", ["bulk_backfill_chunks", "bulk_re_embed"]),
-            layer_group("Entities (L6)", ["bulk_backfill_entities"]),
+            [
+                ft.Row(
+                    controls=[
+                        sub_section_title("Chunks and embeddings (L5)"),
+                        info(self.app, "ingest.bulk_chunks"),
+                    ],
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                ft.Row(
+                    wrap=True,
+                    spacing=8,
+                    controls=[
+                        op_button("bulk_backfill_chunks", "Rebuild graph from chunks"),
+                        op_button("bulk_re_embed", "Re-embed all chunks"),
+                    ],
+                ),
+            ],
+            [
+                ft.Row(
+                    controls=[
+                        sub_section_title("Entities (L6)"),
+                        info(self.app, "ingest.bulk_entities"),
+                    ],
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                ft.Row(
+                    wrap=True,
+                    spacing=8,
+                    controls=[
+                        op_button("bulk_backfill_entities", "Re-extract all entities"),
+                    ],
+                ),
+            ],
             layer_group(
                 "Ontology linking (L7)",
                 ["bulk_backfill_ontology", "backfill_xrefs", "clear_xref_edges"],
