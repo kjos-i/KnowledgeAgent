@@ -19,10 +19,12 @@ strictly: the left column has no configuration surface, only actions.
 Four action buttons:
 
   * **Ingest folder**    — add new files from the picked folder.
-    Skip already-ingested via source_path dedup.
-  * **Re-ingest**        — force re-run on the picked folder.
-  * **Sync**             — bidirectional: add new + remove deleted +
-    re-ingest changed. One-shot.
+    Skips files already in the corpus (dedup by content-hash
+    doc_id, NOT path). Never deletes or re-paths moved/edited docs.
+  * **Re-ingest**        — force a full re-run on every file in the
+    folder, replacing already-indexed docs. No orphan handling.
+  * **Sync**             — bidirectional reconcile to the folder: add
+    new, re-path moved, replace edited, delete orphans. One-shot.
   * **Ingest single file** — pick one file and ingest it.
 
 Empty state (no active corpus): both columns collapse to a single
@@ -51,6 +53,7 @@ from knowledge_agent.gui._styles import (
     thin_rule,
 )
 from knowledge_agent.gui._widgets.info_icon import info_icon
+from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.library.config_diff import config_diff
 from knowledge_agent.gui.library.corpus_config_editor import (
     _ONTOLOGY_DISPLAY,
@@ -241,12 +244,37 @@ class IngestTab:
                     ),
                     ft.Row(
                         controls=[
-                            self.ingest_folder_button,
-                            self.reingest_button,
-                            self.sync_button,
+                            ft.Row(
+                                controls=[
+                                    self.ingest_folder_button,
+                                    info(self.app, "ingest.ingest_folder"),
+                                ],
+                                spacing=2,
+                                tight=True,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            ft.Row(
+                                controls=[
+                                    self.reingest_button,
+                                    info(self.app, "ingest.reingest"),
+                                ],
+                                spacing=2,
+                                tight=True,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            ft.Row(
+                                controls=[
+                                    self.sync_button,
+                                    info(self.app, "ingest.sync"),
+                                ],
+                                spacing=2,
+                                tight=True,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
                         ],
                         spacing=8,
                         wrap=True,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     # Thin rule between the two sub-sections.
                     thin_rule(),
@@ -328,6 +356,7 @@ class IngestTab:
                         controls=[
                             panel_title("Ingestion settings"),
                             self.config_editor.dirty_indicator,
+                            info(self.app, "ingest.settings_reconcile"),
                         ],
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         spacing=8,
@@ -943,10 +972,18 @@ class IngestTab:
             return
 
         self._set_busy(False, "")
+        # Sync is the only action that deletes. Its orphan scope is the WHOLE
+        # corpus (any indexed doc with no matching file in the picked folder),
+        # so a mis-picked folder is a real data-loss path — list every doomed
+        # doc by name in the confirm dialog, not just a count.
+        orphan_names: tuple[str, ...] = (
+            getattr(plan, "orphan_display_names", ()) if action == "Sync" else ()
+        )
         self._show_ingest_confirm(
             action,
             plan.summary,
             lambda: self._spawn(self._execute_action(action, plan, config, overwrite)),
+            orphan_names=orphan_names,
         )
 
     def _plan_single_file(
@@ -983,7 +1020,15 @@ class IngestTab:
         action: str,
         summary: str,
         on_confirm,
+        *,
+        orphan_names: tuple[str, ...] = (),
     ) -> None:
+        """Confirm dialog for an ingest action. When `orphan_names` is given
+        (Sync), the documents that will be DELETED are listed by name below
+        the summary — the whole-corpus orphan scope makes a mis-picked folder
+        a real data-loss path, so the user sees exactly what goes, not just a
+        count. A long list scrolls inside a capped-height box."""
+
         def _cancel(_ev: ft.Event) -> None:
             self.app.page.pop_dialog()
 
@@ -991,10 +1036,37 @@ class IngestTab:
             self.app.page.pop_dialog()
             on_confirm()
 
+        body: list[ft.Control] = [ft.Text(summary, size=12, selectable=True)]
+        if orphan_names:
+            body.append(
+                ft.Text(
+                    f"Will delete these {len(orphan_names)} document(s) from the corpus:",
+                    size=12,
+                    weight=ft.FontWeight.BOLD,
+                    color=ft.Colors.RED_300,
+                )
+            )
+            body.append(
+                ft.Container(
+                    height=min(220, 24 * len(orphan_names) + 8),
+                    content=ft.Column(
+                        tight=True,
+                        spacing=2,
+                        scroll=ft.ScrollMode.AUTO,
+                        controls=[
+                            ft.Text(f"• {name}", size=12, selectable=True) for name in orphan_names
+                        ],
+                    ),
+                )
+            )
+
         dialog = ft.AlertDialog(
             modal=True,
             title=ft.Text(action),
-            content=ft.Text(summary, size=12, selectable=True),
+            content=ft.Container(
+                width=440,
+                content=ft.Column(tight=True, spacing=8, controls=body),
+            ),
             actions=[
                 ft.TextButton("Cancel", on_click=_cancel),
                 ft.Button(content=centered_label(action), on_click=_ok),
