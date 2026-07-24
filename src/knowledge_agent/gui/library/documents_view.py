@@ -148,7 +148,6 @@ class DocumentsView:
         )
         self.refresh_button = ft.Button(
             content="Refresh",
-            tooltip="Reload the document list from the corpus index",
             on_click=self._on_refresh_clicked,
         )
         self.coverage_text = ft.Text("", size=14, color=ft.Colors.GREY_400)
@@ -333,7 +332,6 @@ class DocumentsView:
         snap = dict(row)
         edit_button = ft.Button(
             content="Edit",
-            tooltip="Edit this document's metadata",
             height=28,
             on_click=lambda e, s=snap: self._open_edit_dialog(s),
         )

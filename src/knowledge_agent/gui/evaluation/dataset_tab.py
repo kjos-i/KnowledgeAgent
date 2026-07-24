@@ -231,12 +231,10 @@ class DatasetTab:
         )
         browse_button = ft.Button(
             content=centered_label("Browse"),
-            tooltip="Open an existing gold-dataset JSON (starts in the corpus folder)",
             on_click=self._on_browse_clicked,
         )
         new_dataset_button = ft.Button(
             content=centered_label("New dataset"),
-            tooltip="Start a new empty dataset in the corpus folder",
             on_click=self._on_new_dataset,
         )
         # Status = the whole dataset's authoring state; radios side by side.
@@ -318,9 +316,7 @@ class DatasetTab:
             visible=False,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
-        self.blank_button = ft.TextButton(
-            "Blank", tooltip="Clear the form", on_click=self._on_blank
-        )
+        self.blank_button = ft.TextButton("Blank", on_click=self._on_blank)
         self.gen_model_dropdown = ft.Dropdown(
             editable=True,  # pick a known model OR type one; required for LLM generation
             # Any installed provider's models (stored as a 'provider:model' ref
@@ -494,7 +490,6 @@ class DatasetTab:
         self.update_button = ft.Button("Update case", on_click=self._on_save_case)
         refresh_button = ft.Button(
             "Refresh",
-            tooltip="Reload the dataset from disk and refresh the case list",
             on_click=self._on_refresh,
         )
 

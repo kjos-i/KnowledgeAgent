@@ -149,7 +149,6 @@ class RunTab:
         )
         browse_button = ft.Button(
             content=centered_label("Browse"),
-            tooltip="Browse for a gold-dataset JSON (starts in the corpus folder)",
             on_click=self._on_browse_clicked,
         )
 
