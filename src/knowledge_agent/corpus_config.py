@@ -1068,18 +1068,17 @@ def corpus_folder(corpus_toml_path: Path) -> Path:
     return corpus_toml_path.parent
 
 
-def corpus_figures_dir(corpus_toml_path: Path, doc_id: str) -> Path:
+def corpus_figures_dir(corpus_dir: Path, doc_id: str) -> Path:
     """Return the per-doc figures directory beside the LanceDB folder.
 
     Path is `<corpus folder>/figures/<doc_id>/` — a sibling of
     `<corpus folder>/lancedb/`. Figures are the app's own artefact, not
     LanceDB internals, so they live beside the vector store rather than
-    inside its directory (revised 2026-07-04, was inside lancedb).
+    inside its directory.
 
-    Created idempotently on call so callers can start writing PNGs
-    immediately. Used by the parser when `config.extract_figures=True`;
-    each picture is saved as `<returned dir>/<i>.png`.
+    The single source of truth for the figures location. Pure path join
+    (no mkdir); the ingest pipeline passes `lancedb_path.parent` as the
+    corpus folder, and the parser creates the directory when it writes a
+    PNG (`<returned dir>/<i>.png`).
     """
-    d = corpus_folder(corpus_toml_path) / "figures" / doc_id
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    return corpus_dir / "figures" / doc_id

@@ -50,13 +50,14 @@ def test_fmt_sync_result():
         n_orphans_deleted=3,
         n_new_failed=0,
         n_edited_failed=1,
-        n_moved=0,
+        n_moved=4,
         # A real edited-failure is recorded in `failures` too (sync_execute
         # appends on every failure), so the list length is the truth.
         failures=(("EDITED bad.pdf", "boom"),),
     )
     msg = IngestTab._fmt_sync_result(r)
     assert "2 new" in msg
+    assert "4 moved" in msg
     assert "1 re-ingested" in msg
     assert "3 removed" in msg
     assert "1 failed" in msg  # len(failures)

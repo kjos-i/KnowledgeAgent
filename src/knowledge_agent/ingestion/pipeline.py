@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from knowledge_agent.config import get_settings
-from knowledge_agent.corpus_config import CorpusConfig
+from knowledge_agent.corpus_config import CorpusConfig, corpus_figures_dir
 from knowledge_agent.entity_extractors import (
     extract_union,
     validate_entity_types,
@@ -1033,7 +1033,7 @@ async def ingest_document(
         # Figures live BESIDE lancedb at `<corpus>/figures/<doc_id>/`
         # (lancedb_path.parent = the corpus folder), not inside the
         # LanceDB dir — figures are our artefact, not LanceDB internals.
-        figures_dir = settings.lancedb_path.parent / "figures" / doc_id
+        figures_dir = corpus_figures_dir(settings.lancedb_path.parent, doc_id)
     chunks = await asyncio.to_thread(
         parse_document,
         path,

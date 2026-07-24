@@ -70,16 +70,23 @@ def config_diff(baseline: CorpusConfig, draft: CorpusConfig) -> list[ConfigChang
         if b != d:
             diffs.append((field, _fmt_bool(b), _fmt_bool(d)))
 
-    # xrefs is a 3-state string ("off" / "build" / "use").
+    # xrefs is a 3-state string ("none" / "collect_only" / "use").
     if baseline.layers.xrefs != draft.layers.xrefs:
         diffs.append(("xrefs", baseline.layers.xrefs, draft.layers.xrefs))
 
-    # Per-ontology enable flags.
+    # Per-ontology enable flags + matching mode. is_dirty() compares the full
+    # OntologyConfig (matching is its only field), so matching changes must
+    # show here too — else the card reads "No pending changes" while ● is lit
+    # and a re-ingest silently persists the change.
     for key, display in _ONTOLOGY_DISPLAY.items():
         b = getattr(baseline.layers, f"ontology_{key}", False)
         d = getattr(draft.layers, f"ontology_{key}", False)
         if b != d:
             diffs.append((f"ontology_{key} ({display})", _fmt_bool(b), _fmt_bool(d)))
+        b_match = baseline.ontology[key].matching if key in baseline.ontology else "exact"
+        d_match = draft.ontology[key].matching if key in draft.ontology else "exact"
+        if b_match != d_match:
+            diffs.append((f"{display} matching", b_match, d_match))
 
     # Extractor(s) + entity_types + mode (on the entities subsection). Compare
     # the FULL extractors list (not just extractors[0]) and entity_types_mode,

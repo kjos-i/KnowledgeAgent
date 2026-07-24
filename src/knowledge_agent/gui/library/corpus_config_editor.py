@@ -1588,10 +1588,10 @@ class CorpusConfigEditor:
     def try_save_and_get_error(self) -> str | None:
         """Validate current in-memory state + write to disk if valid.
 
-        Called by Ingest tab's action buttons (Ingest folder / Re-ingest /
-        Sync / Ingest single file) at kickoff time — the only place
-        corpus.toml gets written. Field-handler toggles are in-memory
-        only.
+        Called at kickoff time by the Ingest tab's action buttons (Ingest
+        folder / Re-ingest / Sync / Ingest single file) AND the bulk-op
+        buttons — the places corpus.toml gets written. Field-handler
+        toggles are in-memory only.
 
         Returns None on success + refreshes baseline / dirty indicator.
         Returns a compact error message on validation or write failure.

@@ -958,18 +958,15 @@ def test_corpus_folder_is_toml_parent(tmp_path):
 def test_corpus_figures_dir_is_sibling_of_lancedb(tmp_path):
     """Figures live at `<corpus>/figures/<doc_id>/` — a sibling of
     `<corpus>/lancedb/`, NOT nested inside the LanceDB directory."""
-    toml = tmp_path / "mycorpus" / "corpus.toml"
-    d = corpus_figures_dir(toml, "doc-123")
+    d = corpus_figures_dir(tmp_path / "mycorpus", "doc-123")
     assert d == tmp_path / "mycorpus" / "figures" / "doc-123"
     # Explicitly NOT under a lancedb/ segment (the pre-2026-07-04 layout).
     assert "lancedb" not in d.parts
 
 
-def test_corpus_figures_dir_created_idempotently(tmp_path):
-    """The dir is mkdir'd on call (parents + exist_ok) so callers can
-    write PNGs immediately; a second call on the same doc_id is a no-op."""
-    toml = tmp_path / "c" / "corpus.toml"
-    d1 = corpus_figures_dir(toml, "d1")
-    assert d1.is_dir()
-    d2 = corpus_figures_dir(toml, "d1")  # must not raise
-    assert d1 == d2
+def test_corpus_figures_dir_is_pure_path_join(tmp_path):
+    """The single source of truth for the figures location is a pure path
+    join — no directory is created (the parser mkdirs when it writes PNGs)."""
+    d = corpus_figures_dir(tmp_path, "d1")
+    assert d == tmp_path / "figures" / "d1"
+    assert not d.exists()

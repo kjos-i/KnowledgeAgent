@@ -1372,6 +1372,7 @@ class IngestTab:
     def _fmt_sync_result(result: object) -> str:
         return (
             f"Sync done: {result.n_new_ingested} new, "
+            f"{result.n_moved} moved, "
             f"{result.n_edited_succeeded} re-ingested, "
             f"{result.n_orphans_deleted} removed, "
             # Count the whole failures list — n_new_failed + n_edited_failed

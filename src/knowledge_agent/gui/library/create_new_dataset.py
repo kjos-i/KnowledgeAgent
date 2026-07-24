@@ -84,6 +84,12 @@ logger = logging.getLogger(__name__)
 _NEO4J_PING_TIMEOUT = 5.0
 
 
+# Characters Windows forbids in a path component. The corpus name becomes a
+# folder name (create mode) and a keyring account, so reject them up front
+# rather than fail cryptically at mkdir.
+_ILLEGAL_NAME_CHARS = frozenset('<>:"/\\|?*')
+
+
 # Split proportions for the internal 2-column layout — form on the left,
 # helper info on the right. Fixed (no dragger) — the right column exists
 # only to organise the content and give future info a home.
@@ -484,8 +490,19 @@ class CreateNewDatasetTab:
 
         if not name:
             return False, "corpus name is required"
-        if any(c.name == name for c in self.app.gui_config.corpora):
-            return False, f"corpus name {name!r} is already registered"
+        illegal = sorted({c for c in name if c in _ILLEGAL_NAME_CHARS or ord(c) < 32})
+        if illegal:
+            return False, (
+                "corpus name has characters that can't be used in a folder name: "
+                + " ".join(repr(c) for c in illegal)
+            )
+        if name.endswith("."):
+            return False, "corpus name can't end with a dot (Windows would trim it)"
+        if any(c.name.casefold() == name.casefold() for c in self.app.gui_config.corpora):
+            return False, (
+                f"corpus name {name!r} is already registered "
+                "(names are compared case-insensitively)"
+            )
         if not uri:
             return False, "Neo4j URI is required"
         if not user:

@@ -7,7 +7,12 @@ contradict is_dirty() (B13).
 
 from __future__ import annotations
 
-from knowledge_agent.corpus_config import CorpusConfig, EntityConfig, LayerFlags
+from knowledge_agent.corpus_config import (
+    CorpusConfig,
+    EntityConfig,
+    LayerFlags,
+    OntologyConfig,
+)
 from knowledge_agent.gui.library.config_diff import config_diff
 
 
@@ -36,3 +41,20 @@ def test_config_diff_detects_entity_types_mode_change():
     draft = _config(extractors=["llm"], mode="add")
     diffs = config_diff(base, draft)
     assert any(d[0] == "entity_types_mode" for d in diffs), diffs
+
+
+def test_config_diff_detects_ontology_matching_change():
+    """A matching-mode flip (exact<->fuzzy) must show as a change; the old diff
+    compared only the ontology_* enable flags, so it lit ● + enabled Discard
+    while the card read 'no changes' — and a re-ingest silently applied it."""
+    base = CorpusConfig(
+        layers=LayerFlags(chunks=True, entities=True, ontology_mesh=True),
+        entities=EntityConfig(extractors=["llm"]),
+        ontology={"mesh": OntologyConfig(matching="exact")},
+    )
+    draft = CorpusConfig(
+        layers=LayerFlags(chunks=True, entities=True, ontology_mesh=True),
+        entities=EntityConfig(extractors=["llm"]),
+        ontology={"mesh": OntologyConfig(matching="fuzzy")},
+    )
+    assert any("matching" in d[0].lower() for d in config_diff(base, draft))

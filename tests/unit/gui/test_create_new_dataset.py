@@ -83,6 +83,28 @@ def test_validate_rejects_duplicate_name(tmp_path: Path):
     assert not ok and "already registered" in msg
 
 
+def test_validate_rejects_illegal_name_chars():
+    tab = _tab()
+    _fill(tab, name="bad/name", folder="/somewhere")
+    ok, msg = tab._validate()
+    assert not ok and "folder name" in msg
+
+
+def test_validate_rejects_case_insensitive_duplicate_name(tmp_path: Path):
+    tab = _tab()
+    tab.app.gui_config.corpora = [
+        CorpusEntry(
+            name="Papers",
+            neo4j_uri="neo4j://h:7687",
+            lancedb_path=tmp_path / "l",
+            corpus_config_path=tmp_path / "c.toml",
+        )
+    ]
+    _fill(tab, name="papers", uri="neo4j://other:7687", folder=str(tmp_path))
+    ok, msg = tab._validate()
+    assert not ok and "already registered" in msg
+
+
 # ---- _validate: path-derivation guards ---------------------------------
 
 
