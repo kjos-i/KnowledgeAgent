@@ -277,6 +277,63 @@ INFO: dict[str, InfoText] = {
             "raises, surfaced as 'Ingest failed')."
         ),
     ),
+    "ingest.progress": InfoText(
+        title="Progress",
+        standard=(
+            "The Progress line is the live status of the current job; when idle it "
+            "reads 'Empty'. Every ingest action opens with a spinner and '<action>: "
+            "preparing…' while the ingestion engine loads (slow only on the first run "
+            "of a session).\n\n"
+            "A folder action (Ingest folder / Re-ingest / Sync) then shows '<action>: "
+            "scanning <folder>…' while it hashes every file to build the plan. After "
+            "you confirm, a progress bar replaces the spinner and the line counts "
+            "documents — '<action>: 3 / 20 files' — ending in a summary like 'Ingest "
+            "folder done: 18 succeeded, 2 failed' or 'Sync done: 5 new, 1 re-ingested, "
+            "2 removed, 0 failed'.\n\n"
+            "Ingest single file skips the scan and just shows 'Ingesting <name>…' then "
+            "'Ingested <name>.' (no bar). Other messages: 'nothing to do' when the "
+            "folder holds nothing to change; '<action> failed: …' on error; and if you "
+            "press Cancel during a folder run, it finishes the current document then "
+            "stops, prefixing the summary with 'Cancelled'."
+        ),
+        beginner=(
+            "This line tells you what the app is doing right now. Before you start "
+            "anything it just says 'Empty'.\n\n"
+            "When you run one of the ingest buttons a small spinner appears and the "
+            "line describes each step in words — first it gets ready (and, for a "
+            "folder, reads through your files), then a bar fills up and the line counts "
+            "documents as it goes, like '3 / 20 files', so you can see how far along it "
+            "is. When it finishes, the line shows a short summary of what happened — how "
+            "many documents were added, and how many failed if any.\n\n"
+            "Some messages you might see: 'Ingesting <name>…' then 'Ingested <name>.' "
+            "for a single file; 'nothing to do' if there was nothing new to process; "
+            "or, if you pressed Cancel, it finishes the document it's on and then stops. "
+            "While the spinner is turning it's still working — let it finish."
+        ),
+        technical=(
+            "Three controls share this section — an indeterminate spinner "
+            "(`progress_ring`), the status `Text`, and a `Cancel` button — with a "
+            "determinate `progress_bar` below.\n\n"
+            "Every action opens with '<action>: preparing…' (spinner) during the "
+            "off-thread backend import. Folder actions (`_run_action` → "
+            "`_execute_action`) then show '<action>: scanning <folder>…' during "
+            "`_walk_and_hash`; an empty plan short-circuits to '<action>: nothing to do "
+            "in <folder>.'. After confirm: '<action>: working…', then `_begin_progress` "
+            "hides the spinner and shows the bar, and `_on_ingest_progress` sets it to "
+            "done/total while writing '<action>: {done} / {total} files' per document "
+            "(for Sync, per item across the new/moved/edited/orphan buckets). The final "
+            "line is `_fmt_ingest_result` ('<action> done: N succeeded, M failed' [+ "
+            "'First failure: <name> — <err>']) or `_fmt_sync_result` ('Sync done: X "
+            "new, Y re-ingested, Z removed, W failed'); a raised error shows '<action> "
+            "failed: <exc>'.\n\n"
+            "The bar appears only for folder executes. Ingest single file runs with the "
+            "spinner only ('Ingesting <name>…' → 'Ingested <name>.'), as do the Bulk "
+            "operations ('<op>: working…' → '<op> done: …' / 'failed: …') — all on this "
+            "same line. Cancel is armed only during a folder execute: pressing it writes "
+            "'Cancelling — will stop after the current file…' and prefixes the result "
+            "with 'Cancelled —' (a cooperative stop at the next document boundary)."
+        ),
+    ),
     "ingest.settings_reconcile": InfoText(
         title="How these settings are saved and applied",
         standard=(

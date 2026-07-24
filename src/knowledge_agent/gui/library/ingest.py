@@ -274,7 +274,14 @@ class IngestTab:
                     ),
                     section_divider(),
                     # ============ Section: Progress ============
-                    section_title("Progress"),
+                    ft.Row(
+                        controls=[
+                            section_title("Progress"),
+                            info(self.app, "ingest.progress"),
+                        ],
+                        spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
                     ft.Row(
                         controls=[self.progress_ring, self.status, self.cancel_button],
                         spacing=8,
