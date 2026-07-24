@@ -222,6 +222,61 @@ INFO: dict[str, InfoText] = {
             "case-sensitive."
         ),
     ),
+    "ingest.single_file": InfoText(
+        title="Ingest single file",
+        standard=(
+            "Ingest single file adds one document — the file shown in the File field "
+            "above (pick it with that Browse button) — into the active corpus. It's "
+            "the same ingest as the folder buttons, just for one file you choose "
+            "directly, wherever it lives on disk. It asks 'Ingest <name>?' before "
+            "running.\n\n"
+            "When to use it: to add or refresh a single document without scanning a "
+            "whole folder — one new file, or a re-run of one document that parsed "
+            "badly. Ingesting the exact same file again just replaces its data (no "
+            "duplicate).\n\n"
+            "When not to use it: for many files at once (use Ingest folder); to remove "
+            "documents or mirror a folder (use Sync); to rebuild everything after a "
+            "settings change (use Re-ingest). And note it doesn't clean up edits — if "
+            "you ingest a file you've changed since first adding it, the old version "
+            "stays behind as a separate copy, so use Sync to truly replace an edited "
+            "file."
+        ),
+        beginner=(
+            "A corpus is your own searchable collection of documents. This button adds "
+            "one document to it — the file in the File field just above (click its "
+            "Browse to choose one). It's the single-file version of Ingest folder: same "
+            "result, but for exactly one file you point at, wherever it is on your "
+            "computer. It shows 'Ingest <name>?' and waits for you to confirm.\n\n"
+            "Use it when you just want to add one document, or re-do one that came out "
+            "wrong — no need to gather files into a folder first. Adding the very same "
+            "file again simply refreshes it; you won't get two copies.\n\n"
+            "Skip it when you have lots of files to add (Ingest folder does the whole "
+            "folder at once), or when you want your corpus to match a folder — adding "
+            "new files, removing deleted ones — which is Sync's job. One thing to "
+            "watch: if you changed a file after first adding it and then ingest it "
+            "here, the older version isn't removed and you'd end up with both. To "
+            "replace an edited document cleanly, use Sync."
+        ),
+        technical=(
+            "The button → `_start_action('Ingest single file')` → `_plan_single_file` "
+            "→ `_execute_single_file`, which calls `pipeline.ingest_document(path, "
+            "config, main, sub, preserve_existing_labels=not overwrite)` on the single "
+            "path in the File field (its own picker, separate from the folder picker "
+            "the other three share). No folder walk/hash: the confirm is a plain "
+            "'Ingest <name>?' rather than a scanned plan summary, and the run isn't "
+            "cancellable (the Cancel button is armed only for folder executes).\n\n"
+            "It shares the rest of the ingest contract: `_start_action` saves the "
+            "config editor first, the missing-key pre-flight runs, and "
+            "`ingest_document` runs the corpus-wide `reconcile_*_to_config` — so "
+            "ingesting one file with a layer just disabled still wipes that layer "
+            "across the corpus. `doc_id` is the content hash: ingesting an identical "
+            "file re-runs delete-then-write on the same `doc_id` (replace, no "
+            "duplicate); an edited file (new `doc_id`) is written new while the old "
+            "`doc_id` lingers — only Sync reconciles that. The path must satisfy "
+            "`Path.is_file()` and have a supported extension (else `ingest_document` "
+            "raises, surfaced as 'Ingest failed')."
+        ),
+    ),
     "ingest.settings_reconcile": InfoText(
         title="How these settings are saved and applied",
         standard=(

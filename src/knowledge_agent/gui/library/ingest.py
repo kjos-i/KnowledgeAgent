@@ -265,8 +265,12 @@ class IngestTab:
                         trailing=self.file_browse_button,
                     ),
                     ft.Row(
-                        controls=[self.ingest_file_button],
+                        controls=[
+                            self.ingest_file_button,
+                            info(self.app, "ingest.single_file"),
+                        ],
                         spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     section_divider(),
                     # ============ Section: Progress ============
