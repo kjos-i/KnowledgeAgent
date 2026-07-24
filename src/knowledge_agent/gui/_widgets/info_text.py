@@ -334,6 +334,71 @@ INFO: dict[str, InfoText] = {
             "with 'Cancelled —' (a cooperative stop at the next document boundary)."
         ),
     ),
+    "ingest.labels_section": InfoText(
+        title="Labels and sub-labels",
+        standard=(
+            "These pick the type label applied to every document in your next "
+            "ingest. They're per-run settings — not saved to the corpus — so they "
+            "apply to whichever action you run next (Ingest folder, Re-ingest, Sync, "
+            "or single file) and keep their values until you change them.\n\n"
+            "Main label is the broad kind: Document (papers, notes, reports…) or "
+            "Artifact (datasets, code, figures, audio…). Sub-label is an optional "
+            "finer type under it — Paper, Note, Report… under Document; Dataset, Code, "
+            "Figure… under Artifact — or leave it (none). The sub-label list is "
+            "limited to the types your corpus allows and to those valid for the chosen "
+            "main label, so changing the main label changes the choices. (If the list "
+            "shows only (none), this corpus has been restricted to no sub-labels.)\n\n"
+            "Overwrite existing labels only matters for documents already in the "
+            "corpus. Off (default), re-ingesting or syncing a document keeps its "
+            "stored labels — so if you pick a new label and it doesn't change, that's "
+            "why: tick Overwrite to force the labels above onto an already-ingested "
+            "document. It never affects brand-new files, and it changes only the "
+            "label, not the document's content."
+        ),
+        beginner=(
+            "Every document you add gets a type label, and this is where you choose "
+            "it. These are per-run choices — they aren't saved into the corpus; they "
+            "apply to your next ingest and stay as you left them until you change "
+            "them.\n\n"
+            "Main label is the big category: Document (things you read — papers, notes, "
+            "reports, articles) or Artifact (supporting material — datasets, code, "
+            "figures, audio, video). Sub-label is a more specific type inside that "
+            "category (like Paper or Note under Document), and it's optional — you can "
+            "leave it as (none). The sub-label choices depend on your main label and on "
+            "what your corpus allows, so they change when you switch the main label. If "
+            "you see only (none), this corpus was set up without sub-types.\n\n"
+            "The Overwrite existing labels checkbox only comes into play for a document "
+            "that's already in your corpus. Left off (the default), re-adding or "
+            "syncing a document keeps whatever label it already had — so if you change "
+            "a label and it seems to stick to the old one, tick this box to make your "
+            "new choice win. For brand-new documents it makes no difference, and it "
+            "only ever changes the label, never the document's contents."
+        ),
+        technical=(
+            "Per-run ingest args read live from these three controls via "
+            "get_ingest_args() at action time — not part of CorpusConfig, never written "
+            "to corpus.toml (unlike the layer sections below), and not auto-reset "
+            "between runs (they hold until changed or app restart).\n\n"
+            "Main label options are MAIN_LABELS = (Document, Artifact), the two "
+            "top-level node labels; default Document. Sub-label options are the "
+            "corpus's allowed_types filtered by SUB_LABEL_TO_MAIN to the chosen main, "
+            "plus (none) (default). The 14-way taxonomy is 8 Document sub-labels "
+            "(Paper/Book/Note/Report/Presentation/Article/Correspondence/Transcript) + "
+            "6 Artifact (Dataset/Code/Figure/Diagram/Audio/Video); allowed_types "
+            "defaults to all 14 and is restricted only by hand-editing corpus.toml. At "
+            "ingest, ingest_document validates the pair before any write: sub must be "
+            "in allowed_types AND SUB_LABEL_TO_MAIN[sub] must equal main (so e.g. "
+            "(Document, Dataset) raises ValueError). The chosen (main, sub) become "
+            "Neo4j node labels and are mirrored onto the LanceDB chunk rows.\n\n"
+            "Overwrite is preserve_existing_labels inverted (default off → preserve "
+            "on). When a doc's focal node already exists, preserve keeps its stored "
+            "(main, sub) and ignores the picked values; overwrite forces them. It's a "
+            "no-op for Ingest folder (add only touches new doc_ids) and first-time "
+            "ingests; it bites on Re-ingest, Sync's EDITED bucket, and re-ingesting an "
+            "existing file as a single file. It gates only the label swap — content, "
+            "chunks, embeddings and graph are rebuilt from fresh config either way."
+        ),
+    ),
     "ingest.settings_reconcile": InfoText(
         title="How these settings are saved and applied",
         standard=(

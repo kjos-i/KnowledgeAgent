@@ -83,6 +83,7 @@ from knowledge_agent.gui._styles import (
     sub_section_header,
 )
 from knowledge_agent.gui._widgets.info_icon import info_icon
+from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.library.create_new_dataset import _write_corpus_toml
 from knowledge_agent.gui.library.session_state import load_session, update_draft
 from knowledge_agent.gui.settings.llm_tab import model_options
@@ -431,11 +432,6 @@ class CorpusConfigEditor:
         self.overwrite_checkbox = ft.Checkbox(
             label="Overwrite existing labels",
             value=False,
-            tooltip=(
-                "Only affects Sync and Re-ingest, when a file is already "
-                "in the corpus. OFF (default): keep the stored labels. "
-                "ON: overwrite with the values above."
-            ),
             on_change=self._on_overwrite_changed,
         )
 
@@ -927,17 +923,13 @@ class CorpusConfigEditor:
                 self._build_ingest_infrastructure_block(),
                 # ---- Section 1: Labels and sub-labels (per-run) ----
                 ft.ExpansionTile(
-                    title=self._section_title(
-                        "Labels and sub-labels",
-                        "Applied to every file in the next ingest. Not "
-                        "persisted to corpus.toml — pick fresh each run.\n\n"
-                        "Sub-label options come from allowed_types, filtered "
-                        "to the chosen Main label. If allowed_types is empty, "
-                        "no sub-labels are available.\n\n"
-                        "allowed_types (read-only): "
-                        f"{_format_allowed_types(list(self._corpus_config.allowed_types))}"
-                        ". Default = all 14 sub-labels; hand-edit corpus.toml "
-                        "to restrict this corpus.",
+                    title=ft.Row(
+                        controls=[
+                            section_title("Labels and sub-labels"),
+                            info(self.app, "ingest.labels_section"),
+                        ],
+                        spacing=4,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     subtitle=self.labels_subtitle,
                     expanded=True,
@@ -2799,14 +2791,6 @@ def _fmt_float(value: float | None) -> str:
 
 def _fmt_bool(v: bool) -> str:
     return "on" if v else "off"
-
-
-def _format_allowed_types(allowed: list[str]) -> str:
-    """Format the corpus-wide allowed_types list for the Labels (i) dialog —
-    the same "X, Y, Z (N items)" style that used to show inline."""
-    if allowed:
-        return f"{', '.join(allowed)} ({len(allowed)} items)"
-    return "(empty)"
 
 
 def _globals_block(
