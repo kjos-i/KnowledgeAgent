@@ -690,7 +690,7 @@ async def test_delete_doc_focal_query_matches_by_doc_id():
     client = _client_with_driver(_configured_settings(), driver)
     await client.delete_doc(DOC_ID)
     focal_query, focal_params = driver.sessions[0].calls[0]
-    assert "MATCH (d:Document {doc_id: $doc_id})" in focal_query
+    assert "MATCH (d:Document|Artifact {doc_id: $doc_id})" in focal_query
     assert "DETACH DELETE d" in focal_query
     assert focal_params == {"doc_id": DOC_ID}
 

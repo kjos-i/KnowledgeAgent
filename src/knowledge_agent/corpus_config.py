@@ -504,9 +504,11 @@ class OntologyConfig(BaseModel):
             "Linking strategy for matching `:Entity` nodes to ontology "
             "terms. 'exact' (default) only links entities whose `key` "
             "exactly matches a term's label or synonym (lowercased). "
-            "'fuzzy' falls through to a more permissive match "
-            "(singular/plural collapse, edit-distance ≤ 2) when exact "
-            "fails - catches morphological variation at some risk of "
+            "'fuzzy' falls through to a more permissive match when exact "
+            "fails: it tries a small fixed set of string variants "
+            "(trailing-'s' singular/plural flip, hyphen/space swap, and "
+            "the two combined), not edit-distance or spell-correction. It "
+            "catches simple morphological variation at some risk of "
             "false positives. Switch to 'fuzzy' if 'exact' leaves too "
             "many entities unlinked, then re-run the linking pass."
         ),
@@ -734,8 +736,9 @@ class CorpusConfig(BaseModel):
             "Model used by the LLM entity-extractor adapter (L6). "
             "Haiku is cheap + fast — one call per chunk, short input, "
             "straightforward span extraction (~$0.05 per 200-chunk "
-            "paper at current Haiku pricing). Consulted only when "
-            "`entities.extractor='llm'`. Per-corpus — a biomedical "
+            "paper at current Haiku pricing). Consulted whenever "
+            "'llm' is among `entities.extractors` (any priority "
+            "position), not only as the primary. Per-corpus — a biomedical "
             "corpus wanting Sonnet-grade extraction picks it here "
             "without disturbing other corpora."
         ),
@@ -747,8 +750,8 @@ class CorpusConfig(BaseModel):
         description=(
             "Temperature for the LLM entity-extractor adapter. 0.0 = "
             "deterministic — structured Pydantic output (ExtractedMentions) "
-            "works best at temperature 0. Consulted only when "
-            "`entities.extractor='llm'`. Per-corpus."
+            "works best at temperature 0. Consulted whenever 'llm' is "
+            "among `entities.extractors` (any priority position). Per-corpus."
         ),
     )
     triples_extractor_model: str = Field(

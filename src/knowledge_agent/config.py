@@ -603,48 +603,6 @@ class Settings(BaseSettings):
             "best at temperature 0."
         ),
     )
-    entity_extractor_model: str = Field(
-        default=PROVIDER_NODE_DEFAULTS["anthropic"]["entity_extractor"],
-        description=(
-            "Model used by the LLM entity-extractor adapter (L6). Haiku is "
-            "cheap + fast - one call per chunk, the input is short and the "
-            "task is straightforward span extraction. ~$0.05 per 200-chunk "
-            "paper at current Haiku pricing. Only consulted when "
-            "`[entities].extractor = 'llm'` in the corpus's `corpus.toml`."
-        ),
-    )
-    entity_extractor_temperature: float = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description=(
-            "Temperature for the LLM entity-extractor adapter. 0.0 = "
-            "deterministic - structured Pydantic output (ExtractedMentions) "
-            "works best at temperature 0."
-        ),
-    )
-    triples_extractor_model: str = Field(
-        default=PROVIDER_NODE_DEFAULTS["anthropic"]["triples_extractor"],
-        description=(
-            "Model used by the LLM triples-extractor (L8). Haiku - one "
-            "call per chunk, vocabulary-constrained output (15 fixed "
-            "predicates) is a small structured-output task. Only "
-            "consulted when `layers.triples=true` in the corpus's "
-            "`corpus.toml`. Same model as the entity extractor by "
-            "default; bump independently if L8 quality needs Sonnet."
-        ),
-    )
-    triples_extractor_temperature: float = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description=(
-            "Temperature for the LLM triples-extractor. 0.0 = "
-            "deterministic - the constrained predicate vocabulary + "
-            "structured Pydantic output (ExtractedTriples) need stable "
-            "output."
-        ),
-    )
     skip_query_builder: bool = Field(
         default=False,
         description=(

@@ -713,9 +713,28 @@ async def test_delete_doc_focal_detach_delete_by_doc_id():
     client = _client_with_driver(driver)
     await openalex_writes.delete_doc(client, DOC_ID)
     query, params = driver.sessions[0].calls[0]
-    assert "MATCH (d:Document {doc_id: $doc_id})" in query
+    assert "MATCH (d:Document|Artifact {doc_id: $doc_id})" in query
     assert "DETACH DELETE d" in query
     assert params == {"doc_id": DOC_ID}
+
+
+async def test_delete_doc_focal_wipe_covers_document_and_artifact():
+    """Regression: the focal DETACH DELETE must match BOTH :Document and
+    :Artifact, not :Document alone.
+
+    An artifact's focal node is labelled :Artifact (write_chunks does
+    MERGE (d:<main_label> ...) with main_label in {Document, Artifact}).
+    A :Document-only focal wipe silently skipped artifact focal nodes,
+    leaving the node AND its incident L9 :RELATED_TO / L10
+    :RELATED_BY_XREF edges (which hang off the focal) behind after a
+    delete. The label disjunction ensures artifacts are deleted too.
+    """
+    driver = RecordingDriver()
+    client = _client_with_driver(driver)
+    await openalex_writes.delete_doc(client, DOC_ID)
+    focal_query, _params = driver.sessions[0].calls[0]
+    assert "d:Document|Artifact" in focal_query
+    assert "DETACH DELETE d" in focal_query
 
 
 async def test_delete_doc_gc_authors():

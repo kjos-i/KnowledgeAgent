@@ -478,8 +478,8 @@ class CorpusConfigEditor:
                 tooltip=(
                     f"{display}: entity → term matching strategy. "
                     "exact = label / synonym exact match only. "
-                    "fuzzy = try exact first, then morphological "
-                    "variants (plural / hyphen flips, edit-distance <= 2)."
+                    "fuzzy = try exact first, then simple string "
+                    "variants (plural / hyphen flips), not spell-correction."
                 ),
                 on_select=lambda e, k=key: self._on_ontology_matching_changed(k),
             )
@@ -1074,25 +1074,13 @@ class CorpusConfigEditor:
                 ),
                 # ---- Section 4: Entities (L6) ----
                 ft.ExpansionTile(
-                    title=self._section_title(
-                        "Entities (L6)",
-                        "Chunk-level entity extraction. Requires the chunks "
-                        "layer.\n\n"
-                        "Extractors run in priority order — the top one owns "
-                        "overlapping spans; lower ones only add spans the "
-                        "earlier ones missed. Each extractor is a full pass "
-                        "over every chunk, so runtime (and LLM cost, if the "
-                        "LLM is included) scales with each one added; a third "
-                        "rarely adds much new coverage.\n\n"
-                        "Types to extract (shared): LLM — empty = categorises "
-                        "freely (open vocabulary). GLiNER / GLiNER-BioMed — "
-                        "empty = the adapter's default labels (GLiNER: PERSON, "
-                        "ORG, LOC, EVENT, DATE, MISC; GLiNER-BioMed: DISEASE, "
-                        "CHEMICAL, GENE, PROTEIN, SPECIES, CELL_LINE, "
-                        "CELL_TYPE, ANATOMY); Replace/Add controls whether "
-                        "typed labels replace those defaults or extend them. "
-                        "HunFlair2 — fixed 5-label set (DISEASE, CHEMICAL, "
-                        "GENE, SPECIES, CELL_LINE); entity_types has no effect.",
+                    title=ft.Row(
+                        controls=[
+                            section_title("Entities (L6)"),
+                            info(self.app, "ingest.entities"),
+                        ],
+                        spacing=4,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     subtitle=self.entities_subtitle,
                     controls=[
@@ -1123,14 +1111,13 @@ class CorpusConfigEditor:
                 ),
                 # ---- Section 5: Ontology linking (L7) ----
                 ft.ExpansionTile(
-                    title=self._section_title(
-                        "Ontology linking (L7)",
-                        "Canonicalise entities against curated vocabularies "
-                        "(MeSH, GO, ...). Requires the entities layer. Each "
-                        "ontology must first be installed via the Installs "
-                        "tab; the checkboxes below only toggle whether the "
-                        "already-installed ontology gets linked against for "
-                        "this corpus.",
+                    title=ft.Row(
+                        controls=[
+                            section_title("Ontology linking (L7)"),
+                            info(self.app, "ingest.ontology_linking"),
+                        ],
+                        spacing=4,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     subtitle=self.ontology_subtitle,
                     controls=[
@@ -1166,12 +1153,13 @@ class CorpusConfigEditor:
                 ),
                 # ---- Section 6: Triples (L8) ----
                 ft.ExpansionTile(
-                    title=self._section_title(
-                        "Triples (L8)",
-                        "LLM-extracted (subject, predicate, object) edges "
-                        "between entities per chunk. Requires the entities "
-                        "layer. The 15 predicate types (INHIBITS / ACTIVATES "
-                        "/ ...) are fixed at the code level.",
+                    title=ft.Row(
+                        controls=[
+                            section_title("Triples (L8)"),
+                            info(self.app, "ingest.triples"),
+                        ],
+                        spacing=4,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     subtitle=self.triples_subtitle,
                     controls=[
@@ -1195,10 +1183,13 @@ class CorpusConfigEditor:
                 ),
                 # ---- Section 7: Cross-doc (L9) ----
                 ft.ExpansionTile(
-                    title=self._section_title(
-                        "Cross-doc (L9)",
-                        ":RELATED_TO edges between docs sharing ≥ N L6 "
-                        "entities. Requires the entities layer.",
+                    title=ft.Row(
+                        controls=[
+                            section_title("Cross-doc (L9)"),
+                            info(self.app, "ingest.cross_doc"),
+                        ],
+                        spacing=4,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     subtitle=self.cross_doc_subtitle,
                     controls=[
@@ -1219,11 +1210,13 @@ class CorpusConfigEditor:
                 ),
                 # ---- Section 8: Cross-doc xrefs (L10) ----
                 ft.ExpansionTile(
-                    title=self._section_title(
-                        "Cross-doc xrefs (L10)",
-                        ":RELATED_BY_XREF edges between docs sharing ≥ N "
-                        "canonical concepts (via xref equivalence). Requires "
-                        'entities + xrefs="use".',
+                    title=ft.Row(
+                        controls=[
+                            section_title("Cross-doc xrefs (L10)"),
+                            info(self.app, "ingest.cross_doc_xrefs"),
+                        ],
+                        spacing=4,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     subtitle=self.cross_doc_xrefs_subtitle,
                     controls=[

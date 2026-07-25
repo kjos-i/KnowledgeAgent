@@ -28,6 +28,7 @@ from typing import Any
 
 from knowledge_agent.kg.schema import (
     ABOUT_TOPIC_REL,
+    ARTIFACT_LABEL,
     AUTHOR_LABEL,
     AUTHORED_REL,
     CITES_REL,
@@ -376,16 +377,25 @@ async def write_topics(client, doc_id: str, work: dict[str, Any]) -> None:
 
 
 async def delete_doc(client, doc_id: str) -> None:
-    """Wipe a paper's L1-L4 KG data: focal :Document + edges + GC orphans.
+    """Wipe a doc's focal KG node + L1-L4 metadata + GC orphans.
+
+    Works for BOTH focal labels: `:Document` (papers, notes, ...) and
+    `:Artifact` (datasets, code, figures, ...). The per-doc delete
+    sequence runs for every doc regardless of type, so the focal MATCH
+    covers both. Otherwise an artifact's focal node (and the L9 / L10
+    cross-doc edges that hang off it) would survive deletion.
 
     Steps:
-      1. DETACH DELETE the focal :Document for `doc_id`. This removes the
-         node AND all its edges (:CITES outgoing, :AUTHORED incoming,
-         :PUBLISHED_IN outgoing, :ABOUT_TOPIC outgoing).
+      1. DETACH DELETE the focal :Document or :Artifact for `doc_id`. This
+         removes the node AND all its edges: for a paper the L1-L4 edges
+         (:CITES outgoing, :AUTHORED incoming, :PUBLISHED_IN outgoing,
+         :ABOUT_TOPIC outgoing), and for any doc the incident cross-doc
+         edges (:RELATED_TO, :RELATED_BY_XREF).
       2. GC orphan :Author / :Topic / :Venue / shadow :Document nodes -
          entities the deleted paper's edges were the LAST connection to.
          Shared entities (authors of other papers, etc.) remain because
-         they still have edges from those other papers.
+         they still have edges from those other papers. These are L1-L4
+         paper-only nodes, so step 2 is a no-op for an artifact.
 
     Called by the ingestion pipeline before the L1-L4 writes, so re-ingest
     of the same doc produces a clean state - no orphan edges, no orphan
@@ -404,7 +414,7 @@ async def delete_doc(client, doc_id: str) -> None:
     async with client.driver.session() as session:
         # 1. Wipe focal + its edges in one shot.
         await session.run(
-            f"MATCH (d:{DOCUMENT_LABEL} {{doc_id: $doc_id}}) DETACH DELETE d",
+            f"MATCH (d:{DOCUMENT_LABEL}|{ARTIFACT_LABEL} {{doc_id: $doc_id}}) DETACH DELETE d",
             doc_id=doc_id,
         )
         # 2. GC orphans. Each query targets one label and uses the

@@ -49,7 +49,7 @@ class AgentState(TypedDict, total=False):
     that needs to know which KG layers are present in this corpus -
     notably `cypher_builder_node`, which uses it to scope the schema
     description shown to the Cypher LLM. Loaded from the corpus folder's
-    `corpus.yaml` (or constructed in-memory by the caller) before invoke.
+    `corpus.toml` (or constructed in-memory by the caller) before invoke.
     Nodes that need it raise if missing - no silent fallback."""
 
     retrieval_mode: str | None

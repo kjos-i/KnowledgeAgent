@@ -350,9 +350,11 @@ cross_doc_xrefs = false
 #   "exact" (default) - only links entities whose `key` exactly matches
 #                       a term's label or synonym (lowercased).
 #   "fuzzy"           - tries exact first; falls through to a more
-#                       permissive match (singular/plural collapse,
-#                       edit-distance ≤ 2) on miss. Catches morphological
-#                       variation at some risk of false positives.
+#                       permissive match on miss: a small fixed set of
+#                       string variants (singular/plural flip, hyphen/space
+#                       swap), not edit-distance. Catches simple
+#                       morphological variation at some risk of false
+#                       positives.
 #
 # [ontology.mesh]
 # matching = "exact"
