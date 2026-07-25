@@ -140,6 +140,21 @@ def test_load_corpus_config_partial_layers(tmp_path: Path):
     assert config.layers.chunks is True  # default
 
 
+def test_corpus_config_frozen_defaults_false():
+    """A fresh corpus is not frozen; the flag opts in (selective freeze)."""
+    assert CorpusConfig().frozen is False
+    assert CorpusConfig(frozen=True).frozen is True
+
+
+def test_load_corpus_config_frozen_round_trip(tmp_path: Path):
+    """`frozen` round-trips through corpus.toml; omitted = default False."""
+    toml_path = tmp_path / "corpus.toml"
+    toml_path.write_text("frozen = true\n")
+    assert load_corpus_config(toml_path).frozen is True
+    toml_path.write_text("[layers]\nchunks = true\n")
+    assert load_corpus_config(toml_path).frozen is False
+
+
 def test_load_corpus_config_empty_toml_returns_defaults(tmp_path: Path):
     """Empty TOML file = no values = all defaults."""
     toml_path = tmp_path / "corpus.toml"

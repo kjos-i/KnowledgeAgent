@@ -355,6 +355,14 @@ class CorpusConfigEditor:
         self.cross_doc_subtitle: ft.Text | None = None
         self.cross_doc_xrefs_subtitle: ft.Text | None = None
 
+        # ----- Freeze (selective lock) -----
+        # Per-section content wrappers for the L6–L10 sections; `build()` fills
+        # this via `_wrap_frozen`. `_apply_frozen_lock` disables the whole
+        # wrapper (Flet cascades to children) when the corpus is frozen, so the
+        # embedder + graph-recipe layers become read-only while their section
+        # headers stay expandable to view the greyed settings.
+        self._frozen_wraps: dict[str, ft.Column] = {}
+
         self._create_controls()
 
     # ----- control construction --------------------------------------------
@@ -1082,24 +1090,29 @@ class CorpusConfigEditor:
                     ),
                     subtitle=self.entities_subtitle,
                     controls=[
-                        self.entities_checkbox,
-                        # --- Sub-section: Extractors (ordering explained in (i)) ---
-                        sub_section_header("Extractors"),
-                        self.extractor_rows_column,
-                        self.extractor_info_banner,
-                        # --- Sub-section: Types to extract ---
-                        sub_section_header("Types to extract"),
-                        ft.Container(
-                            padding=ft.Padding.symmetric(vertical=6),
-                            content=self.entity_types_field,
+                        self._wrap_frozen(
+                            "entities",
+                            [
+                                self.entities_checkbox,
+                                # --- Sub-section: Extractors (ordering explained in (i)) ---
+                                sub_section_header("Extractors"),
+                                self.extractor_rows_column,
+                                self.extractor_info_banner,
+                                # --- Sub-section: Types to extract ---
+                                sub_section_header("Types to extract"),
+                                ft.Container(
+                                    padding=ft.Padding.symmetric(vertical=6),
+                                    content=self.entity_types_field,
+                                ),
+                                self.entity_types_mode_radio,
+                                # Per-adapter settings — each group toggles `.visible`
+                                # by set membership (see `_refresh_extractor_groups`)
+                                # and carries its own thin-rule + sub-section title.
+                                self.entities_llm_group,
+                                self.entities_gliner_group,
+                                self.entities_hunflair2_group,
+                            ],
                         ),
-                        self.entity_types_mode_radio,
-                        # Per-adapter settings — each group toggles `.visible`
-                        # by set membership (see `_refresh_extractor_groups`)
-                        # and carries its own thin-rule + sub-section title.
-                        self.entities_llm_group,
-                        self.entities_gliner_group,
-                        self.entities_hunflair2_group,
                     ],
                 ),
                 # ---- Section 5: Ontology linking (L7) ----
@@ -1115,29 +1128,34 @@ class CorpusConfigEditor:
                     ),
                     subtitle=self.ontology_subtitle,
                     controls=[
-                        # Nested collapsible sub-folder — 18 ontology
-                        # rows with checkbox + matching Dropdown each.
-                        ft.ExpansionTile(
-                            title=ft.Text("Enabled ontologies", size=14),
-                            controls=[
-                                self._build_ontology_rows(),
+                        self._wrap_frozen(
+                            "ontology",
+                            [
+                                # Nested collapsible sub-folder — 18 ontology
+                                # rows with checkbox + matching Dropdown each.
+                                ft.ExpansionTile(
+                                    title=ft.Text("Enabled ontologies", size=14),
+                                    controls=[
+                                        self._build_ontology_rows(),
+                                    ],
+                                ),
+                                # Cross-ontology equivalence edges (xrefs) sub-section.
+                                sub_section_header(
+                                    "Cross-ontology equivalence edges (xrefs)",
+                                    trailing=info_icon(
+                                        self.app,
+                                        title="Cross-ontology equivalence edges (xrefs)",
+                                        text=(
+                                            "Materialise `:<X>_XREF` edges between term nodes "
+                                            "across ontologies (MeSH ↔ MONDO, MONDO ↔ ChEBI, "
+                                            "...). L10 cross-doc xrefs requires this be set to "
+                                            '"Materialize edges now".'
+                                        ),
+                                    ),
+                                ),
+                                self.xrefs_radio,
                             ],
                         ),
-                        # Cross-ontology equivalence edges (xrefs) sub-section.
-                        sub_section_header(
-                            "Cross-ontology equivalence edges (xrefs)",
-                            trailing=info_icon(
-                                self.app,
-                                title="Cross-ontology equivalence edges (xrefs)",
-                                text=(
-                                    "Materialise `:<X>_XREF` edges between term nodes "
-                                    "across ontologies (MeSH ↔ MONDO, MONDO ↔ ChEBI, "
-                                    "...). L10 cross-doc xrefs requires this be set to "
-                                    '"Materialize edges now".'
-                                ),
-                            ),
-                        ),
-                        self.xrefs_radio,
                     ],
                 ),
                 # ---- Section 6: Triples (L8) ----
@@ -1151,16 +1169,21 @@ class CorpusConfigEditor:
                     ),
                     subtitle=self.triples_subtitle,
                     controls=[
-                        self.triples_checkbox,
-                        # model on its own line, temperature below it.
-                        labeled_field(
-                            "triples_extractor_model",
-                            self.triples_extractor_model_field,
-                        ),
-                        labeled_field(
-                            "temperature",
-                            self.triples_extractor_temperature_slider,
-                            trailing=self.triples_extractor_temperature_readout,
+                        self._wrap_frozen(
+                            "triples",
+                            [
+                                self.triples_checkbox,
+                                # model on its own line, temperature below it.
+                                labeled_field(
+                                    "triples_extractor_model",
+                                    self.triples_extractor_model_field,
+                                ),
+                                labeled_field(
+                                    "temperature",
+                                    self.triples_extractor_temperature_slider,
+                                    trailing=self.triples_extractor_temperature_readout,
+                                ),
+                            ],
                         ),
                     ],
                 ),
@@ -1173,13 +1196,18 @@ class CorpusConfigEditor:
                     ),
                     subtitle=self.cross_doc_subtitle,
                     controls=[
-                        self.cross_doc_checkbox,
-                        ft.Container(
-                            padding=ft.Padding.symmetric(vertical=6),
-                            content=labeled_field(
-                                "Threshold (min shared entities)",
-                                self.cross_doc_threshold_field,
-                            ),
+                        self._wrap_frozen(
+                            "cross_doc",
+                            [
+                                self.cross_doc_checkbox,
+                                ft.Container(
+                                    padding=ft.Padding.symmetric(vertical=6),
+                                    content=labeled_field(
+                                        "Threshold (min shared entities)",
+                                        self.cross_doc_threshold_field,
+                                    ),
+                                ),
+                            ],
                         ),
                     ],
                 ),
@@ -1193,13 +1221,18 @@ class CorpusConfigEditor:
                     ),
                     subtitle=self.cross_doc_xrefs_subtitle,
                     controls=[
-                        self.cross_doc_xrefs_checkbox,
-                        ft.Container(
-                            padding=ft.Padding.symmetric(vertical=6),
-                            content=labeled_field(
-                                "Threshold (min shared xrefs)",
-                                self.cross_doc_xrefs_threshold_field,
-                            ),
+                        self._wrap_frozen(
+                            "cross_doc_xrefs",
+                            [
+                                self.cross_doc_xrefs_checkbox,
+                                ft.Container(
+                                    padding=ft.Padding.symmetric(vertical=6),
+                                    content=labeled_field(
+                                        "Threshold (min shared xrefs)",
+                                        self.cross_doc_xrefs_threshold_field,
+                                    ),
+                                ),
+                            ],
                         ),
                     ],
                 ),
@@ -1223,6 +1256,8 @@ class CorpusConfigEditor:
                     laid_out.append(section_divider())
             laid_out.append(ctrl)
         col.controls = laid_out
+        # Apply the freeze lock last, once every section wrapper exists.
+        self._apply_frozen_lock()
         return col
 
     # ----- load + populate -------------------------------------------------
@@ -1629,6 +1664,26 @@ class CorpusConfigEditor:
         if self.status is not None:
             self.status.value = "saved"
             self.app.page.update()
+        return None
+
+    def set_frozen(self, value: bool) -> str | None:
+        """Freeze or unfreeze this corpus's recipe. Persists `frozen` to
+        corpus.toml via the normal save path (so freezing also commits the
+        current settings; an invalid pending edit blocks it), then re-applies
+        the read-only lock. Returns None on success, else an error string."""
+        if self._corpus_config is None:
+            return "no corpus loaded"
+        previous = self._corpus_config.frozen
+        self._corpus_config = self._corpus_config.model_copy(update={"frozen": value})
+        error = self.try_save_and_get_error()
+        if error is not None:
+            # Save failed (e.g. invalid draft) — revert the in-memory flag.
+            self._corpus_config = self._corpus_config.model_copy(update={"frozen": previous})
+            return error
+        # `try_save_and_get_error` already ran `_refresh_availability`
+        # (→ `_apply_frozen_lock`); re-apply defensively regardless of order.
+        self._apply_frozen_lock()
+        self.app.page.update()
         return None
 
     def _mutate_layers(self, **changes) -> LayerFlags:
@@ -2730,6 +2785,35 @@ class CorpusConfigEditor:
         )
         _set_disabled([self.cross_doc_threshold_field], not cfg.layers.cross_doc)
         _set_disabled([self.cross_doc_xrefs_threshold_field], not cfg.layers.cross_doc_xrefs)
+
+        # Freeze wins last: when the corpus is frozen, the embedder + L6–L10
+        # sections are read-only regardless of the availability state above.
+        self._apply_frozen_lock()
+
+    def _wrap_frozen(self, key: str, controls: list[ft.Control]) -> ft.Column:
+        """Wrap an L6–L10 section's content in a Column tracked in
+        `_frozen_wraps` so `_apply_frozen_lock` can disable the whole section at
+        once (Flet cascades `disabled` to children) while the tile header stays
+        live — a frozen section can still be expanded to view its greyed
+        settings, and each child keeps its own disabled state for when the
+        corpus is unfrozen. Recreated on every `build()`."""
+        wrap = ft.Column(tight=True, spacing=8, controls=controls)
+        self._frozen_wraps[key] = wrap
+        return wrap
+
+    def _apply_frozen_lock(self) -> None:
+        """Selective freeze: when `frozen`, lock the embedder + the L6–L10
+        graph-recipe sections; Labels / Resolve / the rest of L5 stay editable.
+        Disabling the section wrappers cascades to their children and composes
+        with `_refresh_availability` in both directions (unfrozen → each child's
+        own availability-based disabled shows through the enabled wrapper).
+        No-op before `build()` populated the wrappers."""
+        cfg = self._corpus_config
+        frozen = bool(cfg is not None and cfg.frozen)
+        for wrap in self._frozen_wraps.values():
+            wrap.disabled = frozen
+        if self.embedding_model_field is not None:
+            self.embedding_model_field.disabled = frozen
 
     def _dependency_error_for(
         self,

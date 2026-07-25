@@ -52,7 +52,6 @@ from knowledge_agent.gui._styles import (
     sub_section_title,
     thin_rule,
 )
-from knowledge_agent.gui._widgets.info_icon import info_icon
 from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.library.config_diff import config_diff
 from knowledge_agent.gui.library.corpus_config_editor import (
@@ -134,9 +133,13 @@ class IngestTab:
         # Resolve-all-papers bulk button — held so it can be greyed when the
         # openalex_papers (L1-L4) layer is off in the config draft.
         self.resolve_button: ft.Button | None = None
+        self.entities_button: ft.Button | None = None
         self.triples_button: ft.Button | None = None
         self.cross_doc_button: ft.Button | None = None
         self.cross_doc_xrefs_button: ft.Button | None = None
+        # Freeze/Unfreeze the corpus recipe (embedder + L6–L10) + its indicator.
+        self.freeze_button: ft.Button | None = None
+        self.freeze_indicator: ft.Row | None = None
         # Set by LibraryView — called after a successful ingest / bulk-op
         # so the Select sub-tab refreshes its counts + Documents list.
         self.on_ingest_complete: Callable[[], None] | None = None
@@ -221,6 +224,30 @@ class IngestTab:
             on_click=self._on_ingest_file_clicked,
         )
 
+        # ---- Freeze settings (selective lock) ----
+        # Locks the embedder + graph-recipe layers (L6–L10) in the config
+        # editor so they can't change between ingests; per-batch settings
+        # (labels, resolve, chunking) stay editable. Label + indicator track
+        # the active corpus's `frozen` flag, synced in build().
+        self.freeze_button = ft.Button(
+            content=centered_label("Freeze settings"),
+            on_click=self._on_freeze_clicked,
+            tooltip=(
+                "Lock the embedder + graph-layer settings (entities … cross-doc) "
+                "so they can't change between ingests. Labels, paper resolution, "
+                "and chunking stay editable."
+            ),
+        )
+        self.freeze_indicator = ft.Row(
+            visible=False,
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.Icon(ft.Icons.LOCK, size=16, color=ft.Colors.AMBER_300),
+                ft.Text("Settings frozen", size=12, color=ft.Colors.AMBER_300),
+            ],
+        )
+
     # ----- public API -------------------------------------------------------
 
     def build(self) -> ft.Control:
@@ -251,6 +278,11 @@ class IngestTab:
         # never clobbers a path the user is mid-way through typing.
         self._restore_session_paths(active_name)
 
+        # Sync the Freeze/Unfreeze control to the active corpus's `frozen` flag
+        # before assembling the pane (config is loaded via ensure_loaded).
+        self.config_editor.ensure_loaded()
+        self._sync_freeze_controls()
+
         left_pane = panel_box(
             ft.Column(
                 expand=True,
@@ -260,6 +292,27 @@ class IngestTab:
                 controls=[
                     # (Panel title "Corpus ingestion" lives in the tab's fixed
                     # header above this pane, so it stays put while scrolling.)
+                    # ============ Section: Ingestion summary (moved to top) ============
+                    # Pending config changes + Discard + the Freeze/Unfreeze
+                    # control. At the top so pending changes and the frozen state
+                    # are the first thing seen before running an ingest.
+                    ft.Row(
+                        controls=[
+                            section_title("Ingestion summary"),
+                            info(self.app, "ingest.ingestion_summary"),
+                            ft.Container(expand=True),
+                            self.freeze_indicator,
+                        ],
+                        spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    self._summary_card(),
+                    ft.Row(
+                        controls=[self.config_editor.discard_button, self.freeze_button],
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    section_divider(),
                     # ============ Section: File selection ============
                     section_title("File selection"),
                     # ---- Sub-section: a folder ----
@@ -316,32 +369,11 @@ class IngestTab:
                     ),
                     self.progress_bar,
                     section_divider(),
-                    # ============ Section: Ingestion summary (flat, no box) ============
-                    ft.Row(
-                        controls=[
-                            section_title("Ingestion summary"),
-                            info(self.app, "ingest.ingestion_summary"),
-                        ],
-                        spacing=6,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    self._summary_card(),
-                    # Discard reverts the pending config changes shown above.
-                    ft.Row(controls=[self.config_editor.discard_button]),
-                    section_divider(),
                     # ============ Section: Bulk operations ============
                     ft.Row(
                         controls=[
                             section_title("Bulk operations"),
-                            info_icon(
-                                self.app,
-                                title="Bulk operations",
-                                text=(
-                                    "Retroactive per-layer refreshes for the "
-                                    "already-ingested corpus — re-run one layer "
-                                    "without re-ingesting the files."
-                                ),
-                            ),
+                            info(self.app, "ingest.bulk_operations"),
                         ],
                         spacing=6,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -371,7 +403,14 @@ class IngestTab:
                 ft.Container(
                     expand=1,
                     padding=ft.Padding.symmetric(horizontal=12, vertical=10),
-                    content=panel_title("Corpus ingestion"),
+                    content=ft.Row(
+                        controls=[
+                            panel_title("Corpus ingestion"),
+                            info(self.app, "ingest.corpus_ingestion"),
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=8,
+                    ),
                 ),
                 ft.Container(
                     expand=1,
@@ -429,6 +468,15 @@ class IngestTab:
         cfg = self.config_editor._corpus_config
         return bool(cfg is not None and cfg.layers.openalex_papers)
 
+    def _entities_layer_on(self) -> bool:
+        """True when the config draft has the entities (L6) layer on — gates
+        the Re-extract-all-entities bulk button. Running it while the layer is
+        off wipes all :Entity nodes corpus-wide (cascading to mentions, ontology
+        links, and triples) and reports every doc as a failure, so the button is
+        disabled instead."""
+        cfg = self.config_editor._corpus_config
+        return bool(cfg is not None and cfg.layers.entities)
+
     def _triples_layer_on(self) -> bool:
         """True when the config draft has the triples (L8) layer on — gates
         the Re-extract-all-triples bulk button. Running it while the layer is
@@ -457,12 +505,15 @@ class IngestTab:
         """Grey the layer-gated bulk-op buttons to match the config draft.
         Wired (via LibraryView) to the config editor's on_draft_changed, so
         toggling a layer off greys its bulk button immediately. Gates Resolve
-        all papers on openalex_papers, Re-extract all triples on triples,
+        all papers on openalex_papers, Re-extract all entities on entities,
+        Re-extract all triples on triples,
         Rebuild cross-doc links on cross_doc, and Rebuild cross-doc xref links
         on cross_doc_xrefs; the remaining buttons get their own gating as we
         reach them."""
         if self.resolve_button is not None:
             self.resolve_button.disabled = not self._openalex_layer_on()
+        if self.entities_button is not None:
+            self.entities_button.disabled = not self._entities_layer_on()
         if self.triples_button is not None:
             self.triples_button.disabled = not self._triples_layer_on()
         if self.cross_doc_button is not None:
@@ -570,6 +621,16 @@ class IngestTab:
         if self.skip_manual_checkbox is not None:
             openalex_row.append(self.skip_manual_checkbox)
 
+        # Re-extract all entities (L6): greyed when the entities layer is off in
+        # the config draft (running it while off wipes all :Entity nodes
+        # corpus-wide — cascading to mentions, ontology links, triples — and
+        # reports every doc as a failure; see refresh_bulk_op_gating).
+        self.entities_button = ft.Button(
+            content=centered_label(_BULK_OP_LABELS["bulk_backfill_entities"]),
+            on_click=lambda e: self._on_bulk_op_clicked("bulk_backfill_entities"),
+            disabled=not self._entities_layer_on(),
+        )
+
         # Re-extract all triples (L8): greyed when the triples layer is off in
         # the config draft (running it while off just wipes triples and reports
         # every doc as a failure — see refresh_bulk_op_gating).
@@ -645,7 +706,7 @@ class IngestTab:
                     wrap=True,
                     spacing=8,
                     controls=[
-                        op_button("bulk_backfill_entities"),
+                        self.entities_button,
                     ],
                 ),
             ],
@@ -980,6 +1041,75 @@ class IngestTab:
             self.status.value = msg
             self.status.italic = False
             self.status.color = ft.Colors.GREY_400
+
+    # ----- Freeze / Unfreeze settings --------------------------------------
+
+    def _on_freeze_clicked(self, e: ft.Event) -> None:
+        """Freeze locks the recipe immediately; unfreeze asks first (it
+        re-opens settings that can rebuild/delete corpus data on next ingest)."""
+        cfg = self.config_editor._corpus_config
+        if cfg is None:
+            self._set_status("No active corpus.")
+            return
+        if cfg.frozen:
+            self._show_unfreeze_warning()
+            return
+        error = self.config_editor.set_frozen(True)
+        if error is not None:
+            self._set_status(f"could not freeze settings: {error}")
+            return
+        self._sync_freeze_controls()
+        self.app.page.update()
+
+    def _show_unfreeze_warning(self) -> None:
+        """Confirm before unfreezing — unlocking re-opens the embedder + graph
+        layers, whose change-then-ingest can rebuild or delete corpus data."""
+
+        def _cancel(_ev: ft.Event) -> None:
+            self.app.page.pop_dialog()
+
+        def _confirm(_ev: ft.Event) -> None:
+            self.app.page.pop_dialog()
+            error = self.config_editor.set_frozen(False)
+            if error is not None:
+                self._set_status(f"could not unfreeze settings: {error}")
+                return
+            self._sync_freeze_controls()
+            self.app.page.update()
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Unfreeze settings?"),
+            content=ft.Container(
+                width=440,
+                content=ft.Text(
+                    "Unfreezing unlocks the embedder and the graph-layer settings "
+                    "(entities, ontologies, triples, cross-doc). Changing those and "
+                    "then ingesting can rebuild or delete existing corpus data. The "
+                    "per-batch settings (labels, paper resolution, chunking) stay "
+                    "editable either way.",
+                    size=12,
+                ),
+            ),
+            actions=[
+                ft.TextButton("Cancel", on_click=_cancel),
+                ft.Button(content=centered_label("Unfreeze"), on_click=_confirm),
+            ],
+        )
+        self.app.page.show_dialog(dialog)
+        self.app.page.update()
+
+    def _sync_freeze_controls(self) -> None:
+        """Point the Freeze/Unfreeze button label + the frozen indicator at the
+        active corpus's `frozen` flag. No page.update (safe to call in build)."""
+        cfg = self.config_editor._corpus_config
+        frozen = bool(cfg is not None and cfg.frozen)
+        if self.freeze_button is not None:
+            self.freeze_button.content = centered_label(
+                "Unfreeze settings" if frozen else "Freeze settings"
+            )
+        if self.freeze_indicator is not None:
+            self.freeze_indicator.visible = frozen
 
     def _set_busy(self, busy: bool, msg: str | None = None) -> None:
         """Toggle the spinner + disable every action button during a run

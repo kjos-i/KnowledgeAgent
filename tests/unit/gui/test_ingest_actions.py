@@ -118,6 +118,29 @@ def test_write_status_clears_placeholder_styling(fake_app):
     assert tab.status.italic is False
 
 
+def test_entities_bulk_button_gated_on_entities_layer(fake_app):
+    """Re-extract all entities greys out when the entities layer is off — like
+    the triples / cross-doc buttons — since running it while off would wipe
+    every :Entity corpus-wide."""
+    from knowledge_agent.corpus_config import CorpusConfig, EntityConfig, LayerFlags
+
+    tab = IngestTab(fake_app)
+    tab.config_editor._corpus_config = CorpusConfig(
+        allowed_types=["Paper"],
+        layers=LayerFlags(chunks=True, entities=False),
+    )
+    tab._build_bulk_ops_panel()  # creates the layer-gated buttons
+    assert tab.entities_button.disabled is True  # entities off -> greyed
+
+    tab.config_editor._corpus_config = CorpusConfig(
+        allowed_types=["Paper"],
+        layers=LayerFlags(chunks=True, entities=True),
+        entities=EntityConfig(extractors=["llm"]),
+    )
+    tab.refresh_bulk_op_gating()
+    assert tab.entities_button.disabled is False  # entities on -> enabled
+
+
 def test_start_action_noop_while_busy(fake_app):
     """A second action can't start while one is in flight."""
     tab = IngestTab(fake_app)

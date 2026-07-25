@@ -92,3 +92,50 @@ def test_refresh_availability_greys_section_fields_when_layer_off(fake_app):
     assert ed.chunk_max_tokens_field.disabled is False
     assert ed.triples_extractor_model_field.disabled is False
     assert ed.cross_doc_threshold_field.disabled is False
+
+
+def test_freeze_locks_embedder_and_graph_layers_only(fake_app):
+    """When the corpus is frozen, the embedder + the five L6–L10 section
+    wrappers are disabled; Labels / Resolve / the rest of Chunks-and-embeddings
+    (L5) stay editable (selective freeze)."""
+    ed = _ready_editor(fake_app)
+    ed._corpus_config = CorpusConfig(
+        allowed_types=["Paper"],
+        layers=LayerFlags(chunks=True, entities=True),
+        entities=EntityConfig(extractors=["llm"]),
+        frozen=True,
+    )
+    ed._baseline_config = ed._corpus_config.model_copy(deep=True)
+    ed.build()  # populates _frozen_wraps + applies the lock at the end
+
+    assert set(ed._frozen_wraps) == {
+        "entities",
+        "ontology",
+        "triples",
+        "cross_doc",
+        "cross_doc_xrefs",
+    }
+    for wrap in ed._frozen_wraps.values():
+        assert wrap.disabled is True
+    assert ed.embedding_model_field.disabled is True
+    # Per-batch controls are NOT locked by freeze.
+    assert ed.chunk_max_tokens_field.disabled is False
+    assert ed.enable_pdf_ocr_checkbox.disabled is False
+    assert ed.openalex_checkbox.disabled is False
+
+
+def test_unfreeze_releases_the_lock(fake_app):
+    """Unfrozen: the wrappers + embedder are not force-disabled."""
+    ed = _ready_editor(fake_app)
+    ed._corpus_config = CorpusConfig(
+        allowed_types=["Paper"],
+        layers=LayerFlags(chunks=True, entities=True),
+        entities=EntityConfig(extractors=["llm"]),
+        frozen=False,
+    )
+    ed._baseline_config = ed._corpus_config.model_copy(deep=True)
+    ed.build()
+
+    for wrap in ed._frozen_wraps.values():
+        assert wrap.disabled is False
+    assert ed.embedding_model_field.disabled is False

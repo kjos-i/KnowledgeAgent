@@ -581,6 +581,19 @@ class CorpusConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    frozen: bool = Field(
+        default=False,
+        description=(
+            "When True, the corpus's ingestion recipe is locked in the GUI: "
+            "the embedder and the L6–L10 graph-layer settings (entities, "
+            "ontologies, triples, cross-doc, cross-doc xrefs) become read-only "
+            "so they can't change accidentally between ingests. Per-batch "
+            "settings (labels, paper resolution, chunking/parse/figure options) "
+            "stay editable. Ingests and bulk operations still run under the "
+            "frozen recipe. A GUI-only guard — the backend never enforces it."
+        ),
+    )
+
     layers: LayerFlags = Field(
         default_factory=LayerFlags,
         description="Per-layer on/off toggles. See LayerFlags.",
