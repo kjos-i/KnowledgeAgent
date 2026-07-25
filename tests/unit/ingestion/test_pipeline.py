@@ -2315,10 +2315,12 @@ async def test_ingest_document_skips_openalex_writes_when_layer_off(
     mock_parse,
     _mock_doc_id,
 ):
-    """openalex_papers=False -> L1-L4 KG writes skipped even when
-    OpenAlex resolved successfully."""
+    """openalex_papers=False -> the OpenAlex lookup is not even attempted
+    (no silent background call), so no metadata and no L1-L4 KG writes,
+    even for a Paper."""
     mock_parse.return_value = [_chunk(0, "hello")]
-    mock_resolve.return_value = _DUMMY_WORK  # OpenAlex did resolve
+    # Stubbed, but the box is off so resolve_metadata must never be reached.
+    mock_resolve.return_value = _DUMMY_WORK
     mock_kg = _make_mock_kg()
     mock_get_kg.return_value = mock_kg
 
@@ -2328,7 +2330,9 @@ async def test_ingest_document_skips_openalex_writes_when_layer_off(
     )
     await ingest_document(_DUMMY_PATH, config, "Document", "Paper")
 
-    # L1-L4 writes skipped despite work being resolved and sub_label=Paper.
+    # The box is off: no OpenAlex lookup runs at all (this is the gate fix).
+    mock_resolve.assert_not_called()
+    # L1-L4 writes skipped (no work resolved, and the layer is off).
     mock_kg.write_citations.assert_not_called()
     mock_kg.write_authorships.assert_not_called()
     mock_kg.write_venue.assert_not_called()

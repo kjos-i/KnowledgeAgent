@@ -714,46 +714,6 @@ class Settings(BaseSettings):
         ),
     )
 
-    # ----- Parsing toggles (docling). Format support is broad by default
-    # (PDF, DOCX, HTML, JATS XML, images, etc.); these knobs control OCR
-    # and chunker behaviour.
-    enable_pdf_ocr: bool = Field(
-        default=False,
-        description=(
-            "OCR for PDF inputs. Default off - research papers are usually "
-            "born-digital (text already embedded), so OCR adds latency for no "
-            "gain. Turn on for scanned / image-only PDFs."
-        ),
-    )
-    enable_image_ocr: bool = Field(
-        default=True,
-        description=(
-            "OCR for standalone image-format inputs (PNG / JPG / TIFF as the "
-            "whole document). Default on - without OCR, image-only inputs "
-            "produce no searchable text."
-        ),
-    )
-    chunker_strategy: Literal["hybrid", "hierarchical"] = Field(
-        default="hybrid",
-        description=(
-            "Which docling chunker to use. 'hybrid' (default) is structure- "
-            "AND token-aware - respects headings/paragraphs/tables AND splits "
-            "anything over `chunk_max_tokens`. 'hierarchical' is structure- "
-            "only with no token cap - chunks align to document sections "
-            "exactly but can be arbitrarily large."
-        ),
-    )
-    chunk_max_tokens: int = Field(
-        default=512,
-        ge=64,
-        description=(
-            "Max tokens per chunk (HybridChunker only - ignored by "
-            "Hierarchical). Higher = broader context per chunk, fewer chunks "
-            "total, more storage per chunk. Changing this requires re-chunking "
-            "+ re-embedding existing documents to take effect."
-        ),
-    )
-
     # ----- Rate limiting + concurrency. The async refactor introduces
     # proactive request-rate throttling on the LLM/embedder side AND
     # bounded concurrency on the fan-out side. Both are needed: rate
@@ -831,21 +791,10 @@ class Settings(BaseSettings):
         description=(
             "Max chunks the ingest pipeline processes in parallel within "
             "a single document. asyncio.Semaphore bound on the per-chunk "
-            "fan-out (embedding + L6 entity extraction + L8 triples "
-            "extraction). Higher = faster but more concurrent LLM calls "
+            "fan-out for L6 entity extraction + L8 triples extraction "
+            "(embedding is a single batched call, not bounded here). "
+            "Higher = faster but more concurrent LLM calls "
             "(bumps up against rate limits)."
-        ),
-    )
-    bulk_ops_max_concurrent_docs: int = Field(
-        default=4,
-        ge=1,
-        le=32,
-        description=(
-            "Max documents bulk_ops processes in parallel for multi-doc "
-            "operations (bulk re-embed, bulk re-extract). Each document "
-            "then fans out across `pipeline_max_concurrent_chunks` of its "
-            "own chunks, so effective concurrency at the API is roughly "
-            "the product of the two."
         ),
     )
 

@@ -642,7 +642,8 @@ class CorpusConfig(BaseModel):
             "align to document sections exactly but can be arbitrarily "
             "large. Per-corpus. Changing this on a corpus with existing "
             "chunks yields inconsistent chunk shapes across ingests "
-            "until backfill is run."
+            "until those documents are re-ingested (backfill does not "
+            "re-chunk; it re-reads the existing chunk text)."
         ),
     )
     chunk_max_tokens: int = Field(
@@ -654,7 +655,8 @@ class CorpusConfig(BaseModel):
             "context per chunk, fewer chunks total, more storage per "
             "chunk. Per-corpus. Changing this on a corpus with existing "
             "chunks yields inconsistent chunk sizes across ingests "
-            "until backfill is run."
+            "until those documents are re-ingested (backfill does not "
+            "re-chunk; it re-reads the existing chunk text)."
         ),
     )
     merge_peers: bool = Field(

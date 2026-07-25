@@ -213,12 +213,6 @@ def test_settings_defaults_for_optional_fields() -> None:
     assert s.skip_query_builder is False
     assert s.direct_retrieval is False
 
-    # Parsing toggles.
-    assert s.enable_pdf_ocr is False
-    assert s.enable_image_ocr is True
-    assert s.chunker_strategy == "hybrid"
-    assert s.chunk_max_tokens == 512
-
 
 def test_settings_reads_embedding_dims_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """The per-corpus bridge (`apply_corpus_embedding_to_env`) writes
@@ -367,13 +361,6 @@ def test_invalid_default_retrieval_mode_rejected() -> None:
     with pytest.raises(ValidationError):
         Settings(  # type: ignore[arg-type]
             **_minimal_required(default_retrieval_mode="not_a_mode")
-        )
-
-
-def test_invalid_chunker_strategy_rejected() -> None:
-    with pytest.raises(ValidationError):
-        Settings(  # type: ignore[arg-type]
-            **_minimal_required(chunker_strategy="exotic")
         )
 
 

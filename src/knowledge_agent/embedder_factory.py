@@ -52,16 +52,17 @@ ASYNC + RATE LIMITING (added 2026-06-29 in the async refactor):
   Voyage HTTP request is in-flight.
 
 - Unlike the LLM side, LangChain `Embeddings` clients do NOT accept
-  a `rate_limiter` kwarg — there's no built-in proactive throttling
-  for embedders. Bounded throughput on the embedder side is enforced
-  by `settings.pipeline_max_concurrent_chunks` +
-  `settings.bulk_ops_max_concurrent_docs` semaphores at the
-  orchestrator level. The factory itself does not rate-limit; if
-  embedder 429s become a problem in practice, drop the concurrency
-  caps. The orchestrator's `.with_retry`-equivalent for embedders is
-  handled differently (LangChain Embeddings exposes
-  `.with_retry()` via `Runnable`); wiring is deferred to the
-  orchestrators alongside `.with_retry` for the LLM call sites.
+  a `rate_limiter` kwarg, so there's no built-in proactive throttling
+  for embedders. Embedding is issued as one batched call per document
+  (`embed_chunks`), so no per-chunk semaphore bounds it;
+  `settings.pipeline_max_concurrent_chunks` caps the per-doc L6/L8
+  fan-out, not embedding. If a provider's rate limit is a problem,
+  set that provider's `*_requests_per_second` cap (applied at the
+  factory wrapper for Voyage). The orchestrator's
+  `.with_retry`-equivalent for embedders is handled differently
+  (LangChain Embeddings exposes `.with_retry()` via `Runnable`);
+  wiring is deferred to the orchestrators alongside `.with_retry`
+  for the LLM call sites.
 """
 
 from __future__ import annotations

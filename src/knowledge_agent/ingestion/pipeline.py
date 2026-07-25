@@ -1058,16 +1058,19 @@ async def ingest_document(
         _kg_wipe(),
     )
 
-    # ---- 3. Metadata resolution (Paper-only; one HTTP call) ----
+    # ---- 3. Metadata resolution (Paper-only, and only when the OpenAlex
+    #         layer is on; one HTTP call) ----
     # DOI + OpenAlex enrichment applies ONLY to scholarly documents
-    # (`is_doi_eligible` → Paper). Non-Paper docs skip DOI extraction and the
-    # OpenAlex call entirely and stay at "baseline". For XML/JATS the DOI
-    # lives in structured metadata docling drops from the chunk text, so pass
-    # the source path — resolve_metadata reads it straight from the file and
-    # prioritises it over the text regex.
+    # (`is_doi_eligible` → Paper) AND only when `layers.openalex_papers` is on.
+    # An unchecked box means NO OpenAlex call at all (no silent background
+    # lookup), so such docs stay at "baseline" with no enrichment, exactly like
+    # non-Paper inputs. For XML/JATS the DOI lives in structured metadata
+    # docling drops from the chunk text, so pass the source path;
+    # resolve_metadata reads it straight from the file and prioritises it over
+    # the text regex.
     work = None
     metadata_status = "baseline"
-    if is_doi_eligible(sub_label):
+    if is_doi_eligible(sub_label) and config.layers.openalex_papers:
         work = await resolve_metadata(chunks, source_path=path)
         if work is not None:
             metadata_status = "enriched"

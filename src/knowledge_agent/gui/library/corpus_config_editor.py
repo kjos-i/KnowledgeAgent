@@ -961,30 +961,36 @@ class CorpusConfigEditor:
                 ),
                 # ---- Section 2: openalex_papers (L1–L4) ----
                 ft.ExpansionTile(
-                    title=self._section_title(
-                        "Resolve paper metadata (L1–L4)",
-                        "L1–L4 bundle: citation + author + venue + topic graph "
-                        "from a single OpenAlex API lookup per doc. Turn on for "
-                        "scientific papers.\n\n"
-                        "Global (read-only): openalex_mailto = "
-                        f"{self._read_global('openalex_mailto')}. "
-                        "Edit via .env / global Settings.",
+                    title=ft.Row(
+                        controls=[
+                            section_title("Resolve paper metadata (L1–L4)"),
+                            info(self.app, "ingest.resolve_paper_metadata"),
+                        ],
+                        spacing=4,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     subtitle=self.openalex_subtitle,
                     controls=[
                         self.openalex_checkbox,
+                        _globals_block(
+                            [
+                                (
+                                    "openalex_mailto",
+                                    self._read_global("openalex_mailto"),
+                                ),
+                            ],
+                        ),
                     ],
                 ),
                 # ---- Section 3: Chunks (L5) ----
                 ft.ExpansionTile(
-                    title=self._section_title(
-                        "Chunks and embeddings (L5)",
-                        "Per-chunk :Chunk nodes joinable with LanceDB via "
-                        "`chunk_id`. Required for retrieval — effectively "
-                        "always on.\n\n"
-                        "min_rows_for_vector_index (shown below, read-only): "
-                        "LanceDB IVF_PQ needs ~256 rows to train; below this, "
-                        "brute-force scan is used. Not user-facing tuning.",
+                    title=ft.Row(
+                        controls=[
+                            section_title("Chunks and embeddings (L5)"),
+                            info(self.app, "ingest.chunks_embeddings"),
+                        ],
+                        spacing=4,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     subtitle=self.chunks_subtitle,
                     controls=[
@@ -2094,7 +2100,6 @@ class CorpusConfigEditor:
             "http_max_retries",
             "http_user_agent",
             "pipeline_max_concurrent_chunks",
-            "bulk_ops_max_concurrent_docs",
         ):
             rows.append(
                 ft.Row(
@@ -2115,11 +2120,13 @@ class CorpusConfigEditor:
                 ),
             )
         return ft.ExpansionTile(
-            title=self._section_title(
-                "Ingest infrastructure (read-only)",
-                "Process-wide (shared across all corpora, not per-corpus). "
-                "Edit via `.env` / global Settings; the Ollama daemon probe "
-                "uses its own timeout=1.0 override.",
+            title=ft.Row(
+                controls=[
+                    section_title("Ingest infrastructure (read-only)"),
+                    info(self.app, "ingest.infrastructure"),
+                ],
+                spacing=4,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
             controls=[
                 ft.Container(
