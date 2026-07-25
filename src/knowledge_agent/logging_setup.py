@@ -143,6 +143,7 @@ __all__ = [
     # Constants other modules read
     "APP_NAME",
     "CRASH_SUBDIR",
+    "ENV_DEV_AIDS",
     "ENV_LOG_CONSOLE",
     "ENV_LOG_DIR",
     "ENV_LOG_LEVEL",
@@ -190,6 +191,7 @@ ENV_LOG_DIR = "KAGENT_LOG_DIR"
 ENV_LOG_LEVEL = "LOG_LEVEL"
 ENV_LOG_CONSOLE = "KAGENT_LOG_CONSOLE"
 ENV_PACKAGED = "KAGENT_PACKAGED"
+ENV_DEV_AIDS = "KAGENT_DEV_AIDS"
 
 LIBRARY_NOISE_CLAMP: dict[str, str] = {
     "httpx": "WARNING",
@@ -657,9 +659,12 @@ def init_logging(
         max_files=settings.crash_max_files,
     )
 
-    if not is_packaged:
-        # Dev-only debugging aids. Cheap to leave on; very useful when
-        # an async leak or memory regression appears.
+    if not is_packaged and os.environ.get(ENV_DEV_AIDS) == "1":
+        # Opt-in dev aids (KAGENT_DEV_AIDS=1). OFF by default: tracemalloc hooks
+        # every allocation and PYTHONASYNCIODEBUG puts the event loop in debug
+        # mode — together they make the GUI's ML-heavy startup crawl and every
+        # UI callback lag. Enable only when chasing an async leak / memory
+        # regression.
         import tracemalloc
 
         if not tracemalloc.is_tracing():

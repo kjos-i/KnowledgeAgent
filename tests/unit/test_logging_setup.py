@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import sys
 import threading
 import time
@@ -28,6 +29,7 @@ import pytest
 from knowledge_agent import logging_setup
 from knowledge_agent.logging_setup import (
     CRASH_SUBDIR,
+    ENV_DEV_AIDS,
     ENV_LOG_CONSOLE,
     ENV_LOG_DIR,
     ENV_LOG_LEVEL,
@@ -211,6 +213,37 @@ def test_shutdown_logging_stops_listener_and_is_idempotent(reset_logging_state: 
 
     shutdown_logging()  # already down → harmless no-op
     assert logging_setup._LISTENER is None
+
+
+def test_dev_aids_off_by_default(
+    reset_logging_state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The tracemalloc + PYTHONASYNCIODEBUG dev aids must NOT fire on a normal
+    (non-packaged) run — they made the GUI's startup + every UI callback crawl.
+    Off unless KAGENT_DEV_AIDS=1. PYTHONASYNCIODEBUG staying unset proves the
+    whole opt-in block was skipped (it is only set inside that block)."""
+    monkeypatch.delenv(ENV_DEV_AIDS, raising=False)
+    monkeypatch.delenv("PYTHONASYNCIODEBUG", raising=False)
+    init_logging(LoggingSettings(log_dir=reset_logging_state))
+    assert os.environ.get("PYTHONASYNCIODEBUG") is None
+
+
+def test_dev_aids_on_with_flag(reset_logging_state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """KAGENT_DEV_AIDS=1 opts back into the aids for chasing async / memory bugs
+    — kept available, just not the default. tracemalloc.start is stubbed so the
+    test doesn't hook the real allocator."""
+    import tracemalloc
+
+    started: list[bool] = []
+    monkeypatch.setenv(ENV_DEV_AIDS, "1")
+    monkeypatch.delenv("PYTHONASYNCIODEBUG", raising=False)
+    monkeypatch.setattr(tracemalloc, "is_tracing", lambda: False)
+    monkeypatch.setattr(tracemalloc, "start", lambda *a: started.append(True))
+
+    init_logging(LoggingSettings(log_dir=reset_logging_state))
+
+    assert started == [True]
+    assert os.environ.get("PYTHONASYNCIODEBUG") == "1"
 
 
 # ---------------------------------------------------------------------------
