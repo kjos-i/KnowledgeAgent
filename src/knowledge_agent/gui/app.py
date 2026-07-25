@@ -23,7 +23,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -936,7 +938,54 @@ def _prewarm_graph() -> None:
         _import_graph()
 
 
+_CLOSE_WATCHDOG_SECONDS = 2.0
+
+
+def _arm_close_watchdog() -> None:
+    """Force-exit a couple of seconds after the window is asked to close.
+
+    On Windows, Flet/asyncio's teardown after a window close can hang forever (a
+    ConnectionResetError / WinError 10054 while shutting the socket down), so
+    ``ft.run()`` never returns and the launching terminal is left stuck with a
+    zombie process — the post-run hard-exit in ``main()`` only fires on Ctrl-C.
+    A daemon thread (so it can never itself block interpreter shutdown) that
+    flushes logging then hard-exits if the normal close hasn't already killed
+    us. os._exit skips the atexit + non-daemon thread joins that are the hang.
+    """
+
+    def _watchdog() -> None:
+        time.sleep(_CLOSE_WATCHDOG_SECONDS)
+        logging.shutdown()
+        os._exit(0)
+
+    threading.Thread(target=_watchdog, name="ka-close-watchdog", daemon=True).start()
+
+
 def _page_factory(page: ft.Page) -> None:
+    # Flet-on-Windows close-hang net. Closing the desktop window does NOT make
+    # ft.run() return (its asyncio teardown hangs on the socket shutdown), so
+    # the post-run hard-exit in main() only fires on Ctrl-C, not a window close.
+    # Intercept the window close, arm a force-exit watchdog, then let Flet close
+    # the window — if teardown hangs, the watchdog kills the process a couple of
+    # seconds later. prevent_close is required for the CLOSE event to reach
+    # on_event; installing the hook is best-effort so a Flet API change can
+    # never stop the app from launching.
+    async def _on_window_event(e) -> None:
+        etype = getattr(e, "type", None)
+        # Compare the string value ("close") so this works whether `type` is a
+        # str-enum, a plain enum, or a raw string across Flet versions.
+        if getattr(etype, "value", etype) != "close":
+            return
+        _arm_close_watchdog()
+        with contextlib.suppress(Exception):
+            await page.window.destroy()
+
+    try:
+        page.window.prevent_close = True
+        page.window.on_event = _on_window_event
+    except Exception:
+        logger.warning("could not install the window-close watchdog hook", exc_info=True)
+
     GuiApp(page=page).build()
 
 
@@ -946,7 +995,27 @@ def main() -> None:
         level=logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
     )
-    ft.run(_page_factory)
+    exit_code = 0
+    try:
+        ft.run(_page_factory)
+    except Exception:
+        # A crash in the Flet host — log it before the hard exit below, which
+        # skips Python's normal traceback printing.
+        logger.exception("GUI exited with an error")
+        exit_code = 1
+    finally:
+        # Flet-on-Windows close-hang net. On desktop, ft.run() returns once the
+        # window is closed — but normal interpreter shutdown then hangs forever
+        # joining a non-daemon worker thread left running by Flet/asyncio's
+        # Windows Proactor teardown (which also logs a harmless
+        # ConnectionResetError / WinError 10054). The launching terminal never
+        # returns and zombie ka-gui processes pile up. Flush logging, then
+        # hard-exit so the process actually dies. os._exit deliberately skips the
+        # atexit handlers + non-daemon thread joins that are the hang; the app
+        # has nothing that needs them (init_logging() is never wired in, and
+        # _http_client.close() is already never called).
+        logging.shutdown()
+        os._exit(exit_code)
 
 
 if __name__ == "__main__":
