@@ -900,10 +900,7 @@ async def _count_l10_edges(client) -> int | None:
     error (logged).
     """
     try:
-        async with client.driver.session() as session:
-            result = await session.run("MATCH ()-[r:RELATED_BY_XREF]-() RETURN count(r) AS n")
-            row = await result.single()
-            return int(row["n"]) if row else 0
+        return await client.count_related_by_xref_edges()
     except Exception as exc:
         logger.warning("_count_l10_edges failed: %r", exc)
         return None

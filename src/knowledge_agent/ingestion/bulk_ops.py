@@ -432,6 +432,7 @@ class BulkBackfillPlan:
 
     target_doc_ids: tuple[str, ...]
     layer_name: str
+    summary_override: str | None = None
 
     @property
     def n_targets(self) -> int:
@@ -439,6 +440,8 @@ class BulkBackfillPlan:
 
     @property
     def summary(self) -> str:
+        if self.summary_override is not None:
+            return self.summary_override
         return f"Backfill {self.layer_name} for {self.n_targets} docs."
 
 
@@ -449,6 +452,22 @@ class BulkBackfillResult:
     n_succeeded: int
     n_failed: int
     failures: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class CrossDocBackfillResult:
+    """Result of the L9 bulk rebuild (`bulk_backfill_cross_doc_execute`).
+
+    Like `BulkBackfillResult` plus `n_edges`: the total distinct
+    `:RELATED_TO` edges in the corpus after the run, counted corpus-wide
+    (summing the per-doc incident counts would double every undirected
+    edge).
+    """
+
+    n_succeeded: int
+    n_failed: int
+    failures: tuple[tuple[str, str], ...]
+    n_edges: int
 
 
 async def _bulk_backfill_plan(layer_name: str) -> BulkBackfillPlan:
@@ -699,15 +718,28 @@ async def bulk_backfill_triples_execute(
     )
 
 
-async def bulk_backfill_cross_doc_plan() -> BulkBackfillPlan:
-    """List every indexed doc for the bulk KG L9 rebuild op."""
-    return await _bulk_backfill_plan("cross_doc")
+async def bulk_backfill_cross_doc_plan(config: CorpusConfig) -> BulkBackfillPlan:
+    """List every indexed doc for the bulk KG L9 rebuild op.
+
+    Carries a threshold-aware summary so the confirm dialog says what
+    "related" means for this run.
+    """
+    plan = await _bulk_backfill_plan("cross_doc")
+    threshold = config.cross_doc.threshold if config.cross_doc is not None else 2
+    return BulkBackfillPlan(
+        target_doc_ids=plan.target_doc_ids,
+        layer_name=plan.layer_name,
+        summary_override=(
+            f"Rebuild cross-doc links for {plan.n_targets} docs — linking any "
+            f"two that share ≥ {threshold} distinct entities."
+        ),
+    )
 
 
 async def bulk_backfill_cross_doc_execute(
     plan: BulkBackfillPlan,
     config: CorpusConfig,
-) -> BulkBackfillResult:
+) -> CrossDocBackfillResult:
     """Iterate targets; call `await pipeline.backfill_cross_doc(doc_id, config)`.
 
     Reconciles cross-doc-to-config at the top: wipes all :RELATED_TO
@@ -718,8 +750,13 @@ async def bulk_backfill_cross_doc_execute(
     zero `:RELATED_TO` edges (no other doc met the threshold) is
     still a success - empty output is a valid outcome, distinct from
     `cross_doc_ok=False` which means the recompute Cypher crashed.
+
+    Reports `n_edges`: the total distinct `:RELATED_TO` edges in the
+    corpus after the run, counted corpus-wide (summing the per-doc
+    incident counts would double every undirected edge).
     """
-    await reconcile_cross_doc_to_config(get_kg_client(), config)
+    kg_client = get_kg_client()
+    await reconcile_cross_doc_to_config(kg_client, config)
     n_succeeded = 0
     n_failed = 0
     failures: list[tuple[str, str]] = []
@@ -741,10 +778,12 @@ async def bulk_backfill_cross_doc_execute(
             failures.append((doc_id, repr(exc)))
             n_failed += 1
 
-    return BulkBackfillResult(
+    n_edges = await kg_client.count_related_to_edges()
+    return CrossDocBackfillResult(
         n_succeeded=n_succeeded,
         n_failed=n_failed,
         failures=tuple(failures),
+        n_edges=n_edges,
     )
 
 
@@ -1662,8 +1701,9 @@ class RecomputeCrossDocXrefsResult:
     at plan time — execute is a documented no-op.
 
     `n_edges_written` is the integer count returned by the underlying
-    `recompute_cross_doc_xrefs_global` call; None when skipped or
-    the Cypher failed.
+    `recompute_cross_doc_xrefs_global` call; None only when the layer
+    was off (skipped). A failed recompute re-raises rather than
+    returning None, so the GUI surfaces a "… failed" status.
     """
 
     layer_skipped: bool
@@ -1681,18 +1721,14 @@ async def recompute_cross_doc_xrefs_plan(
     enabled = bool(config.layers.cross_doc_xrefs)
     if enabled:
         kg_client = get_kg_client()
-        # Reuse the same diagnostic the install plan uses.
-        async with kg_client.driver.session() as session:
-            try:
-                result = await session.run("MATCH ()-[r:RELATED_BY_XREF]-() RETURN count(r) AS n")
-                row = await result.single()
-                n_edges = int(row["n"]) if row else 0
-            except Exception as exc:
-                logger.warning(
-                    "recompute_cross_doc_xrefs_plan: edge count failed: %r",
-                    exc,
-                )
-                n_edges = 0
+        try:
+            n_edges = await kg_client.count_related_by_xref_edges()
+        except Exception as exc:
+            logger.warning(
+                "recompute_cross_doc_xrefs_plan: edge count failed: %r",
+                exc,
+            )
+            n_edges = 0
         threshold = (
             config.cross_doc_xrefs.threshold
             if config.cross_doc_xrefs is not None
@@ -1736,12 +1772,11 @@ async def recompute_cross_doc_xrefs_execute(
             kg_client,
             plan.threshold,
         )
-    except Exception as exc:
-        logger.warning(
-            "recompute_cross_doc_xrefs_execute: failed: %r",
-            exc,
-        )
-        n = None
+    except Exception:
+        # Surface the failure instead of swallowing it into a fake success:
+        # re-raise so _execute_bulk_op shows "… failed: <error>" in the status.
+        logger.exception("recompute_cross_doc_xrefs_execute: global recompute failed")
+        raise
     return RecomputeCrossDocXrefsResult(
         layer_skipped=False,
         n_edges_written=n,

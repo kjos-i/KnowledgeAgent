@@ -14,6 +14,8 @@ import pytest
 
 from knowledge_agent.corpus_config import (
     CorpusConfig,
+    CrossDocConfig,
+    EntityConfig,
     LayerFlags,
 )
 from knowledge_agent.ingestion.bulk_ops import (
@@ -27,6 +29,7 @@ from knowledge_agent.ingestion.bulk_ops import (
     BulkResolveOpenAlexPlan,
     BulkResolveOpenAlexResult,
     ClearXrefEdgesPlan,
+    CrossDocBackfillResult,
     DeleteDocPlan,
     DeleteDocResult,
     IngestFolderItem,
@@ -1692,6 +1695,14 @@ async def test_bulk_backfill_triples_execute_returns_result_dataclass():
 # ---- bulk_backfill_cross_doc (L9) ----
 
 
+def _kg_client_with_edge_count(n: int = 0) -> MagicMock:
+    """A mock KG client whose count_related_to_edges returns `n` (the L9
+    execute now queries the corpus-wide :RELATED_TO total for its report)."""
+    client = MagicMock()
+    client.count_related_to_edges = AsyncMock(return_value=n)
+    return client
+
+
 async def test_bulk_backfill_cross_doc_plan_uses_layer_name_cross_doc():
     search_mock = MagicMock()
     search_mock.list_indexed_docs = AsyncMock(return_value=[{"doc_id": "d1"}])
@@ -1699,7 +1710,7 @@ async def test_bulk_backfill_cross_doc_plan_uses_layer_name_cross_doc():
         "knowledge_agent.ingestion.bulk_ops.get_search_client",
         return_value=search_mock,
     ):
-        plan = await bulk_backfill_cross_doc_plan()
+        plan = await bulk_backfill_cross_doc_plan(_config())
     assert plan.layer_name == "cross_doc"
 
 
@@ -1724,12 +1735,17 @@ async def test_bulk_backfill_cross_doc_execute_counts_cross_doc_ok_as_success():
             "knowledge_agent.ingestion.bulk_ops.reconcile_cross_doc_to_config",
             new_callable=AsyncMock,
         ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.get_kg_client",
+            return_value=_kg_client_with_edge_count(7),
+        ),
     ):
         result = await bulk_backfill_cross_doc_execute(plan, _config())
 
     assert result.n_succeeded == 2
     assert result.n_failed == 1
     assert result.failures[0][0] == "d3"
+    assert result.n_edges == 7  # corpus-wide :RELATED_TO count, not summed per-doc
 
 
 async def test_bulk_backfill_cross_doc_execute_catches_per_doc_exceptions():
@@ -1751,6 +1767,10 @@ async def test_bulk_backfill_cross_doc_execute_catches_per_doc_exceptions():
             "knowledge_agent.ingestion.bulk_ops.reconcile_cross_doc_to_config",
             new_callable=AsyncMock,
         ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.get_kg_client",
+            return_value=_kg_client_with_edge_count(0),
+        ),
     ):
         result = await bulk_backfill_cross_doc_execute(plan, _config())
 
@@ -1767,9 +1787,33 @@ async def test_bulk_backfill_cross_doc_execute_returns_result_dataclass():
             "knowledge_agent.ingestion.bulk_ops.reconcile_cross_doc_to_config",
             new_callable=AsyncMock,
         ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.get_kg_client",
+            return_value=_kg_client_with_edge_count(0),
+        ),
     ):
         result = await bulk_backfill_cross_doc_execute(plan, _config())
-    assert isinstance(result, BulkBackfillResult)
+    assert isinstance(result, CrossDocBackfillResult)
+
+
+async def test_bulk_backfill_cross_doc_plan_summary_names_threshold():
+    """#3a: the confirm summary states the threshold, so the user sees what
+    'related' means for this run."""
+    search_mock = MagicMock()
+    search_mock.list_indexed_docs = AsyncMock(return_value=[{"doc_id": "d1"}, {"doc_id": "d2"}])
+    config = CorpusConfig(
+        allowed_types=["Paper"],
+        layers=LayerFlags(chunks=True, entities=True, cross_doc=True),
+        entities=EntityConfig(extractors=["llm"]),
+        cross_doc=CrossDocConfig(threshold=4),
+    )
+    with patch(
+        "knowledge_agent.ingestion.bulk_ops.get_search_client",
+        return_value=search_mock,
+    ):
+        plan = await bulk_backfill_cross_doc_plan(config)
+    assert "Rebuild cross-doc links" in plan.summary
+    assert "4" in plan.summary  # the configured threshold
 
 
 async def test_bulk_re_embed_execute_returns_result_dataclass():
@@ -2038,17 +2082,11 @@ async def test_recompute_cross_doc_xrefs_plan_layer_off_skips_edge_count():
 
 
 async def test_recompute_cross_doc_xrefs_plan_layer_on_queries_existing_count():
-    """Layer on -> factory queries the live L10 edge count via an ASYNC session
-    (`async with` + `await session.run(...)` + `await result.single()`). Mocking
-    a SYNC session here previously masked the sync-`with`-on-AsyncSession bug."""
+    """Layer on -> plan queries the live L10 edge count via the client's
+    directed-count helper (count_related_by_xref_edges), so the "existing
+    edges" figure matches the true count (an undirected count would double it)."""
     kg_mock = MagicMock()
-    sess = MagicMock()
-    sess.__aenter__ = AsyncMock(return_value=sess)
-    sess.__aexit__ = AsyncMock(return_value=None)
-    fake_result = MagicMock()
-    fake_result.single = AsyncMock(return_value={"n": 25})
-    sess.run = AsyncMock(return_value=fake_result)
-    kg_mock.driver.session.return_value = sess
+    kg_mock.count_related_by_xref_edges = AsyncMock(return_value=25)
     with patch(
         "knowledge_agent.ingestion.bulk_ops.get_kg_client",
         return_value=kg_mock,
@@ -2059,8 +2097,7 @@ async def test_recompute_cross_doc_xrefs_plan_layer_on_queries_existing_count():
     assert plan.enabled is True
     assert plan.n_existing_l10_edges == 25
     assert plan.threshold == 4
-    # The async path actually ran — fails on the old sync `with` + un-awaited run.
-    sess.run.assert_awaited_once()
+    kg_mock.count_related_by_xref_edges.assert_awaited_once()
 
 
 async def test_recompute_cross_doc_xrefs_execute_skipped_when_layer_off():
@@ -2108,6 +2145,29 @@ async def test_recompute_cross_doc_xrefs_execute_calls_global_recompute_when_on(
     assert args[1] == 3  # threshold positional
     assert result.layer_skipped is False
     assert result.n_edges_written == 42
+
+
+async def test_recompute_cross_doc_xrefs_execute_reraises_on_failure():
+    """A global-recompute crash re-raises (surfaces as a 'failed' status)
+    instead of being swallowed into a fake success."""
+    plan = RecomputeCrossDocXrefsPlan(
+        enabled=True,
+        n_existing_l10_edges=0,
+        threshold=2,
+    )
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.get_kg_client",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops."
+            "cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global",
+            side_effect=RuntimeError("boom"),
+        ),
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        await recompute_cross_doc_xrefs_execute(plan)
 
 
 # ---- clear_xref_edges (per-ontology xref wipe) ----

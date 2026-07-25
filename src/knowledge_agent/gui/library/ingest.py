@@ -75,6 +75,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Single source of truth for bulk-op button captions. Used for the button
+# label, the confirm-dialog title + confirm button, and the status line, so a
+# rename shows everywhere (not just on the button). Ops absent here fall back
+# to their raw op key.
+_BULK_OP_LABELS: dict[str, str] = {
+    "bulk_resolve_openalex": "Resolve all papers",
+    "bulk_backfill_chunks": "Rebuild graph from chunks",
+    "bulk_re_embed": "Re-embed all chunks",
+    "bulk_backfill_entities": "Re-extract all entities",
+    "bulk_backfill_ontology": "Re-link all entities",
+    "backfill_xrefs": "Materialize xref edges",
+    "clear_xref_edges": "Clear xref edges…",
+    "bulk_backfill_triples": "Re-extract all triples",
+    "bulk_backfill_cross_doc": "Rebuild cross-doc links",
+    "recompute_cross_doc_xrefs": "Rebuild cross-doc xref links",
+}
+
+
 class IngestTab:
     """Pure action flow (left) + full config surface (right)."""
 
@@ -117,6 +135,8 @@ class IngestTab:
         # openalex_papers (L1-L4) layer is off in the config draft.
         self.resolve_button: ft.Button | None = None
         self.triples_button: ft.Button | None = None
+        self.cross_doc_button: ft.Button | None = None
+        self.cross_doc_xrefs_button: ft.Button | None = None
         # Set by LibraryView — called after a successful ingest / bulk-op
         # so the Select sub-tab refreshes its counts + Documents list.
         self.on_ingest_complete: Callable[[], None] | None = None
@@ -417,16 +437,38 @@ class IngestTab:
         cfg = self.config_editor._corpus_config
         return bool(cfg is not None and cfg.layers.triples)
 
+    def _cross_doc_layer_on(self) -> bool:
+        """True when the config draft has the cross_doc (L9) layer on — gates
+        the Rebuild-cross-doc-links bulk button. Running it while the layer is
+        off wipes all :RELATED_TO edges and reports every doc as a failure, so
+        the button is disabled instead."""
+        cfg = self.config_editor._corpus_config
+        return bool(cfg is not None and cfg.layers.cross_doc)
+
+    def _cross_doc_xrefs_layer_on(self) -> bool:
+        """True when the config draft has the cross_doc_xrefs (L10) layer on —
+        gates the Rebuild-cross-doc-xref-links bulk button. Running it while the
+        layer is off wipes all :RELATED_BY_XREF edges, so the button is disabled
+        instead."""
+        cfg = self.config_editor._corpus_config
+        return bool(cfg is not None and cfg.layers.cross_doc_xrefs)
+
     def refresh_bulk_op_gating(self) -> None:
         """Grey the layer-gated bulk-op buttons to match the config draft.
         Wired (via LibraryView) to the config editor's on_draft_changed, so
         toggling a layer off greys its bulk button immediately. Gates Resolve
-        all papers on openalex_papers and Re-extract all triples on triples;
-        the remaining buttons get their own gating as we reach them."""
+        all papers on openalex_papers, Re-extract all triples on triples,
+        Rebuild cross-doc links on cross_doc, and Rebuild cross-doc xref links
+        on cross_doc_xrefs; the remaining buttons get their own gating as we
+        reach them."""
         if self.resolve_button is not None:
             self.resolve_button.disabled = not self._openalex_layer_on()
         if self.triples_button is not None:
             self.triples_button.disabled = not self._triples_layer_on()
+        if self.cross_doc_button is not None:
+            self.cross_doc_button.disabled = not self._cross_doc_layer_on()
+        if self.cross_doc_xrefs_button is not None:
+            self.cross_doc_xrefs_button.disabled = not self._cross_doc_xrefs_layer_on()
         self.app.page.update()
 
     def _build_diff_card(self) -> ft.Control:
@@ -501,7 +543,7 @@ class IngestTab:
 
         def op_button(op_name: str, label: str | None = None) -> ft.Control:
             return ft.Button(
-                content=centered_label(label or op_name),
+                content=centered_label(label or _BULK_OP_LABELS.get(op_name, op_name)),
                 on_click=lambda e, n=op_name: self._on_bulk_op_clicked(n),
             )
 
@@ -520,7 +562,7 @@ class IngestTab:
         # read as a pair. The button is greyed when the openalex_papers layer
         # is off in the config draft (see refresh_bulk_op_gating).
         self.resolve_button = ft.Button(
-            content=centered_label("Resolve all papers"),
+            content=centered_label(_BULK_OP_LABELS["bulk_resolve_openalex"]),
             on_click=lambda e: self._on_bulk_op_clicked("bulk_resolve_openalex"),
             disabled=not self._openalex_layer_on(),
         )
@@ -532,9 +574,27 @@ class IngestTab:
         # the config draft (running it while off just wipes triples and reports
         # every doc as a failure — see refresh_bulk_op_gating).
         self.triples_button = ft.Button(
-            content=centered_label("Re-extract all triples"),
+            content=centered_label(_BULK_OP_LABELS["bulk_backfill_triples"]),
             on_click=lambda e: self._on_bulk_op_clicked("bulk_backfill_triples"),
             disabled=not self._triples_layer_on(),
+        )
+
+        # Rebuild cross-doc links (L9): greyed when the cross_doc layer is off
+        # in the config draft (running it while off wipes all :RELATED_TO edges
+        # and reports every doc as a failure — see refresh_bulk_op_gating).
+        self.cross_doc_button = ft.Button(
+            content=centered_label(_BULK_OP_LABELS["bulk_backfill_cross_doc"]),
+            on_click=lambda e: self._on_bulk_op_clicked("bulk_backfill_cross_doc"),
+            disabled=not self._cross_doc_layer_on(),
+        )
+
+        # Rebuild cross-doc xref links (L10): greyed when the cross_doc_xrefs
+        # layer is off in the config draft (running it while off wipes all
+        # :RELATED_BY_XREF edges — see refresh_bulk_op_gating).
+        self.cross_doc_xrefs_button = ft.Button(
+            content=centered_label(_BULK_OP_LABELS["recompute_cross_doc_xrefs"]),
+            on_click=lambda e: self._on_bulk_op_clicked("recompute_cross_doc_xrefs"),
+            disabled=not self._cross_doc_xrefs_layer_on(),
         )
 
         # One entry per layer sub-section — joined below with a thin rule.
@@ -567,8 +627,8 @@ class IngestTab:
                     wrap=True,
                     spacing=8,
                     controls=[
-                        op_button("bulk_backfill_chunks", "Rebuild graph from chunks"),
-                        op_button("bulk_re_embed", "Re-embed all chunks"),
+                        op_button("bulk_backfill_chunks"),
+                        op_button("bulk_re_embed"),
                     ],
                 ),
             ],
@@ -585,7 +645,7 @@ class IngestTab:
                     wrap=True,
                     spacing=8,
                     controls=[
-                        op_button("bulk_backfill_entities", "Re-extract all entities"),
+                        op_button("bulk_backfill_entities"),
                     ],
                 ),
             ],
@@ -602,9 +662,9 @@ class IngestTab:
                     wrap=True,
                     spacing=8,
                     controls=[
-                        op_button("bulk_backfill_ontology", "Re-link all entities"),
-                        op_button("backfill_xrefs", "Materialize xref edges"),
-                        op_button("clear_xref_edges", "Clear xref edges…"),
+                        op_button("bulk_backfill_ontology"),
+                        op_button("backfill_xrefs"),
+                        op_button("clear_xref_edges"),
                     ],
                 ),
             ],
@@ -623,8 +683,36 @@ class IngestTab:
                     controls=[self.triples_button],
                 ),
             ],
-            layer_group("Cross-doc (L9)", ["bulk_backfill_cross_doc"]),
-            layer_group("Cross-doc xrefs (L10)", ["recompute_cross_doc_xrefs"]),
+            [
+                ft.Row(
+                    controls=[
+                        sub_section_title("Cross-doc (L9)"),
+                        info(self.app, "ingest.bulk_cross_doc"),
+                    ],
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                ft.Row(
+                    wrap=True,
+                    spacing=8,
+                    controls=[self.cross_doc_button],
+                ),
+            ],
+            [
+                ft.Row(
+                    controls=[
+                        sub_section_title("Cross-doc xrefs (L10)"),
+                        info(self.app, "ingest.bulk_cross_doc_xrefs"),
+                    ],
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                ft.Row(
+                    wrap=True,
+                    spacing=8,
+                    controls=[self.cross_doc_xrefs_button],
+                ),
+            ],
         ]
         controls: list[ft.Control] = []
         for i, group in enumerate(groups):
@@ -702,7 +790,7 @@ class IngestTab:
             "bulk_backfill_cross_doc": (
                 bulk_ops.bulk_backfill_cross_doc_plan,
                 bulk_ops.bulk_backfill_cross_doc_execute,
-                "none",
+                "config",
                 True,
             ),
             "backfill_xrefs": (
@@ -754,10 +842,11 @@ class IngestTab:
             def executor(pf=exec_fn, p=plan):
                 return pf(p)
 
+        label = _BULK_OP_LABELS.get(op_name, op_name)
         self._show_ingest_confirm(
-            op_name,
+            label,
             plan.summary,
-            lambda: self._spawn(self._execute_bulk_op(op_name, executor)),
+            lambda: self._spawn(self._execute_bulk_op(op_name, executor, label)),
         )
 
     def _prompt_clear_xref_ontology(self) -> None:
@@ -825,22 +914,24 @@ class IngestTab:
         def executor(pf=exec_fn, p=plan):
             return pf(p)
 
+        label = _BULK_OP_LABELS.get("clear_xref_edges", "clear_xref_edges")
         self._show_ingest_confirm(
-            "clear_xref_edges",
+            label,
             plan.summary,
-            lambda: self._spawn(self._execute_bulk_op("clear_xref_edges", executor)),
+            lambda: self._spawn(self._execute_bulk_op("clear_xref_edges", executor, label)),
         )
 
-    async def _execute_bulk_op(self, op_name: str, executor) -> None:
-        self._set_busy(True, f"{op_name}: working…")
+    async def _execute_bulk_op(self, op_name: str, executor, label: str | None = None) -> None:
+        display = label or op_name
+        self._set_busy(True, f"{display}: working…")
         try:
             result = await executor()
         except Exception as exc:
-            self._set_busy(False, f"{op_name} failed: {exc}")
+            self._set_busy(False, f"{display} failed: {exc}")
             return
         self._set_busy(
             False,
-            f"{op_name} done: {self._fmt_bulk_result(result)}.",
+            f"{display} done: {self._fmt_bulk_result(result)}.",
         )
         self._notify_ingest_complete()
 

@@ -338,6 +338,15 @@ class Neo4jClient:
         """
         return await cross_doc_writes.recompute_cross_doc_edges(self, doc_id, threshold)
 
+    async def count_related_to_edges(self) -> int:
+        """L9: count all `:RELATED_TO` edges in the graph (each stored once).
+
+        The true de-duplicated link total (summing per-doc incident counts
+        would double every undirected edge). Delegates to
+        `cross_doc_writes.count_related_to_edges`.
+        """
+        return await cross_doc_writes.count_related_to_edges(self)
+
     # ---- L10 cross-doc xrefs - implementation in `cross_doc_xrefs_writes.py` ----
 
     async def recompute_cross_doc_xrefs_edges(
@@ -364,6 +373,14 @@ class Neo4jClient:
         `cross_doc_xrefs_writes.recompute_cross_doc_xrefs_edges`.
         """
         return await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_edges(self, doc_id, threshold)
+
+    async def count_related_by_xref_edges(self) -> int:
+        """L10: count all `:RELATED_BY_XREF` edges in the graph (each stored once).
+
+        The true de-duplicated total (an undirected count would double every
+        edge). Delegates to `cross_doc_xrefs_writes.count_related_by_xref_edges`.
+        """
+        return await cross_doc_xrefs_writes.count_related_by_xref_edges(self)
 
     # ---- L7 ontology imports - implementations in `kg/ontologies/*_writes.py` ----
 

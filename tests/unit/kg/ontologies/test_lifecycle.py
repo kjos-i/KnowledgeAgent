@@ -954,20 +954,14 @@ def test_install_cross_doc_xrefs_plan_summary_disabling():
 
 
 async def test_install_cross_doc_xrefs_plan_factory_reads_live_counts():
-    """The factory queries `:Document|:Artifact` count and the L10
-    edge count via await session.run(); both come back as the plan's
-    `n_docs` / `n_existing_l10_edges`."""
-    sessions_made = []
+    """The factory queries the `:Document|:Artifact` count via session.run()
+    and the L10 edge count via `client.count_related_by_xref_edges()`; both
+    come back as the plan's `n_docs` / `n_existing_l10_edges`."""
 
     class FakeSession:
         def __init__(self):
             self.calls = []
-            self._iter = iter(
-                [
-                    {"n": 73},  # count of focal nodes
-                    {"n": 19},  # count of L10 edges
-                ]
-            )
+            self._iter = iter([{"n": 73}])  # count of focal nodes
 
         async def run(self, query, **params):
             self.calls.append(query)
@@ -993,11 +987,13 @@ async def test_install_cross_doc_xrefs_plan_factory_reads_live_counts():
             self.sess = FakeSession()
 
         def session(self):
-            sessions_made.append(self.sess)
             return self.sess
 
     class FakeClient:
         driver = FakeDriver()
+
+        async def count_related_by_xref_edges(self):
+            return 19
 
     plan = await install_cross_doc_xrefs_plan(
         FakeClient(),
@@ -1019,6 +1015,9 @@ async def test_install_cross_doc_xrefs_plan_factory_fail_soft_on_count_error():
 
     class FakeClient:
         driver = FakeDriver()
+
+        async def count_related_by_xref_edges(self):
+            raise RuntimeError("driver down")
 
     plan = await install_cross_doc_xrefs_plan(
         FakeClient(),

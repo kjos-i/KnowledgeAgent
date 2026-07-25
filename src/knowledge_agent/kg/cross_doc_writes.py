@@ -158,3 +158,17 @@ async def recompute_cross_doc_edges(
         threshold,
     )
     return n
+
+
+async def count_related_to_edges(client) -> int:
+    """Count all `:RELATED_TO` edges in the graph (each stored once).
+
+    A directed match counts every undirected edge exactly once, so this
+    returns the true de-duplicated link total. The L9 bulk rebuild uses
+    it to report how many links exist after the run - summing the per-doc
+    incident counts would double every edge.
+    """
+    async with client.driver.session() as session:
+        result = await session.run(f"MATCH ()-[r:{RELATED_TO_REL}]->() RETURN count(r) AS n")
+        row = await result.single()
+        return int(row["n"]) if row else 0

@@ -273,3 +273,17 @@ async def recompute_cross_doc_xrefs_global(
         threshold,
     )
     return n
+
+
+async def count_related_by_xref_edges(client) -> int:
+    """Count all `:RELATED_BY_XREF` edges in the graph (each stored once).
+
+    A directed match counts every undirected edge exactly once - an
+    undirected `()-[r]-()` count would double every edge. The L10 recompute
+    plan and the ontology install plan use this so the "existing edges"
+    figure they show matches the true count the rebuild reports.
+    """
+    async with client.driver.session() as session:
+        result = await session.run(f"MATCH ()-[r:{RELATED_BY_XREF_REL}]->() RETURN count(r) AS n")
+        row = await result.single()
+        return int(row["n"]) if row else 0
