@@ -783,35 +783,26 @@ class IngestTab:
         return ft.Column(spacing=8, controls=controls)
 
     def _on_bulk_op_clicked(self, op_name: str) -> None:
-        """Validate + save config, then run bulk op `op_name`:
-        plan → confirm dialog → execute (with a spinner)."""
+        """Validate config, then run bulk op `op_name`: plan, confirm dialog,
+        execute (with a spinner). The validated settings are written to
+        corpus.toml only when the user confirms the dialog, never at click
+        time."""
         if self._busy:
             return
-        error = self.config_editor.try_save_and_get_error()
+        config, error = self.config_editor.validate_pending_config()
         if error is not None:
             self._show_invalid_config_dialog(op_name, error)
             return
         if not self._loop_running():
             return
-        self._spawn(self._run_bulk_op(op_name))
+        self._spawn(self._run_bulk_op(op_name, config))
 
-    async def _run_bulk_op(self, op_name: str) -> None:
-        from knowledge_agent.corpus_config import load_corpus_config
+    async def _run_bulk_op(self, op_name: str, config: object) -> None:
         from knowledge_agent.ingestion import bulk_ops
-
-        cfg_path = self.app.gui_config.corpus_config_path
-        if cfg_path is None:
-            self._set_status("No active corpus.")
-            return
-        try:
-            config = load_corpus_config(cfg_path)
-        except Exception as exc:
-            self._set_status(f"could not load corpus.toml: {exc}")
-            return
 
         # clear_xref_edges needs the user to pick WHICH ontology first.
         if op_name == "clear_xref_edges":
-            self._prompt_clear_xref_ontology()
+            self._prompt_clear_xref_ontology(config)
             return
 
         # op_name -> (plan_fn, execute_fn, plan_arg, execute_takes_config).
@@ -907,10 +898,12 @@ class IngestTab:
         self._show_ingest_confirm(
             label,
             plan.summary,
-            lambda: self._spawn(self._execute_bulk_op(op_name, executor, label)),
+            lambda: self._commit_then(
+                config, lambda: self._execute_bulk_op(op_name, executor, label)
+            ),
         )
 
-    def _prompt_clear_xref_ontology(self) -> None:
+    def _prompt_clear_xref_ontology(self, config: object) -> None:
         """Ask which ontology's xref edges to clear, then plan + confirm."""
         dropdown = ft.Dropdown(
             label="Ontology",
@@ -928,7 +921,7 @@ class IngestTab:
             if not name:
                 self._set_status("Pick an ontology to clear.")
                 return
-            self._spawn(self._run_clear_xref(name))
+            self._spawn(self._run_clear_xref(name, config))
 
         dialog = ft.AlertDialog(
             modal=True,
@@ -952,19 +945,9 @@ class IngestTab:
         self.app.page.show_dialog(dialog)
         self.app.page.update()
 
-    async def _run_clear_xref(self, ontology_name: str) -> None:
-        from knowledge_agent.corpus_config import load_corpus_config
+    async def _run_clear_xref(self, ontology_name: str, config: object) -> None:
         from knowledge_agent.ingestion import bulk_ops
 
-        cfg_path = self.app.gui_config.corpus_config_path
-        if cfg_path is None:
-            self._set_status("No active corpus.")
-            return
-        try:
-            config = load_corpus_config(cfg_path)
-        except Exception as exc:
-            self._set_status(f"could not load corpus.toml: {exc}")
-            return
         try:
             plan = await bulk_ops.clear_xref_edges_plan(ontology_name, config)
         except Exception as exc:
@@ -979,7 +962,9 @@ class IngestTab:
         self._show_ingest_confirm(
             label,
             plan.summary,
-            lambda: self._spawn(self._execute_bulk_op("clear_xref_edges", executor, label)),
+            lambda: self._commit_then(
+                config, lambda: self._execute_bulk_op("clear_xref_edges", executor, label)
+            ),
         )
 
     async def _execute_bulk_op(self, op_name: str, executor, label: str | None = None) -> None:
@@ -1029,6 +1014,17 @@ class IngestTab:
         task = asyncio.create_task(coro)
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
+
+    def _commit_then(self, config, make_coro) -> None:
+        """Dialog-confirm handler: persist the validated config to corpus.toml,
+        then start the run. Deferring the write to the OK button means Cancel
+        writes nothing and the pending draft stays intact.
+        """
+        error = self.config_editor.commit_config(config)
+        if error is not None:
+            self._set_status(f"could not save corpus.toml: {error}")
+            return
+        self._spawn(make_coro())
 
     def _set_status(self, msg: str) -> None:
         self._write_status(msg)
@@ -1236,25 +1232,28 @@ class IngestTab:
         self._start_action("Ingest single file")
 
     def _start_action(self, action: str) -> None:
-        """Validate + save the config, then run `action` on the picked
-        folder/file: plan → confirm dialog → execute (with a spinner).
+        """Validate the config, then run `action` on the picked folder/file:
+        plan, confirm dialog, execute (with a spinner). The validated settings
+        are written to corpus.toml only when the user confirms the dialog,
+        never at click time.
 
-        Validation failure surfaces as a warning dialog with the
-        pydantic message; no pipeline runs.
+        Validation failure surfaces as a warning dialog with the pydantic
+        message; no pipeline runs.
         """
         if self._busy:
             return
-        error = self.config_editor.try_save_and_get_error()
+        config, error = self.config_editor.validate_pending_config()
         if error is not None:
             self._show_invalid_config_dialog(action, error)
             return
         if not self._loop_running():
             return
-        self._spawn(self._run_action(action))
+        self._spawn(self._run_action(action, config))
 
-    async def _run_action(self, action: str) -> None:
-        """Load the saved config, build the plan for `action`, and show a
-        confirm dialog whose OK button kicks off the execute.
+    async def _run_action(self, action: str, config: object) -> None:
+        """Build the plan for `action` from the validated `config`, then show a
+        confirm dialog whose OK button writes corpus.toml and kicks off the
+        execute.
 
         The spinner is turned on FIRST and the (potentially cold, 30-60s on
         the first ingest of a session) ingestion-backend import runs off the
@@ -1263,29 +1262,19 @@ class IngestTab:
         """
 
         def _import_ingest_backend():
-            from knowledge_agent.corpus_config import load_corpus_config
             from knowledge_agent.ingestion import bulk_ops
 
-            return bulk_ops, load_corpus_config
+            return bulk_ops
 
         self._set_busy(True, f"{action}: preparing…")
         await asyncio.sleep(0.05)  # let Flet paint the spinner before the import blocks
         try:
-            bulk_ops, load_corpus_config = await asyncio.to_thread(_import_ingest_backend)
+            bulk_ops = await asyncio.to_thread(_import_ingest_backend)
         except Exception as exc:
             self._set_busy(False, f"{action}: could not load ingestion backend — {exc}")
             return
 
         main, sub, overwrite = self.config_editor.get_ingest_args()
-        cfg_path = self.app.gui_config.corpus_config_path
-        if cfg_path is None:
-            self._set_busy(False, "No active corpus.")
-            return
-        try:
-            config = load_corpus_config(cfg_path)
-        except Exception as exc:
-            self._set_busy(False, f"could not load corpus.toml: {exc}")
-            return
 
         # Pre-flight: ingestion embeds every chunk (and may extract with an
         # LLM), so the required provider key(s) must be present. A missing
@@ -1347,7 +1336,9 @@ class IngestTab:
         self._show_ingest_confirm(
             action,
             plan.summary,
-            lambda: self._spawn(self._execute_action(action, plan, config, overwrite)),
+            lambda: self._commit_then(
+                config, lambda: self._execute_action(action, plan, config, overwrite)
+            ),
             orphan_names=orphan_names,
         )
 
@@ -1369,14 +1360,9 @@ class IngestTab:
         self._show_ingest_confirm(
             "Ingest single file",
             f"Ingest '{path.name}' into the active corpus?",
-            lambda: self._spawn(
-                self._execute_single_file(
-                    path,
-                    config,
-                    main,
-                    sub,
-                    overwrite,
-                )
+            lambda: self._commit_then(
+                config,
+                lambda: self._execute_single_file(path, config, main, sub, overwrite),
             ),
         )
 

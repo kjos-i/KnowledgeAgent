@@ -131,9 +131,30 @@ def test_delete_case_persists(fake_app, tmp_path):
     p = _dataset_file(tmp_path)
     tab = _tab(fake_app)
     tab._load(p)
-    # Each case card's Delete button calls _delete_case with its index.
+    # _delete_case is the confirmed action (run from the confirm dialog).
     tab._delete_case(0)
 
+    assert [c.id for c in load_dataset(p).cases] == ["c2"]
+
+
+def test_delete_case_button_confirms_first(fake_app, tmp_path, monkeypatch):
+    """The card Delete button routes through a confirm dialog: the case is
+    deleted only when the confirm callback fires, not on the click itself."""
+    p = _dataset_file(tmp_path)
+    tab = _tab(fake_app)
+    tab._load(p)
+
+    captured: dict = {}
+
+    def _fake_confirm(app, *, title, message, confirm_label, on_confirm):
+        captured["on_confirm"] = on_confirm
+
+    monkeypatch.setattr("knowledge_agent.gui.evaluation._common.confirm_dialog", _fake_confirm)
+
+    tab._confirm_delete_case(0)
+    assert len(load_dataset(p).cases) == 2  # dialog raised, nothing deleted yet
+
+    captured["on_confirm"]()  # user confirms
     assert [c.id for c in load_dataset(p).cases] == ["c2"]
 
 

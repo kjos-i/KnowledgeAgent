@@ -9,6 +9,8 @@ coverage before the info-icon retrofit.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import flet as ft
 
 from knowledge_agent.corpus_config import (
@@ -139,3 +141,49 @@ def test_unfreeze_releases_the_lock(fake_app):
     for wrap in ed._frozen_wraps.values():
         assert wrap.disabled is False
     assert ed.embedding_model_field.disabled is False
+
+
+def test_validate_pending_config_returns_config_without_writing(fake_app, monkeypatch):
+    """validate_pending_config validates the draft and returns it, but must NOT
+    write corpus.toml. The write is deferred to commit_config (dialog confirm)."""
+    ed = _ready_editor(fake_app)
+    wrote: list = []
+    monkeypatch.setattr(
+        "knowledge_agent.gui.library.corpus_config_editor._write_corpus_toml",
+        lambda *a, **k: wrote.append(a),
+    )
+
+    config, error = ed.validate_pending_config()
+
+    assert error is None
+    assert config is not None
+    assert wrote == []  # validation never touches disk
+
+
+def test_commit_config_writes_and_adopts_baseline(fake_app, monkeypatch):
+    """commit_config writes the validated config to disk and adopts it as the
+    new in-memory baseline."""
+    ed = _ready_editor(fake_app)
+    wrote: list = []
+    monkeypatch.setattr(
+        "knowledge_agent.gui.library.corpus_config_editor._write_corpus_toml",
+        lambda _path, cfg: wrote.append(cfg),
+    )
+    monkeypatch.setattr(
+        ed, "_find_active_entry", lambda _name: SimpleNamespace(corpus_config_path="corpus.toml")
+    )
+    # Silence the UI-refresh / draft side effects (isolate the write path).
+    for m in (
+        "_clear_draft",
+        "_refresh_subtitles",
+        "_refresh_availability",
+        "_refresh_dirty_indicator",
+        "_notify_draft_changed",
+    ):
+        monkeypatch.setattr(ed, m, lambda *a, **k: None)
+
+    config, _ = ed.validate_pending_config()
+
+    assert ed.commit_config(config) is None
+    assert wrote == [config]  # written to disk
+    assert ed._corpus_config is config  # adopted as current

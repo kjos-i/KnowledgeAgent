@@ -7,9 +7,10 @@ without a running loop, so unit tests never touch the backend.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from knowledge_agent.gui.library.ingest import IngestTab
 
@@ -157,21 +158,81 @@ async def test_run_action_empty_folder_clears_busy(fake_app, monkeypatch):
     clear busy)."""
     tab = IngestTab(fake_app)
     tab.folder_field.value = "   "  # blank -> empty after strip
-    fake_app.gui_config.corpus_config_path = "corpus.toml"  # not None
     monkeypatch.setattr(tab.config_editor, "get_ingest_args", lambda: ("Document", "Paper", False))
     monkeypatch.setattr(tab, "_missing_ingest_key", lambda config: None)
-    # Skip the heavy backend import: stand-ins for (bulk_ops, load_corpus_config).
-    monkeypatch.setattr(
-        "asyncio.to_thread",
-        AsyncMock(return_value=(SimpleNamespace(), lambda _p: SimpleNamespace())),
-    )
+    # Skip the heavy backend import: stand-in for bulk_ops (config is passed in).
+    monkeypatch.setattr("asyncio.to_thread", AsyncMock(return_value=SimpleNamespace()))
 
-    await tab._run_action("Ingest folder")
+    await tab._run_action("Ingest folder", SimpleNamespace())
 
     assert tab._busy is False
     assert tab.progress_ring.visible is False
     assert tab.ingest_folder_button.disabled is False
     assert "Pick a folder" in tab.status.value
+
+
+def test_start_action_validates_but_does_not_write(fake_app, monkeypatch):
+    """Clicking an ingest action validates the config but must NOT write
+    corpus.toml. The write is deferred to the confirm dialog (commit_config)."""
+    tab = IngestTab(fake_app)
+    validate = MagicMock(return_value=(SimpleNamespace(), None))
+    commit = MagicMock()
+    monkeypatch.setattr(tab.config_editor, "validate_pending_config", validate)
+    monkeypatch.setattr(tab.config_editor, "commit_config", commit)
+
+    tab._start_action("Ingest folder")
+
+    validate.assert_called_once()
+    commit.assert_not_called()  # nothing written at click time
+
+
+def test_bulk_op_click_validates_but_does_not_write(fake_app, monkeypatch):
+    """Same for a bulk op: the click validates, the write waits for confirm."""
+    tab = IngestTab(fake_app)
+    validate = MagicMock(return_value=(SimpleNamespace(), None))
+    commit = MagicMock()
+    monkeypatch.setattr(tab.config_editor, "validate_pending_config", validate)
+    monkeypatch.setattr(tab.config_editor, "commit_config", commit)
+
+    tab._on_bulk_op_clicked("bulk_backfill_chunks")
+
+    validate.assert_called_once()
+    commit.assert_not_called()
+
+
+async def test_commit_then_writes_then_runs(fake_app, monkeypatch):
+    """The confirm handler writes corpus.toml (commit_config) then starts the
+    run. This is where the deferred write happens, on the dialog's OK."""
+    tab = IngestTab(fake_app)
+    commit = MagicMock(return_value=None)
+    monkeypatch.setattr(tab.config_editor, "commit_config", commit)
+    ran: list[bool] = []
+
+    async def _fake_run():
+        ran.append(True)
+
+    tab._commit_then(SimpleNamespace(), _fake_run)
+
+    commit.assert_called_once()  # write happens on confirm
+    await asyncio.sleep(0)  # let the spawned task run
+    assert ran == [True]
+
+
+async def test_commit_then_aborts_run_on_write_error(fake_app, monkeypatch):
+    """If the confirm-time write fails, the run does not start and the error
+    surfaces."""
+    tab = IngestTab(fake_app)
+    monkeypatch.setattr(tab.config_editor, "commit_config", lambda _c: "disk full")
+    ran: list[bool] = []
+
+    async def _fake_run():
+        ran.append(True)
+
+    tab._commit_then(SimpleNamespace(), _fake_run)
+
+    await asyncio.sleep(0)
+    assert ran == []  # write failed -> run never started
+    assert "disk full" in tab.status.value
 
 
 # ---- bulk-ops ----

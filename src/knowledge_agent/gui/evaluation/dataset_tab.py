@@ -1252,7 +1252,7 @@ class DatasetTab:
             selected=self._selected,
             detailed=True,  # show every gold field on each card, not just a summary
             on_edit=self._select,
-            on_delete=self._delete_case,
+            on_delete=self._confirm_delete_case,
             on_cancel=self._on_cancel_edit,
             empty_hint="No cases yet — add one to get started.",
         )
@@ -2065,8 +2065,21 @@ class DatasetTab:
             self._restore_form(self._drafts[min(saved, len(self._drafts) - 1)])
         return cases, err
 
+    def _confirm_delete_case(self, idx: int) -> None:
+        """Confirm before deleting a case. Deleting writes to disk immediately,
+        so Cancel here must leave the case in place."""
+        from knowledge_agent.gui.evaluation._common import confirm_dialog
+
+        confirm_dialog(
+            self.app,
+            title="Delete case?",
+            message="This removes the case from the dataset and saves the file. It cannot be undone.",
+            confirm_label="Delete",
+            on_confirm=lambda: self._delete_case(idx),
+        )
+
     def _delete_case(self, idx: int) -> None:
-        """Delete case `idx` (wired to each card's Delete button) and persist."""
+        """Delete case `idx` (runs from the confirm dialog) and persist."""
         from knowledge_agent.evaluation.models import save_dataset
 
         if self._dataset is None or not (0 <= idx < len(self._dataset.cases)):

@@ -1620,19 +1620,31 @@ class CorpusConfigEditor:
 
     # ----- save core --------------------------------------------------------
 
-    def try_save_and_get_error(self) -> str | None:
-        """Validate current in-memory state + write to disk if valid.
+    def validate_pending_config(self) -> tuple[CorpusConfig | None, str | None]:
+        """Validate the in-memory draft WITHOUT writing to disk.
 
-        Called at kickoff time by the Ingest tab's action buttons (Ingest
-        folder / Re-ingest / Sync / Ingest single file) AND the bulk-op
-        buttons — the places corpus.toml gets written. Field-handler
-        toggles are in-memory only.
-
-        Returns None on success + refreshes baseline / dirty indicator.
-        Returns a compact error message on validation or write failure.
+        Returns (validated_config, None) on success, or (None, error) on
+        failure. The Ingest and bulk-op buttons call this at click time so a
+        click no longer persists settings the user might Cancel. The actual
+        write is deferred to `commit_config`, called from a dialog's confirm.
         """
         if self._corpus_config is None:
-            return "no corpus loaded"
+            return None, "no corpus loaded"
+        if self._loaded_for_corpus is None:
+            return None, "no active corpus"
+        try:
+            validated = CorpusConfig.model_validate(
+                self._corpus_config.model_dump(mode="json"),
+            )
+        except ValidationError as exc:
+            return None, _format_validation_error(exc)
+        return validated, None
+
+    def commit_config(self, validated: CorpusConfig) -> str | None:
+        """Write a previously-validated config to corpus.toml and adopt it as
+        the new baseline. Call this from a dialog's confirm callback, not at
+        click time. Returns None on success, else an error string.
+        """
         active_name = self._loaded_for_corpus
         if active_name is None:
             return "no active corpus"
@@ -1640,22 +1652,16 @@ class CorpusConfigEditor:
         if entry is None:
             return f"active corpus {active_name!r} not found"
         try:
-            validated = CorpusConfig.model_validate(
-                self._corpus_config.model_dump(mode="json"),
-            )
-        except ValidationError as exc:
-            return _format_validation_error(exc)
-        try:
             _write_corpus_toml(entry.corpus_config_path, validated)
         except Exception as exc:
             logger.warning("corpus.toml write failed: %r", exc)
             return f"could not save corpus.toml: {exc}"
-        # Successful write — the validated CorpusConfig (auto-populated
+        # Successful write. The validated CorpusConfig (auto-populated
         # subsections, etc.) becomes the new baseline.
         self._corpus_config = validated
         self._baseline_config = validated.model_copy(deep=True)
-        # The draft is now the saved baseline — drop the persisted draft so
-        # a later reopen doesn't resurrect stale "pending" changes.
+        # The draft is now the saved baseline, so drop the persisted draft so a
+        # later reopen doesn't resurrect stale "pending" changes.
         self._clear_draft()
         self._refresh_subtitles()
         self._refresh_availability()
@@ -1665,6 +1671,20 @@ class CorpusConfigEditor:
             self.status.value = "saved"
             self.app.page.update()
         return None
+
+    def try_save_and_get_error(self) -> str | None:
+        """Validate the in-memory draft and, if valid, write it to corpus.toml.
+
+        A thin validate-then-commit. Still used by the freeze toggle
+        (`set_frozen`), which commits immediately on its own confirmed action.
+        The Ingest and bulk-op buttons no longer call this directly: they
+        validate at click time and commit only when the user confirms.
+        """
+        validated, error = self.validate_pending_config()
+        if error is not None:
+            return error
+        assert validated is not None
+        return self.commit_config(validated)
 
     def set_frozen(self, value: bool) -> str | None:
         """Freeze or unfreeze this corpus's recipe. Persists `frozen` to
