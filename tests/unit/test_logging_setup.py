@@ -39,6 +39,7 @@ from knowledge_agent.logging_setup import (
     RingBufferHandler,
     _detect_packaged,
     init_logging,
+    shutdown_logging,
 )
 
 if TYPE_CHECKING:
@@ -195,6 +196,21 @@ def test_init_logging_is_idempotent(reset_logging_state: Path) -> None:
 
     assert len(handlers_after_first) == len(handlers_after_second) == 1
     assert listener_after_first is not listener_after_second  # rebuilt cleanly
+
+
+def test_shutdown_logging_stops_listener_and_is_idempotent(reset_logging_state: Path) -> None:
+    """`shutdown_logging()` drains + stops the QueueListener — the GUI's os._exit
+    close path needs this, since logging.shutdown() alone doesn't empty the queue.
+    A no-op once the listener is gone, so a second call (or one before init) never
+    raises."""
+    init_logging(LoggingSettings(log_dir=reset_logging_state))
+    assert logging_setup._LISTENER is not None
+
+    shutdown_logging()
+    assert logging_setup._LISTENER is None  # listener stopped + cleared
+
+    shutdown_logging()  # already down → harmless no-op
+    assert logging_setup._LISTENER is None
 
 
 # ---------------------------------------------------------------------------

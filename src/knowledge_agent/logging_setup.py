@@ -167,6 +167,7 @@ __all__ = [
     "make_asyncio_exception_handler",
     "make_sys_excepthook",
     "make_threading_excepthook",
+    "shutdown_logging",
     "write_crash_file",
 ]
 
@@ -678,3 +679,15 @@ def _shutdown_listener() -> None:
         with contextlib.suppress(Exception):
             _LISTENER.stop()
         _LISTENER = None
+
+
+def shutdown_logging() -> None:
+    """Drain + stop the logging QueueListener for hard-exit paths.
+
+    `os._exit()` (the GUI's close-hang net) skips the `atexit` that normally
+    stops the listener, and `logging.shutdown()` only flushes handlers — it does
+    NOT drain the queue. Without this, records still in the queue are lost on
+    close. Call this, THEN `logging.shutdown()`, right before a hard exit. No-op
+    + idempotent when logging was never initialised (the listener is None).
+    """
+    _shutdown_listener()

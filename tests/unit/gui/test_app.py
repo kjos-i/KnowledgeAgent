@@ -580,3 +580,56 @@ def test_select_corpus_refused_while_search_in_flight(fake_page: MagicMock):
         app.select_corpus("c2")
     sw.assert_not_called()  # never switched → no corpus mixing
     app.chat_panel.append_system.assert_called()  # told the user why
+
+
+# ---- entry point: logging wiring + close-hang drain ----
+
+
+def test_main_initializes_logging_and_stashes_asyncio_handler(monkeypatch):
+    """ka-gui entry point wires the full logging system (not basicConfig) and
+    stashes init_logging()'s asyncio handler for the async page factory."""
+    import knowledge_agent.gui.app as app_mod
+
+    handler = object()
+    monkeypatch.setattr(app_mod, "_ASYNCIO_HANDLER", None)  # restored on teardown
+    monkeypatch.setattr(app_mod, "init_logging", lambda: handler)
+    monkeypatch.setattr(app_mod, "ft", MagicMock())  # don't launch Flet
+    monkeypatch.setattr(app_mod, "shutdown_logging", MagicMock())
+    monkeypatch.setattr(app_mod.logging, "shutdown", MagicMock())
+    exits: list[int] = []
+    monkeypatch.setattr(app_mod.os, "_exit", lambda code: exits.append(code))
+
+    app_mod.main()
+
+    assert app_mod._ASYNCIO_HANDLER is handler
+    assert exits == [0]  # finally hard-exits cleanly
+    app_mod.shutdown_logging.assert_called_once()  # queue drained before exit
+
+
+async def test_page_factory_installs_asyncio_handler_on_flet_loop(fake_page, monkeypatch):
+    """The async page factory installs the stashed asyncio handler on Flet's
+    running loop and still builds the app."""
+    import knowledge_agent.gui.app as app_mod
+
+    handler = object()
+    monkeypatch.setattr(app_mod, "_ASYNCIO_HANDLER", handler)
+    built = MagicMock(name="GuiApp")
+    monkeypatch.setattr(app_mod, "GuiApp", built)
+    fake_loop = MagicMock()
+    monkeypatch.setattr(app_mod.asyncio, "get_running_loop", lambda: fake_loop)
+
+    await app_mod._page_factory(fake_page)
+
+    fake_loop.set_exception_handler.assert_called_once_with(handler)
+    built.assert_called_once_with(page=fake_page)
+    built.return_value.build.assert_called_once()
+
+
+def test_page_factory_is_async_so_handler_lands_on_flet_loop():
+    """Flet awaits a coroutine target on its event loop (verified in flet's
+    app.py); the factory must stay async or the asyncio handler can't install."""
+    import inspect
+
+    from knowledge_agent.gui.app import _page_factory
+
+    assert inspect.iscoroutinefunction(_page_factory)

@@ -80,7 +80,12 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from knowledge_agent.logging_setup import init_logging
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -352,7 +357,15 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def _async_main(argv: list[str] | None = None) -> int:
+async def _async_main(
+    argv: list[str] | None = None,
+    asyncio_handler: Callable[[Any, dict[str, Any]], None] | None = None,
+) -> int:
+    # Install the logging asyncio-exception handler on the loop asyncio.run()
+    # created (asyncio binds handlers to a specific loop) so coroutine crashes
+    # land in the crash log.
+    if asyncio_handler is not None:
+        asyncio.get_running_loop().set_exception_handler(asyncio_handler)
     parser = _build_parser()
     args = parser.parse_args(argv)
     return await args.func(args)
@@ -363,8 +376,15 @@ def main(argv: list[str] | None = None) -> int:
 
     Wraps the async machinery in `asyncio.run`. Returns the exit code so
     the wheel-installed script can propagate it via `sys.exit(main())`.
+
+    init_logging() sets up the full logging system (rotating file log, crash +
+    faulthandler hooks, library-noise clamp) and returns asyncio's exception
+    handler, installed on the loop inside `_async_main`. `asyncio.run` runs the
+    normal atexit on teardown, so the QueueListener drains cleanly — no os._exit
+    drain is needed here (unlike the GUI's close-hang path).
     """
-    return asyncio.run(_async_main(argv))
+    asyncio_handler = init_logging()
+    return asyncio.run(_async_main(argv, asyncio_handler))
 
 
 if __name__ == "__main__":

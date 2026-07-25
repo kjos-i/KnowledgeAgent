@@ -12,6 +12,7 @@ glue is wired correctly + the exit codes match the contract.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import io
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -87,10 +88,41 @@ def test_build_parser_eval_read_flags():
 
 
 def test_main_help_exits_zero():
-    """`ka --help` is a successful no-op."""
-    with pytest.raises(SystemExit) as exc, redirect_stdout(io.StringIO()):
+    """`ka --help` is a successful no-op (logging init mocked out so the test
+    never touches the real log dir / installs global excepthooks)."""
+    with (
+        patch("knowledge_agent.cli.init_logging") as init,
+        pytest.raises(SystemExit) as exc,
+        redirect_stdout(io.StringIO()),
+    ):
         main(["--help"])
     assert exc.value.code == 0
+    init.assert_called_once()  # entry point wires the logging system
+
+
+def test_main_initializes_logging_and_installs_asyncio_handler():
+    """`ka` entry point calls init_logging() and installs the returned asyncio
+    exception handler on the loop asyncio.run() creates."""
+
+    def handler(_loop, _context):  # must be callable — the real loop validates it
+        pass
+
+    captured: dict[str, object] = {}
+
+    async def _fake_func(_args: argparse.Namespace) -> int:
+        captured["handler"] = asyncio.get_running_loop().get_exception_handler()
+        return 0
+
+    parser = argparse.ArgumentParser()
+    parser.set_defaults(func=_fake_func)
+    with (
+        patch("knowledge_agent.cli.init_logging", return_value=handler) as init,
+        patch("knowledge_agent.cli._build_parser", return_value=parser),
+    ):
+        rc = main([])
+    assert rc == 0
+    init.assert_called_once()
+    assert captured["handler"] is handler
 
 
 # ---- ingest ----

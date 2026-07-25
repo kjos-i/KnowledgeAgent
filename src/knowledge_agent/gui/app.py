@@ -81,8 +81,11 @@ from knowledge_agent.gui.tabs.info_tab import InfoTab
 from knowledge_agent.gui.tabs.library_tab import LibraryTab
 from knowledge_agent.gui.tabs.log_tab import LogTab
 from knowledge_agent.gui.tabs.search_tab import SearchTab
+from knowledge_agent.logging_setup import init_logging, shutdown_logging
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from knowledge_agent.models import AgentAnswer
 
 logger = logging.getLogger(__name__)
@@ -955,13 +958,29 @@ def _arm_close_watchdog() -> None:
 
     def _watchdog() -> None:
         time.sleep(_CLOSE_WATCHDOG_SECONDS)
+        shutdown_logging()  # drain the log queue — os._exit below skips atexit
         logging.shutdown()
         os._exit(0)
 
     threading.Thread(target=_watchdog, name="ka-close-watchdog", daemon=True).start()
 
 
-def _page_factory(page: ft.Page) -> None:
+# Set by main() to init_logging()'s asyncio exception handler. The async
+# _page_factory installs it on Flet's event loop — asyncio binds exception
+# handlers to a specific loop, and Flet creates the loop inside ft.run(), so
+# it can't be installed in the sync main().
+_ASYNCIO_HANDLER: Callable[[Any, dict[str, Any]], None] | None = None
+
+
+async def _page_factory(page: ft.Page) -> None:
+    # Install the logging asyncio-exception handler on Flet's running loop so
+    # crashes in coroutines land in the crash log (best-effort — a missing
+    # handler or a Flet change must never stop the app from launching). This is
+    # why the factory is async: Flet awaits a coroutine target on its loop.
+    if _ASYNCIO_HANDLER is not None:
+        with contextlib.suppress(Exception):
+            asyncio.get_running_loop().set_exception_handler(_ASYNCIO_HANDLER)
+
     # Flet-on-Windows close-hang net. Closing the desktop window does NOT make
     # ft.run() return (its asyncio teardown hangs on the socket shutdown), so
     # the post-run hard-exit in main() only fires on Ctrl-C, not a window close.
@@ -991,10 +1010,14 @@ def _page_factory(page: ft.Page) -> None:
 
 def main() -> None:
     """Entry point for `python -m knowledge_agent.gui` and the console script."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(levelname)s %(name)s: %(message)s",
-    )
+    global _ASYNCIO_HANDLER
+    # Full logging system: rotating gzip file log, async QueueListener fan-out,
+    # ring buffer, crash-file + faulthandler hooks, library-noise clamp, home-
+    # path redaction. Returns asyncio's exception handler, which the async
+    # _page_factory installs on Flet's loop (asyncio binds handlers to the loop
+    # ft.run() creates). init_logging() configures the console itself in dev, so
+    # this replaces the old logging.basicConfig().
+    _ASYNCIO_HANDLER = init_logging()
     exit_code = 0
     try:
         ft.run(_page_factory)
@@ -1009,11 +1032,12 @@ def main() -> None:
         # joining a non-daemon worker thread left running by Flet/asyncio's
         # Windows Proactor teardown (which also logs a harmless
         # ConnectionResetError / WinError 10054). The launching terminal never
-        # returns and zombie ka-gui processes pile up. Flush logging, then
-        # hard-exit so the process actually dies. os._exit deliberately skips the
-        # atexit handlers + non-daemon thread joins that are the hang; the app
-        # has nothing that needs them (init_logging() is never wired in, and
-        # _http_client.close() is already never called).
+        # returns and zombie ka-gui processes pile up. Drain the log queue, flush
+        # logging, then hard-exit so the process actually dies. os._exit skips
+        # the atexit handlers + non-daemon thread joins that are the hang —
+        # shutdown_logging() does the one atexit step we still need (drain the
+        # QueueListener so the last records reach the file).
+        shutdown_logging()
         logging.shutdown()
         os._exit(exit_code)
 
