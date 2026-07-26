@@ -47,6 +47,7 @@ from knowledge_agent.artifacts import (
 from knowledge_agent.config import Settings, disable_env_file, get_settings, reset_after_key_change
 from knowledge_agent.corpus_config import CorpusConfig, load_corpus_config
 from knowledge_agent.evaluation.models import RetrievalSettings
+from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui._widgets.retrieval_form import (
     query_mode_to_knobs,
     store_forced_by_mode,
@@ -306,6 +307,7 @@ class GuiApp:
                     content=ft.Text("Refresh"),
                     on_click=_act(select_tab.on_refresh_clicked),
                 ),
+                info(self, "manage.corpus"),
             ],
         )
 

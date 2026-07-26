@@ -3179,6 +3179,78 @@ INFO: dict[str, InfoText] = {
             "successful Paper lookup or a re-ingest. Then reload(force=True)."
         ),
     ),
+    "manage.corpus": InfoText(
+        title="Manage corpus",
+        standard=(
+            "This dialog manages your corpora. It opens from the gear button "
+            "in the top bar. At the top is a read-only summary of the active "
+            "corpus (the same fields the Selected dataset (i) explains); below "
+            "it are the tools.\n\n"
+            "Actions (these apply to the active corpus).\n\n"
+            "Rename changes only the label shown in the corpus picker. It does "
+            "not rename the corpus folder, its corpus.toml, the LanceDB "
+            "folder, or the Neo4j database on disk. Relocate repoints the app "
+            "at a corpus you moved to a new folder: you pick the folder, which "
+            "must contain the corpus.toml, and no re-ingest happens (the data "
+            "moved with the folder). Refresh re-reads this card from your "
+            "saved settings.\n\n"
+            "All corpora.\n\n"
+            "This lists every corpus registered in the app. Each row shows the "
+            "name, an (active) tag on the one in use, and a (missing) tag when "
+            "the corpus's corpus.toml is no longer on disk (for example after "
+            "you delete its folder). Remove unregisters that corpus: it clears "
+            "the entry and its stored Neo4j password, but never deletes "
+            "anything on disk (the Neo4j database, the LanceDB folder, and the "
+            "corpus.toml are left as they are). For a corpus flagged (missing) "
+            "it just clears the stale entry. Remove works by name, so you can "
+            "prune any corpus without selecting it first."
+        ),
+        beginner=(
+            "This window is where you look after your corpora (your document "
+            "collections). You open it with the gear button at the top. It "
+            "shows details of the corpus you are using now, and tools to "
+            "manage all of them.\n\n"
+            "The buttons act on the corpus you are using now. Rename just "
+            "changes the name shown in the list; it does not rename any files "
+            "or folders on your computer. Relocate is for when you have moved "
+            "a corpus's folder somewhere else: you point the app at the new "
+            "folder, which must still contain its corpus.toml file. Refresh "
+            "re-reads the details shown here.\n\n"
+            "Under All corpora is a list of every corpus the app knows about. "
+            "Each one shows its name, an (active) tag if it is the one in use, "
+            "and a (missing) tag if its corpus.toml file is gone from your "
+            "computer (for example you deleted the folder). Remove takes a "
+            "corpus off this list. It does not delete any of your files (the "
+            "database, the search folder, and the corpus.toml all stay); it "
+            "just makes the app forget the corpus. For a corpus marked "
+            "(missing), Remove simply clears the leftover entry. You can "
+            "remove any corpus straight from the list, without switching to it "
+            "first."
+        ),
+        technical=(
+            "GuiApp._open_manage_dialog. The card is build_corpus_card(app): "
+            "read-only and static (see select.selected_dataset). The action "
+            "buttons reach the SelectDatasetTab handlers through _act, which "
+            "pops this dialog first so the action's own dialog or picker does "
+            "not stack: Rename = on_rename_clicked (relabels the CorpusEntry, "
+            "migrates the keyring entry), Relocate = on_relocate_clicked "
+            "(async folder picker, rewrites lancedb_path + corpus_config_path, "
+            "requires a corpus.toml in the chosen folder), Refresh = "
+            "on_refresh_clicked (re-populates the card).\n\n"
+            "All corpora: one row per self.gui_config.corpora entry. (active) "
+            "= c.name == active_corpus_name; (missing) = not "
+            "Path(c.corpus_config_path).is_file(). Remove routes through _act "
+            "→ select_tab.open_remove_confirm(name, missing) → "
+            "_remove_corpus(name), which filters the entry out of the "
+            "registry, deletes its keyring password (ignored if absent), "
+            "reassigns the active corpus to the first remaining (or None) when "
+            "the removed one was active, saves, re-bridges env, and calls "
+            "refresh_after_corpus_change() (which re-syncs the top-bar "
+            "dropdown). It never reads or deletes the corpus folder, so a "
+            "(missing) corpus removes cleanly. Removal is by name, independent "
+            "of which corpus is active."
+        ),
+    ),
 }
 
 
