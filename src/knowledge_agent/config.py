@@ -422,8 +422,9 @@ class Settings(BaseSettings):
     # Rate limiting + concurrency
     # ========================================================================
     # Proactive per-provider request-rate caps (None = no limiter) + LLM retry +
-    # the per-doc chunk fan-out semaphore. The openai/google caps cover BOTH
-    # their LLM and embedding endpoints.
+    # the per-doc chunk fan-out semaphore. The anthropic/openai/google/ollama
+    # caps throttle only their LLM (chat) calls; Voyage is the one embedder with
+    # a rate cap (applied around its native client in embedder_factory).
     anthropic_requests_per_second: float | None = Field(
         default=None,
         gt=0.0,
@@ -437,19 +438,21 @@ class Settings(BaseSettings):
         default=None,
         gt=0.0,
         description=(
-            "OpenAI LLM+embedding rate cap in requests/sec. None disables "
-            "the limiter. Wire to your tier's documented limit (tier 1 "
-            "≈ 3.0). Single token bucket per process — applies to BOTH "
-            "the chat models and embedding endpoint."
+            "OpenAI LLM rate cap in requests/sec. None disables the "
+            "limiter. Wire to your tier's documented limit (tier 1 about "
+            "3.0). Single token bucket per process. Throttles the chat "
+            "(LLM) calls only; the OpenAI embedding endpoint is not covered "
+            "(LangChain Embeddings takes no rate_limiter)."
         ),
     )
     google_requests_per_second: float | None = Field(
         default=None,
         gt=0.0,
         description=(
-            "Google (Gemini) LLM+embedding rate cap in requests/sec. None "
-            "disables the limiter. Single token bucket per process — "
-            "applies to BOTH chat models and embedding endpoint."
+            "Google (Gemini) LLM rate cap in requests/sec. None disables "
+            "the limiter. Single token bucket per process. Throttles the "
+            "chat (LLM) calls only; the Google embedding endpoint is not "
+            "covered (LangChain Embeddings takes no rate_limiter)."
         ),
     )
     voyage_requests_per_second: float | None = Field(
@@ -457,8 +460,9 @@ class Settings(BaseSettings):
         gt=0.0,
         description=(
             "Voyage AI embedding rate cap in requests/sec. None disables. "
-            "Voyage uses its native client (not LangChain) so the limiter "
-            "is applied at the factory wrapper level."
+            "Voyage uses its native client (not LangChain), so the limiter "
+            "is acquired by hand before each native embed call in "
+            "embedder_factory (embed_texts / embed_chunks)."
         ),
     )
     ollama_requests_per_second: float | None = Field(
@@ -477,9 +481,11 @@ class Settings(BaseSettings):
         description=(
             "Max attempts (including the first) per LLM call. Applied via "
             "LangChain `.with_retry(stop_after_attempt=N, "
-            "wait_exponential_jitter=True)` at every LLM call site. "
-            "Together with the rate limiters this covers transient 429s + "
-            "network blips without an external retry layer."
+            "wait_exponential_jitter=True)` at the agent graph's LLM call "
+            "sites (the query-time nodes and the ingest extractors); the "
+            "GUI chat router is not wrapped. Together with the rate "
+            "limiters this covers transient 429s + network blips without an "
+            "external retry layer."
         ),
     )
     pipeline_max_concurrent_chunks: int = Field(

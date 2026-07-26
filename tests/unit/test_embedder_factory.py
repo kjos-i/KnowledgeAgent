@@ -30,6 +30,7 @@ class _FakeSettings:
         openai_embedding_model: str = "text-embedding-3-small",
         google_embedding_model: str = "models/text-embedding-004",
         hf_embedding_model: str = "BAAI/bge-m3",
+        voyage_requests_per_second: float | None = None,
     ):
         self.embedding_provider = embedding_provider
         self.voyage_api_key = voyage_api_key
@@ -39,6 +40,7 @@ class _FakeSettings:
         self.openai_embedding_model = openai_embedding_model
         self.google_embedding_model = google_embedding_model
         self.hf_embedding_model = hf_embedding_model
+        self.voyage_requests_per_second = voyage_requests_per_second
 
 
 @pytest.fixture(autouse=True)
@@ -420,3 +422,84 @@ async def test_embed_chunks_accepts_dict_rows_from_lancedb():
     assert result == [[0.7]]
     inputs = fake_client.multimodal_embed.call_args.kwargs["inputs"]
     assert inputs == [["row text"]]
+
+
+# ---- Voyage rate limiting (native-client throttle) ----
+
+
+async def test_voyage_rate_limiter_none_when_no_cap():
+    """No cap set (None) means no limiter is resolved, so the native path is
+    not throttled (unchanged behaviour)."""
+    from knowledge_agent.embedder_factory import _voyage_rate_limiter
+
+    settings = _FakeSettings(embedding_provider="voyage", voyage_requests_per_second=None)
+    with patch("knowledge_agent.embedder_factory.get_settings", return_value=settings):
+        assert _voyage_rate_limiter() is None
+
+
+async def test_voyage_rate_limiter_resolves_bucket_when_capped():
+    """A positive cap resolves the cached bucket, keyed on the rps value."""
+    from knowledge_agent.embedder_factory import _voyage_rate_limiter
+
+    settings = _FakeSettings(embedding_provider="voyage", voyage_requests_per_second=3.0)
+    sentinel = object()
+    with (
+        patch("knowledge_agent.embedder_factory.get_settings", return_value=settings),
+        patch(
+            "knowledge_agent.embedder_factory._get_voyage_rate_limiter",
+            return_value=sentinel,
+        ) as get_bucket,
+    ):
+        assert _voyage_rate_limiter() is sentinel
+    get_bucket.assert_called_once_with(3.0)
+
+
+async def test_voyage_embed_texts_acquires_token_when_capped():
+    """With a cap set, embed_texts acquires a limiter token before the native
+    multimodal_embed call."""
+    settings = _FakeSettings(embedding_provider="voyage", voyage_requests_per_second=5.0)
+    fake_client = MagicMock()
+    fake_client.multimodal_embed.return_value = MagicMock(embeddings=[[0.1]])
+    fake_limiter = MagicMock()
+    fake_limiter.aacquire = AsyncMock(return_value=True)
+    with (
+        patch("knowledge_agent.embedder_factory.get_settings", return_value=settings),
+        patch("knowledge_agent.embedder_factory._build_voyage_client", return_value=fake_client),
+        patch("knowledge_agent.embedder_factory._voyage_rate_limiter", return_value=fake_limiter),
+    ):
+        result = await embed_texts(["hi"], input_type="document")
+    assert result == [[0.1]]
+    fake_limiter.aacquire.assert_awaited_once()
+    fake_client.multimodal_embed.assert_called_once()
+
+
+async def test_voyage_embed_chunks_acquires_token_when_capped():
+    """The multimodal embed_chunks path also acquires a token when capped."""
+    settings = _FakeSettings(embedding_provider="voyage", voyage_requests_per_second=5.0)
+    fake_client = MagicMock()
+    fake_client.multimodal_embed.return_value = MagicMock(embeddings=[[0.2]])
+    fake_limiter = MagicMock()
+    fake_limiter.aacquire = AsyncMock(return_value=True)
+    with (
+        patch("knowledge_agent.embedder_factory.get_settings", return_value=settings),
+        patch("knowledge_agent.embedder_factory._build_voyage_client", return_value=fake_client),
+        patch("knowledge_agent.embedder_factory._voyage_rate_limiter", return_value=fake_limiter),
+    ):
+        result = await embed_chunks([_FakeChunk(text="hello")])
+    assert result == [[0.2]]
+    fake_limiter.aacquire.assert_awaited_once()
+    fake_client.multimodal_embed.assert_called_once()
+
+
+async def test_voyage_embed_texts_no_acquire_when_uncapped():
+    """No cap means no limiter and no acquire; the native call still happens."""
+    settings = _FakeSettings(embedding_provider="voyage", voyage_requests_per_second=None)
+    fake_client = MagicMock()
+    fake_client.multimodal_embed.return_value = MagicMock(embeddings=[[0.3]])
+    with (
+        patch("knowledge_agent.embedder_factory.get_settings", return_value=settings),
+        patch("knowledge_agent.embedder_factory._build_voyage_client", return_value=fake_client),
+    ):
+        result = await embed_texts(["hi"])
+    assert result == [[0.3]]
+    fake_client.multimodal_embed.assert_called_once()

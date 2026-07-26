@@ -26,6 +26,7 @@ def _voyage_settings():
         embedding_provider="voyage",
         voyage_api_key="pa-voyage-stub",
         embedding_model="voyage-multimodal-3",
+        voyage_requests_per_second=None,  # real Settings default: no rate cap
     )
 
 

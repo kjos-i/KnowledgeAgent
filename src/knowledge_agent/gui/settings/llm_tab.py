@@ -32,7 +32,7 @@ from knowledge_agent.gui._styles import (
     labeled_field,
     section_divider,
 )
-from knowledge_agent.gui._widgets.info_icon import info_icon, section_header
+from knowledge_agent.gui._widgets.info_icon import section_header
 from knowledge_agent.gui.config_store import (
     ConfigError,
     apply_llm_to_env,
@@ -61,10 +61,11 @@ logger = logging.getLogger(__name__)
 # re-listing the provider set.
 _PROVIDER_ORDER: tuple[str, ...] = LLM_PROVIDERS
 
-# Rate limits also cover the Voyage embedder — its native (non-LangChain)
-# client honours a requests/sec cap. Voyage is embedding-only, so it belongs
-# in the rate-limit section but NOT in the LLM "Installed providers" list;
-# hence a separate tuple that appends it to the LLM providers.
+# Rate limits also cover the Voyage embedder: its native (non-LangChain)
+# client is throttled by a requests/sec cap, acquired before each embed call
+# in embedder_factory. Voyage is embedding-only, so it belongs in the
+# rate-limit section but NOT in the LLM "Installed providers" list; hence a
+# separate tuple that appends it to the LLM providers.
 _RATE_LIMIT_PROVIDERS: tuple[str, ...] = (*_PROVIDER_ORDER, "voyage")
 
 
@@ -118,11 +119,190 @@ def available_models() -> list[tuple[str, str]]:
 
 def model_options() -> list[ft.DropdownOption]:
     """`available_models()` as picker options: key = the stored 'provider:model'
-    ref, text = a readable 'provider — model' label."""
+    ref, text = a readable 'provider / model' label."""
     return [
-        ft.DropdownOption(key=format_model_ref(p, m), text=f"{p} — {m}")
+        ft.DropdownOption(key=format_model_ref(p, m), text=f"{p} / {m}")
         for p, m in available_models()
     ]
+
+
+# =============================================================================
+# 3-tier (i) help text for the three sections. Same rule as the Retrieval tab:
+# every control the section owns is explained in ALL three tiers (standard,
+# beginner, technical); only the depth changes. The chat-router help is folded
+# into the models section (it has no separate per-node icon).
+# =============================================================================
+_INSTALLED_INFO_STANDARD = (
+    "A read-only list of the LLM providers you have installed. There is no "
+    "single active provider: you pick a model per step in the section below, "
+    "and it can come from any installed provider.\n\n"
+    "Install or uninstall providers in the Installs tab, not here. This "
+    "section only reflects what is set up; if nothing is installed yet, it "
+    "points you there.\n\n"
+    "This list is read when the tab opens. If you install a provider, reopen "
+    "the tab (or restart the app) to see it appear here and in the model "
+    "pickers below.\n\n"
+    "The four LLM providers are Anthropic, OpenAI, Google and Ollama (local). "
+    "Voyage is an embedder, so it is not listed here; it appears only in the "
+    "rate-limit section below."
+)
+_INSTALLED_INFO_BEGINNER = (
+    "This box just shows which AI model providers are already set up on this "
+    "computer. You do not change anything here.\n\n"
+    "To add a provider (Anthropic, OpenAI, Google, or the local Ollama), open "
+    "the Installs tab and install it there. After installing, reopen this tab "
+    "(or restart the app) and the new provider shows up here and in the "
+    "pickers just below.\n\n"
+    "If the box says none are installed, start in the Installs tab."
+)
+_INSTALLED_INFO_TECHNICAL = (
+    "Read-only. Each provider's presence comes from its is_installed_fn in "
+    "LLM_PROVIDER_REGISTRY, which probes importlib.util.find_spec (no heavy "
+    "import) for the adapter package (langchain-anthropic, langchain-openai, "
+    "langchain-google-genai, langchain-ollama).\n\n"
+    "The list is filled once when the tab first builds in a session; it does "
+    "not live-refresh after an install, so reopen the tab or restart to "
+    "reflect a change (installing a provider requires a restart to take "
+    "effect anyway). The same install state drives the per-step model options "
+    "below (available_models lists only installed providers' models)."
+)
+
+_MODELS_INFO_STANDARD = (
+    "Pick which model runs at each step of answering a question, plus its "
+    "temperature. Each step is a separate choice, so you can use a cheap "
+    "model where speed matters and a stronger one where reasoning matters.\n\n"
+    "The steps:\n"
+    "- Chat router: the conversational layer. It reads the running "
+    "conversation, decides when to search, and distils a clean, "
+    "self-contained query (resolving 'it', 'those', earlier context) before "
+    "retrieval. It runs only in Conversational input mode. Routing is light, "
+    "so a cheap, fast model is usually enough.\n"
+    "- Mode classifier: in Auto retrieval mode, reads your question and picks "
+    "which store answers it. A small, repeated task; a cheap model suits it.\n"
+    "- Query builder: rewrites your question into a clean query for the "
+    "document (chunk) search. Also light.\n"
+    "- Cypher builder: writes the graph query from your question when the "
+    "knowledge graph is used. This needs stronger, compositional reasoning, "
+    "so a more capable model is worth it.\n"
+    "- Synthesizer: writes the final answer with citations from the retrieved "
+    "evidence. It benefits from a stronger model; it runs once per question, "
+    "so the cost stays small.\n\n"
+    "For each step:\n"
+    "- Model (dropdown): choose any model from any installed provider. You "
+    "can also type a model name to use one that is not in the list.\n"
+    "- Temperature (slider): 0.0 is focused and consistent; higher is more "
+    "varied. These steps produce structured output, so low is usually best. "
+    "The slider greys out for models that do not accept a temperature (the "
+    "newest Anthropic models), because it would have no effect.\n\n"
+    "These are the query-time models. The ingest-time extractor models "
+    "(entities and triples) are set per corpus in the Library tab."
+)
+_MODELS_INFO_BEGINNER = (
+    "Answering a question happens in a few steps, and each step can use a "
+    "different AI model. This section sets the model and its 'temperature' "
+    "for each step.\n\n"
+    "The steps, in plain terms:\n"
+    "- Chat router: understands the back-and-forth of the chat and turns what "
+    "you meant into a clear search request. Used only in the Conversational "
+    "input mode. A small, fast model is fine.\n"
+    "- Mode classifier: when the retrieval mode is Auto, decides where to "
+    "look (your documents, the knowledge graph, or both). A small model is "
+    "fine.\n"
+    "- Query builder: tidies your question into a good search query for your "
+    "documents. A small model is fine.\n"
+    "- Cypher builder: writes the special query used to search the knowledge "
+    "graph. Trickier, so a stronger model helps.\n"
+    "- Synthesizer: writes the final answer and its citations. A stronger "
+    "model gives better answers; it only runs once per question.\n\n"
+    "For each step:\n"
+    "- Model: pick from the models you have installed. Cheaper models are "
+    "faster and cost less; stronger models reason better.\n"
+    "- Temperature: how varied the model is. Low (near 0) keeps it focused "
+    "and repeatable, which is what these steps want; higher makes it more "
+    "varied. If the slider is greyed out, the chosen model does not use this "
+    "setting.\n\n"
+    "A safe starting point is the defaults: light models for the router, "
+    "classifier and query builder, and stronger ones for the cypher builder "
+    "and synthesizer."
+)
+_MODELS_INFO_TECHNICAL = (
+    "The four graph nodes read Settings.<node>_model and "
+    "Settings.<node>_temperature (env MODE_CLASSIFIER_MODEL / _TEMPERATURE, "
+    "QUERY_BUILDER_*, CYPHER_BUILDER_*, SYNTHESIZER_*), bridged by "
+    "apply_llm_to_env and consumed via get_llm_ref wrapped in with_retry. "
+    "Defaults come from PROVIDER_NODE_DEFAULTS (Haiku for the classifier and "
+    "query builder, Sonnet for the cypher builder and synthesizer).\n\n"
+    "Chat router is GUI-only: chat_router_model and chat_router_temperature "
+    "live in GuiConfig, are not bridged to env, and are read by "
+    "get_chat_router (via get_llm_ref) only when the input mode is "
+    "conversational. It is not wrapped in with_retry, so the retry setting "
+    "does not cover it.\n\n"
+    "Each selection is stored as a provider:model reference (format_model_ref), "
+    "so a step can target any installed provider. The dropdown is editable: a "
+    "typed value is stored verbatim, and a bare model name with no provider "
+    "prefix falls back to the global llm_provider for dispatch (and for the "
+    "temperature check).\n\n"
+    "Temperature is omitted for the newest Anthropic models (claude-opus-4-8, "
+    "claude-opus-4-7, claude-sonnet-5, claude-fable-5, claude-mythos-5), which "
+    "reject the sampling parameter with a 400. The slider greys via "
+    "supports_temperature and the factory omits the parameter for the same "
+    "set, so the grey-out matches actual behaviour. Extractor models (entity "
+    "and triples, ingest-time) are per corpus in corpus.toml, set in the "
+    "Library tab."
+)
+
+_RATES_INFO_STANDARD = (
+    "Two kinds of control: per-provider rate caps, and a shared retry "
+    "count.\n\n"
+    "Rate limit (requests/sec) per provider: caps how many requests per "
+    "second the app sends to that provider. Leave a field blank for no limit. "
+    "Set one when your provider tier limits you below the app's concurrent "
+    "fan-out (for example, the many parallel calls during ingest or "
+    "evaluation).\n"
+    "- Anthropic, OpenAI, Google, Ollama: throttle that provider's LLM (chat) "
+    "calls, meaning the models in the section above.\n"
+    "- OpenAI and Google also produce embeddings, but these caps throttle "
+    "only their chat calls, not their embedding calls.\n"
+    "- Voyage: throttles Voyage embedding requests. Voyage is the default "
+    "embedder, and this is a global cap applied wherever it embeds (mainly "
+    "ingest).\n\n"
+    "LLM max retries (1 to 10): how many attempts each LLM call gets when it "
+    "fails transiently (a rate-limit response or a network blip), using "
+    "exponential backoff. The default 3 is a sensible balance. This covers "
+    "the query-time graph steps and the ingest-time extractors."
+)
+_RATES_INFO_BEGINNER = (
+    "These stop the app from calling a provider too quickly, and control how "
+    "many times it retries a failed call.\n\n"
+    "Rate limit (requests/sec): some accounts only allow so many requests per "
+    "second. Leave these blank unless you actually see rate-limit errors; "
+    "then enter a small number for that provider to slow the app to a safe "
+    "pace. It matters most during ingest, when the app makes many calls at "
+    "once.\n\n"
+    "LLM max retries: if a call briefly fails (the provider is busy, or the "
+    "network hiccups), the app waits a moment and tries again, up to this "
+    "many times. Three is a good default; raise it a little if your "
+    "connection is flaky."
+)
+_RATES_INFO_TECHNICAL = (
+    "Each rate field maps to Settings.<provider>_requests_per_second (env "
+    "<PROVIDER>_REQUESTS_PER_SECOND). Blank bridges as an unset env var, so no "
+    "limiter is wired (the default). A positive value builds one "
+    "InMemoryRateLimiter token bucket per provider, shared across that "
+    "provider's cached clients (llm_factory._rate_limiter_for).\n\n"
+    "Anthropic, OpenAI, Google and Ollama caps apply to LLM (chat) calls "
+    "only. OpenAI and Google embedding calls are not throttled by these caps: "
+    "LangChain Embeddings clients take no rate-limiter argument. Voyage maps "
+    "to Settings.voyage_requests_per_second (env VOYAGE_REQUESTS_PER_SECOND) "
+    "and throttles the native Voyage client: embed_texts / embed_chunks "
+    "acquire a token from the same InMemoryRateLimiter class before each "
+    "native call.\n\n"
+    "LLM max retries maps to Settings.llm_max_retries (env LLM_MAX_RETRIES) "
+    "and drives with_retry(stop_after_attempt=N, wait_exponential_jitter=True) "
+    "at the four graph nodes and the entity and triples extractors; the GUI "
+    "chat router is not wrapped. Rate limits and retries here are saved "
+    "settings applied on the next call, not per-request overrides."
+)
 
 
 class LlmTab:
@@ -268,8 +448,9 @@ class LlmTab:
                 section_header(
                     self.app,
                     "Installed providers",
-                    "Install / uninstall providers in the Installs tab. Pick a "
-                    "model — from any installed provider — for each node below.",
+                    _INSTALLED_INFO_STANDARD,
+                    beginner=_INSTALLED_INFO_BEGINNER,
+                    technical=_INSTALLED_INFO_TECHNICAL,
                 ),
                 self.installed_providers_box,
                 section_divider(),
@@ -277,28 +458,17 @@ class LlmTab:
                 section_header(
                     self.app,
                     "Select LLM models and temperatures",
-                    "Query-time nodes only. Ingest-time extractor models live in the Library tab.",
+                    _MODELS_INFO_STANDARD,
+                    beginner=_MODELS_INFO_BEGINNER,
+                    technical=_MODELS_INFO_TECHNICAL,
                 ),
-                # Chat router leads the list — it's the first model to run on a
-                # query (the GUI-only conversational layer above retrieval). The
-                # (i) explains its role, since the node name alone doesn't.
-                self._render_node_block(
-                    "chat_router",
-                    info=(
-                        "Chat router",
-                        "The conversational layer above the retrieval graph: it "
-                        "reads the running conversation, decides when to search, "
-                        "and distils a clean, self-contained query from what "
-                        "you've said (resolving 'it' / 'those' / earlier context) "
-                        "before handing off to retrieval. It's a stand-in for a "
-                        "future supervisor agent, so it lives in the GUI, not the "
-                        "backend graph. A cheap, fast model is usually enough — "
-                        "routing is a light task.",
-                    ),
-                ),
+                # Chat router leads the list: it's the first model to run on a
+                # query (the GUI-only conversational layer above retrieval). Its
+                # role is explained in the section (i), not a per-node icon.
                 *[
                     self._render_node_block(n)
                     for n in (
+                        "chat_router",
                         "mode_classifier",
                         "query_builder",
                         "cypher_builder",
@@ -310,9 +480,9 @@ class LlmTab:
                 section_header(
                     self.app,
                     "Per-provider rate limits + retries",
-                    "Leave blank for no limit. Useful when your provider tier "
-                    "rate-limits below your concurrent fan-out. Includes the "
-                    "Voyage embedder (a global cap, applied at ingest).",
+                    _RATES_INFO_STANDARD,
+                    beginner=_RATES_INFO_BEGINNER,
+                    technical=_RATES_INFO_TECHNICAL,
                 ),
                 *[
                     labeled_field(f"{p} requests/sec", self.rate_limit_fields[p])
@@ -372,7 +542,7 @@ class LlmTab:
         installed = [p for p in _PROVIDER_ORDER if self._installed_state.get(p)]
         if not installed:
             self.installed_providers_box.content = ft.Text(
-                "No LLM providers installed yet — install one in the Installs tab.",
+                "No LLM providers installed yet. Install one in the Installs tab.",
                 size=12,
                 color=ft.Colors.AMBER_300,
                 italic=True,
@@ -396,23 +566,17 @@ class LlmTab:
 
     # ----- Provider row builder --------------------------------------------
 
-    def _render_node_block(
-        self, node_name: str, *, info: tuple[str, str] | None = None
-    ) -> ft.Control:
+    def _render_node_block(self, node_name: str) -> ft.Control:
         """One node's model dropdown + temperature slider, stacked (model on
-        its own line, temperature below it — matches the extractor layout).
+        its own line, temperature below it, matching the extractor layout).
 
-        `info` (title, text) tacks an (i) help icon onto the model row — used
-        for the chat-router node, whose role isn't obvious from its name."""
-        model_trailing = (
-            info_icon(self.app, title=info[0], text=info[1]) if info is not None else None
-        )
+        The chat-router role is explained in the section (i), so no per-node
+        help icon is attached here."""
         return ft.Column(
             controls=[
                 labeled_field(
                     f"{node_name} model",
                     self.node_model_fields[node_name],
-                    trailing=model_trailing,
                 ),
                 labeled_field(
                     f"{node_name} temperature",

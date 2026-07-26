@@ -154,3 +154,45 @@ def test_temp_slider_greys_out_for_sampling_free_model():
     tab.app.gui_config.synthesizer_model = "openai:gpt-4o"
     tab._sync_temp_enabled("synthesizer")
     assert tab.node_temp_sliders["synthesizer"].disabled is False  # openai takes temperature
+
+
+# ---- 3-tier section info text + chat-router fold ----
+
+
+def test_all_llm_sections_have_info_text():
+    """Every LLM-tab section's icon text is present across all three tiers
+    (regression against a tier silently going blank, or a constant being
+    renamed away from the section_header that uses it)."""
+    from knowledge_agent.gui.settings import llm_tab as lt
+
+    for prefix in ("_INSTALLED", "_MODELS", "_RATES"):
+        for tier in ("STANDARD", "BEGINNER", "TECHNICAL"):
+            value = getattr(lt, f"{prefix}_INFO_{tier}")
+            assert value and value.strip(), f"{prefix}_INFO_{tier} is empty"
+
+
+def test_render_node_block_has_no_info_param():
+    """The chat-router help was folded into the models section (i), so the
+    per-node `info` icon parameter is removed (dead code gone)."""
+    import inspect
+
+    params = inspect.signature(LlmTab._render_node_block).parameters
+    assert "info" not in params  # no per-node icon hook any more
+
+
+def test_model_options_label_uses_plain_separator():
+    """The picker label uses a plain ASCII separator, not an em-dash, per the
+    house no-em-dash rule for user-facing text."""
+    from knowledge_agent.gui.settings import llm_tab
+
+    fake_registry = {
+        "anthropic": {"is_installed_fn": lambda: True},
+        "openai": {"is_installed_fn": lambda: False},
+        "google": {"is_installed_fn": lambda: False},
+        "ollama": {"is_installed_fn": lambda: False},
+    }
+    with patch.object(llm_tab, "LLM_PROVIDER_REGISTRY", fake_registry):
+        labels = [o.text for o in model_options()]
+    assert labels  # non-empty
+    assert all("—" not in t for t in labels)  # no em-dash
+    assert any(" / " in t for t in labels)  # plain separator

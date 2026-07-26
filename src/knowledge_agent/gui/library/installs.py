@@ -99,7 +99,7 @@ from knowledge_agent.gui._styles import (
     labeled_field,
     section_divider,
 )
-from knowledge_agent.gui._widgets.info_icon import section_header
+from knowledge_agent.gui._widgets.info_icon import info_icon, section_header
 from knowledge_agent.gui.config_store import (
     ConfigError,
     apply_llm_to_env,
@@ -675,6 +675,19 @@ class InstallsTab:
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                 spacing=10,
                 controls=controls,
+            ),
+            # Placeholder restart note (to elaborate later): most install /
+            # uninstall actions here need an app restart to take effect.
+            trailing=info_icon(
+                self.app,
+                title="Installs",
+                text=(
+                    "Installing or uninstalling a package here changes what "
+                    "Python has loaded, so most actions need an app restart to "
+                    "take effect (each row's status message says when). "
+                    "Downloads and location changes that do not add or remove a "
+                    "package take effect right away."
+                ),
             ),
         )
 

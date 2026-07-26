@@ -51,14 +51,17 @@ ASYNC + RATE LIMITING (added 2026-06-29 in the async refactor):
   `asyncio.to_thread` so the event loop stays responsive while the
   Voyage HTTP request is in-flight.
 
-- Unlike the LLM side, LangChain `Embeddings` clients do NOT accept
-  a `rate_limiter` kwarg, so there's no built-in proactive throttling
-  for embedders. Embedding is issued as one batched call per document
-  (`embed_chunks`), so no per-chunk semaphore bounds it;
-  `settings.pipeline_max_concurrent_chunks` caps the per-doc L6/L8
-  fan-out, not embedding. If a provider's rate limit is a problem,
-  set that provider's `*_requests_per_second` cap (applied at the
-  factory wrapper for Voyage). The orchestrator's
+- LangChain `Embeddings` clients (OpenAI/Google/HF) do NOT accept a
+  `rate_limiter` kwarg, so those embedders have no proactive throttling
+  and the OpenAI/Google `*_requests_per_second` caps cover only their
+  LLM calls, not their embedding endpoints. Voyage is the exception: it
+  runs through its native client, so `embed_texts` / `embed_chunks`
+  acquire an `InMemoryRateLimiter` token (the same limiter class the LLM
+  side uses) before each native call when
+  `settings.voyage_requests_per_second` is set. Embedding is issued as
+  one batched call per document (`embed_chunks`), so no per-chunk
+  semaphore bounds it; `settings.pipeline_max_concurrent_chunks` caps the
+  per-doc L6/L8 fan-out, not embedding. The orchestrator's
   `.with_retry`-equivalent for embedders is handled differently
   (LangChain Embeddings exposes `.with_retry()` via `Runnable`);
   wiring is deferred to the orchestrators alongside `.with_retry`
@@ -77,6 +80,7 @@ from knowledge_agent.llm_factory import ConfigError
 
 if TYPE_CHECKING:
     from langchain_core.embeddings import Embeddings
+    from langchain_core.rate_limiters import InMemoryRateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +182,47 @@ def _build_langchain_embedder(provider: str, model: str) -> Embeddings:
             )
         return HuggingFaceEmbeddings(model_name=model, model_kwargs=model_kwargs)
     raise ConfigError(f"unknown embedding provider: {provider!r}")
+
+
+# ========================================================================
+# Rate limiting (Voyage native client)
+# ========================================================================
+# The LLM providers get proactive throttling for free: `init_chat_model`
+# accepts a `rate_limiter=` kwarg (see `llm_factory`). LangChain Embeddings
+# clients do NOT accept that kwarg, and Voyage runs through its own native
+# client (not LangChain), so none of the embedders are throttled by
+# construction. Voyage is the one we wire a limiter for — it is the default
+# embedder and ingest fans out one batched embed request per document, which
+# a low provider tier can rate-limit. We reuse the SAME InMemoryRateLimiter
+# the LLM side uses, acquired by hand before the native call (there is no
+# kwarg to pass it to).
+@lru_cache(maxsize=4)
+def _get_voyage_rate_limiter(requests_per_second: float) -> InMemoryRateLimiter:
+    """Build and cache the Voyage token-bucket limiter.
+
+    Value-keyed on the rps so every embed call shares ONE bucket per
+    configured rate — the same coordination guarantee as the per-provider
+    bucket on the LLM side (`llm_factory._get_rate_limiter`). A changed rps
+    builds a new bucket; `get_settings()` is cache-cleared on a settings
+    change, so `_voyage_rate_limiter()` below re-reads the new value.
+    """
+    # Lazy import — keeps the module loadable without the langchain extras.
+    from langchain_core.rate_limiters import InMemoryRateLimiter
+
+    return InMemoryRateLimiter(requests_per_second=requests_per_second)
+
+
+def _voyage_rate_limiter() -> InMemoryRateLimiter | None:
+    """Resolve the Voyage rate limiter, or None when no cap is set.
+
+    Reads `settings.voyage_requests_per_second`; None (the default) means no
+    limiter. A positive float (the pydantic `gt=0.0` guard rejects the rest)
+    returns the cached bucket above.
+    """
+    rps = get_settings().voyage_requests_per_second
+    if rps is None:
+        return None
+    return _get_voyage_rate_limiter(rps)
 
 
 # ========================================================================
@@ -299,6 +344,11 @@ async def embed_chunks(
 
     if provider == "voyage":
         items = [(_text_of(c), _image_ref_of(c)) for c in chunks]
+        limiter = _voyage_rate_limiter()
+        if limiter is not None:
+            # Acquire on the event loop BEFORE handing the sync call to a
+            # worker thread — the limiter's async acquire must run here.
+            await limiter.aacquire()
         return await asyncio.to_thread(
             _voyage_multimodal_call,
             items,
@@ -355,6 +405,10 @@ async def embed_texts(texts: list[str], input_type: str = "document") -> list[li
     _validate_embedder_config(provider)
 
     if provider == "voyage":
+        limiter = _voyage_rate_limiter()
+        if limiter is not None:
+            # Acquire on the event loop BEFORE the worker-thread handoff.
+            await limiter.aacquire()
         return await asyncio.to_thread(_voyage_call, texts, input_type)
 
     model = settings.embedding_model
@@ -382,3 +436,4 @@ def clear_cache() -> None:
     """
     _build_voyage_client.cache_clear()
     _build_langchain_embedder.cache_clear()
+    _get_voyage_rate_limiter.cache_clear()

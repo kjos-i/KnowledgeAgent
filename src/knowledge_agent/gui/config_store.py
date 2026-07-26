@@ -316,12 +316,18 @@ class GuiConfig(BaseModel):
     openai_requests_per_second: float | None = Field(
         default=None,
         gt=0.0,
-        description="OpenAI LLM+embedding rate cap (req/sec).",
+        description=(
+            "OpenAI LLM (chat) rate cap (req/sec). Throttles chat calls "
+            "only, not the OpenAI embedding endpoint."
+        ),
     )
     google_requests_per_second: float | None = Field(
         default=None,
         gt=0.0,
-        description="Google (Gemini) LLM+embedding rate cap (req/sec).",
+        description=(
+            "Google (Gemini) LLM (chat) rate cap (req/sec). Throttles chat "
+            "calls only, not the Google embedding endpoint."
+        ),
     )
     ollama_requests_per_second: float | None = Field(
         default=None,
@@ -383,8 +389,8 @@ class GuiConfig(BaseModel):
         gt=0.0,
         description=(
             "Voyage embedding rate cap (req/sec). None disables the "
-            "limiter. Voyage uses its native client; the limiter wraps "
-            "at the factory level."
+            "limiter. Voyage uses its native client; the limiter is "
+            "acquired before each native embed call in embedder_factory."
         ),
     )
 
