@@ -81,6 +81,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ========================================================================
+# Provider config validation (lazy key check)
+# ========================================================================
 def _validate_embedder_config(provider: str) -> None:
     """Check the active embedder has the credentials it needs.
 
@@ -114,6 +117,9 @@ def _validate_embedder_config(provider: str) -> None:
         raise ConfigError(f"unknown embedding_provider: {provider!r}")
 
 
+# ========================================================================
+# Client construction (Voyage native + LangChain builders)
+# ========================================================================
 @lru_cache(maxsize=1)
 def _build_voyage_client():
     """Lazy Voyage client. Kept on its native API for multimodal support."""
@@ -174,6 +180,9 @@ def _build_langchain_embedder(provider: str, model: str) -> Embeddings:
     raise ConfigError(f"unknown embedding provider: {provider!r}")
 
 
+# ========================================================================
+# Voyage native calls (text + multimodal)
+# ========================================================================
 def _voyage_call(texts: list[str], input_type: str) -> list[list[float]]:
     """Native-client Voyage call, factored out so it can run in a thread.
 
@@ -242,6 +251,9 @@ def _voyage_multimodal_call(
     return result.embeddings
 
 
+# ========================================================================
+# Public entry points (embed_chunks / embed_texts)
+# ========================================================================
 async def embed_chunks(
     chunks: list[Any],
     input_type: str = "document",
@@ -357,6 +369,9 @@ async def embed_texts(texts: list[str], input_type: str = "document") -> list[li
     return await embedder.aembed_documents(texts)
 
 
+# ========================================================================
+# Cache management
+# ========================================================================
 def clear_cache() -> None:
     """Drop the cached embedder clients.
 

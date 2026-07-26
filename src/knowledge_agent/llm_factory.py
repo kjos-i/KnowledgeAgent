@@ -72,6 +72,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ========================================================================
+# Temperature capability (Anthropic sampling quirk)
+# ========================================================================
 # Anthropic model IDs that REMOVED the sampling parameters (temperature /
 # top_p / top_k). Sending `temperature` to any of these returns a hard
 # HTTP 400 ("`temperature` is deprecated for this model"), so the factory
@@ -111,6 +114,9 @@ def supports_temperature(provider: str, model: str) -> bool:
     return _supports_temperature(provider, model)
 
 
+# ========================================================================
+# Provider config validation (lazy key check)
+# ========================================================================
 class ConfigError(RuntimeError):
     """Raised when the active provider is mis-configured.
 
@@ -161,6 +167,9 @@ def _validate_provider_config(provider: str) -> None:
         raise ConfigError(f"unknown llm_provider: {provider!r}")
 
 
+# ========================================================================
+# Rate limiting (per-provider token buckets)
+# ========================================================================
 @lru_cache(maxsize=8)
 def _get_rate_limiter(provider: str, requests_per_second: float) -> InMemoryRateLimiter:
     """Build and cache a per-provider token-bucket rate limiter.
@@ -205,6 +214,9 @@ def _rate_limiter_for(provider: str) -> InMemoryRateLimiter | None:
     return _get_rate_limiter(provider, rps)
 
 
+# ========================================================================
+# Client construction (the cached builder)
+# ========================================================================
 @lru_cache(maxsize=16)
 def _build_llm(provider: str, model: str, temperature: float) -> BaseChatModel:
     """Construct and cache the LangChain chat-model client.
@@ -254,6 +266,9 @@ def _build_llm(provider: str, model: str, temperature: float) -> BaseChatModel:
     return init_chat_model(**kwargs)
 
 
+# ========================================================================
+# Model-reference strings ("provider:model")
+# ========================================================================
 _KNOWN_PROVIDERS: frozenset[str] = frozenset(LLM_PROVIDERS)
 
 
@@ -297,6 +312,9 @@ def to_model_ref(ref: str, fallback_provider: str) -> str:
     return format_model_ref(provider or fallback_provider, model)
 
 
+# ========================================================================
+# Public entry points
+# ========================================================================
 def get_llm(model: str, temperature: float, *, provider: str | None = None) -> BaseChatModel:
     """Return the LLM client for the given (or active) provider.
 
@@ -333,6 +351,9 @@ def get_llm_ref(ref: str, temperature: float) -> BaseChatModel:
     return get_llm(model, temperature, provider=provider)
 
 
+# ========================================================================
+# Retry wrapper + cache management
+# ========================================================================
 def with_retry(runnable: Runnable) -> Runnable:
     """Wrap any LangChain `Runnable` with the standard retry policy.
 
