@@ -144,14 +144,18 @@ def section_header(
     title: str,
     text: str | None = None,
     *,
+    beginner: str | None = None,
     technical: str | None = None,
 ) -> ft.Control:
     """A bold `section_title` beside its (i) help icon(s) — the app-wide
     prose → (i) pattern for section headings. `text` is the standard note,
-    `technical` the power-user tier. With neither, it's just the title."""
+    `beginner` the plain-language tier, `technical` the power-user tier. With
+    none of them, it's just the title."""
     controls: list[ft.Control] = [section_title(title)]
-    if text is not None or technical is not None:
-        controls.append(info_icon(app, title=title, text=text, technical=technical))
+    if text is not None or beginner is not None or technical is not None:
+        controls.append(
+            info_icon(app, title=title, text=text, beginner=beginner, technical=technical)
+        )
     return ft.Row(controls, spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
 

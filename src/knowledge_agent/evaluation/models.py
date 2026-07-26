@@ -31,6 +31,7 @@ from knowledge_agent.evaluation.config import (
     DEFAULT_METADATA_MATCH_THRESHOLD,
     DEFAULT_REQUIRED_KEYWORD_THRESHOLD,
 )
+from knowledge_agent.retrieval_rules import active_knobs
 
 RetrievalMode = Literal[
     "auto",
@@ -217,36 +218,20 @@ class EvalCase(BaseModel):
     )
 
 
-# Modes that exercise each retrieval leg. `auto` is classified at run time,
-# so treat it as exercising BOTH legs (require the union of their knobs) —
-# whichever way it routes, the value is already pinned.
-LANCE_MODES: frozenset[str] = frozenset(
-    {"auto", "lancedb_only", "lancedb_then_neo4j", "neo4j_then_lancedb", "parallel_fused"}
-)
-NEO4J_MODES: frozenset[str] = frozenset(
-    {"auto", "neo4j_only", "lancedb_then_neo4j", "neo4j_then_lancedb", "parallel_fused"}
-)
-
-
 def required_knobs(retrieval: RetrievalSettings) -> set[str]:
     """The nullable tuning knobs this case's config actually reads at search
-    time — the ones that must be pinned for the case to be reproducible.
+    time, i.e. the ones that must be pinned for the case to be reproducible.
 
-    Conditional on the case's own settings: a knob is only required when the
-    leg (and sub-mode) that consumes it runs. A blank required knob would
-    fall back to the shifting global setting, so `validate_case` flags it.
+    Delegates to the shared `retrieval_rules.active_knobs`, so this backend
+    check and the GUI's gray-out (`retrieval_form.apply_gray_out`) can never
+    disagree about which knob a mode uses. A blank required knob would fall
+    back to the shifting global setting, so `validate_case` flags it.
     """
-    req: set[str] = set()
-    if retrieval.retrieval_mode in LANCE_MODES:
-        req.add("num_candidates")
-        if retrieval.lancedb_search_mode == "hybrid":
-            req.add("rrf_rank_constant")
-        # MMR needs vectors, so it never runs under FTS even if use_mmr is set.
-        if retrieval.use_mmr and retrieval.lancedb_search_mode != "fts":
-            req.add("mmr_lambda")
-    if retrieval.retrieval_mode in NEO4J_MODES:
-        req.add("kg_max_rows")
-    return req
+    return active_knobs(
+        retrieval.retrieval_mode,
+        retrieval.lancedb_search_mode,
+        retrieval.use_mmr,
+    )
 
 
 def validate_case(case: EvalCase) -> list[str]:

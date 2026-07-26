@@ -73,3 +73,20 @@ def test_app_registry_flips_one_tier_live():
 
     app.set_info_icons_visible("standard", True)
     assert std1.visible is True and std2.visible is True
+
+
+def test_section_header_forwards_beginner_tier(fake_app):
+    """section_header passes a beginner note through to its info icon, so a
+    section header can show the green tier, not just standard + technical."""
+    from knowledge_agent.gui._widgets.info_icon import section_header
+
+    fake_app.gui_config.show_info_icons = True
+    fake_app.gui_config.show_beginner_info = True
+    fake_app.gui_config.show_technical_info = True
+    tiers: list[str] = []
+    fake_app.register_info_icon = lambda btn, tier="standard": tiers.append(tier)
+    row = section_header(fake_app, "Mode", "std", beginner="beg", technical="tech")
+    assert isinstance(row, ft.Row)
+    # [section_title, info_icon_row]; the icon row carries all three tiers.
+    assert len(row.controls) == 2
+    assert tiers == ["standard", "beginner", "technical"]

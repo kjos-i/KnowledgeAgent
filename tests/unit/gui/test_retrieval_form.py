@@ -57,10 +57,10 @@ def test_lancedb_only_hybrid_enables_lance_disables_kg():
     assert c.kg_max_rows_field.disabled is True  # no Neo4j leg
 
 
-def test_fts_disables_rrf_and_forces_mmr_off():
+def test_fts_disables_pool_rrf_and_forces_mmr_off():
     c = _controls()
     apply_gray_out(c, retrieval_mode="lancedb_only", lancedb_search_mode="fts", use_mmr=True)
-    assert c.num_candidates_field.disabled is False  # pool still used
+    assert c.num_candidates_field.disabled is True  # fts fetches no candidate pool
     assert c.rrf_constant_field.disabled is True  # rrf only fuses in hybrid
     assert c.use_mmr_checkbox.disabled is True
     assert c.use_mmr_checkbox.value is False  # can't honour MMR on FTS
@@ -77,7 +77,7 @@ def test_mmr_off_disables_only_the_lambda():
 def test_mmr_help_text_states():
     assert "LanceDB leg" in mmr_help_text(lance_on=False, is_fts=False, use_mmr=True)
     assert "FTS" in mmr_help_text(lance_on=True, is_fts=True, use_mmr=True)
-    assert "MMR off" in mmr_help_text(lance_on=True, is_fts=False, use_mmr=False)
+    assert "MMR is off" in mmr_help_text(lance_on=True, is_fts=False, use_mmr=False)
     assert "relevance" in mmr_help_text(lance_on=True, is_fts=False, use_mmr=True)
 
 

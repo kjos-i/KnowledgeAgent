@@ -30,8 +30,10 @@ Search modes (mirroring ResearchArticlesAgent's `retrieval.py`):
   - hybrid  - BM25 + vector kNN fused via LanceDB's native RRF
   - fts     - BM25 only
   - vector  - kNN cosine only
-Cross-store RRF (for the future `parallel_fused` agent mode) lives in the
-agent code, not here.
+The RRF here fuses BM25 + vector WITHIN a single LanceDB query. There is no
+cross-store fusion: the `parallel_fused` agent mode runs both stores and the
+synthesizer LLM merges the two evidence lists (no fuser node, no cross-store
+RRF).
 """
 
 import asyncio

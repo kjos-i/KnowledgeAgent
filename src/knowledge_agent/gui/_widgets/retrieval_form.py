@@ -1,17 +1,17 @@
-"""Shared retrieval-form logic for BOTH Settings → Retrieval (global config)
-and the Eval dataset form (per-case), so the two can never drift on which knob
-a given mode actually uses.
+"""Shared retrieval-form logic for BOTH the Settings Retrieval tab (global
+config) and the Eval dataset form (per-case), so the two GUI forms can never
+drift on which knob a given mode uses.
 
-GUI-only module — no backend import. The eval harness enforces the same
-mode → leg rule independently (`evaluation.models.required_knobs`); the two
-copies are kept in sync by a per-layer test, not a cross-layer import, per the
-backend/GUI separation rule.
+The mode-to-leg rule itself (which knobs each mode reads) is NOT defined here.
+It lives once in `knowledge_agent.retrieval_rules`, imported by both this GUI
+gray-out and the eval harness's `evaluation.models.required_knobs`, so the two
+can never disagree. This module imports only that shared leaf plus flet.
 
-`apply_gray_out` is the single source for the rule. A control the current mode
-can't use is BOTH disabled (non-interactive) AND faded — Flet doesn't recolor a
-disabled Radio, so a block-level opacity fade is what actually makes it read as
-grayed. A faded/disabled knob is never fed to the search either, because the
-leg that would read it simply doesn't run for that mode.
+`apply_gray_out` turns that rule into disabled/faded controls. A control the
+current mode can't use is BOTH disabled (non-interactive) AND faded, because
+Flet doesn't recolor a disabled Radio, so a block-level opacity fade is what
+makes it read as grayed. A faded/disabled knob is never fed to the search
+either: the leg that would read it simply doesn't run for that mode.
 """
 
 from __future__ import annotations
@@ -21,17 +21,10 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
+from knowledge_agent.retrieval_rules import LANCE_MODES, active_knobs, mmr_applicable
+
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-# Which retrieval legs each agent-level mode runs. `auto` is classified at run
-# time, so it's treated as running BOTH legs (nothing grayed) to stay safe.
-LANCE_MODES: frozenset[str] = frozenset(
-    {"auto", "lancedb_only", "lancedb_then_neo4j", "neo4j_then_lancedb", "parallel_fused"}
-)
-NEO4J_MODES: frozenset[str] = frozenset(
-    {"auto", "neo4j_only", "lancedb_then_neo4j", "neo4j_then_lancedb", "parallel_fused"}
-)
 
 FADED_OPACITY = 0.4  # opacity of a block the current mode can't use
 
@@ -74,12 +67,12 @@ def mmr_help_text(*, lance_on: bool, is_fts: bool, use_mmr: bool) -> str:
     """The one-line MMR help string for the current state (caller assigns it
     wherever it shows one)."""
     if not lance_on:
-        return "Disabled — this mode doesn't run the LanceDB leg."
+        return "Disabled. This mode doesn't run the LanceDB leg."
     if is_fts:
-        return "Disabled — FTS has no vectors to diversify."
+        return "Disabled. FTS has no vectors to diversify."
     if not use_mmr:
-        return "MMR off — enable to diversify the result pool."
-    return "λ = 1.0 → pure relevance; λ = 0.0 → pure diversity."
+        return "MMR is off. Enable it to diversify the result pool."
+    return "lambda 1.0 is pure relevance; lambda 0.0 is pure diversity."
 
 
 def apply_gray_out(
@@ -91,20 +84,20 @@ def apply_gray_out(
 ) -> None:
     """Disable + fade every control the mode/toggles can't use.
 
-    - LanceDB leg (lancedb_search_mode, num_candidates, rrf, MMR) runs for every
-      mode EXCEPT neo4j_only.
-    - rrf fuses only in hybrid; MMR applies only in hybrid/vector (FTS has no
-      vectors); mmr_lambda only when MMR is on.
-    - Neo4j leg (kg_max_rows) runs for every mode EXCEPT lancedb_only.
+    Which tuning knobs a mode uses comes from the shared
+    `retrieval_rules.active_knobs` (the ONE source this gray-out and the eval
+    harness's `required_knobs` both read), so the two can never drift. The radio
+    block and the MMR checkbox aren't tuning knobs, so they use the leg
+    predicates (`LANCE_MODES` membership, `mmr_applicable`) from the same leaf.
 
-    top_k / skip_query_builder / direct_retrieval are always active (every mode
-    reads them), so they aren't handled here.
+    A disabled control is never fed to the search either: the leg that would
+    read it simply doesn't run for that mode. top_k / skip_query_builder /
+    direct_retrieval are always active (every mode reads them), so they aren't
+    handled here.
     """
     lance_on = retrieval_mode in LANCE_MODES
-    neo4j_on = retrieval_mode in NEO4J_MODES
-    is_fts = lancedb_search_mode == "fts"
-    is_hybrid = lancedb_search_mode == "hybrid"
-    mmr_available = lance_on and not is_fts
+    knobs = active_knobs(retrieval_mode, lancedb_search_mode, use_mmr)
+    mmr_ok = mmr_applicable(retrieval_mode, lancedb_search_mode)
 
     # ---- LanceDB search-mode radios ----
     # Flet doesn't cascade a RadioGroup's disabled to its radios, and doesn't
@@ -116,23 +109,23 @@ def apply_gray_out(
     if c.lancedb_mode_box is not None:
         c.lancedb_mode_box.opacity = 1.0 if lance_on else FADED_OPACITY
 
-    # ---- LanceDB numeric knobs ----
+    # ---- LanceDB numeric knobs (from the shared active-knobs rule) ----
     if c.num_candidates_field is not None:
-        c.num_candidates_field.disabled = not lance_on
+        c.num_candidates_field.disabled = "num_candidates" not in knobs
     if c.rrf_constant_field is not None:
-        c.rrf_constant_field.disabled = not (lance_on and is_hybrid)
+        c.rrf_constant_field.disabled = "rrf_rank_constant" not in knobs
 
     # ---- MMR (built-in disabled grays these fine) ----
     if c.use_mmr_checkbox is not None:
-        c.use_mmr_checkbox.disabled = not mmr_available
+        c.use_mmr_checkbox.disabled = not mmr_ok
         # Never show a checked box the mode can't honour.
-        c.use_mmr_checkbox.value = use_mmr and mmr_available
+        c.use_mmr_checkbox.value = use_mmr and mmr_ok
     if c.mmr_lambda_control is not None:
-        c.mmr_lambda_control.disabled = not (mmr_available and use_mmr)
+        c.mmr_lambda_control.disabled = "mmr_lambda" not in knobs
 
     # ---- Neo4j leg ----
     if c.kg_max_rows_field is not None:
-        c.kg_max_rows_field.disabled = not neo4j_on
+        c.kg_max_rows_field.disabled = "kg_max_rows" not in knobs
 
 
 # ---------------------------------------------------------------------------

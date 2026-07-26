@@ -131,8 +131,8 @@ class AgentState(TypedDict, total=False):
     enforced at execution time, not on this field."""
 
     retrieved_chunks: list[RetrievedChunk]
-    """Hits from the LanceDB retriever, typed. Set by lancedb_retriever
-    (and later by the fuser in cross-store modes); read by the synthesizer."""
+    """Hits from the LanceDB retriever, typed. Set by lancedb_retriever;
+    read by the synthesizer."""
 
     kg_hits: list[KGHit]
     """Hits from the Neo4j retriever, typed. Set by neo4j_retriever; read by

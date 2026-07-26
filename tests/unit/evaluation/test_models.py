@@ -363,8 +363,11 @@ def test_required_knobs_lancedb_hybrid_default():
     assert required_knobs(RetrievalSettings()) == {"num_candidates", "rrf_rank_constant"}
 
 
-def test_required_knobs_fts_and_vector_drop_rrf():
-    assert required_knobs(RetrievalSettings(lancedb_search_mode="fts")) == {"num_candidates"}
+def test_required_knobs_fts_drops_pool_and_rrf():
+    # fts fetches no candidate pool (it limits to top_k) and isn't hybrid, so it
+    # requires neither num_candidates nor rrf_rank_constant.
+    assert required_knobs(RetrievalSettings(lancedb_search_mode="fts")) == set()
+    # vector still fetches the pool (just no RRF fusion).
     assert required_knobs(RetrievalSettings(lancedb_search_mode="vector")) == {"num_candidates"}
 
 
@@ -377,11 +380,9 @@ def test_required_knobs_mmr_adds_lambda():
 
 
 def test_required_knobs_fts_never_requires_mmr_lambda():
-    # MMR needs vectors → never runs under FTS, so mmr_lambda isn't required
-    # even with use_mmr set. (rrf also drops — FTS isn't hybrid.)
-    assert required_knobs(RetrievalSettings(lancedb_search_mode="fts", use_mmr=True)) == {
-        "num_candidates"
-    }
+    # MMR needs vectors, so it never runs under FTS even with use_mmr set. FTS
+    # also fetches no candidate pool and isn't hybrid, so nothing is required.
+    assert required_knobs(RetrievalSettings(lancedb_search_mode="fts", use_mmr=True)) == set()
 
 
 def test_required_knobs_neo4j_only_is_kg_max_rows_only():
