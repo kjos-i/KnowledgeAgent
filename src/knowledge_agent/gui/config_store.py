@@ -38,7 +38,13 @@ import keyring.errors
 from platformdirs import user_config_dir
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from knowledge_agent.config import APP_NAME, PROVIDER_NODE_DEFAULTS
+from knowledge_agent.config import (
+    APP_NAME,
+    EMBEDDING_MODEL_DEFAULTS,
+    PROVIDER_NODE_DEFAULTS,
+    EmbeddingProvider,
+    LlmProvider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -243,7 +249,7 @@ class GuiConfig(BaseModel):
     # temperature pairs also bridge; rate limits bridge with the
     # "unset env var = None" convention (pydantic-settings default
     # path applies). Per-call overrides via invoke_state still win.
-    llm_provider: Literal["anthropic", "openai", "google", "ollama"] = Field(
+    llm_provider: LlmProvider = Field(
         default="anthropic",
         description=(
             "Active LLM provider. Switching saves the choice + bridges "
@@ -338,7 +344,7 @@ class GuiConfig(BaseModel):
     # per-provider field (kept in sync by `on_active_provider_changed`
     # in the Embedding tab). Per-provider fields persist each provider's
     # model choice so a A→B→A switch restores A's previous choice.
-    embedding_provider: Literal["voyage", "openai", "google", "huggingface"] = Field(
+    embedding_provider: EmbeddingProvider = Field(
         default="voyage",
         description=(
             "Active embedding provider. Switching saves the choice + "
@@ -347,7 +353,7 @@ class GuiConfig(BaseModel):
         ),
     )
     embedding_model: str = Field(
-        default="voyage-multimodal-3",
+        default=EMBEDDING_MODEL_DEFAULTS["voyage"],
         description=(
             "Active embedding model name. Mirrors the active "
             "provider's per-provider field; the bridge writes this to "
@@ -355,21 +361,21 @@ class GuiConfig(BaseModel):
         ),
     )
     voyage_embedding_model: str = Field(
-        default="voyage-multimodal-3",
+        default=EMBEDDING_MODEL_DEFAULTS["voyage"],
         description=(
             "Voyage model — persisted per-provider so a switch away and back restores this choice."
         ),
     )
     openai_embedding_model: str = Field(
-        default="text-embedding-3-small",
+        default=EMBEDDING_MODEL_DEFAULTS["openai"],
         description="OpenAI embedding model.",
     )
     google_embedding_model: str = Field(
-        default="models/text-embedding-004",
+        default=EMBEDDING_MODEL_DEFAULTS["google"],
         description="Google embedding model.",
     )
     hf_embedding_model: str = Field(
-        default="BAAI/bge-m3",
+        default=EMBEDDING_MODEL_DEFAULTS["huggingface"],
         description="HuggingFace embedding model (downloaded on first use).",
     )
     voyage_requests_per_second: float | None = Field(

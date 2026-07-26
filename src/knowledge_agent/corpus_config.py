@@ -38,7 +38,12 @@ from typing import Any, Literal
 import tomlkit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from knowledge_agent.config import PROVIDER_NODE_DEFAULTS
+from knowledge_agent.config import (
+    EMBEDDING_DIM_DEFAULTS,
+    EMBEDDING_MODEL_DEFAULTS,
+    PROVIDER_NODE_DEFAULTS,
+    EmbeddingProvider,
+)
 from knowledge_agent.kg.schema import ALL_SUB_LABELS
 
 
@@ -778,7 +783,7 @@ class CorpusConfig(BaseModel):
             "`layers.triples=true`. Per-corpus."
         ),
     )
-    embedding_provider: Literal["voyage", "openai", "google", "huggingface"] = Field(
+    embedding_provider: EmbeddingProvider = Field(
         default="voyage",
         description=(
             "Embedding provider for THIS corpus. The embedder is physically "
@@ -793,7 +798,7 @@ class CorpusConfig(BaseModel):
         ),
     )
     embedding_model: str = Field(
-        default="voyage-multimodal-3",
+        default=EMBEDDING_MODEL_DEFAULTS["voyage"],
         description=(
             "Embedding model for THIS corpus's provider. Must stay consistent "
             "with the chunks already in LanceDB — the vector dimension is "
@@ -801,7 +806,7 @@ class CorpusConfig(BaseModel):
         ),
     )
     embedding_dims: int = Field(
-        default=1024,
+        default=EMBEDDING_DIM_DEFAULTS["voyage"],
         ge=1,
         description=(
             "Vector dimension produced by this corpus's embedding model "

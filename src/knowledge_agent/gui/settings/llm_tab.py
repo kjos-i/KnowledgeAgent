@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
-from knowledge_agent.config import reset_after_key_change
+from knowledge_agent.config import LLM_PROVIDERS, reset_after_key_change
 from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     PANEL_BG,
@@ -55,10 +55,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Order in which provider rows render. Anthropic + OpenAI first
-# because they're the most common starting choices; Google + Ollama
-# after.
-_PROVIDER_ORDER: tuple[str, ...] = ("anthropic", "openai", "google", "ollama")
+# Order in which provider rows render — aliases the single-source
+# `LLM_PROVIDERS` (its declaration order IS the display order). Kept as a
+# named local so a GUI-specific order could diverge here later without
+# re-listing the provider set.
+_PROVIDER_ORDER: tuple[str, ...] = LLM_PROVIDERS
 
 # Rate limits also cover the Voyage embedder — its native (non-LangChain)
 # client honours a requests/sec cap. Voyage is embedding-only, so it belongs

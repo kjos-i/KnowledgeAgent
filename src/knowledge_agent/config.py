@@ -32,21 +32,19 @@ logger = logging.getLogger(__name__)
 _KEY_CHANGE_HOOKS: list[Callable[[], None]] = []
 
 
-def register_key_change_hook(fn: Callable[[], None]) -> None:
-    """Register a zero-arg callback run at the end of reset_after_key_change().
-
-    Idempotent — registering the same callable twice is a no-op.
-    """
-    if fn not in _KEY_CHANGE_HOOKS:
-        _KEY_CHANGE_HOOKS.append(fn)
-
-
 # The valid LLM providers — the SINGLE SOURCE for this set. The `llm_provider`
 # field below, the factory's `provider:model` parser, and any provider
 # iteration all derive from `LLM_PROVIDERS` (kept in sync with the Literal via
 # `get_args`, so the two can never drift).
 LlmProvider = Literal["anthropic", "openai", "google", "ollama"]
 LLM_PROVIDERS: tuple[LlmProvider, ...] = get_args(LlmProvider)
+
+# The valid embedding providers — the SINGLE SOURCE for this set, mirroring
+# `LlmProvider` / `LLM_PROVIDERS` above. Every embedding-provider Literal
+# (Settings / CorpusConfig / GuiConfig) and every provider-order tuple in the
+# GUI derives from these so the set can never drift across layers.
+EmbeddingProvider = Literal["voyage", "openai", "google", "huggingface"]
+EMBEDDING_PROVIDERS: tuple[EmbeddingProvider, ...] = get_args(EmbeddingProvider)
 
 # OS-standard app identity — the SINGLE name for this app's platformdirs
 # folders (cache / data / log) AND the keyring service. Defined here in the
@@ -131,6 +129,27 @@ PROVIDER_NODE_DEFAULTS: dict[str, dict[str, str]] = {
         "entity_extractor": "qwen2.5:7b",
         "triples_extractor": "qwen2.5:7b",
     },
+}
+
+
+# Single source for each embedding provider's DEFAULT model + its vector
+# dimension, mirroring `PROVIDER_NODE_DEFAULTS` for the LLM side. The Settings /
+# CorpusConfig / GuiConfig embedding fields AND the `embedder_lifecycle`
+# registry all derive their defaults from these, so a default model or its
+# dimension lives in exactly ONE place. As with the LLM side, the lifecycle
+# registry no longer hardcodes these values — install/availability is its
+# concern; the default VALUES live here.
+EMBEDDING_MODEL_DEFAULTS: dict[str, str] = {
+    "voyage": "voyage-multimodal-3",
+    "openai": "text-embedding-3-small",
+    "google": "models/text-embedding-004",
+    "huggingface": "BAAI/bge-m3",
+}
+EMBEDDING_DIM_DEFAULTS: dict[str, int] = {
+    "voyage": 1024,
+    "openai": 1536,
+    "google": 768,
+    "huggingface": 1024,
 }
 
 
@@ -221,7 +240,7 @@ class Settings(BaseSettings):
             "invokes an uninstalled provider. See `llm_lifecycle.py`."
         ),
     )
-    embedding_provider: Literal["voyage", "openai", "google", "huggingface"] = Field(
+    embedding_provider: EmbeddingProvider = Field(
         default="voyage",
         description=(
             "Active embedding provider. Same no-auto-install rule as "
@@ -324,7 +343,7 @@ class Settings(BaseSettings):
     # active one); the provider-specific fields exist for the lifecycle
     # switch step which copies the right one in.
     embedding_model: str = Field(
-        default="voyage-multimodal-3",
+        default=EMBEDDING_MODEL_DEFAULTS["voyage"],
         description=(
             "Active embedding model name. Set automatically by the GUI's "
             "provider-switch step from the per-provider fields below; can "
@@ -334,7 +353,7 @@ class Settings(BaseSettings):
         ),
     )
     embedding_dims: int = Field(
-        default=1024,
+        default=EMBEDDING_DIM_DEFAULTS["voyage"],
         description=(
             "Embedding vector dimension. FIXED by the active model "
             "(voyage-multimodal-3 = 1024). Changing it requires reindex + "
@@ -343,7 +362,7 @@ class Settings(BaseSettings):
         ),
     )
     openai_embedding_model: str = Field(
-        default="text-embedding-3-small",
+        default=EMBEDDING_MODEL_DEFAULTS["openai"],
         description=(
             "OpenAI embedding model used when `embedding_provider='openai'`. "
             "`text-embedding-3-small` is 1536-dim and 5x cheaper than the "
@@ -352,14 +371,14 @@ class Settings(BaseSettings):
         ),
     )
     google_embedding_model: str = Field(
-        default="models/text-embedding-004",
+        default=EMBEDDING_MODEL_DEFAULTS["google"],
         description=(
             "Google Generative AI embedding model used when "
             "`embedding_provider='google'`. 768-dim by default."
         ),
     )
     hf_embedding_model: str = Field(
-        default="BAAI/bge-m3",
+        default=EMBEDDING_MODEL_DEFAULTS["huggingface"],
         description=(
             "HuggingFace model used when `embedding_provider='huggingface'`. "
             "Default `BAAI/bge-m3` is multilingual 1024-dim (~2.3 GB). "
@@ -803,6 +822,15 @@ def _drain_kg_client(client: "Neo4jClient") -> None:
             asyncio.run(client.close())
     except Exception:
         logger.warning("failed to close evicted Neo4j driver on reset", exc_info=True)
+
+
+def register_key_change_hook(fn: Callable[[], None]) -> None:
+    """Register a zero-arg callback run at the end of reset_after_key_change().
+
+    Idempotent — registering the same callable twice is a no-op.
+    """
+    if fn not in _KEY_CHANGE_HOOKS:
+        _KEY_CHANGE_HOOKS.append(fn)
 
 
 def reset_after_key_change() -> None:

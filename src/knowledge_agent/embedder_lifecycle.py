@@ -55,7 +55,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from knowledge_agent import DISTRIBUTION_NAME
-from knowledge_agent.config import get_settings
+from knowledge_agent.config import (
+    EMBEDDING_DIM_DEFAULTS,
+    EMBEDDING_MODEL_DEFAULTS,
+    get_settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +171,7 @@ _VOYAGE_PROVENANCE = EmbedderProviderProvenance(
     source_url="https://www.voyageai.com/embedding-models",
     pip_extras="embed-voyage",
     requires_api_key=True,
-    default_dim=1024,
+    default_dim=EMBEDDING_DIM_DEFAULTS["voyage"],
 )
 
 
@@ -181,7 +185,7 @@ _OPENAI_EMBED_PROVENANCE = EmbedderProviderProvenance(
     requires_api_key=True,
     # text-embedding-3-small default; 3-large is also 1536 by default
     # but supports shortening via dimensions param.
-    default_dim=1536,
+    default_dim=EMBEDDING_DIM_DEFAULTS["openai"],
 )
 
 
@@ -193,7 +197,7 @@ _GOOGLE_EMBED_PROVENANCE = EmbedderProviderProvenance(
     source_url="https://ai.google.dev/gemini-api/docs/embeddings",
     pip_extras="embed-google",
     requires_api_key=True,
-    default_dim=768,  # text-embedding-004
+    default_dim=EMBEDDING_DIM_DEFAULTS["google"],  # text-embedding-004
 )
 
 
@@ -208,7 +212,7 @@ _HF_EMBED_PROVENANCE = EmbedderProviderProvenance(
     # Default model = BGE-m3 (1024-dim multilingual). User can pick
     # any entry from the curated menu via the GUI; the switch step
     # validates dimension against the LanceDB schema.
-    default_dim=1024,
+    default_dim=EMBEDDING_DIM_DEFAULTS["huggingface"],
 )
 
 
@@ -331,7 +335,7 @@ EMBEDDER_PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
         "is_installed_fn": _voyage_is_installed,
         "library_packages": ("voyageai",),
         "provenance": _VOYAGE_PROVENANCE,
-        "default_model": "voyage-multimodal-3",
+        "default_model": EMBEDDING_MODEL_DEFAULTS["voyage"],
     },
     "openai": {
         "display_name": "OpenAI Embeddings",
@@ -339,7 +343,7 @@ EMBEDDER_PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
         "is_installed_fn": _openai_embed_is_installed,
         "library_packages": ("langchain-openai",),
         "provenance": _OPENAI_EMBED_PROVENANCE,
-        "default_model": "text-embedding-3-small",
+        "default_model": EMBEDDING_MODEL_DEFAULTS["openai"],
     },
     "google": {
         "display_name": "Google Gemini Embeddings",
@@ -347,7 +351,7 @@ EMBEDDER_PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
         "is_installed_fn": _google_embed_is_installed,
         "library_packages": ("langchain-google-genai",),
         "provenance": _GOOGLE_EMBED_PROVENANCE,
-        "default_model": "models/text-embedding-004",
+        "default_model": EMBEDDING_MODEL_DEFAULTS["google"],
     },
     "huggingface": {
         "display_name": "HuggingFace (local)",
@@ -357,7 +361,7 @@ EMBEDDER_PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
         "provenance": _HF_EMBED_PROVENANCE,
         # HF provider's "default model" is the menu entry initially
         # picked; settings.hf_embedding_model holds the active choice.
-        "default_model": "BAAI/bge-m3",
+        "default_model": EMBEDDING_MODEL_DEFAULTS["huggingface"],
     },
 }
 

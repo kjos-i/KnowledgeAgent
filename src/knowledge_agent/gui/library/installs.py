@@ -68,7 +68,11 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
-from knowledge_agent.config import reset_after_key_change
+from knowledge_agent.config import (
+    EMBEDDING_PROVIDERS,
+    LLM_PROVIDERS,
+    reset_after_key_change,
+)
 from knowledge_agent.embedder_lifecycle import (
     EMBEDDER_PROVIDER_REGISTRY,
     install_embedder_provider_execute,
@@ -139,8 +143,8 @@ _INSTALLABLE_EXTRACTOR_ORDER: tuple[str, ...] = tuple(
     n for n in _EXTRACTOR_ORDER if not EXTRACTOR_REGISTRY[n].get("bundled")
 )
 _PARSER_ORDER: tuple[str, ...] = tuple(PARSER_LIFECYCLE_REGISTRY.keys())
-_EMBEDDER_PROVIDER_ORDER: tuple[str, ...] = ("voyage", "openai", "google", "huggingface")
-_LLM_PROVIDER_ORDER: tuple[str, ...] = ("anthropic", "openai", "google", "ollama")
+_EMBEDDER_PROVIDER_ORDER: tuple[str, ...] = EMBEDDING_PROVIDERS
+_LLM_PROVIDER_ORDER: tuple[str, ...] = LLM_PROVIDERS
 # Query-time node models whose provider counts as "in use": uninstalling a
 # provider a node is set to would break that node until it's re-pointed. Kept
 # in sync with the LLMs tab's per-node pickers.
