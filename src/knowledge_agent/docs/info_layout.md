@@ -1,7 +1,7 @@
 # Where things are
 
 A quick map of the app. The tabs run along the top; the **Selected corpus**
-dropdown (top-right) is app-wide — it sets which knowledge base every tab works
+dropdown (top-right) is app-wide: it sets which knowledge base every tab works
 on.
 
 Jump to: [Search](#search) · [Library](#library) · [Evaluation](#evaluation) ·
@@ -14,22 +14,22 @@ Jump to: [Search](#search) · [Library](#library) · [Evaluation](#evaluation) �
 Ask questions of the selected corpus. The **chat** is on the left; the right
 column has its own sub-tabs:
 
-- **View** — the answer (with citations) or an opened result file, plus a pager to
+- **View:** the answer (with citations) or an opened result file, plus a pager to
   step back through recent results.
-- **Retrieval** — per-query search knobs (how many results, hybrid vs
-  vector-only, MMR, filters, direct Cypher).
-- **LLMs** — which model answers, and its settings.
-- **Info** — search tips, including Cypher.
+- **Retrieval:** per-query search knobs (how many results, hybrid vs
+  vector-only, MMR, direct Cypher).
+- **LLMs:** which model answers, and its settings.
+- **Info:** search tips, including Cypher.
 
 <a id="library"></a>
 ## Library
 
 Build and manage corpora.
 
-- **Create New** — start a new corpus (its own knowledge base).
-- **Ingest** — add documents; the app chunks + embeds them and builds the graph.
-- **Metadata** — browse and edit what's indexed.
-- **Info** — how the Library works.
+- **Create New:** start a new corpus (its own knowledge base).
+- **Ingest:** add documents; the app chunks + embeds them and builds the graph.
+- **Metadata:** browse and edit what's indexed.
+- **Info:** how the Library works.
 
 <a id="evaluation"></a>
 ## Evaluation
@@ -38,8 +38,8 @@ Measure retrieval and answer quality.
 
 - **Run evaluation** and **Create test cases** author and run evals; **Info**
   explains how to use the harness.
-- The dashboards — **Run Summary**, **Run Charts**, **Compare Datasets**,
-  **Trends** — visualise the results.
+- The dashboards (**Run Summary**, **Run Charts**, **Compare Datasets**,
+  **Trends**) visualise the results.
 - The **Metrics Guide** defines what each metric means.
 
 <a id="installs"></a>
@@ -63,6 +63,6 @@ chats are written.
 <a id="info-icons"></a>
 ## Info icons (i)
 
-Throughout the app, small **(i)** icons give contextual help next to a control —
+Throughout the app, small **(i)** icons give contextual help next to a control,
 useful for *what a specific setting does*. Turn them on or off with the
 **info-icons toggle in Settings**.

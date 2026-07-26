@@ -28,7 +28,7 @@ a report in the corpus's `eval_output/`. They then appear in the dashboards.
 ## Suites
 
 A **suite** is several datasets that share the same facts but differ in their
-**knobs** — the same questions run under different retrieval settings — so you can
+**knobs** (the same questions run under different retrieval settings) so you can
 compare settings head-to-head on identical content.
 
 ### Example: a mode-comparison suite
@@ -46,8 +46,8 @@ dataset, so **Compare Datasets** can overlay them:
 
 Overlaying their metrics shows which facts live in text (chunk hit@k) vs cleanly in
 the graph (KG hit@k), whether `parallel_fused` earns its extra latency + tokens with
-higher grounded correctness / recall, and — via the `auto` member's mode-routing
-correctness — whether the classifier routes each question to the mode that wins. Run
+higher grounded correctness / recall, and, via the `auto` member's mode-routing
+correctness, whether the classifier routes each question to the mode that wins. Run
 each member with only the relevant metric groups on (e.g. the graph dataset → `kg` +
 `judge`, not `chunk` / `source`).
 
@@ -72,20 +72,20 @@ metrics to watch:
 <a id="dashboards"></a>
 ## Dashboards
 
-- **Run Summary** — per-run cards, cases, and details.
-- **Run Charts** — metric scores by case, metric balance, score distributions,
+- **Run Summary:** per-run cards, cases, and details.
+- **Run Charts:** metric scores by case, metric balance, score distributions,
   correlations, latency, and token usage.
-- **Compare Datasets** — one suite-run's members side by side.
-- **Trends** — a metric tracked over time for a dataset.
+- **Compare Datasets:** one suite-run's members side by side.
+- **Trends:** a metric tracked over time for a dataset.
 
 <a id="good-cases"></a>
 ## Writing good test cases
 
-- **One fact per case** — a focused question with a clear right answer scores more
+- **One fact per case:** a focused question with a clear right answer scores more
   meaningfully than a broad one.
-- **Make it self-contained** — the expected answer should be supported by the
+- **Make it self-contained:** the expected answer should be supported by the
   passages you pin, not by outside knowledge.
-- **Pin the retrieval knobs** — a case saves the settings it runs under, so a run
+- **Pin the retrieval knobs:** a case saves the settings it runs under, so a run
   is reproducible regardless of your current global settings.
-- **Capture from real use** — turning an actual search or chat into a case keeps it
+- **Capture from real use:** turning an actual search or chat into a case keeps it
   realistic and records what that query actually used.

@@ -20,10 +20,11 @@ behaviour; RIGHT holds Diagnostics + Database connection. The four sections:
 
   3. Database connection — READ-ONLY display of the active corpus's
      connection (mirrors the active `CorpusEntry` from
-     `GuiConfig.corpora`). Edit the connection or switch corpora via
-     Library → Select Dataset; add a new corpus via Library → Create
-     New Dataset. Pool size + acquisition timeout also read-only —
-     they're backend Settings defaults, override via env vars.
+     `GuiConfig.corpora`). A corpus's connection is set once at Library
+     → Create New Dataset and can't be edited afterwards; switch the
+     active corpus via the top-bar corpus dropdown. Pool size +
+     acquisition timeout also read-only — they're backend Settings
+     defaults, override via env vars.
 
 Save pattern (RA-mirror): each handler captures the previous value,
 mutates GuiConfig, calls `save_config`, rolls back on ConfigError,
@@ -84,11 +85,11 @@ _SAVE_CHAT_BLURB = (
 )
 
 _CONNECTION_BLURB = (
-    "Read-only display of the active corpus's connection. Edit the "
-    "connection or switch corpora via Library → Select Dataset. Add "
-    "a new corpus via Library → Create New Dataset. Pool size + "
-    "acquisition timeout are advanced tuning (set "
-    "NEO4J_MAX_CONNECTION_POOL_SIZE / "
+    "Read-only display of the active corpus's connection. A corpus's Neo4j "
+    "connection is set once, when you create the corpus via Library → Create "
+    "New Dataset; it can't be edited afterwards. Switch the active corpus with "
+    "the corpus dropdown (top-right). Pool size + acquisition timeout are "
+    "advanced tuning (set NEO4J_MAX_CONNECTION_POOL_SIZE / "
     "NEO4J_CONNECTION_ACQUISITION_TIMEOUT env vars to change)."
 )
 
