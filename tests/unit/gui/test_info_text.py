@@ -24,3 +24,11 @@ def test_keys_namespaced_and_lowercase():
     for key in INFO:
         assert key == key.lower(), f"{key}: keys should be lowercase"
         assert "." in key, f"{key}: keys should be namespaced '<area>.<control>'"
+
+
+def test_documents_table_content_icons_present():
+    """The two 'Table contents' icons under the Documents filter (cards +
+    actions, and the Edit dialog) are registered with all three tiers filled."""
+    for key in ("select.documents_cards", "select.documents_edit"):
+        spec = INFO[key]
+        assert spec.standard and spec.beginner and spec.technical, f"{key}: a tier is empty"

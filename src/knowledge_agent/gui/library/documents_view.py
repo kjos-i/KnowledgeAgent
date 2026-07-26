@@ -52,6 +52,7 @@ from typing import TYPE_CHECKING, Any
 import flet as ft
 
 from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, PANEL_BG, labeled_field
+from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.views._frame import empty_state
 
 if TYPE_CHECKING:
@@ -67,6 +68,10 @@ _STATUS_COLORS: dict[str, str] = {
     "baseline": ft.Colors.CYAN_300,
     "manual": ft.Colors.BLUE_300,
 }
+
+# Idle placeholder for the per-doc op status line — always visible, so an
+# empty status never leaves a blank gap above the card list.
+_OP_STATUS_IDLE = "No re-ingest or delete running."
 
 # Ordered (column, label, hint) spec for the Edit modal. Mirrors RAA's
 # "Edit metadata" dialog. Every key is an editable doc-level LanceDB
@@ -150,8 +155,9 @@ class DocumentsView:
             on_click=self._on_refresh_clicked,
         )
         self.coverage_text = ft.Text("", size=14, color=ft.Colors.GREY_400)
-        # Transient status for per-doc ops (re-ingest).
-        self.op_status = ft.Text("", size=12, color=ft.Colors.GREY_400)
+        # Per-doc op (re-ingest / delete) status. Always visible; falls back
+        # to the idle placeholder so the line never blanks into an empty gap.
+        self.op_status = ft.Text(_OP_STATUS_IDLE, size=12, color=ft.Colors.GREY_400)
         # Plain Column — the parent (select_dataset right pane) already
         # scrolls, so nesting a scroll here would fight it.
         self.doc_list = ft.Column(spacing=6)
@@ -170,6 +176,18 @@ class DocumentsView:
             expand=True,
             controls=[
                 labeled_field("Filter", self.search_field, trailing=self.refresh_button),
+                ft.Row(
+                    controls=[
+                        ft.Text("Table contents:", size=12, color=ft.Colors.GREY_400),
+                        ft.Text("Cards and actions", size=12),
+                        info(self.app, "select.documents_cards"),
+                        ft.Container(width=8),
+                        ft.Text("Edit dialog", size=12),
+                        info(self.app, "select.documents_edit"),
+                    ],
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
                 self.op_status,
                 ft.Divider(),
                 self.doc_list,
@@ -336,14 +354,11 @@ class DocumentsView:
         )
         reingest_button = ft.Button(
             content="Re-ingest",
-            tooltip="Re-run the full pipeline on this document with the "
-            "corpus's current settings (needs the source file)",
             height=28,
             on_click=lambda e, s=snap: self._on_reingest_clicked(s),
         )
         delete_button = ft.Button(
             content="Delete",
-            tooltip="Remove this document from the corpus (both stores)",
             height=28,
             on_click=lambda e, s=snap: self._on_delete_clicked(s),
         )
@@ -541,7 +556,7 @@ class DocumentsView:
     # ----- re-ingest -----------------------------------------------------
 
     def _set_op_status(self, msg: str) -> None:
-        self.op_status.value = msg
+        self.op_status.value = msg or _OP_STATUS_IDLE
         self.app.page.update()
 
     def _on_reingest_clicked(self, row: dict[str, Any]) -> None:

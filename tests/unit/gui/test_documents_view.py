@@ -144,6 +144,28 @@ def test_render_doc_card_has_three_action_buttons(fake_app):
     assert len(buttons) == 3
 
 
+def test_action_buttons_have_no_tooltip(fake_app):
+    """Re-ingest/Delete tooltips were removed (their guidance moved to the
+    'Table contents' info icons under the filter); Edit never had one."""
+    dv = _view(fake_app)
+    card = dv._render_doc_card(_rows()[0])
+    action_row = card.content.controls[0]
+    buttons = [c for c in action_row.controls if isinstance(c, ft.Button)]
+    assert [b.content for b in buttons] == ["Edit", "Re-ingest", "Delete"]
+    assert all(b.tooltip is None for b in buttons)
+
+
+def test_op_status_shows_idle_placeholder_not_blank(fake_app):
+    """The status line is always visible: it starts on the idle placeholder
+    and falls back to it if cleared, so it never renders as a blank gap."""
+    dv = DocumentsView(fake_app)
+    assert dv.op_status.value  # non-empty idle text on load
+    dv._set_op_status("Re-ingesting.")
+    assert dv.op_status.value == "Re-ingesting."
+    dv._set_op_status("")
+    assert dv.op_status.value  # cleared -> back to idle, never blank
+
+
 def test_render_doc_card_shows_main_and_sub_label(fake_app):
     """A sub-labelled doc shows '<main> <sub>' (e.g. 'Document Paper') as the
     first item of the meta line, so a Paper is visible as one."""

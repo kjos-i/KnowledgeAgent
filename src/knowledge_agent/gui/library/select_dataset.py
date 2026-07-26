@@ -86,6 +86,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Idle placeholder for the left-column status line — always visible so it
+# reads as an intentional line, not a blank gap under the info card.
+_STATUS_IDLE = "No recent corpus changes."
+
+
 # Sentinel `field` for the L7 pill: ontology linking is a bundle of 18
 # per-ontology flags (no single LayerFlags bool), so its pill counts as
 # "configured" when ANY `ontology_*` flag is on. The detail — which
@@ -198,7 +203,7 @@ class SelectDatasetTab:
     # ----- control construction --------------------------------------------
 
     def _create_controls(self) -> None:
-        self.status = ft.Text("", size=12, color=ft.Colors.GREY_400)
+        self.status = ft.Text(_STATUS_IDLE, size=12, color=ft.Colors.GREY_400)
         # Sticky left-column title — set in `_populate_info_card` /
         # `_info_empty_state` to the active corpus name.
         self.selected_title = panel_title("Selected dataset: —")
@@ -368,15 +373,9 @@ class SelectDatasetTab:
                     padding=ft.Padding.symmetric(horizontal=12, vertical=10),
                     content=ft.Row(
                         controls=[
-                            ft.Row(
-                                controls=[
-                                    panel_title("Documents"),
-                                    info(self.app, "select.documents"),
-                                ],
-                                spacing=4,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            ),
+                            panel_title("Documents"),
                             self.documents.coverage_text,
+                            info(self.app, "select.documents"),
                         ],
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
