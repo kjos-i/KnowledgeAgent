@@ -903,27 +903,42 @@ class SelectDatasetTab:
 
     # ----- Remove ---------------------------------------------------------
 
-    def on_remove_clicked(self, e: ft.Event) -> None:
-        active_name = self.app.gui_config.active_corpus_name
-        if active_name is None:
+    def open_remove_confirm(self, name: str, *, missing: bool = False) -> None:
+        """Confirm, then unregister ANY registered corpus by name (not only
+        the active one).
+
+        Shared by the active-corpus Remove button and the Manage dialog's
+        corpus list, so a stale corpus whose folder is gone can be pruned
+        without activating it first. Pass `missing=True` to word the prompt
+        for a corpus whose files are already deleted. Removal never touches
+        the corpus's files (see `_remove_corpus`).
+        """
+        if not name:
             return
 
         def _do_remove(_ev):
-            self._remove_corpus(active_name)
+            self._remove_corpus(name)
             self.app.page.pop_dialog()
 
         def _do_cancel(_ev):
             self.app.page.pop_dialog()
 
+        if missing:
+            body = (
+                "This corpus's files are already gone (its corpus.toml is "
+                "missing), so this just clears the stale entry from the list. "
+                "Nothing on disk is affected."
+            )
+        else:
+            body = (
+                "This unregisters the corpus from the GUI. It does NOT delete "
+                "the Neo4j DBMS, the LanceDB folder, or the corpus.toml file; "
+                "you manage those yourself."
+            )
         dialog = ft.AlertDialog(
             modal=True,
-            title=ft.Text(f"Remove corpus {active_name!r}?"),
-            content=ft.Text(
-                "This unregisters the corpus from the GUI. It does "
-                "NOT delete the Neo4j DBMS, the LanceDB folder, or "
-                "the corpus.toml file — you manage those yourself.",
-                size=12,
-            ),
+            title=ft.Text(f"Remove corpus {name!r}?"),
+            content=ft.Text(body, size=12),
             actions=[
                 ft.TextButton("Cancel", on_click=_do_cancel),
                 ft.TextButton("Remove", on_click=_do_remove),

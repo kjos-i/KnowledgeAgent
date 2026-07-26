@@ -210,3 +210,44 @@ def test_relocate_corpus_rejects_folder_without_corpus_toml(fake_app, tmp_path):
     # entry untouched
     assert fake_app.gui_config.corpora[0].corpus_config_path == tmp_path / "old" / "corpus.toml"
     assert "corpus.toml" in tab.status.value
+
+
+# ---- Remove (unregister a corpus, including a non-active / stale one) ----
+
+
+def test_remove_corpus_non_active_leaves_active(fake_app, tmp_path, monkeypatch):
+    """Removing a NON-active corpus by name drops just that entry and leaves
+    the active corpus untouched — the capability the Manage dialog's corpus
+    list uses to prune a stale corpus without activating it first."""
+    monkeypatch.setenv("NEO4J_PASSWORD", "sentinel")  # isolate the env pop
+    tab = _tab(fake_app)
+    fake_app.gui_config.corpora = [
+        _corpus("c1", tmp_path / "c1"),
+        _corpus("c2", tmp_path / "c2"),
+    ]
+    fake_app.gui_config.active_corpus_name = "c1"
+    with (
+        patch(f"{_MOD}.save_config"),
+        patch(f"{_MOD}.set_corpus_password"),
+        patch(f"{_MOD}.apply_connection_to_env"),
+        patch(f"{_MOD}.apply_active_corpus_embedding_to_env"),
+        patch(f"{_MOD}.get_corpus_password", return_value=""),
+        patch(f"{_MOD}.reset_after_key_change"),
+    ):
+        tab._remove_corpus("c2")
+
+    assert [c.name for c in fake_app.gui_config.corpora] == ["c1"]  # c2 gone
+    assert fake_app.gui_config.active_corpus_name == "c1"  # active unchanged
+
+
+def test_open_remove_confirm_empty_name_is_noop(fake_app):
+    tab = _tab(fake_app)
+    tab.open_remove_confirm("")
+    fake_app.page.show_dialog.assert_not_called()
+
+
+def test_open_remove_confirm_shows_dialog(fake_app):
+    """A named corpus opens a confirm dialog — the list rows call this per row."""
+    tab = _tab(fake_app)
+    tab.open_remove_confirm("c2")
+    fake_app.page.show_dialog.assert_called_once()

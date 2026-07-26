@@ -265,7 +265,9 @@ class GuiApp:
     def _open_manage_dialog(self, e: ft.Event) -> None:
         """Open the 'Selected corpus' dialog: the active corpus's read-only
         card (notes #34 — paths, layers, extractor, chunking, **embedder +
-        LLM**) plus Rename / Relocate / Remove / Refresh.
+        LLM**), the active-corpus actions Rename / Relocate / Remove /
+        Refresh, and an 'All corpora' list that can remove any registered
+        corpus by name (including a stale one whose folder is gone).
 
         The actions reach across to the Library → Select handlers (single
         source of truth — they act on the active corpus, not the Library
@@ -301,15 +303,54 @@ class GuiApp:
                     disabled=not has_active,
                 ),
                 ft.Button(
-                    content=ft.Text("Remove"),
-                    on_click=_act(select_tab.on_remove_clicked),
-                    disabled=not has_active,
-                ),
-                ft.Button(
                     content=ft.Text("Refresh"),
                     on_click=_act(select_tab.on_refresh_clicked),
                 ),
             ],
+        )
+
+        # "All corpora" list — every registered corpus with a per-row Remove,
+        # so a stale corpus (folder deleted on disk, flagged "missing") can be
+        # pruned by name without activating it first. Remove reuses the same
+        # confirm + `_remove_corpus` path as the active-corpus Remove button.
+        active_name = self.gui_config.active_corpus_name
+
+        def _corpus_row(c) -> ft.Control:
+            is_active = c.name == active_name
+            missing = not Path(c.corpus_config_path).is_file()
+            tags: list[ft.Control] = []
+            if is_active:
+                tags.append(ft.Text("(active)", size=11, color=ft.Colors.GREEN_300))
+            if missing:
+                tags.append(ft.Text("(missing)", size=11, color=ft.Colors.RED_300))
+            return ft.Row(
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Text(c.name, size=13, expand=True),
+                    *tags,
+                    ft.Button(
+                        content=ft.Text("Remove"),
+                        height=28,
+                        on_click=_act(
+                            lambda ev, n=c.name, m=missing: select_tab.open_remove_confirm(
+                                n, missing=m
+                            )
+                        ),
+                    ),
+                ],
+            )
+
+        corpora = list(self.gui_config.corpora)
+        corpus_list: ft.Control = (
+            ft.Column(spacing=4, controls=[_corpus_row(c) for c in corpora])
+            if corpora
+            else ft.Text(
+                "No corpora registered.",
+                size=12,
+                italic=True,
+                color=ft.Colors.GREY_400,
+            )
         )
         dialog = ft.AlertDialog(
             modal=True,
@@ -341,6 +382,9 @@ class GuiApp:
                     build_corpus_card(self),
                     ft.Divider(),
                     buttons,
+                    ft.Divider(),
+                    ft.Text("All corpora", size=13, weight=ft.FontWeight.BOLD),
+                    corpus_list,
                 ],
             ),
             actions=[ft.TextButton("Close", on_click=lambda _c: self.page.pop_dialog())],
