@@ -49,6 +49,7 @@ class LatestView:
         answer: AgentAnswer | None,
         query: str,
         page: ft.Page | None = None,
+        header_trailing: ft.Control | None = None,
     ) -> None:
         self.answer = answer
         self.query = query
@@ -56,11 +57,13 @@ class LatestView:
         # figure thumbnails. None disables the click behavior (the
         # thumbnails still render, just not interactive).
         self.page = page
+        # Optional control (an info icon) placed beside the view header.
+        self.header_trailing = header_trailing
 
     def build(self) -> ft.Control:
         if self.answer is None:
             body: ft.Control = empty_state("Search result will show here once you ask a question.")
-            return view_with_header("View result from search", body)
+            return view_with_header("View result from search", body, trailing=self.header_trailing)
 
         md = render_answer_markdown(self.answer, self.query)
         controls: list[ft.Control] = [themed_markdown(md)]
@@ -99,7 +102,7 @@ class LatestView:
             expand=True,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
-        return view_with_header("View result from search", body)
+        return view_with_header("View result from search", body, trailing=self.header_trailing)
 
     def _build_thumbnail(
         self,

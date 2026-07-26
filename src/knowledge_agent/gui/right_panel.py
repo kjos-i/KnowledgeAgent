@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 import flet as ft
 
 from knowledge_agent.gui._styles import FIELD_LABEL_SIZE, FRAME_BORDER_COLOR, centered_label
+from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.settings.llm_tab import LlmTab
 from knowledge_agent.gui.settings.retrieval_tab import RetrievalTab
 from knowledge_agent.gui.views.file_view import FileView
@@ -181,11 +182,25 @@ class RightPanel:
             self._rebuild()
 
     def _on_close_item(self, _e: ft.Event) -> None:
-        """Drop the shown slot and land on its neighbour (the previous one,
-        or the new last slot when the first was removed)."""
+        """Drop the shown slot. The cursor lands on the slot shifted into its
+        place (the next one), or on the new last slot when the last one was
+        removed; the pager empties to the placeholder when it was the only
+        slot."""
         if not self.history:
             return
+        removed = self.history[self.history_index]
         del self.history[self.history_index]
+        # If the removed slot was the currently loaded file, forget it too, so a
+        # later Clear (with keep_loaded_file_on_clear on) doesn't resurrect a
+        # file the user explicitly closed here.
+        loaded = self.app.loaded_file
+        if (
+            removed.kind == MODE_FILE
+            and loaded is not None
+            and removed.name == loaded.name
+            and removed.content == loaded.content
+        ):
+            self.app.loaded_file = None
         if self.history_index >= len(self.history):
             self.history_index = len(self.history) - 1  # -1 when now empty
         self._rebuild()
@@ -208,13 +223,16 @@ class RightPanel:
         self.app.page.update()
 
     def _build_current_view(self) -> ft.Control:
+        # A fresh info icon for the view header (built per rebuild so it's never
+        # re-parented across navigations).
+        icon = info(self.app, "search.view")
         if not self.history:
             # Empty history → the Latest view's search-result placeholder.
-            return LatestView(None, "", page=self.app.page).build()
+            return LatestView(None, "", page=self.app.page, header_trailing=icon).build()
         item = self.history[self.history_index]
         if item.kind == MODE_FILE:
-            return FileView(name=item.name, content=item.content).build()
-        return LatestView(item.answer, item.query, page=self.app.page).build()
+            return FileView(name=item.name, content=item.content, header_trailing=icon).build()
+        return LatestView(item.answer, item.query, page=self.app.page, header_trailing=icon).build()
 
     def _sync_pager(self) -> None:
         """Point the pager label + button states at the current cursor. Buttons
@@ -241,20 +259,20 @@ class RightPanel:
         from here too.)"""
         self.pager_prev = ft.IconButton(
             ft.Icons.CHEVRON_LEFT,
-            icon_size=18,
+            icon_size=24,
             tooltip="Previous result",
             on_click=self._on_prev,
         )
         self.pager_label = ft.Text("0/0", size=12)
         self.pager_next = ft.IconButton(
             ft.Icons.CHEVRON_RIGHT,
-            icon_size=18,
+            icon_size=24,
             tooltip="Next result",
             on_click=self._on_next,
         )
         self.pager_close = ft.IconButton(
             ft.Icons.CLOSE,
-            icon_size=18,
+            icon_size=24,
             icon_color=ft.Colors.RED_300,
             tooltip="Remove this result from history",
             on_click=self._on_close_item,

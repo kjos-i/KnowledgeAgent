@@ -3327,6 +3327,71 @@ INFO: dict[str, InfoText] = {
             "in sync and the question is restored for retry."
         ),
     ),
+    "search.view": InfoText(
+        title="View result",
+        standard=(
+            "This is the result display for the Search tab. It shows the answer "
+            "from your most recent question, an answer file you opened, or a "
+            "placeholder before you have asked anything. An answer renders as "
+            "formatted text with its text-chunk and knowledge-graph sources "
+            "listed below; if it cited any figures, they appear as thumbnails "
+            "you can click to open full size.\n\n"
+            "Save Result and Open Result.\n\n"
+            "Save Result writes the shown answer to a folder in the formats you "
+            "chose (Markdown, text, Word, or JSON); the first save asks for a "
+            "folder and remembers it. Open Result loads a previously saved .md "
+            "or .txt answer back into this view, either through the file picker "
+            "or by pasting its path into the field beside the button and "
+            "pressing Enter.\n\n"
+            "The pager.\n\n"
+            "The app keeps the last five things you viewed here (answers and "
+            "opened files). The < n/N > controls flip back and forth through "
+            "them, and the red X removes the one on screen. The pager starts "
+            "empty on each launch (it is not saved between sessions), and Clear "
+            "empties it."
+        ),
+        beginner=(
+            "This panel shows the result of your search. After you ask a "
+            "question, the answer appears here with a list of where it came "
+            "from (the text passages and knowledge-graph facts it used), and "
+            "any pictures it referred to show as small thumbnails you can click "
+            "to enlarge. Before you ask anything, it shows a short "
+            "placeholder.\n\n"
+            "Save Result saves the answer on screen to a folder on your "
+            "computer, as Word, Markdown, plain text, or JSON. The first time, "
+            "it asks which folder to use and then remembers it. Open Result "
+            "does the opposite: it loads a saved answer file (.md or .txt) back "
+            "into this panel, either by picking the file or by pasting its path "
+            "into the box next to the button and pressing Enter.\n\n"
+            "The little < n/N > arrows and the red X are a short history: the "
+            "app remembers the last five things you looked at here (answers and "
+            "opened files), the arrows step back and forth through them, and "
+            "the X removes the one you are looking at. This history is not kept "
+            "after you close the app, and the Clear button empties it."
+        ),
+        technical=(
+            "RightPanel View sub-tab (gui/right_panel.py). view_container "
+            "renders one of three, rebuilt on each navigation: an answer "
+            "(LatestView: render_answer_markdown + a figure thumbnail gallery "
+            "for chunk_sources with content_type='figure' and an on-disk "
+            "image_ref, click-to-expand modal), an opened file (FileView: .txt "
+            "monospace, else themed_markdown), or the empty placeholder.\n\n"
+            "Save Result = on_save_answer (save_answer(last_answer, "
+            "last_query, results_dir, save_formats)); Open Result = "
+            "on_open_result (md/txt picker); the paste-path field = "
+            "on_open_path (.md/.txt + is_file check). Both load via "
+            "_load_file_into_view then push_file. Formats and the default "
+            "folders live in Settings.\n\n"
+            "Pager: an in-memory list of up to _MAX_HISTORY=5 _ViewItem slots "
+            "(MODE_LATEST answers + MODE_FILE files), snapshotted at push time. "
+            "push_answer/push_file append and jump to the newest; < and > "
+            "(_on_prev/_on_next) walk the cursor (greyed at the ends); the X "
+            "(_on_close_item) drops the shown slot (and now clears "
+            "app.loaded_file when it was the loaded file). History is not "
+            "persisted; reset_history (Clear) empties it, re-seeding a kept "
+            "loaded_file."
+        ),
+    ),
 }
 
 

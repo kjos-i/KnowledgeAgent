@@ -41,15 +41,18 @@ def empty_state(message: str) -> ft.Control:
     )
 
 
-def view_with_header(title: str, body: ft.Control) -> ft.Control:
+def view_with_header(
+    title: str, body: ft.Control, *, trailing: ft.Control | None = None
+) -> ft.Control:
     """Header + body composition used by every view in the display panel.
 
     Header is the bold-title block; body fills the rest. Returning a
     Column with `expand=True` lets the parent container size both
-    pieces — the divider hugs the title, body stretches.
+    pieces — the divider hugs the title, body stretches. Pass `trailing`
+    (e.g. an info icon) to sit it beside the title.
     """
     return ft.Column(
-        controls=[view_header(title), body],
+        controls=[view_header(title, trailing=trailing), body],
         expand=True,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         spacing=8,

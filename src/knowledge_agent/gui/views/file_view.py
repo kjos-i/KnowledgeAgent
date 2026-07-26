@@ -16,9 +16,11 @@ from knowledge_agent.gui.views._frame import view_with_header
 class FileView:
     """Renders an opened saved answer file in the Search right panel."""
 
-    def __init__(self, name: str, content: str) -> None:
+    def __init__(self, name: str, content: str, header_trailing: ft.Control | None = None) -> None:
         self.name = name
         self.content = content
+        # Optional control (an info icon) placed beside the view header.
+        self.header_trailing = header_trailing
 
     def build(self) -> ft.Control:
         # A .txt renders as-is (monospace, no Markdown parsing) so it shows
@@ -37,4 +39,4 @@ class FileView:
             expand=True,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
-        return view_with_header(f"File: {self.name}", body)
+        return view_with_header(f"File: {self.name}", body, trailing=self.header_trailing)

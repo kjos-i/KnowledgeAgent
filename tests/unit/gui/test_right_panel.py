@@ -227,3 +227,38 @@ def test_single_item_greys_prev_next_but_allows_close(fake_app: MagicMock):
     assert panel.pager_prev.disabled is True
     assert panel.pager_next.disabled is True
     assert panel.pager_close.disabled is False
+
+
+# ---- pager icon size + close-clears-loaded-file ----------------------------
+
+
+def test_pager_icons_use_size_24(fake_app: MagicMock):
+    """Pager prev/next/close render at size 24, matching the Evaluation
+    per-case pager (they were a smaller 18 before)."""
+    panel = _panel(fake_app)
+    panel.build()
+    assert panel.pager_prev.icon_size == 24
+    assert panel.pager_next.icon_size == 24
+    assert panel.pager_close.icon_size == 24
+
+
+def test_close_loaded_file_slot_also_clears_loaded_file(fake_app: MagicMock):
+    """Closing the pager slot of the currently loaded file also forgets the
+    file, so a later Clear (keep_loaded_file_on_clear) can't resurrect it."""
+    panel = _panel(fake_app)
+    panel.build()
+    fake_app.loaded_file = SimpleNamespace(name="a.md", content="# a")
+    panel.push_file("a.md", "# a")
+    panel._on_close_item(None)
+    assert panel.history == []
+    assert fake_app.loaded_file is None  # forgotten → reset_history won't re-seed it
+
+
+def test_close_answer_slot_leaves_loaded_file(fake_app: MagicMock):
+    """Closing a non-file (answer) slot must not touch loaded_file."""
+    panel = _panel(fake_app)
+    panel.build()
+    fake_app.loaded_file = SimpleNamespace(name="a.md", content="# a")
+    panel.push_answer(_answer(), "q")
+    panel._on_close_item(None)
+    assert fake_app.loaded_file is not None  # untouched
