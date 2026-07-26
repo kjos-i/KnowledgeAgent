@@ -36,12 +36,18 @@ def test_set_busy_toggles_send_stop_input_visibility(fake_app: MagicMock):
     assert panel.stop_button.disabled is False
     assert panel.input_field.disabled is True
     assert panel.progress_ring.visible is True
+    # Save + Clear are disabled during a send so they can't mutate `messages`
+    # under an in-flight on_send.
+    assert panel.save_button.disabled is True
+    assert panel.clear_button.disabled is True
 
     panel.set_busy(False)
     assert panel.send_button.disabled is False
     assert panel.stop_button.disabled is True
     assert panel.input_field.disabled is False
     assert panel.progress_ring.visible is False
+    assert panel.save_button.disabled is False
+    assert panel.clear_button.disabled is False
 
 
 def test_append_user_clears_placeholder_on_first_message(fake_app: MagicMock):
@@ -86,19 +92,12 @@ def test_clear_input_blanks_field(fake_app: MagicMock):
     assert panel.input_field.value == ""
 
 
-def test_begin_assistant_stream_returns_updatable_body_text(
-    fake_app: MagicMock,
-):
-    """The streaming pattern: begin_assistant_stream returns a Text,
-    then update_assistant_stream overwrites its value as tokens arrive."""
+def test_set_input_restores_text(fake_app: MagicMock):
+    """set_input puts text back in the box (restoring a question for retry)."""
     panel = ChatPanel(fake_app)
     panel.build()
-    body = panel.begin_assistant_stream()
-    assert isinstance(body, ft.Text)
-    panel.update_assistant_stream(body, "partial answer")
-    assert body.value == "partial answer"
-    panel.update_assistant_stream(body, "partial answer plus more")
-    assert body.value == "partial answer plus more"
+    panel.set_input("what is X?")
+    assert panel.input_field.value == "what is X?"
 
 
 def test_pop_last_removes_latest_message(fake_app: MagicMock):

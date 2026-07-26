@@ -2,10 +2,9 @@
 multiline input + bottom button row.
 
 Owns the chat-side UI and message-rendering helpers (`append_user/
-assistant/system`), the busy-state toggle for input/Send/Stop, and
-the streaming-bubble helpers used by the synthesizer's astream
-output. Cross-cutting actions (Send / Stop / Clear / Save Chat) call
-back into `GuiApp`.
+assistant/system`) and the busy-state toggle for
+input/Send/Stop/Save/Clear. Cross-cutting actions (Send / Stop /
+Clear / Save Chat) call back into `GuiApp`.
 
 Slice 1 doesn't have a corpus selector here — corpus selection lives
 in Settings (slice 2). The chat panel surface itself is unchanged
@@ -25,7 +24,9 @@ from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     PANEL_BG,
     centered_label,
+    panel_title,
 )
+from knowledge_agent.gui._widgets.info_text import info
 
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
@@ -49,6 +50,8 @@ class ChatPanel:
         self.input_field: ft.TextField | None = None
         self.send_button: ft.Button | None = None
         self.stop_button: ft.Button | None = None
+        self.save_button: ft.Button | None = None
+        self.clear_button: ft.Button | None = None
 
     # ----- public API -------------------------------------------------------
 
@@ -124,26 +127,33 @@ class ChatPanel:
             on_click=self.app.on_stop,
             disabled=True,
         )
+        self.save_button = ft.Button(
+            content=centered_label("Save"),
+            expand=True,
+            on_click=self.app.on_save_chat,
+        )
+        self.clear_button = ft.Button(
+            content=centered_label("Clear"),
+            expand=True,
+            on_click=self.app.on_clear,
+        )
         button_row = ft.Row(
             controls=[
-                ft.Button(
-                    content=centered_label("Save"),
-                    expand=True,
-                    on_click=self.app.on_save_chat,
-                ),
-                ft.Button(
-                    content=centered_label("Clear"),
-                    expand=True,
-                    on_click=self.app.on_clear,
-                ),
+                self.save_button,
+                self.clear_button,
                 self.stop_button,
                 self.send_button,
             ],
             spacing=8,
         )
 
+        header = ft.Row(
+            controls=[panel_title("Chat"), info(self.app, "search.chat")],
+            spacing=4,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
         inner = ft.Column(
-            controls=[output_box, splitter, input_row, button_row],
+            controls=[header, output_box, splitter, input_row, button_row],
             expand=True,
             spacing=8,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
@@ -158,7 +168,11 @@ class ChatPanel:
         )
 
     def set_busy(self, busy: bool) -> None:
-        """Toggle progress + Stop-enabled + input/Send-disabled state."""
+        """Toggle progress + Stop-enabled + input/Send/Save/Clear-disabled state.
+
+        Save and Clear are disabled while a search runs so they can't mutate
+        `messages` mid-send (e.g. Clear emptying the list under an in-flight
+        `on_send`, which could then raise on a later `messages.pop()`)."""
         if self.progress_ring is not None:
             self.progress_ring.visible = busy
         if self.send_button is not None:
@@ -166,6 +180,10 @@ class ChatPanel:
         if self.stop_button is not None:
             # Stop is the inverse of Send: enabled exactly when busy.
             self.stop_button.disabled = not busy
+        if self.save_button is not None:
+            self.save_button.disabled = busy
+        if self.clear_button is not None:
+            self.clear_button.disabled = busy
         if self.input_field is not None:
             self.input_field.disabled = busy
         self.app.page.update()
@@ -186,6 +204,12 @@ class ChatPanel:
         if self.input_field is not None:
             self.input_field.value = ""
 
+    def set_input(self, text: str) -> None:
+        """Put `text` back in the input box — used to restore a question after a
+        chat-router failure so it can be retried without retyping."""
+        if self.input_field is not None:
+            self.input_field.value = text
+
     # ----- append helpers ---------------------------------------------------
 
     def append_user(self, text: str) -> None:
@@ -196,43 +220,6 @@ class ChatPanel:
 
     def append_system(self, text: str) -> None:
         self._append(self._render_system_message(text))
-
-    def begin_assistant_stream(self) -> ft.Text:
-        """Add a live assistant bubble for streaming output.
-
-        Returns the inner `Text` widget whose `.value` is overwritten on
-        each token update (the synthesizer pushes *cumulative* text,
-        not deltas, so the consumer just assigns). The bubble looks
-        identical to a regular assistant message — it just grows in
-        place as text arrives.
-        """
-        body_text = ft.Text("", size=14, selectable=True)
-        container = ft.Container(
-            content=ft.Column(
-                controls=[
-                    ft.Text(
-                        "assistant",
-                        color=ft.Colors.GREEN_200,
-                        size=12,
-                        weight=ft.FontWeight.BOLD,
-                    ),
-                    body_text,
-                ],
-                spacing=2,
-            ),
-            padding=ft.Padding.symmetric(vertical=4),
-        )
-        self._append(container)
-        return body_text
-
-    def update_assistant_stream(
-        self,
-        body_text: ft.Text,
-        text: str,
-    ) -> None:
-        """Overwrite a streaming bubble's text with the latest cumulative value."""
-        body_text.value = text
-        self.app.page.update()
 
     def pop_last(self) -> None:
         """Remove the last appended message — used to roll back a failed send."""

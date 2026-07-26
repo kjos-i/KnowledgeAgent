@@ -574,10 +574,12 @@ class GuiApp:
                         self.gui_config.chat_router_temperature,
                     )
                 except Exception as exc:
+                    self.messages.pop()
+                    self.chat_panel.pop_last()  # remove the orphaned user bubble
+                    self.chat_panel.set_input(text)  # restore the question for retry
                     self.chat_panel.append_system(
                         f"could not initialize chat router (check provider config): {exc}"
                     )
-                    self.messages.pop()
                     return
 
                 try:
@@ -591,8 +593,10 @@ class GuiApp:
                     raise
                 except Exception as exc:
                     logger.warning("chat-router failed: %r", exc)
-                    self.chat_panel.append_system(f"chat-router error: {exc}")
                     self.messages.pop()
+                    self.chat_panel.pop_last()  # remove the orphaned user bubble
+                    self.chat_panel.set_input(text)  # restore the question for retry
+                    self.chat_panel.append_system(f"chat-router error: {exc}")
                     return
 
                 self.messages.append(AIMessage(content=output.response))
@@ -651,6 +655,7 @@ class GuiApp:
             self.right_panel.push_answer(answer, text)
         except asyncio.CancelledError:
             self.chat_panel.append_system("search cancelled")
+            raise
         finally:
             self.busy = False
             self.chat_panel.set_busy(False)
