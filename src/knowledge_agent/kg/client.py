@@ -111,6 +111,8 @@ class Neo4jClient:
                     self._settings.neo4j_user,
                     self._settings.neo4j_password,
                 ),
+                max_connection_pool_size=self._settings.neo4j_max_connection_pool_size,
+                connection_acquisition_timeout=self._settings.neo4j_connection_acquisition_timeout,
             )
         return self._driver
 

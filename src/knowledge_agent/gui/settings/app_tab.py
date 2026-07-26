@@ -52,7 +52,7 @@ from knowledge_agent.gui._styles import (
     panel_title,
     section_divider,
 )
-from knowledge_agent.gui._widgets.info_icon import info_icon, section_header, tier_icon_sample
+from knowledge_agent.gui._widgets.info_icon import section_header, tier_icon_sample
 from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.config_store import ConfigError, save_config
 from knowledge_agent.gui.views._frame import view_header
@@ -63,35 +63,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-_DEBUG_BLURB = (
-    "When on, the chat shows per-node progress (query built, "
-    "retrieved N chunks, ...) plus the search query, retrieval mode, "
-    "and per-hit titles + scores. Off = clean chat with only the "
-    "essential 'answer ready' closure line."
-)
-
-_SAVE_RESULTS_BLURB = (
-    "Where and in which format(s) the Search tab's Save Result button writes. "
-    "Check one or more (JSON = answers only). When no folder is set, the first "
-    "save asks for one and remembers it here."
-)
-
-_SAVE_CHAT_BLURB = (
-    "Where and in which format(s) the Search tab's Save Chat button writes — its "
-    "own settings, separate from Save Result. A chat transcript has no JSON form. "
-    "When no folder is set, the first save asks for one and remembers it here."
-)
-
-_CONNECTION_BLURB = (
-    "Read-only display of the active corpus's connection. A corpus's Neo4j "
-    "connection is set once, when you create the corpus via Library → Create "
-    "New Dataset; it can't be edited afterwards. Switch the active corpus with "
-    "the corpus dropdown (top-right). Pool size + acquisition timeout are "
-    "advanced tuning (set NEO4J_MAX_CONNECTION_POOL_SIZE / "
-    "NEO4J_CONNECTION_ACQUISITION_TIMEOUT env vars to change)."
-)
 
 
 class AppTab:
@@ -144,7 +115,7 @@ class AppTab:
         }
         rd = self.app.gui_config.results_dir
         self.results_dir_text = ft.Text(
-            str(rd) if rd else "(not set — first Save will ask)",
+            str(rd) if rd else "(not set; first Save will ask)",
             size=12,
             color=ft.Colors.WHITE,
             selectable=True,
@@ -165,7 +136,7 @@ class AppTab:
         }
         cd = self.app.gui_config.chat_dir
         self.chat_dir_text = ft.Text(
-            str(cd) if cd else "(not set — first Save will ask)",
+            str(cd) if cd else "(not set; first Save will ask)",
             size=12,
             color=ft.Colors.WHITE,
             selectable=True,
@@ -298,7 +269,7 @@ class AppTab:
                 spacing=10,
                 controls=[
                     # ---- Save results -------------------------------------
-                    section_header(self.app, "Save results", _SAVE_RESULTS_BLURB),
+                    section_header(self.app, "Save results", key="settings.save_results"),
                     ft.Row(
                         controls=[self.save_format_checkboxes[f] for f in ANSWER_FORMATS],
                         wrap=True,
@@ -308,7 +279,7 @@ class AppTab:
                     ft.Row(controls=[self.browse_folder_button]),
                     section_divider(),
                     # ---- Save chat ----------------------------------------
-                    section_header(self.app, "Save chat", _SAVE_CHAT_BLURB),
+                    section_header(self.app, "Save chat", key="settings.save_chat"),
                     ft.Row(
                         controls=[self.chat_format_checkboxes[f] for f in CHAT_FORMATS],
                         wrap=True,
@@ -318,7 +289,7 @@ class AppTab:
                     ft.Row(controls=[self.chat_browse_button]),
                     section_divider(),
                     # ---- App behaviour -------------------------------------
-                    section_header(self.app, "App behaviour"),
+                    section_header(self.app, "App behaviour", key="settings.app_behaviour"),
                     self.restore_last_corpus_checkbox,
                     self.keep_loaded_checkbox,
                     # Each info-tier toggle shows a live sample of the icon it
@@ -350,28 +321,17 @@ class AppTab:
                 spacing=10,
                 controls=[
                     # ---- Diagnostics ---------------------------------------
-                    section_header(self.app, "Diagnostics"),
-                    ft.Row(
-                        [
-                            self.debug_mode_checkbox,
-                            info_icon(
-                                self.app,
-                                title="Show diagnostic info in chat",
-                                text=_DEBUG_BLURB,
-                            ),
-                        ],
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        spacing=4,
-                    ),
+                    section_header(self.app, "Diagnostics", key="settings.diagnostics"),
+                    self.debug_mode_checkbox,
                     ft.Container(height=8),
                     ft.Row(
                         controls=[
                             ft.Text(
-                                "System health — Neo4j, LanceDB, active provider keys:",
+                                "System health (Neo4j, LanceDB, active provider keys):",
                                 size=12,
                                 color=ft.Colors.GREY_400,
                             ),
-                            info(self.app, "diagnostics.system_health"),
+                            info(self.app, "settings.system_health"),
                         ],
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         spacing=6,
@@ -380,7 +340,11 @@ class AppTab:
                     ft.Row(controls=[self.rerun_button]),
                     section_divider(),
                     # ---- Database connection (read-only display) -----------
-                    section_header(self.app, "Database connection", _CONNECTION_BLURB),
+                    section_header(
+                        self.app,
+                        "Database connection",
+                        key="settings.database_connection",
+                    ),
                     _kv_row("Active corpus", self.active_corpus_text),
                     _kv_row("Neo4j URI", self.neo4j_uri_text),
                     _kv_row("Neo4j user", self.neo4j_user_text),
@@ -686,7 +650,7 @@ class AppTab:
         cfg = self.app.gui_config
         if self.active_corpus_text is not None:
             self.active_corpus_text.value = (
-                cfg.active_corpus_name or "(no corpus — create one in Library)"
+                cfg.active_corpus_name or "(no corpus; create one in Library)"
             )
         if self.neo4j_uri_text is not None:
             self.neo4j_uri_text.value = cfg.neo4j_uri

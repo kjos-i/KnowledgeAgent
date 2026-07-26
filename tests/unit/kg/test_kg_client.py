@@ -7,6 +7,7 @@ session.run() so assertions can check exactly what was sent.
 
 from dataclasses import dataclass, field
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -127,6 +128,28 @@ def _client_with_driver(settings: Settings, driver: RecordingDriver) -> Neo4jCli
     # pre-set value is returned as-is.
     client._driver = driver  # type: ignore[assignment]
     return client
+
+
+# ---- driver construction (pool tuning wiring) ----
+
+
+def test_driver_forwards_pool_tuning_settings():
+    """The lazy driver forwards the two Neo4j tuning settings so they are live,
+    not dead config: max_connection_pool_size + connection_acquisition_timeout,
+    alongside the URI + auth."""
+    settings = _configured_settings(
+        neo4j_max_connection_pool_size=42,
+        neo4j_connection_acquisition_timeout=12.5,
+    )
+    client = Neo4jClient(settings=settings)
+    with patch("knowledge_agent.kg.client.AsyncGraphDatabase") as gdb:
+        _ = client.driver  # triggers the lazy construction
+    gdb.driver.assert_called_once()
+    args, kwargs = gdb.driver.call_args
+    assert args[0] == "neo4j://localhost:7687"
+    assert kwargs["auth"] == ("neo4j", "fake-neo4j-password")  # pragma: allowlist secret
+    assert kwargs["max_connection_pool_size"] == 42
+    assert kwargs["connection_acquisition_timeout"] == 12.5
 
 
 # Test doc_id used by write_citations / write_authorships tests.

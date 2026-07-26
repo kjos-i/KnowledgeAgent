@@ -142,15 +142,21 @@ def test_mode_section_header_has_icon():
 
 
 def test_all_retrieval_sections_have_info_text():
-    """Every Retrieval section's icon text is present across all three tiers
-    (regression against a tier silently going blank, or a constant being
-    renamed away from the section_header that uses it)."""
-    from knowledge_agent.gui.settings import retrieval_tab as rt
+    """Every Retrieval section's icon text is present across all three tiers in
+    the central registry (headers render via section_header key=; guards against
+    a tier silently going blank)."""
+    from knowledge_agent.gui._widgets.info_text import INFO
 
-    for prefix in ("_MODE", "_RESULT_SIZE", "_RRF", "_MMR", "_KG", "_INPUT"):
-        for tier in ("STANDARD", "BEGINNER", "TECHNICAL"):
-            value = getattr(rt, f"{prefix}_INFO_{tier}")
-            assert value and value.strip(), f"{prefix}_INFO_{tier} is empty"
+    for key in (
+        "retrieval.mode",
+        "retrieval.result_size",
+        "retrieval.rrf",
+        "retrieval.mmr",
+        "retrieval.knowledge_graph",
+        "retrieval.input_mode",
+    ):
+        spec = INFO[key]
+        assert spec.standard and spec.beginner and spec.technical, f"{key}: a tier is empty"
 
 
 def test_direct_cypher_greys_the_mode_dropdown():

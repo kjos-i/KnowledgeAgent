@@ -7,7 +7,7 @@ keeps the GUI layout code readable and gathers every help string in one
 place to review and tone-check as a body.
 
 Keys are namespaced by location, `"<area>.<control>"` (e.g.
-`"diagnostics.system_health"`, `"library.corpus.embedder"`), so the key
+`"settings.system_health"`, `"library.corpus.embedder"`), so the key
 tells you where the icon lives. A `KeyError` from `info(app, key)` means
 a typo'd or unregistered key — it fails loudly in dev rather than
 rendering blank.
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 
 INFO: dict[str, InfoText] = {
-    "diagnostics.system_health": InfoText(
+    "settings.system_health": InfoText(
         title="System health",
         standard=(
             "Checks the app can reach the parts it needs to answer a query, as "
@@ -3690,6 +3690,696 @@ INFO: dict[str, InfoText] = {
             "keyring entry), clears that key's env var, and resets the caches, so "
             "it takes effect without a restart. The Neo4j password is not managed "
             "here: it is per corpus (keyring neo4j-<corpus>), set in the Library tab."
+        ),
+    ),
+    # ---- Settings tab (AppTab) ----
+    "settings.save_results": InfoText(
+        title="Save results",
+        standard=(
+            "Sets where and in which format(s) the Search tab's Save Result button "
+            "writes an answer. Tick any of Markdown (.md), Plain text (.txt), Word "
+            "(.docx), or JSON (.json), and Save Result writes one file per ticked "
+            "format (JSON holds the answer data on its own). At least one format "
+            "always stays ticked. Browse chooses the default folder shown here; when "
+            "no folder is set, the first Save Result asks for one and remembers it. "
+            "Save Chat, in the next section, has its own separate formats and folder."
+        ),
+        beginner=(
+            "This is where your saved answers go, and in what file types. When you "
+            "press Save Result on the Search tab, the app writes the answer into the "
+            "folder shown here, making one file for each type you have ticked. "
+            "Markdown and Word open as nicely formatted documents, plain text is just "
+            "the words, and JSON is a data format that other programs can read. You "
+            "can tick more than one, and one always has to stay ticked so there is "
+            "something to save. Press Browse to choose the folder; if you never "
+            "choose one, the first save will ask you to pick a folder and then "
+            "remember it. Saving your chat is set up separately, just below."
+        ),
+        technical=(
+            "Drives GuiConfig.save_formats (default ['md']) and results_dir. The "
+            "checkboxes come from ANSWER_FORMATS (md, txt, docx, json) with "
+            "FORMAT_LABELS. on_save_format_changed persists the ticked set in "
+            "canonical order, refuses an empty set (it re-ticks the prior "
+            "selection), and rolls back on a ConfigError. Browse calls the OS folder "
+            "picker (file_picker.get_directory_path) and persists results_dir, also "
+            "with rollback. The Save Chat section is a separate chat_save_formats / "
+            "chat_dir pair, and the same artifacts.py renderers are shared by the CLI."
+        ),
+    ),
+    "settings.save_chat": InfoText(
+        title="Save chat",
+        standard=(
+            "Sets where and in which format(s) the Search tab's Save Chat button "
+            "writes the full conversation transcript. These are its own settings, "
+            "separate from Save Result above. Tick any of Markdown (.md), Plain text "
+            "(.txt), or Word (.docx). A transcript has no JSON form, so JSON is not "
+            "offered here. At least one format always stays ticked. Browse chooses "
+            "the default folder; when none is set, the first Save Chat asks for one "
+            "and remembers it."
+        ),
+        beginner=(
+            "This is the same idea as Save results just above, but for saving the "
+            "whole back-and-forth conversation instead of a single answer. Pick the "
+            "folder and the file types you want, then press Save Chat on the Search "
+            "tab. You get Markdown, plain text, or Word here. There is no JSON "
+            "option, because a conversation is not stored as data the way a single "
+            "answer is. One type always stays ticked, and Browse chooses the folder "
+            "(the app asks the first time if you have not set one). These choices are "
+            "kept separate from the Save results ones, so you can send answers and "
+            "chats to different places."
+        ),
+        technical=(
+            "Drives GuiConfig.chat_save_formats (default ['md']) and chat_dir, "
+            "independent of the Save results pair. The checkboxes come from "
+            "CHAT_FORMATS (md, txt, docx, no json). on_chat_format_changed persists "
+            "the ticked set, keeps at least one, and rolls back on ConfigError. "
+            "on_chat_browse_folder persists chat_dir via the OS folder picker with "
+            "rollback. A legacy config with no chat_* keys inherits the results_dir "
+            "and save_formats values once (the _mirror_chat_from_results validator), "
+            "after which the two sets diverge freely."
+        ),
+    ),
+    "settings.app_behaviour": InfoText(
+        title="App behaviour",
+        standard=(
+            "Five preferences for how the app starts and how much help it shows. "
+            "Restore last used dataset on startup: reopen the corpus you last used "
+            "when the app launches, instead of starting with none. Keep loaded file "
+            "when clearing chat: when you press Clear, leave any answer file you had "
+            "opened on screen rather than clearing it too. The three help-icon "
+            "toggles turn the (i) help tiers on or off across the whole app: standard "
+            "(blue) is the everyday note, beginner (green) adds plain-language help "
+            "for new users, and technical (orange) adds power-user detail such as "
+            "environment variables and backend behaviour. Each tier is independent, "
+            "and the sample icon beside each toggle shows what it looks like. All "
+            "three off gives a clean, icon-free interface."
+        ),
+        beginner=(
+            "A few switches for how the app behaves. The first, restore last used "
+            "dataset on startup, means that when you open the app it goes straight "
+            "back to the collection of documents (a corpus) you were last working "
+            "with, so you do not have to pick it again. The second, keep loaded file "
+            "when clearing chat, means that when you press Clear to tidy up, a "
+            "document you had opened stays on screen instead of disappearing with "
+            "everything else. The last three switches control these little help icons "
+            "themselves. You are reading one right now. Standard (blue) is the normal "
+            "help, beginner (green) is this friendlier kind written for people new to "
+            "the tool, and technical (orange) is extra detail for advanced users. "
+            "Turn on whichever mix you like; the small coloured icon next to each "
+            "switch shows what it looks like. Turn all three off and the help icons "
+            "disappear for a clean screen."
+        ),
+        technical=(
+            "Each checkbox auto-saves one GuiConfig flag with rollback on "
+            "ConfigError. restore_last_corpus (default True): on startup the GUI "
+            "loads corpus_config_path, falling back to <cwd>/corpus.toml; when False "
+            "it skips the explicit path, so you start with no corpus unless one sits "
+            "in the working directory. keep_loaded_file_on_clear (default True): "
+            "Clear leaves an opened answer file mounted. show_info_icons (default "
+            "True), show_beginner_info (default False), and show_technical_info "
+            "(default False) gate the three (i) tiers; their handlers also call "
+            "app.set_info_icons_visible(tier, on), so every registered icon of that "
+            "tier flips live without a restart. The tier widgets and their gating "
+            "live in info_icon.py, and the help strings live in this info_text.py "
+            "registry."
+        ),
+    ),
+    "settings.diagnostics": InfoText(
+        title="Diagnostics",
+        standard=(
+            "Tools for seeing what the app is doing under the hood. Show diagnostic "
+            "info in chat: when on, each query adds one extra line to the chat just "
+            "before it runs, showing the input mode, the retrieval mode, and the "
+            "exact search query being sent. When off, that line is hidden and the "
+            "chat shows only the normal 'answer ready' summary. Below the toggle, the "
+            "System health board checks that the app can reach its databases and that "
+            "your provider keys are set; it has its own (i) with the full detail."
+        ),
+        beginner=(
+            "This section helps you look behind the scenes. The switch, show "
+            "diagnostic info in chat, decides whether the app shows a little extra "
+            "detail as it works. Leave it off for a clean conversation. Turn it on "
+            "and, just before each answer, the chat adds one line telling you how it "
+            "read your request, which kind of search it is running, and the exact "
+            "wording it is searching for. That is handy when a result looks off and "
+            "you want to see what was actually searched. Underneath is a System "
+            "health panel that runs a few quick checks on the app's plumbing; it has "
+            "its own help icon that explains it in full."
+        ),
+        technical=(
+            "The checkbox drives GuiConfig.debug_mode (default False), auto-saved "
+            "with rollback. When on, the app emits a single debug-gated line before "
+            "retrieval, via app._diag(): 'retrieving (input_mode=..., mode=..., "
+            "query=...)' carrying the input mode, the resolved retrieval_mode, and "
+            "the query. That is the only debug-gated output today; every other chat "
+            "line (including the 'answer ready, N chunk + M KG sources' count) is "
+            "unconditional, and there is no per-node or per-hit title/score stream. "
+            "The System health board below is a separate feature with its own (i): it "
+            "renders health.system_status() as OK or FAIL chips. This section only "
+            "groups the two controls under one heading."
+        ),
+    ),
+    "settings.database_connection": InfoText(
+        title="Database connection",
+        standard=(
+            "A read-only view of the databases the active corpus uses. It shows the "
+            "active corpus name, its Neo4j knowledge-graph connection (URI and user), "
+            "and its LanceDB search-store path. A corpus's connection is fixed when "
+            "you create it (Library, Create New Dataset) and cannot be edited here; "
+            "to use a different one, switch the active corpus with the 'Selected "
+            "corpus' dropdown at the top right. Connection pool size and acquisition "
+            "timeout are advanced Neo4j tuning values; change them by setting the "
+            "NEO4J_MAX_CONNECTION_POOL_SIZE and NEO4J_CONNECTION_ACQUISITION_TIMEOUT "
+            "environment variables and restarting the app."
+        ),
+        beginner=(
+            "This just shows you which databases your current corpus (your searchable "
+            "document collection) is wired to. Nothing here can be typed over, it is "
+            "for looking only. The app keeps two stores: Neo4j, which holds the "
+            "knowledge graph (how facts and documents link together), and LanceDB, "
+            "which holds the searchable text. Each corpus is tied to its own stores "
+            "when you first create it in the Library tab, and that wiring stays put; "
+            "if you want different databases, make or switch to another corpus using "
+            "the dropdown at the top right. The last two lines, pool size and "
+            "acquisition timeout, are fine-tuning numbers for advanced setups; you "
+            "can ignore them unless someone tells you otherwise."
+        ),
+        technical=(
+            "Read-only mirror of the active corpus. Active corpus, Neo4j URI, Neo4j "
+            "user, and LanceDB path come from GuiConfig (the mirror of the active "
+            "CorpusEntry); the connection is set at Library, Create New Dataset and "
+            "is immutable here (the old on-blur editors were removed at the read-only "
+            "pivot). Switch corpora via the top-bar dropdown (app.select_corpus). "
+            "Connection pool size (neo4j_max_connection_pool_size, default 100) and "
+            "acquisition timeout (neo4j_connection_acquisition_timeout, default "
+            "60.0s) are read live from get_settings() and passed to "
+            "AsyncGraphDatabase.driver(); they fall back to the pydantic Field "
+            "defaults with a '(default)' suffix if Settings cannot be built yet (for "
+            "example before a corpus bridges NEO4J_PASSWORD). Both are read once at "
+            "driver construction, so an override via the matching uppercase env var "
+            "needs a restart."
+        ),
+    ),
+    # ---- Search tab: LLMs sub-tab (llm_tab.py) ----
+    "llms.installed_providers": InfoText(
+        title="Installed providers",
+        standard=(
+            "A read-only list of the LLM providers you have installed. There is no "
+            "single active provider: you pick a model per step in the section below, "
+            "and it can come from any installed provider.\n\n"
+            "Install or uninstall providers in the Installs tab, not here. This "
+            "section only reflects what is set up; if nothing is installed yet, it "
+            "points you there.\n\n"
+            "This list is read when the tab opens. If you install a provider, reopen "
+            "the tab (or restart the app) to see it appear here and in the model "
+            "pickers below.\n\n"
+            "The four LLM providers are Anthropic, OpenAI, Google and Ollama (local). "
+            "Voyage is an embedder, so it is not listed here; it appears only in the "
+            "rate-limit section below."
+        ),
+        beginner=(
+            "This box just shows which AI model providers are already set up on this "
+            "computer. You do not change anything here.\n\n"
+            "To add a provider (Anthropic, OpenAI, Google, or the local Ollama), open "
+            "the Installs tab and install it there. After installing, reopen this tab "
+            "(or restart the app) and the new provider shows up here and in the "
+            "pickers just below.\n\n"
+            "If the box says none are installed, start in the Installs tab."
+        ),
+        technical=(
+            "Read-only. Each provider's presence comes from its is_installed_fn in "
+            "LLM_PROVIDER_REGISTRY, which probes importlib.util.find_spec (no heavy "
+            "import) for the adapter package (langchain-anthropic, langchain-openai, "
+            "langchain-google-genai, langchain-ollama).\n\n"
+            "The list is filled once when the tab first builds in a session; it does "
+            "not live-refresh after an install, so reopen the tab or restart to "
+            "reflect a change (installing a provider requires a restart to take "
+            "effect anyway). The same install state drives the per-step model options "
+            "below (available_models lists only installed providers' models)."
+        ),
+    ),
+    "llms.models": InfoText(
+        title="Select LLM models and temperatures",
+        standard=(
+            "Pick which model runs at each step of answering a question, plus its "
+            "temperature. Each step is a separate choice, so you can use a cheap "
+            "model where speed matters and a stronger one where reasoning matters.\n\n"
+            "The steps:\n"
+            "- Chat router: the conversational layer. It reads the running "
+            "conversation, decides when to search, and distils a clean, "
+            "self-contained query (resolving 'it', 'those', earlier context) before "
+            "retrieval. It runs only in Conversational input mode. Routing is light, "
+            "so a cheap, fast model is usually enough.\n"
+            "- Mode classifier: in Auto retrieval mode, reads your question and picks "
+            "which store answers it. A small, repeated task; a cheap model suits it.\n"
+            "- Query builder: rewrites your question into a clean query for the "
+            "document (chunk) search. Also light.\n"
+            "- Cypher builder: writes the graph query from your question when the "
+            "knowledge graph is used. This needs stronger, compositional reasoning, "
+            "so a more capable model is worth it.\n"
+            "- Synthesizer: writes the final answer with citations from the retrieved "
+            "evidence. It benefits from a stronger model; it runs once per question, "
+            "so the cost stays small.\n\n"
+            "For each step:\n"
+            "- Model (dropdown): choose any model from any installed provider. You "
+            "can also type a model name to use one that is not in the list.\n"
+            "- Temperature (slider): 0.0 is focused and consistent; higher is more "
+            "varied. These steps produce structured output, so low is usually best. "
+            "The slider greys out for models that do not accept a temperature (the "
+            "newest Anthropic models), because it would have no effect.\n\n"
+            "These are the query-time models. The ingest-time extractor models "
+            "(entities and triples) are set per corpus in the Library tab."
+        ),
+        beginner=(
+            "Answering a question happens in a few steps, and each step can use a "
+            "different AI model. This section sets the model and its 'temperature' "
+            "for each step.\n\n"
+            "The steps, in plain terms:\n"
+            "- Chat router: understands the back-and-forth of the chat and turns what "
+            "you meant into a clear search request. Used only in the Conversational "
+            "input mode. A small, fast model is fine.\n"
+            "- Mode classifier: when the retrieval mode is Auto, decides where to "
+            "look (your documents, the knowledge graph, or both). A small model is "
+            "fine.\n"
+            "- Query builder: tidies your question into a good search query for your "
+            "documents. A small model is fine.\n"
+            "- Cypher builder: writes the special query used to search the knowledge "
+            "graph. Trickier, so a stronger model helps.\n"
+            "- Synthesizer: writes the final answer and its citations. A stronger "
+            "model gives better answers; it only runs once per question.\n\n"
+            "For each step:\n"
+            "- Model: pick from the models you have installed. Cheaper models are "
+            "faster and cost less; stronger models reason better.\n"
+            "- Temperature: how varied the model is. Low (near 0) keeps it focused "
+            "and repeatable, which is what these steps want; higher makes it more "
+            "varied. If the slider is greyed out, the chosen model does not use this "
+            "setting.\n\n"
+            "A safe starting point is the defaults: light models for the router, "
+            "classifier and query builder, and stronger ones for the cypher builder "
+            "and synthesizer."
+        ),
+        technical=(
+            "The four graph nodes read Settings.<node>_model and "
+            "Settings.<node>_temperature (env MODE_CLASSIFIER_MODEL / _TEMPERATURE, "
+            "QUERY_BUILDER_*, CYPHER_BUILDER_*, SYNTHESIZER_*), bridged by "
+            "apply_llm_to_env and consumed via get_llm_ref wrapped in with_retry. "
+            "Defaults come from PROVIDER_NODE_DEFAULTS (Haiku for the classifier and "
+            "query builder, Sonnet for the cypher builder and synthesizer).\n\n"
+            "Chat router is GUI-only: chat_router_model and chat_router_temperature "
+            "live in GuiConfig, are not bridged to env, and are read by "
+            "get_chat_router (via get_llm_ref) only when the input mode is "
+            "conversational. It is not wrapped in with_retry, so the retry setting "
+            "does not cover it.\n\n"
+            "Each selection is stored as a provider:model reference (format_model_ref), "
+            "so a step can target any installed provider. The dropdown is editable: a "
+            "typed value is stored verbatim, and a bare model name with no provider "
+            "prefix falls back to the global llm_provider for dispatch (and for the "
+            "temperature check).\n\n"
+            "Temperature is omitted for the newest Anthropic models (claude-opus-4-8, "
+            "claude-opus-4-7, claude-sonnet-5, claude-fable-5, claude-mythos-5), which "
+            "reject the sampling parameter with a 400. The slider greys via "
+            "supports_temperature and the factory omits the parameter for the same "
+            "set, so the grey-out matches actual behaviour. Extractor models (entity "
+            "and triples, ingest-time) are per corpus in corpus.toml, set in the "
+            "Library tab."
+        ),
+    ),
+    "llms.rate_limits": InfoText(
+        title="Per-provider rate limits + retries",
+        standard=(
+            "Two kinds of control: per-provider rate caps, and a shared retry "
+            "count.\n\n"
+            "Rate limit (requests/sec) per provider: caps how many requests per "
+            "second the app sends to that provider. Leave a field blank for no limit. "
+            "Set one when your provider tier limits you below the app's concurrent "
+            "fan-out (for example, the many parallel calls during ingest or "
+            "evaluation).\n"
+            "- Anthropic, OpenAI, Google, Ollama: throttle that provider's LLM (chat) "
+            "calls, meaning the models in the section above.\n"
+            "- OpenAI and Google also produce embeddings, but these caps throttle "
+            "only their chat calls, not their embedding calls.\n"
+            "- Voyage: throttles Voyage embedding requests. Voyage is the default "
+            "embedder, and this is a global cap applied wherever it embeds (mainly "
+            "ingest).\n\n"
+            "LLM max retries (1 to 10): how many attempts each LLM call gets when it "
+            "fails transiently (a rate-limit response or a network blip), using "
+            "exponential backoff. The default 3 is a sensible balance. This covers "
+            "the query-time graph steps and the ingest-time extractors."
+        ),
+        beginner=(
+            "These stop the app from calling a provider too quickly, and control how "
+            "many times it retries a failed call.\n\n"
+            "Rate limit (requests/sec): some accounts only allow so many requests per "
+            "second. Leave these blank unless you actually see rate-limit errors; "
+            "then enter a small number for that provider to slow the app to a safe "
+            "pace. It matters most during ingest, when the app makes many calls at "
+            "once.\n\n"
+            "LLM max retries: if a call briefly fails (the provider is busy, or the "
+            "network hiccups), the app waits a moment and tries again, up to this "
+            "many times. Three is a good default; raise it a little if your "
+            "connection is flaky."
+        ),
+        technical=(
+            "Each rate field maps to Settings.<provider>_requests_per_second (env "
+            "<PROVIDER>_REQUESTS_PER_SECOND). Blank bridges as an unset env var, so no "
+            "limiter is wired (the default). A positive value builds one "
+            "InMemoryRateLimiter token bucket per provider, shared across that "
+            "provider's cached clients (llm_factory._rate_limiter_for).\n\n"
+            "Anthropic, OpenAI, Google and Ollama caps apply to LLM (chat) calls "
+            "only. OpenAI and Google embedding calls are not throttled by these caps: "
+            "LangChain Embeddings clients take no rate-limiter argument. Voyage maps "
+            "to Settings.voyage_requests_per_second (env VOYAGE_REQUESTS_PER_SECOND) "
+            "and throttles the native Voyage client: embed_texts / embed_chunks "
+            "acquire a token from the same InMemoryRateLimiter class before each "
+            "native call.\n\n"
+            "LLM max retries maps to Settings.llm_max_retries (env LLM_MAX_RETRIES) "
+            "and drives with_retry(stop_after_attempt=N, wait_exponential_jitter=True) "
+            "at the four graph nodes and the entity and triples extractors; the GUI "
+            "chat router is not wrapped. Rate limits and retries here are saved "
+            "settings applied on the next call, not per-request overrides."
+        ),
+    ),
+    # ---- Search tab: Retrieval sub-tab (retrieval_tab.py) ----
+    "retrieval.mode": InfoText(
+        title="Mode",
+        standard=(
+            "This section has two separate controls.\n\n"
+            "Retrieval mode (the dropdown) chooses which store answers your "
+            "question:\n"
+            "- Auto: the app reads your question and picks one of the five modes "
+            "below for you.\n"
+            "- LanceDB only: searches the text inside your documents (the chunks). "
+            'Best for "what do the documents say about X".\n'
+            "- Neo4j only: queries the knowledge graph (the network of authors, "
+            "documents, citations and entities) instead of the text. Best for "
+            '"who wrote X", "what cites Y", counts and relationships.\n'
+            "- LanceDB then Neo4j: finds the most relevant chunks first, then "
+            "looks up graph facts about those same documents and adds them.\n"
+            "- Neo4j then LanceDB: uses the graph to narrow to a set of documents "
+            "first (say, by author or year), then searches chunk text only inside "
+            "that set.\n"
+            "- Parallel fused: runs the chunk search and the graph query at the "
+            "same time, and the answer step combines both.\n\n"
+            "LanceDB search mode (the radio buttons) chooses how the chunk search "
+            "itself works. It only matters when the chosen mode runs a chunk "
+            "search:\n"
+            "- Hybrid: combines keyword matching (BM25) with meaning-based vector "
+            "search. The all-round default.\n"
+            "- FTS: keyword matching only. Best when exact words matter (names, "
+            "codes, precise phrases).\n"
+            "- Vector: meaning-based only. Best when your wording differs from the "
+            "documents but the concept is the same.\n\n"
+            "Controls the current mode does not use are greyed out."
+        ),
+        beginner=(
+            "Two questions decide how a search runs.\n\n"
+            "First, where should the app look? That is the Retrieval mode "
+            "dropdown:\n"
+            "- Auto: let the app choose for you. Use this if you are unsure.\n"
+            "- LanceDB only: read the actual words inside your documents. Use it "
+            'for "what do the documents say about ...".\n'
+            "- Neo4j only: look at the map of who wrote what and what links to "
+            "what, rather than the text. Use it for "
+            '"who wrote ...", "what cites ...", or counting things.\n'
+            "- LanceDB then Neo4j: find the text first, then add facts about those "
+            "documents (such as their authors or citations).\n"
+            "- Neo4j then LanceDB: first pick documents by a fact (like an "
+            "author), then read the text only inside those.\n"
+            "- Parallel fused: do both at once and blend the result. Good for big, "
+            "open-ended questions.\n\n"
+            "Second, how should it search the text? That is the LanceDB search "
+            "mode buttons (they only matter when the app reads document text):\n"
+            "- Hybrid: matches both exact words and meaning. Leave it here if "
+            "unsure.\n"
+            "- FTS: exact words only. Good when a specific term or name must "
+            "appear.\n"
+            "- Vector: meaning only. Good when you describe an idea in your own "
+            "words.\n\n"
+            "Starting out, Auto with Hybrid is a safe pairing."
+        ),
+        technical=(
+            "Agent-level mode maps to Settings.default_retrieval_mode (env "
+            "DEFAULT_RETRIEVAL_MODE) and is also passed per-search as a state "
+            "override that wins over the saved default. It selects the LangGraph "
+            "topology:\n"
+            "- auto: an LLM mode_classifier reads the query and picks one of the "
+            "five concrete modes (fail-soft to lancedb_only on error).\n"
+            "- lancedb_only: query_builder, then lancedb_retriever, then "
+            "synthesizer.\n"
+            "- neo4j_only: cypher_builder, then neo4j_retriever, then "
+            "synthesizer.\n"
+            "- lancedb_then_neo4j: the chunk hits are fed into cypher_builder so "
+            "its Cypher can correlate by doc_id.\n"
+            "- neo4j_then_lancedb: the doc_ids from the graph rows become a "
+            '"doc_id IN (...)" filter on the chunk search (unfiltered fallback '
+            "when none).\n"
+            "- parallel_fused: both legs fan out and the synthesizer LLM merges "
+            "the two evidence lists. There is no cross-store rank fusion.\n\n"
+            "Within-store mode maps to Settings.lancedb_search_mode (env "
+            "LANCEDB_SEARCH_MODE):\n"
+            "- hybrid: BM25 and cosine-vector legs fused by LanceDB's RRF "
+            "reranker.\n"
+            "- fts: BM25 only (MMR does not apply).\n"
+            "- vector: cosine kNN only.\n\n"
+            "Direct Cypher input mode forces the store to neo4j_only, overriding "
+            "this dropdown. Unused knobs grey out via apply_gray_out."
+        ),
+    ),
+    "retrieval.result_size": InfoText(
+        title="Result size",
+        standard=(
+            "top_k is how many document chunks a search returns: the final result "
+            "count.\n\n"
+            "The search gathers a larger pool of candidate chunks, ranks them, and "
+            "keeps the best top_k. It caps document chunks only; graph rows have "
+            "their own limit (see Knowledge graph). The allowed range is 1 to 50, "
+            "and top_k must not exceed num_candidates (the form reverts the value "
+            "if you break that).\n\n"
+            'It has no effect in "Neo4j only" mode, which returns graph rows, not '
+            "chunks."
+        ),
+        beginner=(
+            "This is simply how many results come back. Around 5 is a good start: "
+            "enough to answer most questions without burying you in text. Raise it "
+            "to have the assistant weigh more sources, lower it for short, focused "
+            "answers. The most you can set is 50."
+        ),
+        technical=(
+            "Maps to Settings.top_k (env TOP_K); also sent per-search in the graph "
+            "state, where it overrides the saved default. Constraints: 1 to 50, "
+            "and top_k must be less than or equal to num_candidates (the Retrieval "
+            "tab checks this itself and reverts an edit that breaks it). In hybrid "
+            "and vector search the ranked pool is cut, or MMR-reranked, to top_k; "
+            "FTS limits straight to top_k. It is not greyed in Neo4j-only mode but "
+            "has no effect there (no chunk leg runs)."
+        ),
+    ),
+    "retrieval.rrf": InfoText(
+        title="Hybrid fusion (RRF)",
+        standard=(
+            "Two knobs that shape the chunk search before it returns your top_k "
+            "results.\n\n"
+            "- num_candidates: how many rows the search pulls into its working "
+            "pool before trimming down to top_k. A bigger pool means better recall "
+            "and better fusion, at a little more cost. It applies to Hybrid and "
+            "Vector search, and must be at least top_k (the form reverts an edit "
+            "that breaks this).\n"
+            "- RRF rank constant k: used only by Hybrid. When Hybrid blends its "
+            "keyword (BM25) and vector results, each hit scores 1/(k + rank). A "
+            "lower k lets the very top hits dominate; a higher k evens out the "
+            "difference between ranks."
+        ),
+        beginner=(
+            'These fine-tune the "Hybrid" chunk search, and you can usually leave '
+            "them alone.\n\n"
+            "- num_candidates: how wide a net the search casts before picking the "
+            "best few. Larger can find slightly better results but is a touch "
+            "slower. The default (100) suits most corpora.\n"
+            "- RRF rank constant: how strongly the very top matches are favoured "
+            "when Hybrid blends keyword and meaning results. The default (60) is a "
+            "sensible balance. Lower favours the top hits more; higher treats more "
+            "results evenly."
+        ),
+        technical=(
+            "num_candidates maps to Settings.num_candidates (env NUM_CANDIDATES, "
+            "default 100); the RRF constant to Settings.rrf_rank_constant (env "
+            "RRF_RANK_CONSTANT, default 60). In Hybrid the BM25 and cosine-vector "
+            "legs each fetch num_candidates rows and LanceDB's RRF reranker fuses "
+            "them with score 1/(k + rank); the fused pool is then cut to top_k, or "
+            "MMR-reranked. Vector search also fetches num_candidates but ignores "
+            "k. FTS uses neither and limits straight to top_k, so num_candidates "
+            "has no effect in FTS (it stays editable there; the RRF constant greys "
+            "out in both FTS and Vector). From the GUI these two are saved "
+            "settings, applied on the next search, not per-search overrides."
+        ),
+    ),
+    "retrieval.mmr": InfoText(
+        title="Diversity (MMR)",
+        standard=(
+            "MMR (Maximal Marginal Relevance) re-ranks the chunk pool to cut "
+            "near-duplicates, so the results cover more ground instead of "
+            "repeating the same point.\n\n"
+            "- Apply MMR diversity re-rank (checkbox): turns the re-rank on or "
+            "off.\n"
+            "- MMR lambda (slider): the balance between relevance and variety. "
+            "Higher favours relevance (results closest to your query); lower "
+            "favours diversity (results that differ from each other).\n\n"
+            "MMR needs vectors, so it applies to Hybrid and Vector search, not FTS."
+        ),
+        beginner=(
+            "Turn this on when your results feel repetitive.\n\n"
+            "- Apply MMR diversity re-rank: when several top chunks say almost the "
+            "same thing, tick this to spread the results across different points. "
+            "Off by default.\n"
+            "- MMR lambda: slide toward the right for the most on-topic results, "
+            "or toward the left for more variety. The middle is a sensible "
+            "balance.\n\n"
+            "It only works with the Hybrid or Vector search modes (it needs "
+            "meaning-based vectors), so it is unavailable for FTS."
+        ),
+        technical=(
+            "use_mmr maps to Settings.default_use_mmr (env DEFAULT_USE_MMR, "
+            "default off); mmr_lambda to Settings.mmr_lambda (env MMR_LAMBDA, 0.0 "
+            "to 1.0, default 0.6). When on, the num_candidates pool is re-ranked "
+            "Python-side down to top_k by score = lambda * sim(query, c) minus "
+            "(1 - lambda) * max sim(c, already-picked), cosine on each row's "
+            "stored embedding. lambda 1.0 is pure relevance, 0.0 is pure "
+            "diversity. FTS ignores use_mmr (no query vector); a pool row missing "
+            "its embedding falls back to plain relevance order. The checkbox greys "
+            "out in FTS and Neo4j-only; the slider greys out whenever MMR is off. "
+            "Both are saved settings applied on the next search, not per-search "
+            "overrides."
+        ),
+    ),
+    "retrieval.knowledge_graph": InfoText(
+        title="Knowledge graph",
+        standard=(
+            "kg_max_rows is the most rows a single knowledge-graph query may "
+            "return.\n\n"
+            "It is a hard cap on graph results (authors, citations, entities and "
+            "other structured rows). It is separate from top_k, which caps "
+            "document chunks; graph queries often return more rows, for example "
+            "the 50 citations of a paper.\n\n"
+            'It has no effect in "LanceDB only" mode, which does not query the '
+            "graph."
+        ),
+        beginner=(
+            "This limits how many rows the graph side hands back at once. The "
+            "default (50) is plenty for most questions. Raise it when you ask for "
+            "long lists (say, every author across many papers) and want to see "
+            'more; lower it to keep answers tight. It does nothing in "LanceDB '
+            'only" mode, which never touches the graph.'
+        ),
+        technical=(
+            "Maps to Settings.kg_max_rows (env KG_MAX_ROWS, default 50). The Neo4j "
+            'retriever wraps the generated Cypher as "CALL { <cypher> } RETURN * '
+            "LIMIT kg_max_rows\", so Neo4j enforces the cap even when the LLM's "
+            "own query forgets a LIMIT or sets a larger one. Distinct from top_k. "
+            'Greys out in "LanceDB only" (no graph leg runs), and is a saved '
+            "setting applied on the next search."
+        ),
+    ),
+    "retrieval.input_mode": InfoText(
+        title="Input mode",
+        standard=(
+            "This section has two controls: how your typed input becomes a search, "
+            "and whether the app writes an answer or just shows the raw results.\n\n"
+            "Input mode (the radios) decides how your text is turned into a query:\n"
+            "- Conversational: the chat assistant reads the conversation, decides "
+            "when to search, and turns your intent into a query for you. The normal "
+            "chat experience.\n"
+            "- Refined query: no chat assistant, but the query builder still "
+            "rewrites your text into a search-friendly query before searching.\n"
+            "- Direct query: your exact text is the search query, with no "
+            "rewriting.\n"
+            "- Direct Cypher: your text is run as a read-only Cypher query against "
+            "the knowledge graph. This forces the search to Neo4j only, whatever the "
+            "Mode dropdown says.\n\n"
+            "Direct retrieval (the checkbox) decides what comes back:\n"
+            "- Off: the app writes a synthesized answer with citations (the normal "
+            "result).\n"
+            "- On: the app skips the answer-writing step and returns the raw "
+            "retrieved chunks and graph rows so you can read the sources yourself. "
+            "Works with every retrieval mode."
+        ),
+        beginner=(
+            "Leave Input mode on Conversational and Direct retrieval off, and it "
+            "works like a normal chat: you type a question in plain words, and the "
+            "app figures out how and when to search and writes you an answer.\n\n"
+            "The other input modes are shortcuts for advanced users:\n"
+            "- Refined query and Direct query give you more control over the exact "
+            "search words.\n"
+            "- Direct Cypher is for people who want to write graph queries by "
+            "hand.\n\n"
+            "Turn Direct retrieval on only if you want to see the raw sources the "
+            "app found, without a written answer. That is mainly for checking search "
+            "quality."
+        ),
+        technical=(
+            "Input mode is a GUI-only routing choice (GuiConfig.input_mode); it is "
+            "not a backend setting. It maps at query time to graph knobs:\n"
+            "- conversational: runs the chat router node, which gates retrieval "
+            "(ready_to_retrieve) and distills a search_query, then the graph runs. "
+            "The only mode that uses the router.\n"
+            "- refined: skips the router; query_builder rewrites the text "
+            "(skip_query_builder=False).\n"
+            "- direct_query: skips the router and query_builder; the raw text is the "
+            "query (skip_query_builder=True).\n"
+            "- direct_cypher: the text is passed as user_cypher and run verbatim; "
+            "store_forced_by_mode pins retrieval_mode to neo4j_only, and the "
+            "read-only rails (is_cypher_read_only, LIMIT wrap, read session) reject "
+            "writes.\n\n"
+            "Direct retrieval maps to direct_retrieval (env DIRECT_RETRIEVAL plus a "
+            "per-invocation state field, which wins from the GUI). When on, the "
+            "synthesizer node is skipped: the answer is empty and the retrieved "
+            "chunks and KG rows are returned as sources. It applies to every "
+            "topology, since the synthesizer is the single convergence node."
+        ),
+    ),
+    # ---- Log tab (log_tab.py) ----
+    "log.overview": InfoText(
+        title="Log",
+        standard=(
+            "The app's activity log, read in-app. File shows the full path of the current "
+            "log file (kagent.log); the box below shows the last 500 lines of it, newest "
+            "at the bottom, and the line under the buttons says how many of that file's "
+            "lines are shown. The view is a snapshot: it does not update on its own, so "
+            "press Refresh to re-read the file and pick up entries written since you "
+            "opened the app. Open folder opens the log's folder in your file manager, "
+            "where the older compressed log archives and a crashes folder also live. The "
+            "text is read-only; you can select and copy it. To see more than the last 500 "
+            "lines, open the file itself from that folder."
+        ),
+        beginner=(
+            "This tab shows the app's diary: a running record of what it did, which helps "
+            "when something goes wrong and you (or someone helping you) want to see what "
+            "happened. The File line at the top is where that record is saved on your "
+            "computer. The large box shows the most recent entries (the last 500 lines), "
+            "with the newest at the bottom, where the view scrolls automatically. It does "
+            "not refresh by itself, so press Refresh whenever you want to pick up the "
+            "latest, since the app keeps adding to the log as it works. Press Open folder "
+            "to jump to where the log is kept, in case you want to send the file to "
+            "someone; that folder also holds older logs (compressed to save space) and a "
+            "separate crashes folder for any serious errors. You cannot type here; it is "
+            "for reading and copying only."
+        ),
+        technical=(
+            "Reads the tail of the active rotating log. File is log_file_path(): the dir "
+            "init_logging() resolved (KAGENT_LOG_DIR or settings.toml [logging].log_dir, "
+            "else platformdirs.user_log_dir) plus kagent.log. The viewer shows the last "
+            "500 lines (_TAIL_LINES) in file order, newest last, via a deque, read once "
+            "when the tab is built at startup and again on each Refresh, never on tab "
+            "re-select; the pane auto-scrolls to the bottom and the status reports "
+            "shown-of-total for the current file only (the count resets on rotation). "
+            "Open folder reveals log_file_path().parent (os.startfile / open / xdg-open). "
+            "The file is written off the event loop (a QueueHandler feeds a background "
+            "QueueListener) by a RotatingFileHandler that rotates at 20 MB and keeps 10 "
+            "gzipped backups (kagent.log.N.gz); the active file stays plain text so "
+            "tailing works. Home paths are redacted to ~ by RedactingFormatter. Level is "
+            "INFO by default (LOG_LEVEL or settings.toml), with noisy libraries clamped "
+            "to WARNING (transformers to ERROR). The .gz archives are not stitched into "
+            "the view, and the crashes/ subdir (crash_<UTC>.log + fault.log) sits "
+            "alongside; both are reached via Open folder."
         ),
     ),
 }

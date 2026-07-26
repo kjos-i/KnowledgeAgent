@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import flet as ft
 
 from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, centered_label
+from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.views._frame import view_header
 from knowledge_agent.logging_setup import log_file_path
 
@@ -35,11 +36,13 @@ logger = logging.getLogger(__name__)
 _TAIL_LINES = 500
 
 
-def _read_tail(path: Path, n: int) -> tuple[str, int]:
+def _read_tail(path: Path, n: int) -> tuple[str, int | None]:
     """Return `(last-n-lines-text, total-line-count)` for `path`.
 
-    `("", 0)` when the file doesn't exist yet. Reads the whole (rotation-bounded)
-    file once, keeping only the last `n` lines in memory."""
+    `("", 0)` when the file doesn't exist yet; `(message, None)` when the file
+    exists but can't be read (total is None so the caller reports the error
+    rather than "no entries"). Reads the whole (rotation-bounded) file once,
+    keeping only the last `n` lines in memory."""
     if not path.is_file():
         return "", 0
     total = 0
@@ -51,12 +54,13 @@ def _read_tail(path: Path, n: int) -> tuple[str, int]:
                 tail.append(line)
     except OSError as exc:
         logger.warning("could not read log %s: %r", path, exc)
-        return f"(could not read log: {exc})", 0
+        return f"(could not read log: {exc})", None
     return "".join(tail), total
 
 
-def _reveal_in_file_manager(path: Path) -> None:
-    """Open `path` (a directory) in the OS file manager."""
+def _reveal_in_file_manager(path: Path) -> bool:
+    """Open `path` (a directory) in the OS file manager. Returns True on
+    success, False if the launch failed (the caller surfaces the failure)."""
     try:
         if sys.platform.startswith("win"):
             os.startfile(str(path))  # opening a dir we resolved ourselves
@@ -66,6 +70,8 @@ def _reveal_in_file_manager(path: Path) -> None:
             subprocess.Popen(["xdg-open", str(path)])
     except Exception as exc:
         logger.warning("could not open log folder %s: %r", path, exc)
+        return False
+    return True
 
 
 class LogTab:
@@ -91,7 +97,9 @@ class LogTab:
             spacing=8,
         )
         log_view = ft.Container(
-            content=ft.Column(controls=[self._body], scroll=ft.ScrollMode.AUTO, expand=True),
+            content=ft.Column(
+                controls=[self._body], scroll=ft.ScrollMode.AUTO, auto_scroll=True, expand=True
+            ),
             expand=True,
             padding=8,
             border=ft.Border.all(1, FRAME_BORDER_COLOR),
@@ -99,7 +107,7 @@ class LogTab:
         )
         return ft.Column(
             controls=[
-                view_header("Log"),
+                view_header("Log", trailing=info(self.app, "log.overview")),
                 ft.Row(
                     controls=[
                         ft.Text("File:", size=12, weight=ft.FontWeight.BOLD),
@@ -118,7 +126,9 @@ class LogTab:
         )
 
     def refresh(self) -> None:
-        """Re-read the log (e.g. after the tab is re-selected)."""
+        """Re-read the log and repaint. Wired to the Refresh button; the tab
+        body is built once at startup, so this is the only way the view picks
+        up entries written since."""
         self._load()
         self.app.page.update()
 
@@ -132,7 +142,9 @@ class LogTab:
         if self._body is not None:
             self._body.value = text or "(no log written yet)"
         if self._status is not None:
-            if total:
+            if total is None:
+                self._status.value = "Could not read the log file."
+            elif total:
                 shown = min(total, _TAIL_LINES)
                 self._status.value = f"Showing the last {shown} of {total} lines."
             else:
@@ -142,4 +154,6 @@ class LogTab:
         self.refresh()
 
     def _on_open_folder(self, _e: ft.Event) -> None:
-        _reveal_in_file_manager(log_file_path().parent)
+        if not _reveal_in_file_manager(log_file_path().parent) and self._status is not None:
+            self._status.value = "Could not open the log folder."
+            self.app.page.update()

@@ -440,9 +440,9 @@ class GuiConfig(BaseModel):
     debug_mode: bool = Field(
         default=False,
         description=(
-            "When True, surfaces per-node progress + diagnostic details "
-            "(search query, retrieved-chunk titles + scores) in the chat "
-            "panel. Off = clean chat with only essential closure messages."
+            "When True, the chat shows one extra line before each retrieval "
+            "(the input mode, retrieval mode, and search query). Off = clean "
+            "chat with only the unconditional closure messages."
         ),
     )
 

@@ -160,15 +160,14 @@ def test_temp_slider_greys_out_for_sampling_free_model():
 
 
 def test_all_llm_sections_have_info_text():
-    """Every LLM-tab section's icon text is present across all three tiers
-    (regression against a tier silently going blank, or a constant being
-    renamed away from the section_header that uses it)."""
-    from knowledge_agent.gui.settings import llm_tab as lt
+    """Every LLM-tab section's icon text is present across all three tiers in
+    the central registry (the tab renders its section headers via
+    section_header key=; guards against a tier silently going blank)."""
+    from knowledge_agent.gui._widgets.info_text import INFO
 
-    for prefix in ("_INSTALLED", "_MODELS", "_RATES"):
-        for tier in ("STANDARD", "BEGINNER", "TECHNICAL"):
-            value = getattr(lt, f"{prefix}_INFO_{tier}")
-            assert value and value.strip(), f"{prefix}_INFO_{tier} is empty"
+    for key in ("llms.installed_providers", "llms.models", "llms.rate_limits"):
+        spec = INFO[key]
+        assert spec.standard and spec.beginner and spec.technical, f"{key}: a tier is empty"
 
 
 def test_render_node_block_has_no_info_param():

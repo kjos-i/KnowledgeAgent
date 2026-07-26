@@ -186,10 +186,10 @@ def _check_provider_key(
 # failure renders "missing X — do Y" instead of a raw pydantic error. The
 # Neo4j params + LanceDB path are per-corpus, hence "create a corpus".
 _FIELD_GUIDANCE: dict[str, str] = {
-    "neo4j_password": "Neo4j password not set — create a corpus in Library",
-    "neo4j_uri": "Neo4j URI not set — create a corpus in Library",
-    "neo4j_user": "Neo4j user not set — create a corpus in Library",
-    "lancedb_path": "LanceDB path not set — create a corpus in Library",
+    "neo4j_password": "Neo4j password not set; create a corpus in Library",
+    "neo4j_uri": "Neo4j URI not set; create a corpus in Library",
+    "neo4j_user": "Neo4j user not set; create a corpus in Library",
+    "lancedb_path": "LanceDB path not set; create a corpus in Library",
 }
 
 

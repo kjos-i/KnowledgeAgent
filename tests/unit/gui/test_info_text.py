@@ -53,3 +53,46 @@ def test_keys_overview_icon_present():
     """The Keys tab overview icon is registered with all three tiers filled."""
     spec = INFO["keys.overview"]
     assert spec.standard and spec.beginner and spec.technical, "keys.overview: a tier is empty"
+
+
+def test_settings_section_icons_present():
+    """The Settings tab (AppTab) section headers + system-health board render
+    from the registry, all under the settings.* prefix with three tiers filled
+    (system_health was renamed from diagnostics.system_health, not duplicated)."""
+    for key in (
+        "settings.save_results",
+        "settings.save_chat",
+        "settings.app_behaviour",
+        "settings.diagnostics",
+        "settings.database_connection",
+        "settings.system_health",
+    ):
+        spec = INFO[key]
+        assert spec.standard and spec.beginner and spec.technical, f"{key}: a tier is empty"
+    assert "diagnostics.system_health" not in INFO, "old key should be renamed, not kept"
+
+
+def test_llms_and_retrieval_section_icons_present():
+    """The LLMs + Retrieval sub-tabs render their section headers from the
+    registry (migrated out of local module constants); every key has all three
+    tiers filled."""
+    for key in (
+        "llms.installed_providers",
+        "llms.models",
+        "llms.rate_limits",
+        "retrieval.mode",
+        "retrieval.result_size",
+        "retrieval.rrf",
+        "retrieval.mmr",
+        "retrieval.knowledge_graph",
+        "retrieval.input_mode",
+    ):
+        spec = INFO[key]
+        assert spec.standard and spec.beginner and spec.technical, f"{key}: a tier is empty"
+
+
+def test_log_overview_icon_present():
+    """The Log tab's single overview icon (after the title) is registered with
+    all three tiers filled."""
+    spec = INFO["log.overview"]
+    assert spec.standard and spec.beginner and spec.technical, "log.overview: a tier is empty"

@@ -154,9 +154,9 @@ class GuiApp:
     def _diag(self, msg: str) -> None:
         """Append a system message to chat only when `debug_mode` is on.
 
-        Used for per-node progress + extra detail (search query,
-        retrieval hits). Off by default — essential closure messages
-        (answer ready, errors) still go through `append_system`
+        Currently used for the single pre-retrieval line (input mode,
+        retrieval mode, search query). Off by default. Essential closure
+        messages (answer ready, errors) still go through `append_system`
         unconditionally.
         """
         if self.gui_config.debug_mode:
