@@ -169,17 +169,12 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ----- API keys.
-    # ALL provider keys are optional. The factory validates the active
-    # provider's key at first call (lazy) and raises a clear
-    # `ConfigError` naming the exact env var to set if missing.
-    # See `llm_factory.py` / `embedder_factory.py` for the check.
-    #
-    # No provider is privileged as "default that's always required" —
-    # the first-launch GUI wizard picks which provider(s) to install
-    # AND prompts for the matching API key. A user on pure-OpenAI never
-    # needs an Anthropic/Voyage key; a user on pure-local-HF never
-    # needs any cloud key.
+    # ========================================================================
+    # Credentials (API keys)
+    # ========================================================================
+    # All optional. The active provider's key is validated lazily at first call
+    # (llm_factory / embedder_factory) - a pure-OpenAI user never needs an
+    # Anthropic/Voyage key. No provider is privileged as always-required.
     anthropic_api_key: str | None = Field(
         default=None,
         description=(
@@ -209,27 +204,12 @@ class Settings(BaseSettings):
             "Validated lazily at first call."
         ),
     )
-    ollama_base_url: str = Field(
-        default="http://localhost:11434",
-        description=(
-            "Ollama daemon endpoint. Only consulted when "
-            "`llm_provider='ollama'`. Default targets a local install; "
-            "override for a remote daemon. Daemon is NOT pip-installable "
-            "— user installs it manually from https://ollama.com."
-        ),
-    )
 
-    @field_validator("ollama_base_url")
-    @classmethod
-    def _strip_ollama_url_trailing_slash(cls, v: str) -> str:
-        """Strip trailing slash(es) so a downstream `f"{base}/api/..."`
-        join can't produce a double slash (e.g. `.../api//tags`)."""
-        return v.rstrip("/")
-
-    # ----- Provider selection. Two independent toggles so users can mix
-    # (Anthropic LLM + OpenAI embeddings is a real pairing). Defaults
-    # match today's behaviour — Anthropic + Voyage — so no breakage on
-    # upgrade for existing corpora.
+    # ========================================================================
+    # Provider selection
+    # ========================================================================
+    # LLM + embedding providers are independent toggles (mix freely). Changing
+    # one is settings-only - never auto-installs (see llm_/embedder_lifecycle).
     llm_provider: LlmProvider = Field(
         default="anthropic",
         description=(
@@ -250,98 +230,29 @@ class Settings(BaseSettings):
             "`embedder_lifecycle.py`."
         ),
     )
-
-    # ----- Neo4j connection (knowledge-graph store). The ingestion pipeline
-    # writes here at the metadata stage; the agent traverses here at query
-    # time — both sides need the same config, so it lives in the shared
-    # Settings.
-    #
-    # ALL DB settings (neo4j_uri / neo4j_user / neo4j_password / lancedb_path)
-    # are required-no-default by design. Forcing the user to set them
-    # explicitly in `.env` (and `.env.test`) eliminates the failure mode where
-    # a forgotten config silently falls back to a default that points at the
-    # wrong instance / wrong directory. This is what enables the
-    # test/real isolation pattern (`.env.test` on a separate instance).
-    neo4j_uri: str = Field(
-        ...,
+    ollama_base_url: str = Field(
+        default="http://localhost:11434",
         description=(
-            "Neo4j Bolt endpoint (e.g. `neo4j://127.0.0.1:7687`). Required - "
-            "no safe default. Set via NEO4J_URI in .env / .env.test."
-        ),
-    )
-    neo4j_user: str = Field(
-        ...,
-        description=(
-            "Neo4j database user. Required - no safe default. The universal "
-            "Neo4j default is `neo4j`; set it explicitly via NEO4J_USER in "
-            ".env / .env.test."
-        ),
-    )
-    neo4j_password: str = Field(
-        ...,
-        description=(
-            "Neo4j password. Required - no safe default. Set via "
-            "NEO4J_PASSWORD in .env (real instance) / .env.test (test "
-            "instance). You chose the value at instance creation in Neo4j "
-            "Desktop."
-        ),
-    )
-    neo4j_max_connection_pool_size: int = Field(
-        default=100,
-        ge=1,
-        description=(
-            "Max connections in the AsyncDriver's connection pool. Neo4j "
-            "driver default is 100; appropriate for single-user desktop. "
-            "Bump if you point at a Neo4j cluster from a multi-user "
-            "deployment. Read once at driver construction; restart the "
-            "process to change."
-        ),
-    )
-    neo4j_connection_acquisition_timeout: float = Field(
-        default=60.0,
-        ge=1.0,
-        description=(
-            "Seconds the AsyncDriver waits for a free connection from the "
-            "pool before raising. 60s matches the Neo4j default; bump for "
-            "slow networks or contention-heavy setups."
+            "Ollama daemon endpoint. Only consulted when "
+            "`llm_provider='ollama'`. Default targets a local install; "
+            "override for a remote daemon. Daemon is NOT pip-installable "
+            "— user installs it manually from https://ollama.com."
         ),
     )
 
-    # ----- LanceDB connection (vector + BM25 hybrid retrieval store, local
-    # file-based, no server). Path points at the folder where LanceDB will
-    # create and manage its on-disk dataset files.
-    lancedb_path: Path = Field(
-        ...,
-        description=(
-            "Directory where LanceDB stores its dataset files. Required - no "
-            "safe default. Set via LANCEDB_PATH in .env (real corpus) / "
-            ".env.test (smoke isolation). Created on first use."
-        ),
-    )
+    @field_validator("ollama_base_url")
+    @classmethod
+    def _strip_ollama_url_trailing_slash(cls, v: str) -> str:
+        """Strip trailing slash(es) so a downstream `f"{base}/api/..."`
+        join can't produce a double slash (e.g. `.../api//tags`)."""
+        return v.rstrip("/")
 
-    # ----- Ontology downloads (L7). Source ontology files (MeSH RDF, GO
-    # OBO, ChEBI, etc.) are downloaded once and reused across ingestion runs.
-    ontology_downloads_dir: Path = Field(
-        default=(Path(user_cache_dir(APP_NAME, appauthor=False)) / "ontology-downloads"),
-        description=(
-            "Directory for downloaded ontology source files. Each enabled "
-            "L7 ontology layer downloads its file here on first use; "
-            "subsequent ingestions reuse the local copy. Safe to delete — "
-            "files re-download on next ingest. Default sits under the "
-            "OS-standard cache dir (platformdirs user_cache_dir); override "
-            "via ONTOLOGY_DOWNLOADS_DIR for a custom location."
-        ),
-    )
-
-    # ----- Embedding model. Read by the ingestion pipeline (writes) and the
-    # agent (queries) - MUST be the same model on both sides, or query
-    # vectors land in a different latent space from the indexed chunks.
-    # `embedding_model` carries the active provider's model name; the
-    # provider-specific fields below let users keep ALL their model
-    # choices in `.env` and only the active provider's one matters at
-    # runtime. The factory reads `embedding_model` directly (already the
-    # active one); the provider-specific fields exist for the lifecycle
-    # switch step which copies the right one in.
+    # ========================================================================
+    # Embedding (model + dimensions)
+    # ========================================================================
+    # embedding_model/dims MUST match on ingest + query (LanceDB pins the vector
+    # dimension at table creation). Defaults come from EMBEDDING_MODEL_DEFAULTS /
+    # EMBEDDING_DIM_DEFAULTS above; per-provider fields feed the lifecycle switch.
     embedding_model: str = Field(
         default=EMBEDDING_MODEL_DEFAULTS["voyage"],
         description=(
@@ -389,18 +300,12 @@ class Settings(BaseSettings):
         ),
     )
 
-    # ----- Agent retrieval mode. Five retrieval topologies span the
-    # two stores (LanceDB hybrid + Neo4j graph). The graph state carries
-    # the per-invocation `retrieval_mode`; this default is what the agent
-    # uses when the caller doesn't override.
-    #
-    # Build status (will move the default to 'auto' as later modes land):
-    #   lancedb_only       - hybrid search in LanceDB only (PHASE 1)
-    #   neo4j_only         - Cypher traversal in Neo4j only (PHASE 2)
-    #   lancedb_then_neo4j - LanceDB hits, then Neo4j enrichment (PHASE 3)
-    #   neo4j_then_lancedb - Neo4j filter, then LanceDB within scope (PHASE 3)
-    #   parallel_fused     - both fire in parallel, results fused (PHASE 4)
-    #   auto               - LLM router picks one of 1-5 per query (PHASE 5)
+    # ========================================================================
+    # LLM agent nodes (retrieval mode + per-node models / temps)
+    # ========================================================================
+    # The agent's four LLM call sites (classifier / query / cypher / synth) + the
+    # default retrieval topology + skip toggles. Model defaults come from
+    # PROVIDER_NODE_DEFAULTS above. Extractor models are per-corpus (CorpusConfig).
     default_retrieval_mode: Literal[
         "lancedb_only",
         "neo4j_only",
@@ -416,138 +321,6 @@ class Settings(BaseSettings):
             "`retrieval_mode` field."
         ),
     )
-
-    # ----- LanceDB retrieval knobs. All query-time tunables - changing any of
-    # these does NOT require re-ingest or re-embed (they only affect how
-    # search runs). lancedb_search_mode for within-store mode selection,
-    # distinct from default_retrieval_mode which is the agent-level mode.
-    top_k: int = Field(
-        default=5,
-        ge=1,
-        le=50,
-        description=(
-            "Number of chunks returned per query (final result size). "
-            "Per-invocation override lives on the graph state."
-        ),
-    )
-    lancedb_search_mode: Literal["hybrid", "fts", "vector"] = Field(
-        default="hybrid",
-        description=(
-            "Default search mode WITHIN LanceDB: 'hybrid' (BM25 + vector "
-            "fused via RRF), 'fts' (BM25 only), or 'vector' (kNN cosine "
-            "only). Distinct from `default_retrieval_mode` which picks the "
-            "agent-level store(s)."
-        ),
-    )
-    num_candidates: int = Field(
-        default=100,
-        ge=1,
-        description=(
-            "Candidate-pool size the LanceDB retriever fetches BEFORE "
-            "truncating/re-ranking to top_k. In hybrid mode the BM25 + "
-            "vector legs each retrieve this many rows, RRF fuses them, and "
-            "the result is cut to top_k (or MMR-reranked to top_k). Higher "
-            "= closer to exact nearest-neighbours + better fusion recall, "
-            "slower. Must be >= top_k."
-        ),
-    )
-    rrf_rank_constant: int = Field(
-        default=60,
-        ge=1,
-        description=(
-            "RRF rank constant `k` in the fusion score 1/(k + rank). Lower = "
-            "top-ranked hits dominate more; higher = flattens the contribution "
-            "across ranks. Applied to LanceDB's native hybrid RRF via "
-            "`RRFReranker(K=...)`."
-        ),
-    )
-    mmr_lambda: float = Field(
-        default=0.6,
-        ge=0.0,
-        le=1.0,
-        description=(
-            "MMR relevance/diversity tradeoff: score = lambda * sim(query, c) "
-            "- (1 - lambda) * max_sim(c, selected). 1.0 = pure relevance, "
-            "0.0 = pure diversity. Used when the caller passes use_mmr=True "
-            "and the mode supports it (hybrid/vector, not fts)."
-        ),
-    )
-    default_use_mmr: bool = Field(
-        default=False,
-        description=(
-            "Default for the `use_mmr` flag the LanceDB retriever node "
-            "passes to `client.retrieve()`. When True, hybrid/vector "
-            "searches Python-side MMR-rerank the candidate pool to "
-            "boost diversity. Silently ignored for `fts` mode (no "
-            "vectors). Per-invocation override lives on the graph "
-            "state's `use_mmr` field."
-        ),
-    )
-    optimize_indexes_per_ingest: bool = Field(
-        default=True,
-        description=(
-            "When True, `ingest_document()` calls `LanceClient.ensure_indexes()` "
-            "after each successful write so vector + FTS indexes stay current. "
-            "INCREMENTAL optimize - not a full rebuild - typically <1s per doc. "
-            "Turn off only for bulk loads where you want to defer all index "
-            "work to a single optimize at the end (bulk_ops.py will do this "
-            "automatically when it lands)."
-        ),
-    )
-    min_rows_for_vector_index: int = Field(
-        default=256,
-        ge=1,
-        description=(
-            "Minimum row count before `ensure_indexes()` attempts vector "
-            "index creation. LanceDB's default IVF_PQ index needs ~256 rows "
-            "to train its clustering; below that, brute force scan is fine "
-            "(milliseconds at small scale). FTS index has no threshold and "
-            "is always created."
-        ),
-    )
-
-    # ----- Neo4j retrieval knobs. Today just the row cap; grows as cross-
-    # store fusion and more sophisticated graph queries land.
-    kg_max_rows: int = Field(
-        default=50,
-        ge=1,
-        description=(
-            "Maximum number of rows returned from a single Neo4j query. "
-            "Enforced by wrapping the LLM-generated Cypher in "
-            "`CALL { ... } RETURN * LIMIT N` at retrieval time, so the cap "
-            "holds even if the LLM forgets its own LIMIT clause. Distinct "
-            "from `top_k` (which caps the final LanceDB chunk count) - "
-            "graph queries legitimately return more rows (e.g., 50 citations "
-            "of a paper) than a chunk retriever typically would."
-        ),
-    )
-
-    @model_validator(mode="after")
-    def _validate_retrieval_windows(self) -> "Settings":
-        """Enforce the candidate-pool ordering: top_k <= num_candidates.
-
-        `num_candidates` is the pool the retriever fetches before cutting
-        to `top_k`, so a pool smaller than the final result count is a
-        misconfiguration. LanceDB would surface it inconsistently at
-        search time, so catch it up front with a clear message. Shares the
-        rule with the GUI + eval-case resolvers via `check_window_ordering`.
-        """
-        message = check_window_ordering(self.top_k, self.num_candidates)
-        if message is not None:
-            raise ValueError(message)
-        return self
-
-    # ----- LLM nodes (mode classifier + query builders + synthesizer).
-    # The agent pipeline uses up to four LLM call sites:
-    #   - mode_classifier: Haiku, picks one of the 5 concrete retrieval
-    #                      modes from the user question (only runs when
-    #                      `retrieval_mode` is "auto").
-    #   - query_builder  : Haiku, rewrites the user question into a hybrid-
-    #                      search query for LanceDB.
-    #   - cypher_builder : Sonnet, writes Cypher against the KG schema for
-    #                      Neo4j (compositional reasoning, so Sonnet not Haiku).
-    #   - synthesizer    : Sonnet, produces the final cited answer.
-    # Toggles below switch nodes off for cost-saving / debugging paths.
     mode_classifier_model: str = Field(
         default=PROVIDER_NODE_DEFAULTS["anthropic"]["mode_classifier"],
         description=(
@@ -645,64 +418,12 @@ class Settings(BaseSettings):
         ),
     )
 
-    # ----- OpenAlex resolution. The "polite pool" gives faster + more reliable
-    # responses; opt-in by providing an email here.
-    openalex_mailto: str | None = Field(
-        default=None,
-        description=(
-            "Email for OpenAlex's polite pool (faster, more reliable DOI "
-            "lookups). Optional - lookups still work without it, just rate-"
-            "limited more aggressively."
-        ),
-    )
-
-    # ----- Central HTTP client (see `_http_client.py`).
-    # Three knobs shared by every outbound HTTP call (OpenAlex, FIBO GitHub
-    # tree API, Ollama daemon probe, ontology downloads). One place to tune,
-    # one User-Agent string to identify ourselves to upstreams.
-    http_default_timeout: float = Field(
-        default=30.0,
-        description=(
-            "Default per-request timeout (seconds) for the central HTTP "
-            "client's `get()`. Individual call sites can override (e.g. "
-            "the Ollama daemon probe uses 1s; ontology downloads use None "
-            "for unbounded streaming)."
-        ),
-    )
-    http_max_retries: int = Field(
-        default=3,
-        ge=0,
-        description=(
-            "Max retry attempts on retryable HTTP failures (429, 5xx, "
-            "network errors). 0 disables retries. Stream() does NOT retry "
-            "regardless — partial-download replays are unsafe. Must be >= 0: a "
-            "negative value makes the request loop `range(retries + 1)` empty, "
-            "so no attempt runs and every request raises UnboundLocalError."
-        ),
-    )
-    http_user_agent: str = Field(
-        default="knowledge-agent/0.x",
-        description=(
-            "User-Agent header on every outbound HTTP request. Identifies "
-            "this app to upstream APIs; some (GitHub, OpenAlex) condition "
-            "rate-limit pools on it. Override to add a contact email "
-            "(e.g. 'knowledge-agent/0.x (you@example.com)') if you ship "
-            "this app to others."
-        ),
-    )
-
-    # ----- Rate limiting + concurrency. The async refactor introduces
-    # proactive request-rate throttling on the LLM/embedder side AND
-    # bounded concurrency on the fan-out side. Both are needed: rate
-    # limiter prevents 429s before they happen, semaphore prevents OOM
-    # from infinite chunk-parallel awaits. The retry knob covers the
-    # transient-network residual after the rate limiter does its job.
-    #
-    # Default `None` for `*_requests_per_second` means "no rate limit
-    # wired" — LangChain's InMemoryRateLimiter is skipped for that
-    # provider. Set to a positive float in `.env` when the provider's
-    # documented rate limit is below your free-running throughput
-    # (Anthropic free tier ~5 RPM ≈ 0.08; OpenAI tier 1 ≈ 3.0).
+    # ========================================================================
+    # Rate limiting + concurrency
+    # ========================================================================
+    # Proactive per-provider request-rate caps (None = no limiter) + LLM retry +
+    # the per-doc chunk fan-out semaphore. The openai/google caps cover BOTH
+    # their LLM and embedding endpoints.
     anthropic_requests_per_second: float | None = Field(
         default=None,
         gt=0.0,
@@ -772,6 +493,247 @@ class Settings(BaseSettings):
             "(embedding is a single batched call, not bounded here). "
             "Higher = faster but more concurrent LLM calls "
             "(bumps up against rate limits)."
+        ),
+    )
+
+    # ========================================================================
+    # LanceDB (vector + BM25 store)
+    # ========================================================================
+    # Connection path (required, no default) + all query-time retrieval knobs
+    # (changing a knob never requires re-ingest / re-embed). The window validator
+    # enforces top_k <= num_candidates.
+    lancedb_path: Path = Field(
+        ...,
+        description=(
+            "Directory where LanceDB stores its dataset files. Required - no "
+            "safe default. Set via LANCEDB_PATH in .env (real corpus) / "
+            ".env.test (smoke isolation). Created on first use."
+        ),
+    )
+    top_k: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description=(
+            "Number of chunks returned per query (final result size). "
+            "Per-invocation override lives on the graph state."
+        ),
+    )
+    lancedb_search_mode: Literal["hybrid", "fts", "vector"] = Field(
+        default="hybrid",
+        description=(
+            "Default search mode WITHIN LanceDB: 'hybrid' (BM25 + vector "
+            "fused via RRF), 'fts' (BM25 only), or 'vector' (kNN cosine "
+            "only). Distinct from `default_retrieval_mode` which picks the "
+            "agent-level store(s)."
+        ),
+    )
+    num_candidates: int = Field(
+        default=100,
+        ge=1,
+        description=(
+            "Candidate-pool size the LanceDB retriever fetches BEFORE "
+            "truncating/re-ranking to top_k. In hybrid mode the BM25 + "
+            "vector legs each retrieve this many rows, RRF fuses them, and "
+            "the result is cut to top_k (or MMR-reranked to top_k). Higher "
+            "= closer to exact nearest-neighbours + better fusion recall, "
+            "slower. Must be >= top_k."
+        ),
+    )
+    rrf_rank_constant: int = Field(
+        default=60,
+        ge=1,
+        description=(
+            "RRF rank constant `k` in the fusion score 1/(k + rank). Lower = "
+            "top-ranked hits dominate more; higher = flattens the contribution "
+            "across ranks. Applied to LanceDB's native hybrid RRF via "
+            "`RRFReranker(K=...)`."
+        ),
+    )
+    mmr_lambda: float = Field(
+        default=0.6,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "MMR relevance/diversity tradeoff: score = lambda * sim(query, c) "
+            "- (1 - lambda) * max_sim(c, selected). 1.0 = pure relevance, "
+            "0.0 = pure diversity. Used when the caller passes use_mmr=True "
+            "and the mode supports it (hybrid/vector, not fts)."
+        ),
+    )
+    default_use_mmr: bool = Field(
+        default=False,
+        description=(
+            "Default for the `use_mmr` flag the LanceDB retriever node "
+            "passes to `client.retrieve()`. When True, hybrid/vector "
+            "searches Python-side MMR-rerank the candidate pool to "
+            "boost diversity. Silently ignored for `fts` mode (no "
+            "vectors). Per-invocation override lives on the graph "
+            "state's `use_mmr` field."
+        ),
+    )
+    optimize_indexes_per_ingest: bool = Field(
+        default=True,
+        description=(
+            "When True, `ingest_document()` calls `LanceClient.ensure_indexes()` "
+            "after each successful write so vector + FTS indexes stay current. "
+            "INCREMENTAL optimize - not a full rebuild - typically <1s per doc. "
+            "Turn off only for bulk loads where you want to defer all index "
+            "work to a single optimize at the end (bulk_ops.py will do this "
+            "automatically when it lands)."
+        ),
+    )
+    min_rows_for_vector_index: int = Field(
+        default=256,
+        ge=1,
+        description=(
+            "Minimum row count before `ensure_indexes()` attempts vector "
+            "index creation. LanceDB's default IVF_PQ index needs ~256 rows "
+            "to train its clustering; below that, brute force scan is fine "
+            "(milliseconds at small scale). FTS index has no threshold and "
+            "is always created."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_retrieval_windows(self) -> "Settings":
+        """Enforce the candidate-pool ordering: top_k <= num_candidates.
+
+        `num_candidates` is the pool the retriever fetches before cutting
+        to `top_k`, so a pool smaller than the final result count is a
+        misconfiguration. LanceDB would surface it inconsistently at
+        search time, so catch it up front with a clear message. Shares the
+        rule with the GUI + eval-case resolvers via `check_window_ordering`.
+        """
+        message = check_window_ordering(self.top_k, self.num_candidates)
+        if message is not None:
+            raise ValueError(message)
+        return self
+
+    # ========================================================================
+    # Neo4j (knowledge-graph store)
+    # ========================================================================
+    # Connection (uri / user / password required, no default - forces explicit
+    # config so a forgotten value fails loudly instead of hitting the wrong
+    # instance) + the per-query row cap.
+    neo4j_uri: str = Field(
+        ...,
+        description=(
+            "Neo4j Bolt endpoint (e.g. `neo4j://127.0.0.1:7687`). Required - "
+            "no safe default. Set via NEO4J_URI in .env / .env.test."
+        ),
+    )
+    neo4j_user: str = Field(
+        ...,
+        description=(
+            "Neo4j database user. Required - no safe default. The universal "
+            "Neo4j default is `neo4j`; set it explicitly via NEO4J_USER in "
+            ".env / .env.test."
+        ),
+    )
+    neo4j_password: str = Field(
+        ...,
+        description=(
+            "Neo4j password. Required - no safe default. Set via "
+            "NEO4J_PASSWORD in .env (real instance) / .env.test (test "
+            "instance). You chose the value at instance creation in Neo4j "
+            "Desktop."
+        ),
+    )
+    neo4j_max_connection_pool_size: int = Field(
+        default=100,
+        ge=1,
+        description=(
+            "Max connections in the AsyncDriver's connection pool. Neo4j "
+            "driver default is 100; appropriate for single-user desktop. "
+            "Bump if you point at a Neo4j cluster from a multi-user "
+            "deployment. Read once at driver construction; restart the "
+            "process to change."
+        ),
+    )
+    neo4j_connection_acquisition_timeout: float = Field(
+        default=60.0,
+        ge=1.0,
+        description=(
+            "Seconds the AsyncDriver waits for a free connection from the "
+            "pool before raising. 60s matches the Neo4j default; bump for "
+            "slow networks or contention-heavy setups."
+        ),
+    )
+    kg_max_rows: int = Field(
+        default=50,
+        ge=1,
+        description=(
+            "Maximum number of rows returned from a single Neo4j query. "
+            "Enforced by wrapping the LLM-generated Cypher in "
+            "`CALL { ... } RETURN * LIMIT N` at retrieval time, so the cap "
+            "holds even if the LLM forgets its own LIMIT clause. Distinct "
+            "from `top_k` (which caps the final LanceDB chunk count) - "
+            "graph queries legitimately return more rows (e.g., 50 citations "
+            "of a paper) than a chunk retriever typically would."
+        ),
+    )
+
+    # ========================================================================
+    # Ontology downloads (L7)
+    # ========================================================================
+    ontology_downloads_dir: Path = Field(
+        default=(Path(user_cache_dir(APP_NAME, appauthor=False)) / "ontology-downloads"),
+        description=(
+            "Directory for downloaded ontology source files. Each enabled "
+            "L7 ontology layer downloads its file here on first use; "
+            "subsequent ingestions reuse the local copy. Safe to delete — "
+            "files re-download on next ingest. Default sits under the "
+            "OS-standard cache dir (platformdirs user_cache_dir); override "
+            "via ONTOLOGY_DOWNLOADS_DIR for a custom location."
+        ),
+    )
+
+    # ========================================================================
+    # OpenAlex
+    # ========================================================================
+    openalex_mailto: str | None = Field(
+        default=None,
+        description=(
+            "Email for OpenAlex's polite pool (faster, more reliable DOI "
+            "lookups). Optional - lookups still work without it, just rate-"
+            "limited more aggressively."
+        ),
+    )
+
+    # ========================================================================
+    # HTTP client
+    # ========================================================================
+    # Shared by every outbound call (OpenAlex, GitHub tree API, Ollama probe,
+    # ontology downloads). One place to tune timeout / retries / User-Agent.
+    http_default_timeout: float = Field(
+        default=30.0,
+        description=(
+            "Default per-request timeout (seconds) for the central HTTP "
+            "client's `get()`. Individual call sites can override (e.g. "
+            "the Ollama daemon probe uses 1s; ontology downloads use None "
+            "for unbounded streaming)."
+        ),
+    )
+    http_max_retries: int = Field(
+        default=3,
+        ge=0,
+        description=(
+            "Max retry attempts on retryable HTTP failures (429, 5xx, "
+            "network errors). 0 disables retries. Stream() does NOT retry "
+            "regardless — partial-download replays are unsafe. Must be >= 0: a "
+            "negative value makes the request loop `range(retries + 1)` empty, "
+            "so no attempt runs and every request raises UnboundLocalError."
+        ),
+    )
+    http_user_agent: str = Field(
+        default="knowledge-agent/0.x",
+        description=(
+            "User-Agent header on every outbound HTTP request. Identifies "
+            "this app to upstream APIs; some (GitHub, OpenAlex) condition "
+            "rate-limit pools on it. Override to add a contact email "
+            "(e.g. 'knowledge-agent/0.x (you@example.com)') if you ship "
+            "this app to others."
         ),
     )
 
