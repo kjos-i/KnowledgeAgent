@@ -157,7 +157,7 @@ def test_on_create_derives_subfolder_paths_and_registers(tmp_path: Path, monkeyp
         patch(f"{_MOD}.set_corpus_password"),
         patch(f"{_MOD}.save_config"),
         patch(f"{_MOD}.apply_connection_to_env"),
-        patch(f"{_MOD}.reset_after_key_change"),
+        patch(f"{_MOD}.reset_after_settings_change"),
     ):
         asyncio.run(tab.on_create_clicked(MagicMock()))
 
@@ -234,7 +234,7 @@ def test_adopt_mode_registers_folder_as_corpus_home(tmp_path: Path, monkeypatch)
         patch(f"{_MOD}.set_corpus_password"),
         patch(f"{_MOD}.save_config"),
         patch(f"{_MOD}.apply_connection_to_env"),
-        patch(f"{_MOD}.reset_after_key_change"),
+        patch(f"{_MOD}.reset_after_settings_change"),
     ):
         asyncio.run(tab.on_create_clicked(MagicMock()))
 

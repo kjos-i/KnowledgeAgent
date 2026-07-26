@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
-from knowledge_agent.config import reset_after_key_change
+from knowledge_agent.config import reset_after_settings_change
 from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
     PANEL_BG,
@@ -314,9 +314,9 @@ class RetrievalTab:
             return False
         apply_retrieval_to_env(self.app.gui_config)
         try:
-            reset_after_key_change()
+            reset_after_settings_change()
         except Exception as exc:
-            logger.warning("reset_after_key_change failed: %r", exc)
+            logger.warning("reset_after_settings_change failed: %r", exc)
         self.status.value = f"saved {label}"
         self.app.page.update()
         return True

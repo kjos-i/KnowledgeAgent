@@ -147,11 +147,11 @@ async def run(
         # Resolve the embedder from the corpus under evaluation (per-corpus;
         # query vectors must match the model the corpus was ingested with),
         # overriding any global / .env embedder.
-        from knowledge_agent.config import reset_after_key_change
+        from knowledge_agent.config import reset_after_settings_change
         from knowledge_agent.corpus_config import apply_corpus_embedding_to_env
 
         apply_corpus_embedding_to_env(corpus_config)
-        reset_after_key_change()
+        reset_after_settings_change()
 
     logger.info("evaluating %d case(s), groups=%s", len(cases), sorted(cfg.enabled_groups))
     if trace:

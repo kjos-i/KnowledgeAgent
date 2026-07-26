@@ -398,7 +398,7 @@ def test_http_max_retries_zero_allowed() -> None:
 
 
 # ---------------------------------------------------------------------------
-# reset_after_key_change() closes the evicted Neo4j driver (verify-11 HIGH,
+# reset_after_settings_change() closes the evicted Neo4j driver (verify-11 HIGH,
 # config.py:874). Evicting the get_kg_client cache without closing the old
 # client leaked its AsyncDriver Bolt pool on every corpus switch — close() had
 # no other caller, and neo4j 5.x's async __del__ only warns (GC never drains
@@ -458,7 +458,7 @@ async def test_reset_closes_evicted_kg_driver_on_the_running_loop(
     closed: list[bool] = []
     getter = _install_fake_kg_getter(monkeypatch, closed)
 
-    config_module.reset_after_key_change()
+    config_module.reset_after_settings_change()
     await asyncio.sleep(0)  # let the scheduled close task run to completion
 
     assert getter.cleared is True  # cache still evicted
@@ -473,6 +473,6 @@ def test_reset_closes_evicted_kg_driver_without_a_loop(
     closed: list[bool] = []
     _install_fake_kg_getter(monkeypatch, closed)
 
-    config_module.reset_after_key_change()
+    config_module.reset_after_settings_change()
 
     assert closed == [True]

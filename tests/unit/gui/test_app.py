@@ -534,7 +534,7 @@ def test_select_corpus_ok_resets_caches_and_broadcasts(fake_page: MagicMock):
             "knowledge_agent.gui.app.switch_active_corpus",
             return_value=SwitchOutcome(ok=True, message="Active corpus: c2"),
         ),
-        patch("knowledge_agent.gui.app.reset_after_key_change") as reset,
+        patch("knowledge_agent.gui.app.reset_after_settings_change") as reset,
     ):
         app.select_corpus("c2")
     reset.assert_called_once()
@@ -555,7 +555,7 @@ def test_select_corpus_hard_failure_no_reset_no_broadcast(fake_page: MagicMock):
             "knowledge_agent.gui.app.switch_active_corpus",
             return_value=SwitchOutcome(ok=False, message="could not save: boom"),
         ),
-        patch("knowledge_agent.gui.app.reset_after_key_change") as reset,
+        patch("knowledge_agent.gui.app.reset_after_settings_change") as reset,
     ):
         app.select_corpus("c2")
     reset.assert_not_called()
@@ -565,7 +565,7 @@ def test_select_corpus_hard_failure_no_reset_no_broadcast(fake_page: MagicMock):
 
 def test_select_corpus_refused_while_search_in_flight(fake_page: MagicMock):
     """A corpus switch mid-search would swap the backend clients out from under
-    the in-flight retrieval (switch_active_corpus + reset_after_key_change
+    the in-flight retrieval (switch_active_corpus + reset_after_settings_change
     rebind config/env and clear cached clients), so a query started against
     corpus A would finish reading corpus B's data. The switch must be REFUSED
     while `_send_task` is live: no switch call, selector bounced, message

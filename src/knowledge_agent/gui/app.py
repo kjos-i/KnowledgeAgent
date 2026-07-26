@@ -44,7 +44,12 @@ from knowledge_agent.artifacts import (
     save_answer,
     save_chat,
 )
-from knowledge_agent.config import Settings, disable_env_file, get_settings, reset_after_key_change
+from knowledge_agent.config import (
+    Settings,
+    disable_env_file,
+    get_settings,
+    reset_after_settings_change,
+)
 from knowledge_agent.corpus_config import CorpusConfig, load_corpus_config
 from knowledge_agent.evaluation.models import RetrievalSettings
 from knowledge_agent.gui._widgets.info_text import info
@@ -185,7 +190,7 @@ class GuiApp:
             return
         # A corpus switch mid-search would swap the backend clients out from
         # under the in-flight retrieval: `switch_active_corpus` + the
-        # `reset_after_key_change` below rebind config/env and clear the cached
+        # `reset_after_settings_change` below rebind config/env and clear the cached
         # clients, so a query that started against corpus A would finish reading
         # corpus B's data (a silently mixed answer). Refuse while a search is
         # live; bounce the selector back to the real active corpus.
@@ -204,9 +209,9 @@ class GuiApp:
             self.page.update()
             return
         try:
-            reset_after_key_change()
+            reset_after_settings_change()
         except Exception as exc:
-            logger.warning("reset_after_key_change failed after corpus switch: %r", exc)
+            logger.warning("reset_after_settings_change failed after corpus switch: %r", exc)
         if outcome.message:
             self.chat_panel.append_system(outcome.message)
         self.refresh_after_corpus_change()

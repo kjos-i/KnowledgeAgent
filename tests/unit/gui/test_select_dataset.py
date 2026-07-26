@@ -183,7 +183,7 @@ def test_relocate_corpus_rewrites_paths(fake_app, tmp_path):
     with (
         patch(f"{_MOD}.save_config"),
         patch(f"{_MOD}.apply_connection_to_env"),
-        patch(f"{_MOD}.reset_after_key_change"),
+        patch(f"{_MOD}.reset_after_settings_change"),
         patch.object(tab, "_populate_info_card"),
     ):
         tab._relocate_corpus("c1", new)
@@ -232,7 +232,7 @@ def test_remove_corpus_non_active_leaves_active(fake_app, tmp_path, monkeypatch)
         patch(f"{_MOD}.apply_connection_to_env"),
         patch(f"{_MOD}.apply_active_corpus_embedding_to_env"),
         patch(f"{_MOD}.get_corpus_password", return_value=""),
-        patch(f"{_MOD}.reset_after_key_change"),
+        patch(f"{_MOD}.reset_after_settings_change"),
     ):
         tab._remove_corpus("c2")
 

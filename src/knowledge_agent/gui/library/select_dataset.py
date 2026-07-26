@@ -26,7 +26,7 @@ Switch handler flow (unchanged from Phase 3):
      keeps working).
   3. Set `active_corpus_name` = new name.
   4. Push per-corpus Neo4j password from keyring → `NEO4J_PASSWORD`.
-  5. `save_config` + `apply_connection_to_env` + `reset_after_key_change`.
+  5. `save_config` + `apply_connection_to_env` + `reset_after_settings_change`.
   6. Repopulate the info card.
 
 Rename: updates `CorpusEntry.name`; migrates keyring entry from
@@ -55,7 +55,7 @@ from typing import TYPE_CHECKING
 import flet as ft
 from pydantic import ValidationError
 
-from knowledge_agent.config import reset_after_key_change
+from knowledge_agent.config import reset_after_settings_change
 from knowledge_agent.corpus_config import CorpusConfig, load_corpus_config
 from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
@@ -893,9 +893,9 @@ class SelectDatasetTab:
         if is_active:
             apply_connection_to_env(self.app.gui_config)
             try:
-                reset_after_key_change()
+                reset_after_settings_change()
             except Exception as exc:
-                logger.warning("reset_after_key_change failed: %r", exc)
+                logger.warning("reset_after_settings_change failed: %r", exc)
         self.app.refresh_after_corpus_change()  # dropdown + card + Ingest
         self.status.value = f"relocated {name!r} → {new_folder}"
         self.app.chat_panel.append_system(f"relocated corpus {name!r} → {new_folder}")
@@ -1001,9 +1001,9 @@ class SelectDatasetTab:
         else:
             os.environ.pop("NEO4J_PASSWORD", None)
         try:
-            reset_after_key_change()
+            reset_after_settings_change()
         except Exception as exc:
-            logger.warning("reset_after_key_change failed: %r", exc)
+            logger.warning("reset_after_settings_change failed: %r", exc)
         self.app.refresh_after_corpus_change()  # dropdown + card + Ingest
         self.status.value = f"removed {name!r} from the corpus list"
         self.app.chat_panel.append_system(f"unregistered corpus {name!r} (external files kept)")

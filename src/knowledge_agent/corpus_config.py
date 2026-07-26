@@ -1061,7 +1061,7 @@ def apply_corpus_embedding_to_env(config: CorpusConfig) -> None:
     embedder instead of any global default.
 
     The caller MUST clear cached settings afterwards
-    (`config.reset_after_key_change()`); `get_settings` is `lru_cache`d, so
+    (`config.reset_after_settings_change()`); `get_settings` is `lru_cache`d, so
     the new env values only take effect after a clear (same contract as the
     key/connection bridges). Callers: the GUI corpus-switch bridge
     (`gui.config_store.apply_active_corpus_embedding_to_env`) and the

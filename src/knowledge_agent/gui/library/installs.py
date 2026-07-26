@@ -71,7 +71,7 @@ import flet as ft
 from knowledge_agent.config import (
     EMBEDDING_PROVIDERS,
     LLM_PROVIDERS,
-    reset_after_key_change,
+    reset_after_settings_change,
 )
 from knowledge_agent.embedder_lifecycle import (
     EMBEDDER_PROVIDER_REGISTRY,
@@ -787,7 +787,7 @@ class InstallsTab:
 
         Empty string → None → env-var deleted → backend Settings default
         wins. Non-empty → validated as `Path` → written to GuiConfig +
-        env var. `reset_after_key_change()` clears the Settings cache
+        env var. `reset_after_settings_change()` clears the Settings cache
         so `get_settings()` picks up the change without a restart.
 
         Persisted via `save_config` (JSON at `<config_dir>/settings.json`).
@@ -815,9 +815,9 @@ class InstallsTab:
             return
         apply_ontology_downloads_dir_to_env(self.app.gui_config)
         try:
-            reset_after_key_change()
+            reset_after_settings_change()
         except Exception as exc:
-            logger.warning("reset_after_key_change failed: %r", exc)
+            logger.warning("reset_after_settings_change failed: %r", exc)
         if new_value is None:
             self._set_status("ontology_downloads_dir reset — using backend default.")
         else:
@@ -996,9 +996,9 @@ class InstallsTab:
             return
         apply_llm_to_env(self.app.gui_config)
         try:
-            reset_after_key_change()
+            reset_after_settings_change()
         except Exception as exc:
-            logger.warning("reset_after_key_change failed: %r", exc)
+            logger.warning("reset_after_settings_change failed: %r", exc)
         self._set_status(f"Saved Ollama base URL: {raw}")
 
     async def _probe_ollama_daemon(self) -> None:

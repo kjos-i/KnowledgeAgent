@@ -97,7 +97,7 @@ logger = logging.getLogger(__name__)
 
 async def _cmd_ingest(args: argparse.Namespace) -> int:
     """Build a plan via `bulk_ops.ingest_folder_plan`, then execute."""
-    from knowledge_agent.config import reset_after_key_change
+    from knowledge_agent.config import reset_after_settings_change
     from knowledge_agent.corpus_config import (
         apply_corpus_embedding_to_env,
         load_corpus_config,
@@ -118,7 +118,7 @@ async def _cmd_ingest(args: argparse.Namespace) -> int:
     # Resolve the embedder from THIS corpus (per-corpus; LanceDB pins the
     # vector dim at ingest), overriding any global / .env embedder.
     apply_corpus_embedding_to_env(config)
-    reset_after_key_change()
+    reset_after_settings_change()
     plan = await bulk_ops.ingest_folder_plan(
         folder,
         main_label=args.main_label,
@@ -156,7 +156,7 @@ async def _cmd_ingest(args: argparse.Namespace) -> int:
 
 async def _cmd_query(args: argparse.Namespace) -> int:
     """Invoke the compiled agent graph and print the answer."""
-    from knowledge_agent.config import reset_after_key_change
+    from knowledge_agent.config import reset_after_settings_change
     from knowledge_agent.corpus_config import (
         apply_corpus_embedding_to_env,
         load_corpus_config,
@@ -171,7 +171,7 @@ async def _cmd_query(args: argparse.Namespace) -> int:
     # Resolve the embedder from THIS corpus (per-corpus; query vectors must
     # come from the same model the corpus was ingested with).
     apply_corpus_embedding_to_env(corpus_config)
-    reset_after_key_change()
+    reset_after_settings_change()
 
     initial_state: dict[str, Any] = {
         "query": args.query,

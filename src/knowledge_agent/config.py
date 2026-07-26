@@ -25,11 +25,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Zero-arg callbacks invoked at the END of every reset_after_key_change().
+# Zero-arg callbacks invoked at the END of every reset_after_settings_change().
 # Lets GUI-only caches (e.g. the chat-router lru_cache — which config.py must
 # NOT import, per layering) get cleared on every key/provider/corpus change from
 # a SINGLE place, without config.py depending on gui. The gui side registers.
-_KEY_CHANGE_HOOKS: list[Callable[[], None]] = []
+_SETTINGS_CHANGE_HOOKS: list[Callable[[], None]] = []
 
 
 # The valid LLM providers — the SINGLE SOURCE for this set. The `llm_provider`
@@ -786,16 +786,16 @@ def _drain_kg_client(client: "Neo4jClient") -> None:
         logger.warning("failed to close evicted Neo4j driver on reset", exc_info=True)
 
 
-def register_key_change_hook(fn: Callable[[], None]) -> None:
-    """Register a zero-arg callback run at the end of reset_after_key_change().
+def register_settings_change_hook(fn: Callable[[], None]) -> None:
+    """Register a zero-arg callback run at the end of reset_after_settings_change().
 
     Idempotent — registering the same callable twice is a no-op.
     """
-    if fn not in _KEY_CHANGE_HOOKS:
-        _KEY_CHANGE_HOOKS.append(fn)
+    if fn not in _SETTINGS_CHANGE_HOOKS:
+        _SETTINGS_CHANGE_HOOKS.append(fn)
 
 
-def reset_after_key_change() -> None:
+def reset_after_settings_change() -> None:
     """Drop cached state that captured an API key at construction.
 
     Call after a key reached `os.environ` (any path — GUI keyring
@@ -850,11 +850,11 @@ def reset_after_key_change() -> None:
 
     # GUI-registered cache clearers (e.g. the chat-router lru_cache) — run last
     # so a fixed key / switched provider isn't served from a stale cache.
-    for hook in _KEY_CHANGE_HOOKS:
+    for hook in _SETTINGS_CHANGE_HOOKS:
         try:
             hook()
         except Exception as exc:
-            logger.warning("reset_after_key_change: hook %r failed: %r", hook, exc)
+            logger.warning("reset_after_settings_change: hook %r failed: %r", hook, exc)
 
 
 def load_test_env() -> None:

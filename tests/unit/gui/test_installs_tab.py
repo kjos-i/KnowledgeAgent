@@ -124,7 +124,7 @@ def test_ollama_url_blur_persists_and_bridges(fake_app):
     with (
         patch.object(installs, "save_config"),
         patch.object(installs, "apply_llm_to_env") as bridge,
-        patch.object(installs, "reset_after_key_change"),
+        patch.object(installs, "reset_after_settings_change"),
     ):
         tab._on_ollama_url_blur(MagicMock())
     assert fake_app.gui_config.ollama_base_url == "http://localhost:22222"

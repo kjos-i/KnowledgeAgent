@@ -20,7 +20,7 @@ Save UX:
     primary read-surface.
 
 Backend cache hygiene after a save: the keys reach `os.environ` via
-`apply_keys_to_env()`, then `config.reset_after_key_change()` drops
+`apply_keys_to_env()`, then `config.reset_after_settings_change()` drops
 the cached singletons (Neo4j driver, LLM client, embedder client)
 that captured the OLD key at construction.
 
@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
-from knowledge_agent.config import reset_after_key_change
+from knowledge_agent.config import reset_after_settings_change
 from knowledge_agent.gui._styles import FRAME_BORDER_COLOR, PANEL_BG, labeled_field
 from knowledge_agent.gui._widgets.info_icon import info_icon
 from knowledge_agent.gui.config_store import (
@@ -189,11 +189,11 @@ class KeysTab:
         # construction.
         apply_keys_to_env()
         try:
-            reset_after_key_change()
+            reset_after_settings_change()
         except Exception as exc:
             # Cache-clear failure is non-fatal — the new key is stored,
             # but a restart will be needed before factories see it.
-            logger.warning("reset_after_key_change failed: %r", exc)
+            logger.warning("reset_after_settings_change failed: %r", exc)
         caption = self.key_captions.get(name)
         if caption is not None:
             caption.value = f"{self._key_label(name)}:"

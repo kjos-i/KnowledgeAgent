@@ -17,7 +17,7 @@ from knowledge_agent.gui.settings.retrieval_tab import RetrievalTab
 
 _SAVE = "knowledge_agent.gui.settings.retrieval_tab.save_config"
 _APPLY = "knowledge_agent.gui.settings.retrieval_tab.apply_retrieval_to_env"
-_RESET = "knowledge_agent.gui.settings.retrieval_tab.reset_after_key_change"
+_RESET = "knowledge_agent.gui.settings.retrieval_tab.reset_after_settings_change"
 
 
 def _tab() -> RetrievalTab:

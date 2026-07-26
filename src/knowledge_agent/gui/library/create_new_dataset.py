@@ -51,7 +51,7 @@ from typing import TYPE_CHECKING
 import flet as ft
 import tomlkit
 
-from knowledge_agent.config import reset_after_key_change
+from knowledge_agent.config import reset_after_settings_change
 from knowledge_agent.corpus_config import CorpusConfig
 from knowledge_agent.gui._styles import (
     FRAME_BORDER_COLOR,
@@ -685,9 +685,9 @@ class CreateNewDatasetTab:
 
         os.environ["NEO4J_PASSWORD"] = password
         try:
-            reset_after_key_change()
+            reset_after_settings_change()
         except Exception as exc:
-            logger.warning("reset_after_key_change failed: %r", exc)
+            logger.warning("reset_after_settings_change failed: %r", exc)
 
         self.status.value = (
             f"corpus {name!r} created + active. Open Ingest to configure it "

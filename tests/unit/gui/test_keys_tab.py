@@ -40,7 +40,7 @@ def test_blur_saves_a_changed_key(fake_app: MagicMock):
         patch(f"{_M}.get_api_key", return_value=None),
         patch(f"{_M}.set_api_key") as set_key,
         patch(f"{_M}.apply_keys_to_env") as apply_env,
-        patch(f"{_M}.reset_after_key_change"),
+        patch(f"{_M}.reset_after_settings_change"),
     ):
         tab.on_key_blur("langsmith")
     set_key.assert_called_once_with("langsmith", "ls-new-value")  # pragma: allowlist secret

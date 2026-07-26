@@ -124,7 +124,7 @@ def test_voyage_rate_blur_commits_and_bridges():
         patch.object(llm_tab, "save_config"),
         patch.object(llm_tab, "apply_llm_to_env"),
         patch.object(llm_tab, "apply_voyage_rate_to_env") as rate_bridge,
-        patch.object(llm_tab, "reset_after_key_change"),
+        patch.object(llm_tab, "reset_after_settings_change"),
     ):
         tab.on_rate_limit_blur("voyage")
     assert tab.app.gui_config.voyage_requests_per_second == 5.0

@@ -867,7 +867,7 @@ def apply_active_corpus_embedding_to_env(cfg: GuiConfig) -> None:
     `apply_embedding_to_env`, so the corpus overrides the global defaults)
     AND on every corpus switch. No active corpus, a missing file, or a
     parse error leaves the global embedding settings in place (logged) —
-    it never raises. The caller owns `reset_after_key_change()` (same
+    it never raises. The caller owns `reset_after_settings_change()` (same
     contract as the connection/password bridges).
     """
     path = cfg.corpus_config_path
@@ -907,7 +907,7 @@ def switch_active_corpus(cfg: GuiConfig, name: str) -> SwitchOutcome:
     persists (rolling back on save failure), pushes the connection to env,
     and bridges the corpus's Neo4j password (keyring -> env). Does NO UI
     work and does NOT clear backend caches — the caller (`GuiApp.select_corpus`)
-    owns `reset_after_key_change` and the cross-tab refresh.
+    owns `reset_after_settings_change` and the cross-tab refresh.
 
     This is the single source of truth for "activate this corpus": the
     top-bar selector, the Manage dialog, and the Library picker all route
