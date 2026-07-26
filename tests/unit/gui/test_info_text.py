@@ -32,3 +32,24 @@ def test_documents_table_content_icons_present():
     for key in ("select.documents_cards", "select.documents_edit"):
         spec = INFO[key]
         assert spec.standard and spec.beginner and spec.technical, f"{key}: a tier is empty"
+
+
+def test_installs_section_icons_present():
+    """The Installs tab overview + 5 section icons are registered with all
+    three tiers filled (they render from the registry via section_header key=)."""
+    for key in (
+        "installs.overview",
+        "installs.llm_providers",
+        "installs.embedding_providers",
+        "installs.parsers",
+        "installs.entity_extractors",
+        "installs.ontologies",
+    ):
+        spec = INFO[key]
+        assert spec.standard and spec.beginner and spec.technical, f"{key}: a tier is empty"
+
+
+def test_keys_overview_icon_present():
+    """The Keys tab overview icon is registered with all three tiers filled."""
+    spec = INFO["keys.overview"]
+    assert spec.standard and spec.beginner and spec.technical, "keys.overview: a tier is empty"

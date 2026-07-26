@@ -90,3 +90,21 @@ def test_section_header_forwards_beginner_tier(fake_app):
     # [section_title, info_icon_row]; the icon row carries all three tiers.
     assert len(row.controls) == 2
     assert tiers == ["standard", "beginner", "technical"]
+
+
+def test_section_header_key_pulls_from_registry(fake_app):
+    """section_header(key=...) sources its (i) text from the info_text registry
+    (the single home for icon text) instead of inline strings, so the header
+    still renders title + the icon row with the entry's tiers."""
+    from knowledge_agent.gui._widgets.info_icon import section_header
+
+    fake_app.gui_config.show_info_icons = True
+    fake_app.gui_config.show_beginner_info = True
+    fake_app.gui_config.show_technical_info = True
+    tiers: list[str] = []
+    fake_app.register_info_icon = lambda btn, tier="standard": tiers.append(tier)
+    # A real registry key with all three tiers filled.
+    row = section_header(fake_app, "LLM providers", key="installs.llm_providers")
+    assert isinstance(row, ft.Row)
+    assert len(row.controls) == 2  # [section_title, info row from the registry]
+    assert tiers == ["standard", "beginner", "technical"]

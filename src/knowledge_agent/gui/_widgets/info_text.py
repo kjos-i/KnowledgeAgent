@@ -3392,6 +3392,306 @@ INFO: dict[str, InfoText] = {
             "loaded_file."
         ),
     ),
+    "installs.overview": InfoText(
+        title="Installs",
+        standard=(
+            "The one place to set up the optional pieces the app can use: LLM "
+            "providers, embedding providers, document parsers, entity extractors, "
+            "and ontologies. Nothing here is bundled, so you install only what a "
+            "corpus needs.\n\n"
+            "Installing or uninstalling a package (a provider, parser, or extractor "
+            "adapter) needs an app restart to take effect. Downloading or deleting "
+            "files (extractor weights, ontology source files) does not: those are "
+            "read on the next ingest. Each section below has its own help icon with "
+            "the details."
+        ),
+        beginner=(
+            "This tab is where you add or remove the optional add-ons the app can "
+            "use. None come pre-installed, so you set up only the ones you actually "
+            "need.\n\n"
+            "There are five kinds: LLM providers (the models that reason and "
+            "answer), embedding providers (turn text into searchable vectors), "
+            "parsers (read extra file types like audio or code), entity extractors "
+            "(find names and terms in documents), and ontologies (curated "
+            "vocabularies).\n\n"
+            "Rule of thumb for restarts: adding or removing a software package "
+            "needs a restart; downloading or deleting data files (model weights, "
+            "ontology files) does not. Each section's icon explains its own case."
+        ),
+        technical=(
+            "The global install surface. Adapters ship as opt-in pip extras "
+            "(llm-*, embed-*, parsers-*, entities-*); this is the only GUI path "
+            "that runs pip install/uninstall. The active-provider choice lives in "
+            "the LLMs and Embedding tabs, which read install state to offer only "
+            "installed providers.\n\n"
+            "Restart contract: pip install/uninstall returns restart_required and "
+            "the app must restart to load or release the module. File operations "
+            "(extractor weights via HF snapshot, ontology source files) mutate disk "
+            "only and are picked up at next ingest, no restart. The editable "
+            "settings here (Ollama base URL, ontology_downloads_dir) bridge to env "
+            "and call reset_after_settings_change(), so they apply in-process "
+            "without a restart. Each installable uses the lifecycle plan/execute "
+            "pattern behind a confirm dialog."
+        ),
+    ),
+    "installs.llm_providers": InfoText(
+        title="LLM providers",
+        standard=(
+            "Install or uninstall each LLM provider's adapter (a pip package): "
+            "Anthropic, OpenAI, Google, and Ollama (local). Nothing is bundled, so "
+            "install only what you use. Both install and uninstall need an app "
+            "restart to take effect (the status line says so). The active provider "
+            "cannot be uninstalled.\n\n"
+            "You choose which model each step uses in the LLMs tab (under Search), "
+            "not here.\n\n"
+            "Ollama is local and has three parts: the adapter (installed here), the "
+            "daemon (a separate program from ollama.com that must be running; the "
+            "line under the Ollama row checks it), and the models (pulled on the "
+            "command line with 'ollama pull', not in this app). The box shows where "
+            "Ollama stores models on disk. The Ollama base URL is where the app "
+            "reaches the daemon; editing it applies immediately, no restart."
+        ),
+        beginner=(
+            "This is where you set up the AI providers whose models answer your "
+            "questions. None come pre-installed, so add the one(s) you have an "
+            "account for: Anthropic, OpenAI, Google, or Ollama (which runs models "
+            "locally on your own machine).\n\n"
+            "Press Install to add a provider's software, or Uninstall to remove it. "
+            "Either way, restart the app afterwards so the change takes effect. You "
+            "cannot uninstall the provider currently in use.\n\n"
+            "Ollama takes a few more steps because it runs locally: install its "
+            "adapter here, install and start the Ollama program from ollama.com, and "
+            "download the models by typing 'ollama pull <model>' in a terminal. The "
+            "Ollama base URL is the address the app uses to reach it; the line under "
+            "the row tells you whether it is reachable.\n\n"
+            "You pick which model does what in the LLMs tab (under Search), not here."
+        ),
+        technical=(
+            "Rows install/uninstall the pip adapter for each provider in "
+            "LLM_PROVIDER_REGISTRY via llm_lifecycle (plan/execute). Both set "
+            "restart_required on success; the app must restart to load or release "
+            "langchain-<provider>. Uninstalling the active provider "
+            "(settings.llm_provider) is blocked in the lifecycle, and the GUI greys "
+            "the Uninstall button for any provider a node model uses or the active "
+            "one.\n\n"
+            "Ollama is three independent parts: adapter (langchain-ollama, pip, "
+            "here), daemon (external binary from ollama.com, reachability probed "
+            "async and shown in the status line), and model weights (ollama pull on "
+            "the CLI; the backend has pull ops but they are not wired into this "
+            "GUI). The read-only box resolves the Ollama models directory "
+            "(OLLAMA_MODELS env or the platform default). The base URL field "
+            "persists to GuiConfig, bridges via apply_llm_to_env (OLLAMA_BASE_URL), "
+            "and calls reset_after_settings_change(), so it applies in-process; "
+            "empty is rejected."
+        ),
+    ),
+    "installs.embedding_providers": InfoText(
+        title="Embedding providers",
+        standard=(
+            "Install or uninstall each embedding provider's adapter (a pip "
+            "package): Voyage, OpenAI, Google, and HuggingFace. Both install and "
+            "uninstall need an app restart to take effect. The active embedder "
+            "cannot be uninstalled; switch it in the Embedding settings first.\n\n"
+            "You choose the active embedder and model in the Embedding settings, "
+            "not here. Only HuggingFace downloads models to your machine (shown in "
+            "the 'on disk' box); Voyage, OpenAI, and Google are remote APIs."
+        ),
+        beginner=(
+            "Embedding providers turn your document text into the numeric vectors "
+            "that make search work. This is where you install or remove them. None "
+            "come pre-installed.\n\n"
+            "Press Install to add one, Uninstall to remove it, and restart the app "
+            "afterwards. You cannot uninstall the embedder you are currently using; "
+            "change it in the Embedding settings first.\n\n"
+            "Three of them (Voyage, OpenAI, Google) run in the cloud, so there is "
+            "nothing to download. HuggingFace runs on your machine and downloads its "
+            "model the first time it is used; the box shows where those files live."
+        ),
+        technical=(
+            "Rows install/uninstall the pip adapter for each provider in "
+            "EMBEDDER_PROVIDER_REGISTRY via embedder_lifecycle (plan/execute); both "
+            "set restart_required on success. Uninstalling the active embedder "
+            "(settings.embedding_provider) is blocked in the lifecycle.\n\n"
+            "Voyage/OpenAI/Google are remote (require an API key, no local model "
+            "op). Only HuggingFace downloads weights (to the shared HF Hub cache, "
+            "the read-only box); it auto-downloads on first use, so there is no "
+            "explicit weight-download button here. The active embedder and model "
+            "are set per corpus in the Embedding settings."
+        ),
+    ),
+    "installs.parsers": InfoText(
+        title="Parsers",
+        standard=(
+            "Optional Docling parser extras. Install or uninstall each as a pip "
+            "package; both need an app restart to take effect.\n\n"
+            "ASR (audio and video transcription): installing pulls openai-whisper "
+            "plus a bundled ffmpeg. The Whisper model weights (about 1.5 GB) are "
+            "downloaded by Docling on first ingest use, not here; the box shows "
+            "where they land. AST-aware code parsing ships its grammars inside the "
+            "pip package, so nothing extra to download."
+        ),
+        beginner=(
+            "Parsers let the app read extra kinds of files. There are two optional "
+            "ones: transcription of audio and video, and structure-aware parsing of "
+            "source code. Neither is installed by default.\n\n"
+            "Press Install to add one, Uninstall to remove it, and restart the app "
+            "afterwards. The transcription parser downloads its speech model "
+            "automatically the first time you actually ingest audio or video (about "
+            "1.5 GB); the box shows where it is stored. The code parser needs no "
+            "separate download."
+        ),
+        technical=(
+            "Rows install/uninstall the parser pip extra via parser_lifecycle "
+            "(plan/execute); both set restart_required on success. The ASR extra "
+            "installs openai-whisper plus imageio-ffmpeg; Whisper Turbo weights are "
+            "fetched by Docling on first ASR ingest into the shared HF Hub cache "
+            "(the read-only box), not by this tab. The code parser's tree-sitter "
+            "grammars ship in-wheel, so the pip install (and its restart) is all "
+            "that is needed."
+        ),
+    ),
+    "installs.entity_extractors": InfoText(
+        title="Entity extractors",
+        standard=(
+            "The L6 named-entity extractors: GLiNER, GLiNER-BioMed, and HunFlair2. "
+            "Each needs two things: its adapter (a pip package) and its model "
+            "weights (downloaded separately).\n\n"
+            "Install/Uninstall handle the adapter and need an app restart. Download "
+            "weights / Delete download handle the model files and do NOT need a "
+            "restart (they are read at ingest time). There is no auto-download: if "
+            "the weights are missing, extraction fails, so download them before "
+            "ingesting. The box shows where weights are stored.\n\n"
+            "LLM-based extraction is not listed here; it uses your installed LLM "
+            "provider, and you pick its model in Ingest."
+        ),
+        beginner=(
+            "These find named things (people, places, genes, and so on) in your "
+            "documents. There are three, and each has two parts to set up: the "
+            "software (the adapter) and the actual model files (the weights).\n\n"
+            "Use Install and Uninstall for the software, then restart the app. Use "
+            "Download weights and Delete download for the model files; those take "
+            "effect right away, no restart. Important: the weights do not download "
+            "automatically, so download them before you ingest, or extraction will "
+            "fail. The box shows where they are kept.\n\n"
+            "There is also an LLM-based option that is not shown here, because it "
+            "just uses whichever LLM provider you already installed; you choose it "
+            "in the Ingest settings."
+        ),
+        technical=(
+            "Two independent axes per row. Adapter: install/uninstall the pip extra "
+            "via extractor_lifecycle (plan/execute), restart_required on success. "
+            "Weights: download/delete via the HF snapshot ops; those results carry "
+            "no restart_required (files on disk, loaded at inference, so no "
+            "restart). No auto-download at first inference; extraction raises if "
+            "weights are absent. The read-only box resolves the HF Hub cache. "
+            "LLM-based extraction is excluded from this list (it dispatches through "
+            "the installed LLM provider; model chosen in the Ingest/corpus config)."
+        ),
+    ),
+    "installs.ontologies": InfoText(
+        title="Ontologies",
+        standard=(
+            "Download or delete each ontology's source file(s) on disk. No restart "
+            "is needed either way: the Neo4j term nodes are written during ingest, "
+            "not by these buttons, so downloading is safe (no schema change), and "
+            "deleting a download leaves any existing nodes untouched.\n\n"
+            "ontology_downloads_dir sets where the files are saved; leave it blank "
+            "to use the backend default. The Browse button picks a folder, and the "
+            "'on disk' line shows the path actually in use. Editing this applies "
+            "immediately, no restart."
+        ),
+        beginner=(
+            "Ontologies are curated vocabularies (for genes, diseases, chemicals, "
+            "and so on) the app can use during ingest. Here you just download their "
+            "source files to disk, or delete them to free space. Neither needs a "
+            "restart.\n\n"
+            "Downloading a file does not change your data on its own; the terms only "
+            "enter the knowledge graph when you next ingest with that ontology "
+            "enabled. Deleting a download does not remove anything already in the "
+            "graph.\n\n"
+            "The ontology_downloads_dir box is where the files are saved. Leave it "
+            "blank to use the default location, or Browse to choose your own; the "
+            "line below shows where they actually go."
+        ),
+        technical=(
+            "Download/delete source files via kg/ontologies/lifecycle "
+            "(plan/execute); neither result carries restart_required (disk-only; "
+            "Neo4j writes happen at ingest, not here). ontology_downloads_dir "
+            "persists to GuiConfig, bridges via apply_ontology_downloads_dir_to_env "
+            "(blank deletes the env var so the backend default wins), and calls "
+            "reset_after_settings_change(), so it applies in-process without a "
+            "restart. The effective-path box echoes the resolved location (override "
+            "when set, backend default when blank)."
+        ),
+    ),
+    "keys.overview": InfoText(
+        title="Keys",
+        standard=(
+            "Your provider API keys, one field per provider: Anthropic, OpenAI, "
+            "Google, Voyage, and the optional LangSmith. Fill in only the ones the "
+            "providers you actually use need; none is required.\n\n"
+            "Keys are stored in your operating system's secure keyring (Windows "
+            "Credential Manager, macOS Keychain, or Linux Secret Service), never "
+            "written to disk in plain text. Each field saves on its own when you "
+            "click away from it, and the new key takes effect immediately, with no "
+            "restart. The eye button shows or hides a key, and the '(saved)' or "
+            "'(not set)' tag by each label shows whether a key is already stored.\n\n"
+            "Leaving a field blank keeps whatever key is already saved; clearing a "
+            "field does not delete it. To remove a key, use the delete button next "
+            "to it (it asks you to confirm).\n\n"
+            "Voyage is used only for embeddings and Anthropic only for the chat "
+            "models; the OpenAI and Google keys serve both chat and embeddings. "
+            "LangSmith is different: it is optional and only used to trace "
+            "evaluation runs (in the Evaluation Run tab), so leave it blank if you "
+            "do not trace. Neo4j database passwords are not set here: they are per "
+            "corpus, set when you create a corpus in the Library tab."
+        ),
+        beginner=(
+            "These are the keys (like passwords) that let the app use AI providers "
+            "on your behalf. There is one box per provider: Anthropic, OpenAI, "
+            "Google, Voyage, and LangSmith. Fill in only the ones for services you "
+            "actually use, so it is normal to leave several blank.\n\n"
+            "Your keys are kept in your computer's built-in secure store (the same "
+            "place other saved passwords live), not in a plain file. Type a key and "
+            "click elsewhere and it saves by itself, right away. The small eye "
+            "button lets you check what a key is, and each label says '(saved)' or "
+            "'(not set)' so you can see which keys are in place.\n\n"
+            "Leaving a box empty keeps the key you already saved; emptying a box "
+            "does not remove it. To actually remove a saved key, use the delete "
+            "button beside it and confirm.\n\n"
+            "A few specifics: Voyage is only for turning text into search vectors, "
+            "and Anthropic is only for the chat models; the OpenAI and Google keys "
+            "are used for both. LangSmith is different: it is only for recording "
+            "evaluation runs, so you can ignore it otherwise. The password for your "
+            "Neo4j database is not set here; you set that when you create a corpus "
+            "in the Library tab."
+        ),
+        technical=(
+            "Five keyring-backed secrets (anthropic, openai, google, voyage, "
+            "langsmith), stored via the OS keyring under the app's service name, "
+            "never on disk. Each field saves on blur: a value unchanged from the "
+            "stored one, or an empty field, is a no-op. On a real change it writes "
+            "the keyring, then apply_keys_to_env bridges the value to the matching "
+            "env var (ANTHROPIC_API_KEY, and so on) and reset_after_settings_change "
+            "drops the cached Neo4j, LLM, and embedder singletons that captured the "
+            "old key, so the new key applies in-process without a restart (if that "
+            "cache reset fails, the key is saved but a restart is needed before it "
+            "is picked up).\n\n"
+            "Keys are validated lazily (at first use), never at startup, so an "
+            "unused provider's key stays blank without error. LangSmith is "
+            "auth-only: the key is bridged, but LANGSMITH_TRACING is never set "
+            "globally; tracing opts in per evaluation run (the Run tab's trace "
+            "checkbox, or ka eval --trace) through a context manager. Voyage is "
+            "embedder-only and Anthropic is LLM-only; the OpenAI and Google keys "
+            "serve both their chat and embedding endpoints.\n\n"
+            "Emptying a field is a no-op (so an accidental clear never wipes a "
+            "stored key); deletion is an explicit action via the per-key delete "
+            "button, which calls set_api_key with an empty value (deletes the "
+            "keyring entry), clears that key's env var, and resets the caches, so "
+            "it takes effect without a restart. The Neo4j password is not managed "
+            "here: it is per corpus (keyring neo4j-<corpus>), set in the Library tab."
+        ),
+    ),
 }
 
 

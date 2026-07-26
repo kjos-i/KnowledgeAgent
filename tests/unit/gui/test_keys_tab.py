@@ -8,6 +8,7 @@ is a first-class field alongside the provider keys.
 
 from __future__ import annotations
 
+import os
 from unittest.mock import MagicMock, patch
 
 from knowledge_agent.gui.config_store import API_KEY_NAMES
@@ -48,8 +49,8 @@ def test_blur_saves_a_changed_key(fake_app: MagicMock):
 
 
 def test_blur_empty_field_is_noop(fake_app: MagicMock):
-    """An empty field must not wipe a stored key (explicit-delete isn't a
-    GUI flow yet)."""
+    """An empty field must not wipe a stored key; deletion is a separate,
+    explicit action via the per-key delete button."""
     tab = _tab(fake_app)
     tab.key_fields["anthropic"].value = ""
     with (
@@ -71,3 +72,43 @@ def test_blur_unchanged_key_is_noop(fake_app: MagicMock):
     ):
         tab.on_key_blur("openai")
     set_key.assert_not_called()
+
+
+# ---- delete flow (per-key delete button, option i: clears only its env var) ----
+
+
+def test_delete_shows_confirm_dialog_when_key_exists(fake_app: MagicMock):
+    """The delete button opens a confirm dialog (delete acts on confirm only)."""
+    tab = _tab(fake_app, existing={"openai": "stored-key"})  # pragma: allowlist secret
+    with patch(f"{_M}.get_api_key", return_value="stored-key"):  # pragma: allowlist secret
+        tab._on_key_delete("openai")
+    fake_app.page.show_dialog.assert_called_once()
+
+
+def test_delete_noop_when_key_not_set(fake_app: MagicMock):
+    """Deleting a key that isn't stored just reports it, with no dialog."""
+    tab = _tab(fake_app)
+    with patch(f"{_M}.get_api_key", return_value=None):
+        tab._on_key_delete("google")
+    fake_app.page.show_dialog.assert_not_called()
+    assert "not set" in tab.status.value.lower()
+
+
+def test_delete_key_removes_and_clears_only_its_env_var(fake_app: MagicMock, monkeypatch):
+    """_delete_key deletes the keyring entry (set_api_key with empty), clears
+    ONLY this key's env var (option i, not a shell-wide clobber), resets the
+    caches, and empties the field."""
+    tab = _tab(fake_app, existing={"anthropic": "sk-old"})  # pragma: allowlist secret
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-old")  # pragma: allowlist secret
+    monkeypatch.setenv("OPENAI_API_KEY", "keep-me")  # pragma: allowlist secret
+    with (
+        patch(f"{_M}.get_api_key", return_value=None),  # key is gone after delete
+        patch(f"{_M}.set_api_key") as set_key,
+        patch(f"{_M}.reset_after_settings_change") as reset,
+    ):
+        tab._delete_key("anthropic")
+    set_key.assert_called_once_with("anthropic", "")  # empty value deletes
+    reset.assert_called_once()
+    assert "ANTHROPIC_API_KEY" not in os.environ  # deleted key's env var cleared (option i)
+    assert os.environ["OPENAI_API_KEY"] == "keep-me"  # pragma: allowlist secret
+    assert tab.key_fields["anthropic"].value == ""  # field emptied

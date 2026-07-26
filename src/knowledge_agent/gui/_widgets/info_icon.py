@@ -146,13 +146,27 @@ def section_header(
     *,
     beginner: str | None = None,
     technical: str | None = None,
+    key: str | None = None,
 ) -> ft.Control:
     """A bold `section_title` beside its (i) help icon(s) — the app-wide
-    prose → (i) pattern for section headings. `text` is the standard note,
-    `beginner` the plain-language tier, `technical` the power-user tier. With
-    none of them, it's just the title."""
+    prose to (i) pattern for section headings.
+
+    Preferred form: pass `key`, the id of an `info_text.INFO` entry, so the
+    help prose lives in the central registry (the single home for icon text)
+    rather than inline here. The heading `title` is still passed explicitly
+    for the visible bold text; the registry entry supplies the three tiers.
+
+    Legacy inline form: pass `text` (standard) and optionally `beginner` /
+    `technical` as literal strings. With none of `key`/`text`/`beginner`/
+    `technical`, it's just the title."""
     controls: list[ft.Control] = [section_title(title)]
-    if text is not None or beginner is not None or technical is not None:
+    if key is not None:
+        # Lazy import: info_text imports from this module, so a module-level
+        # import would create a cycle.
+        from knowledge_agent.gui._widgets.info_text import info
+
+        controls.append(info(app, key))
+    elif text is not None or beginner is not None or technical is not None:
         controls.append(
             info_icon(app, title=title, text=text, beginner=beginner, technical=technical)
         )

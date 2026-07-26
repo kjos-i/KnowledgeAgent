@@ -88,9 +88,9 @@ def test_llm_provider_uninstall_shows_confirm_dialog(fake_app):
 
 
 def test_llm_provider_sync_disables_uninstall_for_in_use_provider(fake_app):
-    """A provider a query-time node model uses can't be uninstalled; an unused
-    installed provider can. (Replaces the old single 'active provider' guard —
-    there's no active provider any more; each node picks its own.)"""
+    """A provider a query-time node model uses can't be uninstalled; a provider
+    that no node uses and isn't the default provider can. Each node picks its
+    own provider."""
     fake_app.gui_config = GuiConfig()
     fake_app.gui_config.llm_provider = "anthropic"
     for attr in (
@@ -108,6 +108,64 @@ def test_llm_provider_sync_disables_uninstall_for_in_use_provider(fake_app):
     assert tab.llm_provider_uninstall_buttons["anthropic"].disabled is True  # in use
     assert tab.llm_provider_uninstall_buttons["openai"].disabled is True  # in use (synthesizer)
     assert tab.llm_provider_uninstall_buttons["google"].disabled is False  # unused
+
+
+def test_llm_provider_sync_disables_uninstall_for_default_provider_not_in_nodes(fake_app):
+    """Bug 2: the default provider (settings.llm_provider) can't be uninstalled
+    even when NO node model references it — matching the lifecycle's is_active
+    block, so the GUI never offers a button that would no-op."""
+    fake_app.gui_config = GuiConfig()
+    fake_app.gui_config.llm_provider = "google"  # the default/fallback provider
+    for attr in (
+        "chat_router_model",
+        "mode_classifier_model",
+        "query_builder_model",
+        "cypher_builder_model",
+        "synthesizer_model",
+    ):
+        setattr(fake_app.gui_config, attr, "anthropic:claude-haiku-4-5")  # all explicit, non-google
+    tab = InstallsTab(fake_app)
+    with patch.object(tab, "_safe_bool", return_value=True):  # all providers installed
+        tab._sync_llm_provider_state()
+    assert tab.llm_provider_uninstall_buttons["google"].disabled is True  # default, protected
+    assert tab.llm_provider_uninstall_buttons["anthropic"].disabled is True  # node-used
+    assert tab.llm_provider_uninstall_buttons["openai"].disabled is False  # neither
+
+
+def test_llm_uninstall_noop_message_is_honest(fake_app):
+    """Bug 1: a no-op uninstall (nothing removed, restart_required False) must
+    NOT claim 'Uninstalled ... Restart'."""
+    from knowledge_agent.gui.library import installs
+
+    fake_app.gui_config = GuiConfig()
+    tab = InstallsTab(fake_app)
+    noop = MagicMock(uninstall_ok=True, restart_required=False)
+    with (
+        patch(_LLM_UNINSTALL, return_value=MagicMock()),
+        patch.object(installs, "uninstall_llm_provider_execute", AsyncMock(return_value=noop)),
+        patch.object(tab, "_sync_llm_provider_state"),
+        patch.object(tab, "_safe_update"),
+    ):
+        asyncio.run(tab._run_llm_provider_uninstall("anthropic"))
+    assert "not uninstalled" in tab.status.value.lower()
+    assert "Restart" not in tab.status.value
+
+
+def test_llm_uninstall_real_says_restart(fake_app):
+    """A real uninstall (restart_required True) tells the user to restart."""
+    from knowledge_agent.gui.library import installs
+
+    fake_app.gui_config = GuiConfig()
+    tab = InstallsTab(fake_app)
+    done = MagicMock(uninstall_ok=True, restart_required=True)
+    with (
+        patch(_LLM_UNINSTALL, return_value=MagicMock()),
+        patch.object(installs, "uninstall_llm_provider_execute", AsyncMock(return_value=done)),
+        patch.object(tab, "_sync_llm_provider_state"),
+        patch.object(tab, "_safe_update"),
+    ):
+        asyncio.run(tab._run_llm_provider_uninstall("anthropic"))
+    assert "Restart" in tab.status.value
 
 
 # ---- Ollama base URL + daemon status (moved here from the LLMs tab) ----

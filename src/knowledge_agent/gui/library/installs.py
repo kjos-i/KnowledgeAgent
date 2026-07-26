@@ -26,7 +26,7 @@ location sits next to the installs that use it:
      `install_parser_extra_execute` / `uninstall_parser_extra_execute`.
      Whisper weights auto-download inside Docling on first ingest use
      — disclosed in the row text rather than fought upstream.
-  4. **Entity extractors** — 4 rows, under a read-only "HF Hub cache"
+  4. **Entity extractors** — 3 rows, under a read-only "HF Hub cache"
      location (where downloaded weights land). Status = compound (pip package +
      pinned weights on disk). Two independent axes:
        - `Install`/`Uninstall` — pip package (wraps
@@ -99,7 +99,8 @@ from knowledge_agent.gui._styles import (
     labeled_field,
     section_divider,
 )
-from knowledge_agent.gui._widgets.info_icon import info_icon, section_header
+from knowledge_agent.gui._widgets.info_icon import section_header
+from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.config_store import (
     ConfigError,
     apply_llm_to_env,
@@ -182,7 +183,7 @@ def _source_link_button(url: str) -> ft.IconButton:
         icon_color=ft.Colors.BLUE_300,
         width=40,
         url=url,
-        tooltip=f"Open source page — {url}",
+        tooltip=f"Open source page: {url}",
     )
 
 
@@ -496,10 +497,7 @@ class InstallsTab:
             section_header(
                 self.app,
                 "LLM providers (4)",
-                "Install / Uninstall each LLM adapter's pip package (confirm "
-                "dialog; a restart is needed after). Pick per-node models in "
-                "Search → LLMs, not here. The Ollama base URL + daemon status "
-                "sit below its row.",
+                key="installs.llm_providers",
             )
         )
         # Where Ollama keeps pulled local-LLM models — read-only (library-owned).
@@ -530,10 +528,7 @@ class InstallsTab:
             section_header(
                 self.app,
                 "Embedding providers (4)",
-                "Install / Uninstall each embedder's pip adapter (confirm "
-                "dialog; a restart is needed after). Choose the ACTIVE embedder "
-                "+ model in the Embedding settings, not here. The active "
-                "embedder can't be uninstalled — switch it there first.",
+                key="installs.embedding_providers",
             )
         )
         # Only the HuggingFace embedder downloads models locally (Voyage / OpenAI
@@ -560,11 +555,7 @@ class InstallsTab:
             section_header(
                 self.app,
                 "Parsers (2)",
-                "Optional docling extras. ASR (audio + video transcription): pip "
-                "install of the extra pulls openai-whisper + bundled ffmpeg. "
-                "Whisper model weights (~1.5 GB) are downloaded by Docling on "
-                "first ingest use — not managed here. AST-aware code parsing "
-                "ships its tree-sitter grammars inside the pip wheel.",
+                key="installs.parsers",
             )
         )
         # Whisper Turbo weights land in the shared HF Hub cache (Docling fetches
@@ -597,11 +588,7 @@ class InstallsTab:
             section_header(
                 self.app,
                 "Entity extractors (3)",
-                "L6 NER adapters: GLiNER / GLiNER-BioMed / HunFlair2 need BOTH the "
-                "pip extras (adapter library) AND their pinned model weights "
-                "downloaded. No auto-download at first inference — extraction raises "
-                "if weights are missing. (LLM-based extraction isn't listed here — it "
-                "uses your installed LLM provider; pick the model in Ingest.)",
+                key="installs.entity_extractors",
             )
         )
         # Where downloaded extractor weights land — read-only (HF-hub-owned).
@@ -631,9 +618,7 @@ class InstallsTab:
             section_header(
                 self.app,
                 "Ontologies (18)",
-                "Download the source file(s) to disk here. Neo4j term nodes "
-                "are written during ingest — not by these buttons — so "
-                "downloading is safe (no schema change).",
+                key="installs.ontologies",
             )
         )
         # Where ontology source files download to — the ONE editable location
@@ -676,19 +661,8 @@ class InstallsTab:
                 spacing=10,
                 controls=controls,
             ),
-            # Placeholder restart note (to elaborate later): most install /
-            # uninstall actions here need an app restart to take effect.
-            trailing=info_icon(
-                self.app,
-                title="Installs",
-                text=(
-                    "Installing or uninstalling a package here changes what "
-                    "Python has loaded, so most actions need an app restart to "
-                    "take effect (each row's status message says when). "
-                    "Downloads and location changes that do not add or remove a "
-                    "package take effect right away."
-                ),
-            ),
+            # Tab overview (i): what the Installs tab is + the restart contract.
+            trailing=info(self.app, "installs.overview"),
         )
 
     def _simple_row(
@@ -832,7 +806,7 @@ class InstallsTab:
         except Exception as exc:
             logger.warning("reset_after_settings_change failed: %r", exc)
         if new_value is None:
-            self._set_status("ontology_downloads_dir reset — using backend default.")
+            self._set_status("ontology_downloads_dir reset, using backend default.")
         else:
             self._set_status(f"Saved ontology_downloads_dir: {new_value}")
         # Re-run the ontology disk probes against the new path so the
@@ -862,7 +836,7 @@ class InstallsTab:
             # Status chip.
             if pip_installed and (not has_weights_concept or weights_present):
                 size_clause = f" ({_fmt_bytes(weights_bytes)})" if has_weights_concept else ""
-                status_text.value = f"✓ ready — pip + weights{size_clause}"
+                status_text.value = f"✓ ready: pip + weights{size_clause}"
                 status_text.color = ft.Colors.GREEN_300
             elif pip_installed and not weights_present:
                 status_text.value = "○ pip installed; weights not downloaded"
@@ -901,7 +875,7 @@ class InstallsTab:
                 # 1.5 GB fetch on their first ingest.
                 if name == "asr":
                     status_text.value = (
-                        "✓ installed — Docling downloads Whisper (~1.5 GB) on first ingest"
+                        "✓ installed. Docling downloads Whisper (~1.5 GB) on first ingest"
                     )
                 else:
                     status_text.value = "✓ installed"
@@ -935,7 +909,7 @@ class InstallsTab:
             if installed and name == active:
                 uninstall_btn.disabled = True
                 uninstall_btn.tooltip = (
-                    "Active embedder can't be uninstalled — switch it in the "
+                    "Active embedder can't be uninstalled. Switch it in the "
                     "Embedding settings first."
                 )
             else:
@@ -959,7 +933,12 @@ class InstallsTab:
         query-time node model currently uses can't be uninstalled — it would
         break that node (see `_providers_in_use`). The row itself is only
         'is the adapter pip-installed'; the Ollama daemon line is separate."""
-        in_use = self._providers_in_use()
+        # Also protect the active/default provider: the lifecycle blocks
+        # uninstalling settings.llm_provider, so the GUI must too (else the
+        # button no-ops with a misleading result). _providers_in_use already
+        # covers it when a node holds a bare ref; the union covers the case
+        # where every node ref is explicit and the default isn't among them.
+        in_use = self._providers_in_use() | {self.app.gui_config.llm_provider}
         for name in _LLM_PROVIDER_ORDER:
             entry = LLM_PROVIDER_REGISTRY[name]
             installed = self._safe_bool(entry.get("is_installed_fn"))
@@ -977,8 +956,9 @@ class InstallsTab:
             if installed and name in in_use:
                 uninstall_btn.disabled = True
                 uninstall_btn.tooltip = (
-                    f"{entry['display_name']} is used by a model in Search → "
-                    "LLMs — re-point those nodes before uninstalling."
+                    f"{entry['display_name']} is in use by a query model in the "
+                    "LLMs tab (or is the default provider), so it can't be "
+                    "uninstalled. Re-point those models first."
                 )
             else:
                 uninstall_btn.disabled = False
@@ -1032,14 +1012,14 @@ class InstallsTab:
         installed = self._safe_bool(LLM_PROVIDER_REGISTRY["ollama"].get("is_installed_fn"))
         daemon = self._ollama_daemon_ok
         if not installed:
-            self.ollama_daemon_status.value = "Ollama adapter not installed — install it above."
+            self.ollama_daemon_status.value = "Ollama adapter not installed. Install it above."
             self.ollama_daemon_status.color = ft.Colors.GREY_400
         elif daemon is True:
             self.ollama_daemon_status.value = "✓ daemon reachable"
             self.ollama_daemon_status.color = ft.Colors.GREEN_300
         elif daemon is False:
             self.ollama_daemon_status.value = (
-                "○ daemon not reachable — install / start it from https://ollama.com/download"
+                "○ daemon not reachable. Install or start it from https://ollama.com/download"
             )
             self.ollama_daemon_status.color = ft.Colors.AMBER_300
         else:
@@ -1183,7 +1163,7 @@ class InstallsTab:
         # it runs.
         warning = ""
         if plan.provenance is not None and plan.provenance.heavy_warning:
-            warning = f" — WARNING: {plan.provenance.heavy_warning}"
+            warning = f" (WARNING: {plan.provenance.heavy_warning})"
         target_mb = plan.download_size_mb
         self._set_status(f"Downloading {name!r} source file (~{target_mb} MB){warning}…")
 
@@ -1306,7 +1286,10 @@ class InstallsTab:
                 ok=False,
             )
             return
-        self._set_status(f"Uninstalled {name!r}. Restart the app to fully release the module.")
+        if result.restart_required:
+            self._set_status(f"Uninstalled {name!r}. Restart the app to fully release the module.")
+        else:
+            self._set_status(f"{name!r} was not uninstalled (nothing to remove, or it is in use).")
         self._sync_extractor_state()
         self._safe_update()
 
@@ -1365,7 +1348,7 @@ class InstallsTab:
     def _on_extractor_delete(self, name: str) -> None:
         plan = delete_extractor_weights_plan(name)
         summary = (
-            f"{plan.display_name} has no weights on disk — nothing to delete."
+            f"{plan.display_name} has no weights on disk, nothing to delete."
             if not plan.is_downloaded
             else (
                 f"Delete {plan.display_name} weights from disk "
@@ -1447,9 +1430,12 @@ class InstallsTab:
                 ok=False,
             )
             return
-        self._set_status(
-            f"Uninstalled parser {name!r}. Restart the app to fully release the module."
-        )
+        if result.restart_required:
+            self._set_status(
+                f"Uninstalled parser {name!r}. Restart the app to fully release the module."
+            )
+        else:
+            self._set_status(f"Parser {name!r} was not uninstalled (nothing to remove).")
         self._sync_parser_state()
         self._safe_update()
 
@@ -1499,7 +1485,10 @@ class InstallsTab:
             tail = result.pip_output[-200:] if result.pip_output else ""
             self._set_status(f"Uninstall {name!r} failed: {tail}", ok=False)
             return
-        self._set_status(f"Uninstalled {name!r}. Restart the app to fully release the module.")
+        if result.restart_required:
+            self._set_status(f"Uninstalled {name!r}. Restart the app to fully release the module.")
+        else:
+            self._set_status(f"{name!r} was not uninstalled (nothing to remove, or it is in use).")
         self._sync_embedder_provider_state()
         self._safe_update()
 
@@ -1552,6 +1541,9 @@ class InstallsTab:
             tail = result.pip_output[-200:] if result.pip_output else ""
             self._set_status(f"Uninstall {name!r} failed: {tail}", ok=False)
             return
-        self._set_status(f"Uninstalled {name!r}. Restart the app to fully release the module.")
+        if result.restart_required:
+            self._set_status(f"Uninstalled {name!r}. Restart the app to fully release the module.")
+        else:
+            self._set_status(f"{name!r} was not uninstalled (nothing to remove, or it is in use).")
         self._sync_llm_provider_state()
         self._safe_update()
