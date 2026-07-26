@@ -123,7 +123,8 @@ def test_render_rows_empty_set_shows_empty_state(fake_app):
     dv = _view(fake_app, rows=[])
     dv._render_rows()
     assert len(dv.doc_list.controls) == 1
-    assert dv.coverage_text.value == ""
+    # Empty corpus shows an explicit count (always visible), not a blank.
+    assert dv.coverage_text.value == "(0 documents)"
 
 
 def test_render_doc_card_returns_container(fake_app):

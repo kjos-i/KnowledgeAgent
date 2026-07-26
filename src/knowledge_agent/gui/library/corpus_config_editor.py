@@ -1846,6 +1846,27 @@ class CorpusConfigEditor:
         if field_name == "entities" and new_value and self._corpus_config.entities is None:
             self._commit_extractors()  # builds EntityConfig + runs _after_mutation
             return
+        if (
+            field_name == "entities"
+            and not new_value
+            and self._baseline_config is not None
+            and self._baseline_config.entities is None
+            and self._corpus_config.entities is not None
+        ):
+            # Entities turned OFF on a corpus whose ingested baseline had no
+            # [entities] section: drop the section the ON path seeded so a
+            # toggle on→off leaves no phantom pending change. When the baseline
+            # DOES have a section we leave the draft alone (turning the layer
+            # off then shows only the real flag change, and the section is kept).
+            self._corpus_config = self._corpus_config.model_copy(update={"entities": None})
+            self._selected_extractors = ["llm"]
+            if self.entity_types_field is not None:
+                self.entity_types_field.value = ""
+            if self.entity_types_mode_radio is not None:
+                self.entity_types_mode_radio.value = "replace"
+            self._rebuild_extractor_widget()
+            self._after_mutation()
+            return
         self._after_mutation()
 
     def _on_xrefs_changed(self, e: ft.Event) -> None:
@@ -2281,11 +2302,16 @@ class CorpusConfigEditor:
             return
         raw = (self.entity_extractor_model_field.value or "").strip()
         current = self._corpus_config.entity_extractor_model
+        fallback = self.app.gui_config.llm_provider
         if not raw:
-            self.entity_extractor_model_field.value = current
+            self.entity_extractor_model_field.value = to_model_ref(current, fallback)
             self.app.page.update()
             return
-        if raw == current:
+        # The picker shows a bare stored value in its composite provider:model
+        # form, so a blur that only echoes that form is not a real change.
+        # Compare normalized refs so a bare→composite no-op isn't committed as a
+        # phantom edit; a genuinely different model still commits.
+        if to_model_ref(raw, fallback) == to_model_ref(current, fallback):
             return
         self._corpus_config = self._corpus_config.model_copy(
             update={"entity_extractor_model": raw},
@@ -2323,11 +2349,16 @@ class CorpusConfigEditor:
             return
         raw = (self.triples_extractor_model_field.value or "").strip()
         current = self._corpus_config.triples_extractor_model
+        fallback = self.app.gui_config.llm_provider
         if not raw:
-            self.triples_extractor_model_field.value = current
+            self.triples_extractor_model_field.value = to_model_ref(current, fallback)
             self.app.page.update()
             return
-        if raw == current:
+        # The picker shows a bare stored value in its composite provider:model
+        # form, so a blur that only echoes that form is not a real change.
+        # Compare normalized refs so a bare→composite no-op isn't committed as a
+        # phantom edit; a genuinely different model still commits.
+        if to_model_ref(raw, fallback) == to_model_ref(current, fallback):
             return
         self._corpus_config = self._corpus_config.model_copy(
             update={"triples_extractor_model": raw},
@@ -2835,17 +2866,44 @@ class CorpusConfigEditor:
         if self.embedding_model_field is not None:
             self.embedding_model_field.disabled = frozen
 
+    def _entities_dependents_on(self, cfg: CorpusConfig) -> list[str]:
+        """Display names of the layers that REQUIRE the entities layer and are
+        currently on, so entities can't be turned off while any is active."""
+        on: list[str] = []
+        if cfg.layers.triples:
+            on.append("Triples (L8)")
+        if cfg.layers.cross_doc:
+            on.append("Cross-doc (L9)")
+        if cfg.layers.cross_doc_xrefs:
+            on.append("Cross-doc xrefs (L10)")
+        if any(getattr(cfg.layers, f"ontology_{key}", False) for key in _ONTOLOGY_DISPLAY):
+            on.append("Ontology linking (L7)")
+        return on
+
     def _dependency_error_for(
         self,
         field_name: str,
         new_value: bool,
     ) -> str | None:
-        """If turning `field_name` to `new_value` violates a cross-field
-        rule, return the message to show. Turning fields OFF never
-        violates."""
-        if not new_value or self._corpus_config is None:
+        """If turning `field_name` to `new_value` violates a cross-field rule,
+        return the message to show. Turning most fields OFF never violates; the
+        exception is turning entities OFF while a layer that requires it
+        (triples / cross_doc / cross_doc_xrefs / any ontology) is still on."""
+        if self._corpus_config is None:
             return None
         cfg = self._corpus_config
+        if field_name == "entities" and not new_value:
+            dependents = self._entities_dependents_on(cfg)
+            if dependents:
+                joined = ", ".join(dependents)
+                return (
+                    f"Turn off {joined} first, as "
+                    f"{'it requires' if len(dependents) == 1 else 'they require'} "
+                    "the entities layer."
+                )
+            return None
+        if not new_value:
+            return None
         if field_name == "entities":
             if not cfg.layers.chunks:
                 return "The entities layer requires the chunks layer. Turn chunks on first."

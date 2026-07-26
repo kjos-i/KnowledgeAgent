@@ -203,3 +203,78 @@ def test_toggling_entities_on_seeds_a_valid_section(fake_app):
     assert ed._corpus_config.entities.extractors  # >= 1 extractor seeded
     # The whole config validates now (this raised before the fix).
     CorpusConfig.model_validate(ed._corpus_config.model_dump(mode="json"))
+
+
+def test_toggling_entities_off_clears_the_seeded_section(fake_app):
+    """Regression: turning entities OFF on a corpus whose baseline had no
+    [entities] section drops the section the ON path seeded, so a toggle
+    on→off leaves no phantom pending change (entities back to None, not dirty)."""
+    ed = _editor(fake_app)
+    ed._corpus_config = CorpusConfig(
+        allowed_types=["Paper"],
+        layers=LayerFlags(chunks=True, entities=False),  # off → no [entities] section
+    )
+    ed._baseline_config = ed._corpus_config.model_copy(deep=True)
+    ed._populate_controls()
+
+    ed.entities_checkbox.value = True
+    ed._on_layer_toggle("entities")
+    assert ed._corpus_config.entities is not None  # seeded on ON
+
+    ed.entities_checkbox.value = False
+    ed._on_layer_toggle("entities")
+    assert ed._corpus_config.layers.entities is False
+    assert ed._corpus_config.entities is None  # seed cleared on OFF
+    assert ed.is_dirty() is False  # draft == baseline: no phantom pending change
+
+
+def test_model_blur_ignores_bare_to_composite_normalization(fake_app):
+    """Regression: the model picker shows a bare stored model in its composite
+    provider:model form; a blur that only echoes that form must NOT be recorded
+    as a change (no phantom pending edit)."""
+    fake_app.gui_config.llm_provider = "anthropic"
+    ed = _load(_editor(fake_app), ["llm"])
+    ed._corpus_config = ed._corpus_config.model_copy(
+        update={"entity_extractor_model": "claude-haiku-4-5"},  # bare default
+    )
+    # The field displays the composite form (as _populate_controls sets it).
+    ed.entity_extractor_model_field.value = "anthropic:claude-haiku-4-5"
+    ed._on_entity_extractor_model_blur(None)
+    assert ed._corpus_config.entity_extractor_model == "claude-haiku-4-5"  # unchanged
+
+
+def test_model_blur_commits_a_genuinely_different_model(fake_app):
+    """A real model pick still commits (the no-op skip only ignores same-model
+    bare↔composite echoes)."""
+    fake_app.gui_config.llm_provider = "anthropic"
+    ed = _load(_editor(fake_app), ["llm"])
+    ed.entity_extractor_model_field.value = "anthropic:claude-sonnet-4-6"
+    ed._on_entity_extractor_model_blur(None)
+    assert ed._corpus_config.entity_extractor_model == "anthropic:claude-sonnet-4-6"
+
+
+def test_entities_off_refused_while_dependent_layer_on(fake_app):
+    """Regression: turning entities OFF is refused while a layer that requires
+    it (triples / cross_doc / cross_doc_xrefs / any ontology) is still on."""
+    ed = _load(_editor(fake_app), ["llm"])  # entities on, nothing depends on it
+    assert ed._dependency_error_for("entities", False) is None  # allowed
+
+    # Triples on → refused, message names it.
+    ed._corpus_config = ed._corpus_config.model_copy(
+        update={"layers": ed._corpus_config.layers.model_copy(update={"triples": True})},
+    )
+    err = ed._dependency_error_for("entities", False)
+    assert err is not None
+    assert "Triples" in err
+
+    # An ontology on (no triples) is also a dependent.
+    ed._corpus_config = ed._corpus_config.model_copy(
+        update={
+            "layers": ed._corpus_config.layers.model_copy(
+                update={"triples": False, "ontology_mesh": True},
+            ),
+        },
+    )
+    err2 = ed._dependency_error_for("entities", False)
+    assert err2 is not None
+    assert "Ontology" in err2

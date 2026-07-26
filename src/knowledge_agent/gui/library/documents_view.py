@@ -59,14 +59,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# metadata_status -> chip colour. Unknown statuses fall back to grey.
+# metadata_status -> chip colour. The four canonical values (see
+# search.schema METADATA_STATUS_VALUES); unknown statuses fall back to grey.
 _STATUS_COLORS: dict[str, str] = {
     "enriched": ft.Colors.GREEN_300,
-    "resolved": ft.Colors.GREEN_300,
     "pending": ft.Colors.ORANGE_300,
     "baseline": ft.Colors.CYAN_300,
     "manual": ft.Colors.BLUE_300,
-    "failed": ft.Colors.RED_300,
 }
 
 # Ordered (column, label, hint) spec for the Edit modal. Mirrors RAA's
@@ -279,7 +278,7 @@ class DocumentsView:
                     "Ingest a folder or file from the Ingest tab."
                 )
             ]
-            self.coverage_text.value = ""
+            self.coverage_text.value = "(0 documents)"
             return
         needle = (self.search_field.value or "").strip().lower()
         filtered = [r for r in self._loaded_rows if self._matches_filter(r, needle)]

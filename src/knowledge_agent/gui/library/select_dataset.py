@@ -2,11 +2,17 @@
 
 Internal 2-column layout (fixed proportions, no dragger):
 
-  Left column  (~320 px): dataset picker + Rename / Relocate / Remove /
-                          Refresh.
-  Right column (expand):  info card (name, URIs, paths, counts,
-                          active ontologies + extractor + layer flags)
-                          on top; Documents table below.
+  Left column  (LEFT_COLUMN_WIDTH): read-only info card for the active
+                          corpus (name, URIs, paths, counts, status,
+                          layer pills, ontologies + extractor + xrefs,
+                          chunk/OCR/figure settings, embedder + LLM,
+                          and a "changed since last ingest" diff).
+  Right column (expand):  Documents browser (filter + Refresh + card
+                          list), the DocumentsView.
+
+Corpus selection + management (Rename / Relocate / Remove / Refresh)
+moved to the global top-bar `Corpus ▾` dropdown + `⚙ Manage` dialog;
+those handlers still live here (the Manage dialog calls across to them).
 
 Config editing (allowed_types, ontologies, layer flags, extractor,
 thresholds) lives under the sibling **Ingest** sub-tab — Select is a
@@ -59,6 +65,7 @@ from knowledge_agent.gui._styles import (
     panel_box,
     panel_title,
 )
+from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.config_store import (
     ConfigError,
     apply_active_corpus_embedding_to_env,
@@ -347,13 +354,30 @@ class SelectDatasetTab:
                 ft.Container(
                     width=LEFT_COLUMN_WIDTH,
                     padding=ft.Padding.symmetric(horizontal=12, vertical=10),
-                    content=self.selected_title,
+                    content=ft.Row(
+                        controls=[
+                            self.selected_title,
+                            info(self.app, "select.selected_dataset"),
+                        ],
+                        spacing=4,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
                 ),
                 ft.Container(
                     expand=1,
                     padding=ft.Padding.symmetric(horizontal=12, vertical=10),
                     content=ft.Row(
-                        controls=[panel_title("Documents"), self.documents.coverage_text],
+                        controls=[
+                            ft.Row(
+                                controls=[
+                                    panel_title("Documents"),
+                                    info(self.app, "select.documents"),
+                                ],
+                                spacing=4,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            self.documents.coverage_text,
+                        ],
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
