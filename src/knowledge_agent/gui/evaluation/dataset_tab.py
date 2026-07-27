@@ -46,11 +46,11 @@ from knowledge_agent.gui._styles import (
     panel_box,
     panel_title,
     section_divider,
-    section_title,
     sub_section_header,
     sub_section_title,
 )
-from knowledge_agent.gui._widgets.info_icon import info_icon
+from knowledge_agent.gui._widgets.info_icon import section_header
+from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui._widgets.retrieval_form import (
     DEFAULT_VALUES,
     RetrievalControls,
@@ -263,7 +263,7 @@ class DatasetTab:
                     ft.Radio(
                         value="lazy",
                         label="Lazy",
-                        tooltip="One text chunk per document — fast, basic coverage.",
+                        tooltip="One text chunk per document (fast, basic coverage).",
                     ),
                     ft.Radio(
                         value="advanced",
@@ -287,7 +287,7 @@ class DatasetTab:
             tooltip=(
                 "Take the question from the last Search chat's distilled query "
                 "(origin=chat). From-search then only adds sources and LLM only "
-                "writes the gold — neither overwrites the question. Run a "
+                "writes the gold, so neither overwrites the question. Run a "
                 "Conversational search first."
             ),
             on_change=self._on_from_chat_toggled,
@@ -308,9 +308,13 @@ class DatasetTab:
             icon_color=ft.Colors.RED_300,
             tooltip="Delete this case from the batch",
             on_click=self._on_delete_page,
+            visible=False,  # sits at the far right of the header; shown with the pager
         )
+        # The pager is the < n/N > nav only; the delete-X is placed separately at
+        # the far right of the Per case form header (its visibility tracks here
+        # via _render_pager).
         self.pager = ft.Row(
-            [self.page_prev, self.page_label, self.page_next, self.page_delete],
+            [self.page_prev, self.page_label, self.page_next],
             spacing=0,
             tight=True,
             visible=False,
@@ -322,7 +326,7 @@ class DatasetTab:
             # Any installed provider's models (stored as a 'provider:model' ref
             # the generator dispatches per-ref).
             options=model_options(),
-            hint_text="required — pick a model for LLM case generation",
+            hint_text="required: pick a model for LLM case generation",
             expand=True,
             on_blur=self._on_gen_model_changed,
         )
@@ -357,7 +361,7 @@ class DatasetTab:
         # No own scroll / expand — the right column scrolls the preview + list
         # together (avoids a nested-scroll region).
         self.case_list = ft.Column(
-            controls=[ft.Text("No cases yet — add one to get started.", italic=True)],
+            controls=[ft.Text("No cases yet. Add one to get started.", italic=True)],
             spacing=2,
         )
 
@@ -424,7 +428,7 @@ class DatasetTab:
                 ),
             ),
             "direct_retrieval": ft.Checkbox(
-                label="direct_retrieval — skip synthesizer, show raw chunks / rows",
+                label="direct_retrieval: skip synthesizer, show raw chunks / rows",
                 value=False,
                 on_change=oc,
             ),
@@ -462,6 +466,7 @@ class DatasetTab:
                     "Information",
                     ["id", "origin", "category", "notes"],
                     first=True,
+                    info_key="eval_dataset.form_information",
                 ),
                 *self._group(
                     "Facts",
@@ -476,6 +481,7 @@ class DatasetTab:
                         "expected_entities",
                         "expected_mode",
                     ],
+                    info_key="eval_dataset.form_facts",
                 ),
                 *self._retrieval_group(),
             ],
@@ -495,11 +501,11 @@ class DatasetTab:
 
         # ----- Suite mode (601): assemble a knob-sweep suite -----
         # The checkbox reveals the suite panel + grays "Add case": in suite
-        # mode you add the shared facts via "Add Information and Fact" (the form's
-        # Info + Fact → a case) and assemble the knob-sets below. Generate then
-        # clones those facts once per knob-set.
+        # mode you add the shared facts via "Add case(s) info and fact" (the
+        # form's Info + Fact become a case) and assemble the knob-sets below.
+        # Generate then clones those facts once per knob-set.
         self.generate_suite_check = ft.Checkbox(
-            label="Generate suite", value=False, on_change=self._on_suite_toggled
+            label="Suite setup", value=False, on_change=self._on_suite_toggled
         )
         self.add_info_fact_button = ft.Button(
             "Add case(s) info and fact",
@@ -559,17 +565,7 @@ class DatasetTab:
                         trailing=ft.Row(
                             [
                                 self.add_info_fact_button,
-                                info_icon(
-                                    self.app,
-                                    title="Case information and facts",
-                                    text=(
-                                        "The suite's facts are this dataset's "
-                                        "cases. Add them from the form with 'Add "
-                                        "case(s) info and fact'; Generate then "
-                                        "clones every fact once per retrieval "
-                                        "knob-set below."
-                                    ),
-                                ),
+                                info(self.app, "eval_dataset.suite"),
                             ],
                             spacing=4,
                             tight=True,
@@ -628,7 +624,9 @@ class DatasetTab:
             ft.Column(
                 [
                     # ============ Section: Evaluation cases ============
-                    section_title("Evaluation cases"),
+                    section_header(
+                        self.app, "Evaluation cases", key="eval_dataset.evaluation_cases"
+                    ),
                     # Browse / New dataset trail the Dataset field on its line.
                     labeled_field(
                         "Dataset",
@@ -649,11 +647,11 @@ class DatasetTab:
                     ),
                     section_divider(),
                     # ============ Section: Progress ============
-                    section_title("Progress"),
+                    section_header(self.app, "Progress", key="eval_dataset.progress"),
                     self.status,
                     section_divider(),
                     # ============ Section: Add cases ============
-                    section_title("Add cases"),
+                    section_header(self.app, "Add cases", key="eval_dataset.add_cases"),
                     # + Case form / From last search on the first row; the LLM
                     # button + its nr.-of-cases field on the row below (602: one
                     # LLM button; count 1 → a page, N → a batch).
@@ -695,22 +693,24 @@ class DatasetTab:
                             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                             spacing=8,
                             controls=[
-                                # Header: the batch pager (left, shown only for a
-                                # multi-page batch), the centered title, and the
-                                # Blank button on the right (602).
+                                # Header: the title flush-left, then the batch
+                                # pager (< n/N >, shown only for a multi-page
+                                # batch), the Blank button, and the delete-X on the
+                                # far right (602).
                                 ft.Row(
                                     [
-                                        self.pager,
                                         ft.Container(
                                             content=ft.Text(
                                                 "--- Per case form ---",
                                                 size=16,
                                                 weight=ft.FontWeight.BOLD,
-                                                text_align=ft.TextAlign.CENTER,
+                                                text_align=ft.TextAlign.START,
                                             ),
                                             expand=True,
                                         ),
+                                        self.pager,
                                         self.blank_button,
+                                        self.page_delete,
                                     ],
                                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
@@ -748,7 +748,7 @@ class DatasetTab:
                     self.suite_panel,
                     section_divider(),
                     # ============ Section: Dataset cases ============
-                    section_title("Dataset cases"),
+                    section_header(self.app, "Dataset cases", key="eval_dataset.dataset_cases"),
                     self.case_list,
                 ],
                 scroll=ft.ScrollMode.AUTO,
@@ -767,12 +767,26 @@ class DatasetTab:
                 ft.Container(
                     width=LEFT_COLUMN_WIDTH,
                     padding=ft.Padding.symmetric(horizontal=12, vertical=10),
-                    content=panel_title("Dataset editor"),
+                    content=ft.Row(
+                        [
+                            panel_title("Dataset editor"),
+                            info(self.app, "eval_dataset.editor_overview"),
+                        ],
+                        spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
                 ),
                 ft.Container(
                     expand=1,
                     padding=ft.Padding.symmetric(horizontal=12, vertical=10),
-                    content=panel_title("Cases"),
+                    content=ft.Row(
+                        [
+                            panel_title("Cases"),
+                            info(self.app, "eval_dataset.cases_overview"),
+                        ],
+                        spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
                 ),
             ],
         )
@@ -809,7 +823,11 @@ class DatasetTab:
         standard defaults, which the curator can override per case."""
         f = self.f
         rows: list[ft.Control] = [
-            sub_section_header("Retrieval settings", bold=True),
+            sub_section_header(
+                "Retrieval settings",
+                bold=True,
+                trailing=info(self.app, "eval_dataset.form_retrieval"),
+            ),
             labeled_field("retrieval_mode", f["retrieval_mode"], label_width=_FORM_LABEL_WIDTH),
             self._lancedb_mode_box,  # shared radios (carry their own caption)
             labeled_field("top_k", f["top_k"], label_width=_FORM_LABEL_WIDTH),
@@ -825,9 +843,15 @@ class DatasetTab:
                 trailing=self._mmr_value_text,
             ),
             labeled_field("kg_max_rows", f["kg_max_rows"], label_width=_FORM_LABEL_WIDTH),
-            # Input mode is part of Retrieval settings, not its own section — a
-            # plain bold label (no dividing rule) rather than a sub_section_header.
-            sub_section_title("Input mode", bold=True),
+            # Input mode is part of Retrieval settings, not its own section, so a
+            # plain non-bold label with a colon (no dividing rule) rather than a
+            # sub_section_header, with extra top space so it doesn't crowd the
+            # kg_max_rows field above. Its help folds into the Retrieval settings
+            # icon.
+            ft.Container(
+                padding=ft.Padding.only(top=12),
+                content=sub_section_title("Input mode:"),
+            ),
             f["input_mode"],
             f["direct_retrieval"],
         ]
@@ -864,20 +888,31 @@ class DatasetTab:
         # The Cypher box is only the input for Direct Cypher mode.
         f["user_cypher"].disabled = f["input_mode"].value != "direct_cypher"
 
-    def _group(self, title: str, keys: list[str], *, first: bool = False) -> list[ft.Control]:
+    def _group(
+        self, title: str, keys: list[str], *, first: bool = False, info_key: str | None = None
+    ) -> list[ft.Control]:
         # Each field group is headed by a sub-section header (thin rule + title)
         # so the groups read as distinct sub-sections. The first group hugs the
         # section title instead (no rule directly under it). Each field gets its
         # key as a caption via labeled_field (multiline boxes top-align their
-        # caption); checkboxes keep their own built-in label.
-        header: ft.Control = (
-            ft.Container(
+        # caption); checkboxes keep their own built-in label. `info_key` (an
+        # info_text registry key) puts the group's 3-tier help icon by its title.
+        icon = info(self.app, info_key) if info_key else None
+        header: ft.Control
+        if first:
+            title_ctrl: ft.Control = sub_section_title(title, bold=True)
+            if icon is not None:
+                title_ctrl = ft.Row(
+                    [title_ctrl, icon],
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                )
+            header = ft.Container(
                 padding=ft.Padding.only(top=12, bottom=4),
-                content=sub_section_title(title, bold=True),
+                content=title_ctrl,
             )
-            if first
-            else sub_section_header(title, bold=True)
-        )
+        else:
+            header = sub_section_header(title, bold=True, trailing=icon)
         rows: list[ft.Control] = [header]
         for k in keys:
             control = self.f[k]
@@ -936,7 +971,10 @@ class DatasetTab:
         if self.pager is not None:
             self.pager.visible = show
         if self.page_delete is not None:
-            self.page_delete.disabled = n <= 1  # can't delete the sole page — greyed, not hidden
+            # Delete sits outside the pager (far right of the header), so it tracks
+            # the pager's visibility itself; greyed (not hidden) for a sole page.
+            self.page_delete.visible = show
+            self.page_delete.disabled = n <= 1
         if show and self.page_label is not None:
             self.page_label.value = f"{self._draft_index + 1}/{n}"
             if self.page_prev is not None:
@@ -1009,9 +1047,7 @@ class DatasetTab:
                 name = f"{name}.json"
             path = folder / name
             if path.exists():
-                _show_error(
-                    f"{path.name} already exists — pick another name, or Browse to open it."
-                )
+                _show_error(f"{path.name} already exists. Pick another name, or Browse to open it.")
                 return
             try:
                 self._start_new_dataset(path)
@@ -1019,7 +1055,7 @@ class DatasetTab:
                 _show_error(f"could not create: {exc}")
                 return
             self.app.page.pop_dialog()
-            self._set_status(f"created {path.name} — add cases, then Add case(s)")
+            self._set_status(f"created {path.name}: add cases, then Add case(s)")
 
         dialog = ft.AlertDialog(
             modal=True,
@@ -1132,7 +1168,7 @@ class DatasetTab:
         if not self._suite_members:
             self.suite_members_list.controls = [
                 ft.Text(
-                    "No knob-sets yet — pick a preset or add one from the form.",
+                    "No knob-sets yet. Pick a preset or add one from the form.",
                     size=12,
                     italic=True,
                     color=ft.Colors.GREY_500,
@@ -1175,7 +1211,7 @@ class DatasetTab:
         from knowledge_agent.gui.evaluation._common import active_corpus_dir
 
         if self._dataset is None or not self._dataset.cases:
-            self._set_suite_status("Add at least one fact first (Add Information and Fact).")
+            self._set_suite_status("Add at least one fact first (Add case(s) info and fact).")
             return
         suite = (self.suite_name_field.value or "").strip() if self.suite_name_field else ""
         if not suite:
@@ -1191,7 +1227,7 @@ class DatasetTab:
             self._set_suite_status(f"could not generate: {exc}")
             return
         self._set_suite_status(f"generated {len(written)} file(s): {', '.join(written)}")
-        self._set_status(f"generated suite “{suite}” — {len(written)} files")
+        self._set_status(f"generated suite '{suite}' ({len(written)} files)")
 
     def _write_suite(
         self,
@@ -1254,7 +1290,7 @@ class DatasetTab:
             on_edit=self._select,
             on_delete=self._confirm_delete_case,
             on_cancel=self._on_cancel_edit,
-            empty_hint="No cases yet — add one to get started.",
+            empty_hint="No cases yet. Add one to get started.",
         )
 
     def _select(self, idx: int) -> None:
@@ -1688,7 +1724,7 @@ class DatasetTab:
             self._set_status(f"could not unfreeze: {exc}")
             return
         self._apply_frozen_ui()
-        self._set_status("Unfroze — run settings can change again (edit them on the Run tab).")
+        self._set_status("Unfroze. Run settings can change again (edit them on the Run tab).")
         self.app.page.update()
 
     def _on_new(self, _e: ft.Event) -> None:
@@ -1708,9 +1744,9 @@ class DatasetTab:
                 self.from_chat_check.value = False
                 self._sync_gen_count_for_chat()
         msg = (
-            "new chat-sourced case — question from the last chat; add the gold, then Add case(s)"
+            "new chat-sourced case: question from the last chat; add the gold, then Add case(s)"
             if (self.f["origin"].value or "") == "chat"
-            else "new case — fill the form, then Add case(s)"
+            else "new case: fill the form, then Add case(s)"
         )
         self._set_status(msg)
 
@@ -1740,7 +1776,7 @@ class DatasetTab:
         on = bool(self.from_chat_check and self.from_chat_check.value)
         if on and not self._chat_available():
             self.from_chat_check.value = False
-            self._set_status("No chat query yet — run a Conversational search in Search first.")
+            self._set_status("No chat query yet. Run a Conversational search in Search first.")
             self.app.page.update()
             return
         self._sync_gen_count_for_chat()
@@ -1769,7 +1805,7 @@ class DatasetTab:
         query = getattr(app, "last_search_query" if from_chat else "last_query", None)
         if answer is None or not query:
             need = "a Conversational search" if from_chat else "a query"
-            self._set_status(f"No search result to capture — run {need} in Search first.")
+            self._set_status(f"No search result to capture. Run {need} in Search first.")
             return
         self._guarded(self._do_capture_from_search)
 
@@ -1797,7 +1833,7 @@ class DatasetTab:
         self._render_preview()
         kind = "chat" if from_chat else "search"
         self._set_status(
-            f"captured from {kind} ({len(sources)} source(s)) — review, then Add case(s)"
+            f"captured from {kind} ({len(sources)} source(s)): review, then Add case(s)"
         )
 
     def _selected_gen_model(self) -> str | None:
@@ -1824,8 +1860,8 @@ class DatasetTab:
             modal=True,
             title=ft.Text("Pick a model first"),
             content=ft.Text(
-                "Choose an LLM model under “LLM model for case generation” before "
-                "generating cases — LLM generation has no default model.",
+                "Choose an LLM model under 'LLM model for case generation' before "
+                "generating cases. LLM generation has no default model.",
                 size=12,
             ),
             actions=[ft.TextButton("OK", on_click=_close)],
@@ -1940,13 +1976,13 @@ class DatasetTab:
         shortfall = ""
         if len(cases) < n:
             shortfall = (
-                f" of {n} requested (one case per document — the corpus has "
+                f" of {n} requested (one case per document; the corpus has "
                 "fewer usable docs, or a passage was skipped)"
             )
         tail = (
             "review the batch, then Add case(s)" if len(cases) > 1 else "review, then Add case(s)"
         )
-        self._set_status(f"drafted {len(cases)} LLM candidate(s){shortfall} (origin=llm) — {tail}")
+        self._set_status(f"drafted {len(cases)} LLM candidate(s){shortfall} (origin=llm): {tail}")
 
     async def _generate_gold_from_chat(self) -> None:
         """The 'Query from chat' + LLM path: keep the chat's distilled query as the
@@ -1962,7 +1998,7 @@ class DatasetTab:
         query = getattr(self.app, "last_search_query", None)
         answer = getattr(self.app, "last_answer", None)
         if not query:
-            self._set_status("No chat query — run a Conversational search in Search first.")
+            self._set_status("No chat query. Run a Conversational search in Search first.")
             return
         self._set_busy(self.gen_button, self.gen_spinner, True)
         self._set_status("writing gold for the chat question…")
@@ -1994,9 +2030,7 @@ class DatasetTab:
         )
         self._capture_page()
         self._render_preview()
-        self._set_status(
-            "wrote gold for the chat question (origin=chat) — review, then Add case(s)"
-        )
+        self._set_status("wrote gold for the chat question (origin=chat): review, then Add case(s)")
 
     def _on_save_case(self, _e: ft.Event) -> None:
         """Commit the form: Update the selected existing case, or Add ALL draft
@@ -2030,7 +2064,7 @@ class DatasetTab:
             self._capture_page()
             cases, err = self._cases_from_drafts()
             if not cases:
-                self._set_status(err or "nothing to add — fill in the case first.")
+                self._set_status(err or "nothing to add. Fill in the case first.")
                 return
             self._dataset.cases.extend(cases)
             verb = f"added {len(cases)}"
@@ -2043,7 +2077,7 @@ class DatasetTab:
         self._path = path
         # Fresh blank page, ready for the next case; nothing left selected.
         self._load_drafts([self._blank_snapshot()])
-        self._set_status(f"{verb} — saved {len(self._cases)} case(s) to {path.name}")
+        self._set_status(f"{verb}, saved {len(self._cases)} case(s) to {path.name}")
 
     def _cases_from_drafts(self) -> tuple[list[EvalCase], str | None]:
         """Read every draft page (strict) into EvalCases; restore the displayed
@@ -2104,7 +2138,7 @@ class DatasetTab:
         self._cases = self._dataset.cases
         self._render_list()
         self._render_preview()
-        self._set_status(f"deleted — {len(self._cases)} case(s) remain")
+        self._set_status(f"deleted, {len(self._cases)} case(s) remain")
 
     # ---- helpers ----------------------------------------------------------
 

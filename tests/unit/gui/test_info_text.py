@@ -115,3 +115,32 @@ def test_eval_run_section_icons_present():
     ):
         spec = INFO[key]
         assert spec.standard and spec.beginner and spec.technical, f"{key}: a tier is empty"
+
+
+def test_eval_dataset_section_icons_present():
+    """The Evaluation Create-test-cases sub-tab icons (2 column titles + 4
+    section headers + 3 per-case-form sub-sections + the suite panel) are
+    registered with all three tiers filled."""
+    for key in (
+        "eval_dataset.editor_overview",
+        "eval_dataset.cases_overview",
+        "eval_dataset.evaluation_cases",
+        "eval_dataset.progress",
+        "eval_dataset.add_cases",
+        "eval_dataset.dataset_cases",
+        "eval_dataset.form_information",
+        "eval_dataset.form_facts",
+        "eval_dataset.form_retrieval",
+        "eval_dataset.suite",
+    ):
+        spec = INFO[key]
+        assert spec.standard and spec.beginner and spec.technical, f"{key}: a tier is empty"
+
+
+def test_eval_dashboard_overview_icon_present():
+    """The shared Evaluation dashboard left-column icon (one 3-tier icon at the
+    top of the rail, right of Refresh) is registered with all three tiers filled."""
+    spec = INFO["eval_dashboard.overview"]
+    assert spec.standard and spec.beginner and spec.technical, (
+        "eval_dashboard.overview: a tier is empty"
+    )

@@ -85,8 +85,8 @@ STRATEGY_LABELS: dict[str, str] = {
     "hybrid": "Hybrid",
     "hybrid_mmr": "Hybrid + MMR",
     "kg_only": "KG only",
-    "vector_then_kg": "Vector → KG",
-    "kg_then_vector": "KG → Vector",
+    "vector_then_kg": "Vector then KG",
+    "kg_then_vector": "KG then Vector",
     "parallel_fused": "Parallel fused",
 }
 

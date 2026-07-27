@@ -1,4 +1,4 @@
-"""Evaluation top-tab coordinator — 7 sub-tabs, full window (Library model).
+"""Evaluation top-tab coordinator — 8 sub-tabs, full window (Library model).
 
 Sub-tabs (fixed order), by display label:
 
@@ -9,11 +9,12 @@ Sub-tabs (fixed order), by display label:
   - Create test cases — browse/author the gold dataset: a scrollable case
     list + a full-field view of the selected case (editing / Add-Delete /
     capture-from-Search / LLM generation).
+  - Info — the Evaluation help doc (info_evaluation.md), rendered read-only.
   - Run Summary — KPI cards + per-case table for the selected run.
   - Run Charts — metric-balance / distribution / correlation for the run.
   - Compare Datasets — several datasets' runs side by side (one kind), a
     metric × run table + grouped bars.
-  - Trends — run-level metric trends over time (scoped per recipe hash).
+  - Trends — run-level metric trends over time (scoped per dataset hash).
   - Metrics Guide — the metrics reference (info_metrics.md).
 
 Shared selected-run state lives here: the per-run tabs read
@@ -63,13 +64,13 @@ _VIEW_TABS = frozenset({"Run Summary", "Run Charts", "Compare Datasets", "Trends
 
 
 class EvaluationView:
-    """Top-tab coordinator for Evaluation — 5 sub-tabs, no shared splitter."""
+    """Top-tab coordinator for Evaluation — 8 sub-tabs, no shared splitter."""
 
     def __init__(self, app: GuiApp) -> None:
         self.app = app
         # Shared dashboard selection, read by all five view tabs' left rails
         # (`DashboardRail`) so they stay in step. The rail is a Suite → Dataset →
-        # Run cascade: `selected_suite` (a facts_hash) scopes the dataset list to
+        # Run cascade: `selected_suite` (a suite name) scopes the dataset list to
         # one suite's members; `selected_dataset` narrows the run picker + scopes
         # Trends (by that dataset's dataset_hash); `selected_run_id` drives the
         # per-run tabs (Run Summary / Run Charts) AND — via its suite_run_id —

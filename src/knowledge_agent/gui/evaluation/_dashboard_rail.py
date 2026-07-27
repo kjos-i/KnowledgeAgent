@@ -40,6 +40,7 @@ from knowledge_agent.gui._styles import (
     section_divider,
     sub_section_header,
 )
+from knowledge_agent.gui._widgets.info_text import info
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -50,7 +51,7 @@ if TYPE_CHECKING:
 _RAIL_WIDTH = 280
 # Grouping key for every run NOT executed as a named suite — single-file runs
 # and legacy rows alike. Suite is a by-name concept (R7), so anything without a
-# `suite` name falls in this one "— No suite —" bucket.
+# `suite` name falls in this one "(no suite)" bucket.
 _NO_SUITE = "∅"
 
 
@@ -65,7 +66,7 @@ def dataset_of(run: dict[str, Any]) -> str:
 
 def _suite_key(run: dict[str, Any]) -> str:
     """The run's suite for grouping — the named `suite` it was executed as, else
-    the '— No suite —' sentinel. Suite is a by-name concept (R7): a single-file
+    the '(no suite)' sentinel. Suite is a by-name concept (R7): a single-file
     or legacy run belongs to no suite, so it groups under the sentinel rather
     than by facts_hash."""
     return run.get("suite") or _NO_SUITE
@@ -73,7 +74,7 @@ def _suite_key(run: dict[str, Any]) -> str:
 
 def _run_label(run: dict[str, Any]) -> str:
     ts = (run.get("run_timestamp") or "")[:16]
-    return f"Run {run['run_id']} — {ts}"
+    return f"Run {run['run_id']} · {ts}"
 
 
 def _parse(raw: Any) -> Any:
@@ -165,7 +166,13 @@ class DashboardRail:
             border_radius=PANEL_RADIUS,
             content=ft.Column(
                 controls=[
-                    refresh_button,
+                    # The one dashboard help icon sits to the right of Refresh,
+                    # at the very top of the shared column.
+                    ft.Row(
+                        [refresh_button, info(self.app, "eval_dashboard.overview")],
+                        spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
                     sub_section_header("Selection"),
                     self.suite_dd,
                     self.dataset_dd,
@@ -196,7 +203,7 @@ class DashboardRail:
 
     def _suites(self) -> list[tuple[str, str]]:
         """The distinct suites among the corpus's runs as (key, label): each NAMED
-        suite by its name, plus a single '— No suite —' bucket for every run not
+        suite by its name, plus a single '(no suite)' bucket for every run not
         executed as a named suite (single-file / legacy). Order follows first
         appearance (list_runs is newest first)."""
         order: list[str] = []
@@ -206,7 +213,7 @@ class DashboardRail:
             if key not in seen:
                 seen.add(key)
                 order.append(key)
-        return [(k, "— No suite —" if k == _NO_SUITE else k) for k in order]
+        return [(k, "(no suite)" if k == _NO_SUITE else k) for k in order]
 
     def _sync_controls(self) -> None:
         """Populate the Suite → Dataset → Run cascade from the loaded runs,
@@ -283,7 +290,7 @@ class DashboardRail:
         judges = _parse(run.get("judge_models")) or []
 
         def _hash(h: Any) -> str:
-            return h[:8] if h else "—"
+            return h[:8] if h else "n/a"
 
         def _header(text: str) -> ft.Text:
             return ft.Text(text, weight=ft.FontWeight.BOLD, size=12)
@@ -300,7 +307,7 @@ class DashboardRail:
         lines: list[ft.Control] = [
             # ---- Suite (facts hash = the suite identity) ----
             _header("Suite Information"),
-            ft.Text(f"Suite: {run.get('suite') or '— No suite —'}", size=12),
+            ft.Text(f"Suite: {run.get('suite') or '(no suite)'}", size=12),
             ft.Text(f"Facts hash: {_hash(run.get('facts_hash'))}", size=12),
             ft.Container(height=6),
             # ---- Dataset (knobs hash = what tells suite members apart) ----
@@ -315,7 +322,7 @@ class DashboardRail:
             ft.Text(f"Judge panel: {judge_line}", size=12),
         ]
         lines += [ft.Text(f"{k}: {v}", size=12) for k, v in thresholds.items()]
-        lines.append(ft.Text(f"Cases: {run.get('case_count')}", size=12))
+        lines.append(ft.Text(f"Cases (run total): {run.get('case_count')}", size=12))
         model = run.get("synthesizer_model")
         if model:
             lines.append(ft.Text(f"Model: {run.get('llm_provider') or '?'}/{model}", size=12))

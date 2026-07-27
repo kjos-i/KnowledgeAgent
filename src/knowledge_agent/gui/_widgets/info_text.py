@@ -4717,6 +4717,485 @@ INFO: dict[str, InfoText] = {
             "frozen."
         ),
     ),
+    # ---- Evaluation: Create test cases sub-tab (dataset_tab.py) ----
+    "eval_dataset.editor_overview": InfoText(
+        title="Dataset editor",
+        standard=(
+            "The left column, where you build and edit a gold dataset: a file of "
+            "test questions each paired with its correct answer, used to score the "
+            "assistant on the Run evaluation tab. Choose or create the dataset file "
+            "and set its status at the top (Evaluation cases), watch the last action "
+            "in Progress, seed a new case (from a blank form, the last Search, or an "
+            "LLM draft) under Add cases, then fill in every field of the current case "
+            "in the Per case form below. Nothing is written to the file until you "
+            "press Add case(s) or Update case on the right. The right column (Cases) "
+            "lists what the file already holds."
+        ),
+        beginner=(
+            "This whole left side is where you write the 'answer key' the assistant "
+            "will be tested against. A dataset is a file of questions, each stored "
+            "with the answer you consider correct (one question plus its answer is "
+            "called a case). You pick or create the file at the top, choose how to "
+            "start a new case in the middle (a blank form, or by copying your last "
+            "search, or by asking an AI to draft one), then fill in the details in "
+            "the boxed form at the bottom. Think of it as writing exam questions and "
+            "their marking guide. Nothing is saved until you press a button on the "
+            "right, so you can experiment freely first."
+        ),
+        technical=(
+            "The authoring surface for an EvalDataset (evaluation/models.py), backed "
+            "by a draft buffer of raw form snapshots (a half-filled page is not a "
+            "valid EvalCase, so form state is snapshotted, not cases). Sections: "
+            "Evaluation cases (file + DatasetStatus + the frozen lock), Progress (a "
+            "status line), Add cases (the three seeds plus the LLM generator), and "
+            "the Per case form (the case fields grouped by the model's facts_hash and "
+            "knob_hash). Persistence is save_dataset to the chosen path; drafts never "
+            "touch disk until Add case(s) or Update case. The active corpus "
+            "(read-only here) supplies the picker's start folder and the corpus the "
+            "LLM generator samples."
+        ),
+    ),
+    "eval_dataset.cases_overview": InfoText(
+        title="Cases",
+        standard=(
+            "The right column: the commit buttons at the top, an optional suite "
+            "builder, and the list of cases already saved in the dataset file. Update "
+            "case or Add case(s) writes the form on the left into the file (only one "
+            "is active: Update when you are editing an existing case, Add case(s) "
+            "when you are adding new ones). Refresh re-reads the file from disk. The "
+            "Suite setup checkbox opens a tool for cloning your cases across several "
+            "retrieval settings at once. Dataset cases below shows every saved case "
+            "as a card you can Edit or Delete."
+        ),
+        beginner=(
+            "This right side shows the cases already saved in your dataset, and holds "
+            "the buttons that save your work. Add case(s) saves what you typed on the "
+            "left as new questions; Update case saves changes to a question you "
+            "opened for editing (only one of the two is active at a time, so you "
+            "cannot mix them up). Refresh re-loads the file in case it changed. The "
+            "Suite setup tick-box is an advanced tool covered in its own help. "
+            "Underneath, each saved case appears as a card with Edit and Delete "
+            "buttons."
+        ),
+        technical=(
+            "Commit routes through _on_save_case: Update overwrites cases[_selected]; "
+            "Add case(s) appends every draft page (all-or-nothing validation) and "
+            "save_dataset writes the file. Exactly one commit button is enabled "
+            "(_render_preview), and Add is also greyed in suite mode. Refresh "
+            "(_on_refresh) reloads via _load. The Suite setup checkbox toggles the "
+            "suite panel (see its help). Dataset cases renders the same "
+            "render_case_cards(detailed=True) the Run tab shows read-only, here with "
+            "Edit (_select; loads into the form, commit becomes Update) and Delete "
+            "(confirmed, save_dataset immediately)."
+        ),
+    ),
+    "eval_dataset.evaluation_cases": InfoText(
+        title="Evaluation cases",
+        standard=(
+            "Choose the dataset file to work on and set its overall state. Dataset "
+            "shows the current file path (read-only); Browse opens an existing gold "
+            "dataset (a JSON file) from the active corpus's folder, and New dataset "
+            "creates an empty one there (it will not overwrite an existing file). "
+            "Status marks the whole file as draft (still being written) or final "
+            "(ready to run and safe to lock). Freezing itself is done on the Run "
+            "evaluation tab; here you only see the lock: when the file is frozen a "
+            "lock badge appears and Unfreeze becomes available, which (after you "
+            "confirm) unlocks its run settings so they can change again. Dropping the "
+            "status from final back to draft also clears the lock."
+        ),
+        beginner=(
+            "Here you pick which answer-key file to work on, and say how finished it "
+            "is. The Dataset line shows which file is open; press Browse to open one "
+            "you already have, or New dataset to start a fresh empty one. Status is "
+            "just a label: draft means you are still writing it, final means it is "
+            "ready to use. A frozen file is one whose scoring settings have been "
+            "locked so results stay comparable over time; you lock it on the Run "
+            "evaluation tab, and here you can see the little lock and press Unfreeze "
+            "to unlock it again if you need to make changes. You do not have to "
+            "freeze anything to use a dataset."
+        ),
+        technical=(
+            "The dataset selector plus header. dataset_field is a read-only path; "
+            "Browse (_on_browse_clicked) picks a JSON via the file picker started at "
+            "active_corpus_dir; New dataset (_on_new_dataset) writes an empty "
+            "EvalDataset to the corpus folder, refusing to overwrite. Status is the "
+            "DatasetStatus Literal (draft and final only); _on_status_change clears "
+            "frozen whenever status drops below final (invariant: only a final "
+            "dataset can be frozen, also enforced by _stamp_header and the model "
+            "validator). Unfreeze is always shown, disabled until frozen "
+            "(_apply_frozen_ui); _do_unfreeze confirms, clears frozen, and "
+            "save_dataset persists it. The frozen lock covers the recipe (metric "
+            "groups, judge panel, gate thresholds), which is edited on the Run tab, "
+            "not here; a save from this tab leaves the recipe exactly as loaded."
+        ),
+    ),
+    "eval_dataset.progress": InfoText(
+        title="Progress",
+        standard=(
+            "A single status line that reports the result of your last action here, "
+            "such as creating a file, drafting cases, capturing from a search, or "
+            "saving. It is informational only (nothing to click) and reads 'No "
+            "activity yet.' until something happens. Errors from an action (for "
+            "example a failed LLM draft or a save problem) also appear on this line."
+        ),
+        beginner=(
+            "This one line tells you what just happened, like a little receipt after "
+            "each action: it might say a file was created, some cases were drafted, "
+            "or your work was saved. If something goes wrong, the reason shows up "
+            "here too. There is nothing to press; it is just there to keep you "
+            "informed. Before you do anything it simply reads 'No activity yet.'"
+        ),
+        technical=(
+            "A read-only status Text (self.status), default 'No activity yet.' "
+            "(_IDLE_STATUS), written by _set_status and _write_status after every "
+            "action (create, seed, generate, capture, add, update, delete, unfreeze) "
+            "and used as the inline error channel for the broad excepts in those "
+            "handlers (I/O, provider, validation). Idle renders muted italic; a real "
+            "message renders in a brighter grey."
+        ),
+    ),
+    "eval_dataset.add_cases": InfoText(
+        title="Add cases",
+        standard=(
+            "How to start a new case before you fill in its details. Three seeds sit "
+            "under 'Generate new case by': Case form gives you one blank page; From "
+            "last search copies your most recent Search (its question, plus the "
+            "documents it retrieved as the expected sources) so you only add the "
+            "correct answer; and LLM asks a model to draft whole cases from the "
+            "corpus for you to review. nr. of cases sets how many the LLM drafts (a "
+            "batch you page through), and Lazy versus Advanced trades speed for depth "
+            "(Advanced also grounds cases in the knowledge graph). Query from chat is "
+            "a modifier: with it on, the question comes from your last conversational "
+            "Search instead. None of these save anything; they only fill the form, "
+            "which you then commit with Add case(s). LLM drafting needs a model "
+            "chosen below (there is no default)."
+        ),
+        beginner=(
+            "A case needs a question, and this section offers four ways to get one "
+            "started so you are not always typing from scratch. Case form just gives "
+            "you an empty page to fill in yourself. From last search copies the "
+            "question and sources from the search you last ran, so you only need to "
+            "add the right answer. LLM asks an AI model to invent draft questions and "
+            "answers from your documents, which you then check and edit. nr. of cases "
+            "is how many drafts the AI makes at once. Lazy is quick and simple; "
+            "Advanced digs deeper (including into the knowledge graph, the web of "
+            "facts the app has extracted from your documents). Query from chat is an "
+            "option that takes the question from your last chat conversation instead. "
+            "Whatever you pick only fills the form; nothing is saved until you press "
+            "Add case(s) on the right. For the AI option you must first choose a "
+            "model just below."
+        ),
+        technical=(
+            "The three seeds plus the LLM generator, all of which replace the draft "
+            "buffer without persisting. Case form (_on_new, guarded) loads one blank "
+            "page (and, with Query from chat on, seeds the question from "
+            "last_search_query or reverts the toggle). From last search "
+            "(_on_capture_from_search) fills question plus deduped chunk_source "
+            "doc_ids as expected_sources and pins the retrieval settings the search "
+            "actually ran under; Query from chat on makes it the router's distilled "
+            "query with origin=chat, else the raw query with origin=search. LLM "
+            "(_on_generate, async) drafts n candidates via generate_from_corpus "
+            "(Lazy) or generate_advanced (Advanced: whole-doc plus KG, writes hybrid "
+            "and KG cases); origin=llm, except the Query-from-chat path "
+            "(_generate_gold_from_chat), which keeps the chat question, writes only "
+            "its gold, and stays origin=chat. _require_gen_model blocks with a dialog "
+            "if no model is chosen (no backend default). Query from chat pins nr. of "
+            "cases to 1 (one conversation, one case) and needs a prior conversational "
+            "Search. Count is bounded 1 to 20 (_MAX_GEN_CASES). The Model dropdown is "
+            "model_options() across installed providers; supports_temperature greys "
+            "the Temperature slider for sampling-free models (for example Opus 4.8)."
+        ),
+    ),
+    "eval_dataset.dataset_cases": InfoText(
+        title="Dataset cases",
+        standard=(
+            "Every case already saved in the open dataset, shown as a card with its "
+            "id, question, retrieval summary, and all its gold fields. Edit loads a "
+            "card into the form on the left (the commit button becomes Update case); "
+            "Delete removes it after you confirm, and that change is written to the "
+            "file straight away. A card that cannot be run reproducibly (for example "
+            "a draft with a required setting left blank) carries a warning, so you "
+            "see it here and not only when a run refuses it. The card body itself is "
+            "not clickable; use the Edit button."
+        ),
+        beginner=(
+            "This is the list of questions your dataset already contains. Each one is "
+            "a card showing the question and the answer details you saved. Press Edit "
+            "to pull a card back into the form on the left so you can change it, or "
+            "Delete to remove it (you are asked to confirm, and it is removed from "
+            "the file immediately, so it cannot be undone). If a card has a problem "
+            "that would stop it from running, a warning appears on it. Clicking the "
+            "middle of a card does nothing on purpose, so a stray click cannot "
+            "disturb your work; use the Edit button."
+        ),
+        technical=(
+            "render_case_cards(detailed=True) over dataset.cases (the same cards the "
+            "Run tab shows read-only). Edit (_select, guarded) fills the form and "
+            "sets _selected so the commit becomes Update; Delete "
+            "(_confirm_delete_case then _delete_case) confirms, deletes, and "
+            "save_dataset persists immediately. Each card runs validate_case and "
+            "shows a 'not runnable' warning when a required knob for the case's "
+            "active legs is None, or when num_candidates is below top_k. The card "
+            "body is intentionally non-interactive (selection only via Edit)."
+        ),
+    ),
+    "eval_dataset.form_information": InfoText(
+        title="Information",
+        standard=(
+            "Bookkeeping for the case: its id (a required, unique name used in "
+            "results and file rows), origin (how the case was created, such as "
+            "manual, search, chat, or llm), an optional category tag, and free-text "
+            "notes. These fields describe and label the case; they are not part of "
+            "what a run scores, and they are not part of the facts or knob signatures "
+            "that group a suite's members. Every case needs an id and a question (the "
+            "question is in the Facts group below)."
+        ),
+        beginner=(
+            "This top group is just labels for the case, not part of the test "
+            "itself. id is the case's name (each one must be different, and it is "
+            "required). origin records how the case was made (for example you typed "
+            "it, or it was copied from a search, or drafted by an AI). category and "
+            "notes are optional, for your own organising and reminders. Filling these "
+            "in helps you keep track of your cases; it does not change how the "
+            "assistant is scored on them."
+        ),
+        technical=(
+            "The non-scored bookkeeping fields: id (required, unique EvalCase.id, "
+            "used in ledger rows and the suite id suffix), origin (CaseOrigin "
+            "Literal; the origin dropdown, also driven by Query from chat), category, "
+            "notes. None are in facts_hash or knob_hash, so they do not affect suite "
+            "grouping or recipe hashing (they are part of the whole-case "
+            "compute_dataset_hash only). Commit still requires id and question."
+        ),
+    ),
+    "eval_dataset.form_facts": InfoText(
+        title="Facts",
+        standard=(
+            "The gold: the question and everything a correct answer must satisfy. "
+            "question is what gets asked. The expected fields (one entry per line) "
+            "are the checks a run scores against: expected_sources (document ids that "
+            "should be retrieved), expected_chunks (text that should appear in the "
+            "retrieved passages), required_keywords and disallowed_keywords (words "
+            "the answer must or must not contain), expected_answer_points (facts the "
+            "answer should make), expected_entities, and expected_mode (a retrieval "
+            "mode you expect to be chosen). user_cypher holds a hand-written graph "
+            "query, used only when the Input mode below is Direct Cypher. Together "
+            "these are the case's facts: within a generated suite, every copy shares "
+            "them and only the retrieval settings differ."
+        ),
+        beginner=(
+            "This group is the heart of the case: the question, and what counts as a "
+            "right answer. You type the question at the top. Everything below is a "
+            "checklist the app uses to grade the answer, one item per line: which "
+            "documents should be found (expected_sources), text that should show up, "
+            "words that must appear (required_keywords) or must not "
+            "(disallowed_keywords), the key points a good answer makes "
+            "(expected_answer_points), and so on. You do not have to fill in all of "
+            "them; use the checks that matter for your question. The Cypher box is "
+            "only for advanced graph queries and can be left blank. These answer "
+            "details are what make the case a real test."
+        ),
+        technical=(
+            "The facts_hash fields (models.py _FACTS_FIELDS): question, "
+            "expected_sources, expected_chunks, required_keywords, "
+            "disallowed_keywords, expected_answer_points, expected_entities, "
+            "expected_mode, user_cypher. Each list field is one-item-per-line text "
+            "(_lines). expected_mode is a RetrievalMode or '(none)'; user_cypher is "
+            "consumed only when Input mode is direct_cypher (query_mode_to_knobs) and "
+            "is disabled otherwise. facts_hash is shared across a suite's members: "
+            "generate_suite copies only id and retrieval per member, so the gold is "
+            "identical across the sweep. Which checks actually gate pass or fail is "
+            "set by the recipe's gate thresholds on the Run tab; empty fields are "
+            "simply not checked."
+        ),
+    ),
+    "eval_dataset.form_retrieval": InfoText(
+        title="Retrieval settings",
+        standard=(
+            "The search settings this case runs under, so it is reproducible. Mode "
+            "(retrieval_mode) picks which stores are searched (text, the knowledge "
+            "graph, or a combination); LanceDB search mode chooses vector, full-text, "
+            "or hybrid within the text store; and the numbers (top_k, num_candidates, "
+            "rrf_rank_constant, mmr, kg_max_rows) tune how many results come back and "
+            "how they are ranked. Settings the chosen mode cannot use are greyed out "
+            "and are not applied. Input mode decides how the question is turned into a "
+            "query (a refined query, your exact text, or a hand-written graph query), "
+            "and direct_retrieval returns the raw retrieved passages instead of a "
+            "written answer. The fields come pre-filled with the standard defaults, "
+            "which you can override per case. These knobs are what a generated suite "
+            "sweeps: every suite copy keeps the same facts but pins a different set "
+            "of these values."
+        ),
+        beginner=(
+            "These settings control HOW the app searches for the answer to this "
+            "question, so the test runs the same way every time. Mode picks where it "
+            "looks (the plain text of your documents, the knowledge graph of "
+            "extracted facts, or both). The various numbers control how many results "
+            "it pulls and how it ranks them; the boxes that do not apply to your "
+            "chosen mode are greyed out automatically, so you can ignore those. Input "
+            "mode is about how your question becomes a search, and direct_retrieval, "
+            "when ticked, shows the raw passages the app found instead of a written "
+            "answer. They start on sensible defaults, so if you are unsure you can "
+            "leave them as they are. (When you build a suite, these are exactly the "
+            "settings it varies from one copy to the next.)"
+        ),
+        technical=(
+            "The case's RetrievalSettings (knob_hash is the whole case.retrieval). "
+            "Fields: retrieval_mode (RetrievalMode dropdown), lancedb_search_mode "
+            "(shared radios), top_k, num_candidates, rrf_rank_constant, use_mmr with "
+            "mmr_lambda (shared slider), kg_max_rows, Input mode radios, "
+            "direct_retrieval. Gray-out is the same apply_gray_out (RetrievalControls) "
+            "that Settings uses (single source), so inactive knobs match and are not "
+            "fed to the search (active_knobs). Input mode is build_input_mode_radios() "
+            "(refined, direct_query, direct_cypher; no Conversational, since the "
+            "harness runs the graph with no chat router); direct_cypher pins "
+            "retrieval_mode to neo4j_only (store_forced_by_mode) and enables "
+            "user_cypher; direct_retrieval skips the synthesizer, so such a case is "
+            "scored on retrieval alone (its keyword and judge gates are skipped on "
+            "the Run tab). Fields default to DEFAULT_VALUES, overridable per case; "
+            "generate_suite pins each member's whole retrieval block uniformly while "
+            "sharing facts."
+        ),
+    ),
+    "eval_dataset.suite": InfoText(
+        title="Suite setup",
+        standard=(
+            "A tool for turning one set of questions into a matched set of dataset "
+            "files that differ only in their search settings, so a single run can "
+            "compare which retrieval strategy answers best. The steps: give the suite "
+            "a name; add the shared questions with Add case(s) info and fact (this "
+            "saves the form's case or batch into the current dataset file, which "
+            "becomes the master fact-set); assemble the retrieval variations to "
+            "sweep, either by picking ready-made ones from the Hybrid and KG "
+            "dropdowns or by capturing the left form's current settings with Add from "
+            "form; then press the Generate suite button. That writes one dataset file "
+            "per variation into the corpus folder, each holding the same questions "
+            "under different pinned settings and tagged so the Run evaluation tab "
+            "lists them together as one suite."
+        ),
+        beginner=(
+            "This is an advanced tool for a specific job: testing the same questions "
+            "several different ways to see which search setup works best. Imagine "
+            "asking the same exam questions but changing the search method each time "
+            "and comparing the scores. You give the group a name, add your questions "
+            "with the Add case(s) info and fact button (which saves them into the "
+            "current file as the shared set), then choose the search variations to "
+            "compare: pick from the ready-made options in the two dropdowns, or "
+            "capture whatever is set in the form on the left. When you press the "
+            "Generate suite button, the app writes one file per variation, all with "
+            "the same questions, ready to run together on the Run evaluation tab. If "
+            "you only want one plain dataset, you can ignore this whole tool."
+        ),
+        technical=(
+            "Assembles a knob-sweep suite. The suite's facts are the current "
+            "dataset's cases: Add case(s) info and fact routes through _on_save_case, "
+            "appending the form's draft batch to the file and saving it (persisted, "
+            "not staged). Members come from two sources: the premade presets "
+            "(suite_gen.STRATEGIES, grouped Hybrid and KG by PRESET_GROUPS) picked "
+            "from the dropdowns (_add_preset_member, deduped), or a custom knob-set "
+            "captured from the left form (_on_add_form_member). Generate suite "
+            "(_on_generate_suite_clicked) requires at least one case, a suite name, "
+            "and at least one member, then generate_suite clones the master cases "
+            "once per member: same gold, the member's uniform RetrievalSettings, a "
+            "per-member id suffix, tagged into suites. One file per member is "
+            "save_dataset'd to the corpus folder. Preset numbers are fixed literals "
+            "(num_candidates 100, rrf 60, mmr_lambda 0.6, kg_max_rows 50; top_k 5 "
+            "from the model default), matching the config defaults; presets never "
+            "sweep numbers (a custom form knob-set does)."
+        ),
+    ),
+    # ---- Evaluation: shared dashboard left column (_dashboard_rail.py) ----
+    "eval_dashboard.overview": InfoText(
+        title="Dashboard controls",
+        standard=(
+            "The shared control column for all five results tabs (Run Summary, Run "
+            "Charts, Compare Datasets, Trends, Metrics Guide), identical on each so "
+            "the picker never moves. Refresh re-reads the saved runs from the active "
+            "corpus (results are not live; the column also reloads when you open a "
+            "tab or a run finishes).\n\n"
+            "The Selection cascade chooses which results appear on the right, "
+            "narrowing from top to bottom:\n"
+            "- Suite: a group of dataset files that were run together as a set (the "
+            "same questions under different search settings). Picking one limits the "
+            "Dataset list to that suite's files.\n"
+            "- Dataset: one file within the suite. Picking one limits the Run list to "
+            "that file's runs, and it is the file whose history Trends charts over "
+            "time.\n"
+            "- Run: one evaluation of that dataset. Picking one is what Run Summary "
+            "and Run Charts display, and it also selects the suite execution that "
+            "Compare lays out side by side.\n\n"
+            "So one selection drives every tab, each using the part it needs: Run "
+            "Summary and Run Charts show the chosen Run; Compare shows all members of "
+            "that run's suite execution; Trends charts every run of the chosen "
+            "Dataset over time; the Metrics Guide is a static reference and ignores "
+            "the selection. Filter by test case origin then narrows the scores to "
+            "cases of the ticked kinds (Manual, LLM, Search, Chat), recomputing the "
+            "numbers on Run Summary, Run Charts, and Compare (Trends and the Metrics "
+            "Guide ignore it). The panel at the bottom is a read-only record of what "
+            "the selected run actually used; it always shows the run as it was saved, "
+            "so the origin tick-boxes do not change it. The whole column is shared, "
+            "so any choice you make here carries to every results tab."
+        ),
+        beginner=(
+            "This column is the same on every results tab, and it is how you choose "
+            "which results to look at. Because it is shared, a change here shows up "
+            "on all of them. Refresh re-loads the list of past evaluation runs "
+            "(results are not live, so press it after a new run finishes; it also "
+            "reloads when you switch to a tab).\n\n"
+            "You choose what to see in three steps, each one narrowing the next:\n"
+            "- A Suite is a batch of related test files (the same questions tried "
+            "with different search settings). Picking a suite decides which files you "
+            "can choose from next.\n"
+            "- A Dataset is one of those files. Picking a dataset decides which runs "
+            "you can choose from, and it is the file whose history the Trends tab "
+            "draws.\n"
+            "- A Run is one time you evaluated that file. Picking a run is what the "
+            "Run Summary and Run Charts tabs show, and it also tells the Compare tab "
+            "which set of results to line up side by side.\n\n"
+            "In other words, your pick here is what fills the charts and tables on "
+            "the right: Run Summary and Run Charts show the run you picked, Compare "
+            "shows that run's whole set of variations together, and Trends shows how "
+            "the picked file has scored over time. The Metrics Guide is just a "
+            "reference page and does not use your pick. The tick-boxes below let you "
+            "look at only certain kinds of test question, for example only the ones "
+            "you wrote by hand; they change the scores on Run Summary, Run Charts, "
+            "and Compare (Trends and the Metrics Guide ignore them). The box at the "
+            "very bottom shows the settings that were recorded for the run you "
+            "picked, so you can see exactly how it was scored; it always shows the "
+            "run as it was saved, so the tick-boxes do not change it. You do not need "
+            "to touch any of this to read one result; it is here for when you want to "
+            "compare or dig in."
+        ),
+        technical=(
+            "One DashboardRail widget, one instance per view tab, synced through the "
+            "coordinator's selected_suite / selected_dataset / selected_run_id / "
+            "selected_origins on refresh() (so a selection is global across the five "
+            "tabs). Refresh reloads EvalLedger.list_runs() from the active corpus's "
+            "eval_output and fires the host tab's on_change; a refresh also happens "
+            "on tab select (_on_subtab_change) and on run/suite completion. The "
+            "cascade is Suite (grouped by the run's named suite, else a single 'No "
+            "suite' bucket) then Dataset (dataset_of: dataset_name or the file stem, "
+            "scoped to the suite) then Run; the three dropdowns are wired via "
+            "on_select. Absent a stored selection each falls back to the newest run "
+            "(list_runs is run_id DESC). The origin checkboxes recompute a run's "
+            "metrics over the ticked provenances via report.build_summary (SSOT with "
+            "the stored averages); all ticked skips the recompute. They are live on "
+            "every tab and mutate the shared filter, but only Run Summary / Run "
+            "Charts / Compare read it; Trends (scoped by dataset_hash) and Metrics "
+            "Guide never do. The context panel reads the selected run's ledger ROW "
+            "(enabled_groups, gate_thresholds, judge_models, the three hashes shown "
+            "as 8-char prefixes, case_count, synthesizer_model), not the mutable "
+            "dataset JSON, so it stays accurate after the dataset is edited or "
+            "deleted and is unaffected by the origin filter (its Cases is the run "
+            "total, not the filtered n). Judge panel shows '(off)' when the judge "
+            "group did not run, else the recorded models, or '(default)' when a "
+            "judged run stored no panel. Consumers: Run Summary / Run Charts resolve "
+            "the run through the filter (resolve_run_or_empty); Compare renders the "
+            "members sharing the run's suite_run_id; Trends charts every run of the "
+            "selected dataset_hash; Metrics Guide ignores the selection and only uses "
+            "Refresh to reload info_metrics.md."
+        ),
+    ),
 }
 
 

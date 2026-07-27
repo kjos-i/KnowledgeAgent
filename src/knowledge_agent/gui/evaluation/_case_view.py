@@ -124,7 +124,7 @@ def case_card(
             detail += f"  (+{len(problems) - 1} more)"
         body.append(
             ft.Text(
-                f"⚠ not runnable — {detail}",
+                f"⚠ not runnable: {detail}",
                 size=12,
                 color=ft.Colors.AMBER_400,
                 weight=ft.FontWeight.BOLD,
