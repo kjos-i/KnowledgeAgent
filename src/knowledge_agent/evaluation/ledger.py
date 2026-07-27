@@ -83,8 +83,8 @@ _RUNS_TRAILING: list[tuple[str, str]] = [
     ("recipe_hash", "TEXT"),
     # Suite model (added 2026-07-15). `facts_hash` = SHA-256 of the cases' gold
     # content only (knobs + id EXCLUDED) → the identity SHARED by every member of
-    # a test-dataset suite (twin of `dataset_hash`, which is per-file); the
-    # facts_hash-based fallback grouping when a run has no `suite`. `suite` = the
+    # a test-dataset suite (twin of `dataset_hash`, which is per-file); shown in
+    # the rail's three-hash panel, NOT used for grouping. `suite` = the
     # NAMED suite this run was executed as (single; the dataset's `suites` list is
     # multi-valued membership, but one run runs one suite) — the dashboard's
     # primary grouping. `suite_run_id` = a shared launch timestamp stamped on all

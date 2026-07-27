@@ -362,8 +362,8 @@ class EvalDataset(BaseModel):
             "files that share the SAME facts under different pinned knobs (e.g. "
             "'escrt-mode-sweep'). A dataset can belong to SEVERAL suites (the same "
             "knob-config file can be the baseline of two sweeps), so this is a "
-            "list. Empty = not explicitly grouped: the Run tab + dashboard then "
-            "fall back to facts_hash auto-grouping. MEMBERSHIP only — a single "
+            "list. Empty = the dataset is in no suite (grouping is by this tag "
+            "only; there is no automatic facts-hash grouping). MEMBERSHIP only — a single "
             "RUN records which one suite it was executed as (the ledger `suite` "
             "column). Header-only, so it's excluded from `compute_dataset_hash`."
         ),

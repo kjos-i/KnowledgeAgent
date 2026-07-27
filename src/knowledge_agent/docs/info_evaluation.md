@@ -42,14 +42,11 @@ dataset, so **Compare Datasets** can overlay them:
 | forced_hybrid | `lancedb_only` (hybrid) |
 | forced_graph | `neo4j_only` |
 | forced_fused | `parallel_fused` |
-| auto | `auto` (+ an `expected_mode` per case) |
 
 Overlaying their metrics shows which facts live in text (chunk hit@k) vs cleanly in
-the graph (KG hit@k), whether `parallel_fused` earns its extra latency + tokens with
-higher grounded correctness / recall, and, via the `auto` member's mode-routing
-correctness, whether the classifier routes each question to the mode that wins. Run
-each member with only the relevant metric groups on (e.g. the graph dataset → `kg` +
-`judge`, not `chunk` / `source`).
+the graph (KG hit@k), and whether `parallel_fused` earns its extra latency + tokens
+with higher grounded correctness / recall. Run each member with only the relevant
+metric groups on (e.g. the graph dataset → `kg` + `judge`, not `chunk` / `source`).
 
 <a id="matrix"></a>
 ## Test-case matrix
@@ -62,11 +59,11 @@ metrics to watch:
 | Semantic text retrieval | `expected_chunks`, `required_keywords` | defaults (`lancedb_only` + hybrid) | chunk hit@k, chunk recall@k, required-keyword hit rate |
 | Graph structure / relationships | `expected_entities` | `neo4j_only` or `parallel_fused` | KG hit@k, KG entity recall, Cypher non-empty |
 | Answer truth / hallucination | `expected_answer_points` | fixed knobs, judge group **on** | faithfulness, hallucination, grounded correctness |
-| Fusion / ranking knobs | `expected_chunks`, `expected_sources` | vary `rrf_rank_constant`; vector vs hybrid | MRR, NDCG@k, contextual precision |
-| Result diversity (MMR) | `expected_chunks` | `use_mmr` on; `mmr_lambda` 0.1 vs 1.0 | contextual relevancy, chunk precision@k |
-| Graph payload limits | `expected_entities` | vary `kg_max_rows` (5 vs 200) | latency, agent tokens, contextual relevancy |
+| Fusion / ranking knobs | `expected_chunks`, `expected_sources` | vary `rrf_rank_constant`; vector vs hybrid; judge group **on** | MRR, NDCG@k, contextual precision |
+| Result diversity (MMR) | `expected_chunks` | `use_mmr` on; `mmr_lambda` 0.1 vs 1.0; judge group **on** | contextual relevancy, chunk precision@k |
+| Graph payload limits | `expected_entities` | vary `kg_max_rows` (5 vs 200); judge group **on** | latency, agent tokens, contextual relevancy |
 | Isolate retrieval (no LLM) | `expected_chunks`, `expected_sources` | `direct_retrieval: true` | hit@k, chunk hit@k (judge + keyword gates skipped) |
-| Raw graph execution | `user_cypher`, `expected_entities` | `neo4j_only` + read-only Cypher | Cypher validity, KG-source grounding |
+| Raw graph execution | `user_cypher`, `expected_entities` | `neo4j_only` + read-only Cypher | Cypher validity, KG citation grounding |
 | Routing / classifier | `expected_mode` | `retrieval_mode: auto` | mode-routing correctness |
 
 <a id="dashboards"></a>

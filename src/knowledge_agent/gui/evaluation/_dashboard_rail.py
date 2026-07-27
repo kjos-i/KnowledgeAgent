@@ -5,8 +5,9 @@ Charts, Compare Datasets, Trends, Metrics Guide), so the column is IDENTICAL
 everywhere. It is a **Suite → Dataset → Run** cascade + Refresh + a read-only
 run-info panel:
 
-  - **Suite** — a group of dataset files sharing a `facts_hash` (the same facts,
-    swept knobs). Picking one scopes the Dataset list to that suite's members.
+  - **Suite** — a group of dataset files sharing a suite name (the same facts,
+    swept knobs, tagged together by Generate suite). Picking one scopes the
+    Dataset list to that suite's members.
   - **Dataset** — one member file. Scopes the Run picker + Trends (by that
     dataset's `dataset_hash`).
   - **Run** — one run of the selected dataset. Drives Run Summary / Run Charts,
