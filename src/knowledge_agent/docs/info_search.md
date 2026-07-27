@@ -14,12 +14,14 @@ Set on **Retrieval**. This decides how your typed text is interpreted:
 
 | Mode | What it does |
 |---|---|
-| **Refined query** | A query-builder rewrites your text before searching (the default). |
+| **Refined query** | A query-builder rewrites your text before searching. |
 | **Direct query** | Searches your exact text, unrewritten (skips the query builder). |
 | **Direct Cypher** | Runs your text as raw Cypher on the knowledge graph, forcing the store to graph-only. |
 
-The chat's **Conversational** mode is a chat-only pre-step that distils a question
-from the conversation, then runs one of the above.
+The chat's **Conversational** mode (the default) is a chat-only pre-step: the chat
+router reads the whole conversation and either asks a clarifying question or distils
+a standalone query and searches it. When it searches, it uses the Refined path (the
+query builder runs) with your selected retrieval mode.
 
 <a id="retrieval-modes"></a>
 ## Retrieval modes: which stores run
@@ -53,13 +55,14 @@ When the LanceDB leg runs, it can search three ways:
 | Knob | Default | Applies when |
 |---|---|---|
 | **top_k** | 5 | Always: how many results to return. |
-| **num_candidates** | 100 | Any mode that runs LanceDB (not `neo4j_only`). |
+| **num_candidates** | 100 | Hybrid or Vector search (not FTS), in any mode that runs LanceDB. |
 | **rrf_rank_constant** | 60 | Hybrid only: it's the fusion constant. |
-| **MMR / mmr_lambda** | 0.6 | Hybrid or Vector only (FTS has no vectors). λ = 1 → pure relevance, λ = 0 → pure diversity. |
+| **MMR / mmr_lambda** | 0.6 | When MMR is enabled, on Hybrid or Vector search (FTS has no vectors). λ = 1 → pure relevance, λ = 0 → pure diversity. |
 | **kg_max_rows** | 50 | Any mode that runs Neo4j (not `lancedb_only`). |
 
 The form grays out a knob the current mode can't use, and the search never reads
-a grayed knob, because the leg that would read it doesn't run for that mode.
+a grayed knob: either the store leg that would read it doesn't run, or the LanceDB
+search mode in use doesn't need it (FTS uses none of num_candidates, RRF, or MMR).
 
 <a id="cypher"></a>
 ## Cypher tips
@@ -72,5 +75,6 @@ query in the chat; it runs on the graph (the store is pinned to graph-only).
   with a broad query first, e.g.
   `MATCH (n) RETURN labels(n), count(*) ORDER BY count(*) DESC`.
 - Always `RETURN` something: a bare `MATCH` shows nothing.
-- Keep it read-only for search: avoid `CREATE` / `DELETE` / `SET` here, since
-  ingestion is what writes the graph.
+- Keep it read-only: the runtime rejects any write (`CREATE`, `MERGE`, `DELETE`,
+  `DROP`, `SET`, `REMOVE`) plus `CALL` / `LOAD`, so a write query just returns
+  nothing. Ingestion is what writes the graph.
