@@ -20,6 +20,7 @@ import flet as ft
 
 from knowledge_agent.gui._markdown import themed_markdown
 from knowledge_agent.gui._styles import dashboard_section_header, section_divider, thin_rule
+from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail
 from knowledge_agent.gui.evaluation._run_dashboard import dashboard_shell, resolve_run_or_empty
 
@@ -81,7 +82,12 @@ class RunSummaryTab:
             expand=True,
             spacing=14,
         )
-        return dashboard_shell(rail_ctl, "Run Summary", self.body)
+        return dashboard_shell(
+            rail_ctl,
+            "Run Summary",
+            self.body,
+            trailing=info(self.app, "eval_run_summary.overview"),
+        )
 
     # ---- data / refresh ---------------------------------------------------
 
@@ -577,7 +583,7 @@ class RunSummaryTab:
             tiles.append(
                 ft.ExpansionTile(
                     title=ft.Text(
-                        f"{icon}  {c.get('case_id') or ''} — {status}  ({score})", size=13
+                        f"{icon}  {c.get('case_id') or ''} · {status}  ({score})", size=13
                     ),
                     controls=[
                         ft.Container(
@@ -661,7 +667,7 @@ class RunSummaryTab:
     @staticmethod
     def _detail_block(label: str, text: Any, *, markdown: bool = False) -> ft.Control:
         if not (text and str(text).strip()):
-            body: ft.Control = ft.Text("—", size=12)
+            body: ft.Control = ft.Text("n/a", size=12)
         elif markdown:
             # Render as markdown so an Evidence section / lists / bold format,
             # matching the Streamlit reference (Metrics Guide uses the same set).

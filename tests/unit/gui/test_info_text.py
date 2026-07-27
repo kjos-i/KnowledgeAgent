@@ -144,3 +144,21 @@ def test_eval_dashboard_overview_icon_present():
     assert spec.standard and spec.beginner and spec.technical, (
         "eval_dashboard.overview: a tier is empty"
     )
+
+
+def test_eval_run_summary_overview_icon_present():
+    """The Run Summary sub-tab body icon (right of the title, threaded through
+    dashboard_shell) is registered with all three tiers filled."""
+    spec = INFO["eval_run_summary.overview"]
+    assert spec.standard and spec.beginner and spec.technical, (
+        "eval_run_summary.overview: a tier is empty"
+    )
+
+
+def test_eval_run_charts_overview_icon_present():
+    """The Run Charts sub-tab body icon (right of the title) is registered with
+    all three tiers filled."""
+    spec = INFO["eval_run_charts.overview"]
+    assert spec.standard and spec.beginner and spec.technical, (
+        "eval_run_charts.overview: a tier is empty"
+    )

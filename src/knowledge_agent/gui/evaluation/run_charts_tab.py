@@ -30,6 +30,7 @@ from knowledge_agent.gui._styles import (
     dashboard_section_header,
     section_divider,
 )
+from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail
 from knowledge_agent.gui.evaluation._run_dashboard import dashboard_shell, resolve_run_or_empty
 from knowledge_agent.gui.evaluation.run_summary_tab import _score_color
@@ -52,13 +53,13 @@ _GROUP_HEADERS: dict[str, str] = {
     "llm": "Judge Metrics",
 }
 _GROUP_DESCRIPTIONS: dict[str, str] = {
-    "retrieval": "Average scores across all cases in the selected run. "
+    "retrieval": "Average scores across the selected run's cases. "
     "Highlights weak spots in source retrieval.",
-    "chunk": "Average scores across all cases in the selected run. Highlights whether "
+    "chunk": "Average scores across the selected run's cases. Highlights whether "
     "the right passages were retrieved, not just the right files.",
-    "kg": "Average scores across all cases in the selected run. "
+    "kg": "Average scores across the selected run's cases. "
     "Highlights knowledge-graph retrieval quality.",
-    "llm": "Average scores across all cases in the selected run. Identifies weak spots "
+    "llm": "Average scores across the selected run's cases. Identifies weak spots "
     "in answer quality. Hallucination is shown separately below.",
 }
 _BAR_W = 160
@@ -294,7 +295,12 @@ class RunChartsTab:
             expand=True,
             spacing=16,
         )
-        return dashboard_shell(rail_ctl, "Run Charts", self.body)
+        return dashboard_shell(
+            rail_ctl,
+            "Run Charts",
+            self.body,
+            trailing=info(self.app, "eval_run_charts.overview"),
+        )
 
     # ---- data / refresh ---------------------------------------------------
 
@@ -371,7 +377,7 @@ class RunChartsTab:
             return ft.Text("No case-level data for this run.", italic=True)
         cols = self._chart_metric_cols(cases)
         if not cols:
-            return ft.Text("No 0–1 score metrics to chart for this run.", italic=True)
+            return ft.Text("No 0-1 score metrics to chart for this run.", italic=True)
 
         metric_keys = [c for c, _ in cols]
         case_keys = [c.get("case_id") or "" for c in cases]
@@ -446,7 +452,7 @@ class RunChartsTab:
         metric/case with no value simply draws no bar."""
         cols = self._chart_metric_cols(cases)
         if not cols:
-            return ft.Text("No 0–1 score metrics to chart for this run.", italic=True)
+            return ft.Text("No 0-1 score metrics to chart for this run.", italic=True)
         color_of = {
             col: _METRIC_PALETTE[i % len(_METRIC_PALETTE)] for i, (col, _) in enumerate(cols)
         }
@@ -603,7 +609,7 @@ class RunChartsTab:
         for group in ("retrieval", "chunk", "llm"):
             body = rows_by_group[group] or [
                 ft.Text(
-                    "No data for this run — this metric group wasn't evaluated.",
+                    "No data for this run; this metric group wasn't evaluated.",
                     italic=True,
                     size=12,
                     color=ft.Colors.GREY_500,
@@ -687,7 +693,9 @@ class RunChartsTab:
             width=260,
             text_size=FIELD_LABEL_SIZE,
         )
-        self.hist_dropdown.on_change = self._on_hist_metric_change
+        # Flet 0.85 Dropdown fires on_select, NOT on_change (same as the rail's
+        # dropdowns); on_change silently never fired, so the metric never redrew.
+        self.hist_dropdown.on_select = self._on_hist_metric_change
         self.hist_container = ft.Container(content=self._histogram(self._hist_metric))
         return ft.Column(
             [
@@ -757,8 +765,8 @@ class RunChartsTab:
             [
                 dashboard_section_header("Latency by Case"),
                 ft.Text(
-                    "Total latency per case (seconds). KA measures total latency only "
-                    "— no retrieval/LLM split.",
+                    "Total latency per case (seconds). KA measures total latency only, "
+                    "no retrieval/LLM split.",
                     size=12,
                     color=ft.Colors.GREY_400,
                 ),
@@ -928,5 +936,5 @@ class RunChartsTab:
         except statistics.StatisticsError:
             r = None
         if r is None:
-            return ft.Colors.TRANSPARENT, "—", ft.Colors.GREY_400
+            return ft.Colors.TRANSPARENT, "n/a", ft.Colors.GREY_400
         return _corr_color(r), f"{r:.2f}", ft.Colors.WHITE if abs(r) > 0.55 else ft.Colors.GREY_300

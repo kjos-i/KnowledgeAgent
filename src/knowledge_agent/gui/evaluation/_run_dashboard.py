@@ -19,14 +19,17 @@ if TYPE_CHECKING:
     from knowledge_agent.gui.evaluation.evaluation_view import EvaluationView
 
 
-def dashboard_shell(rail_ctl: ft.Control, title: str, body: ft.Column) -> ft.Control:
+def dashboard_shell(
+    rail_ctl: ft.Control, title: str, body: ft.Column, *, trailing: ft.Control | None = None
+) -> ft.Control:
     """The two-column dashboard frame: the run rail on the left, a titled scrolling
     body on the right. Shared by Run Summary + Run Charts so the shell lives in one
-    place (the caller builds `body` with its own placeholder + spacing)."""
+    place (the caller builds `body` with its own placeholder + spacing). Pass
+    `trailing` (e.g. an info icon) to sit it beside the title."""
     return ft.Row(
         [
             rail_ctl,
-            ft.Column([view_header(title), body], expand=True, spacing=8),
+            ft.Column([view_header(title, trailing=trailing), body], expand=True, spacing=8),
         ],
         expand=True,
         vertical_alignment=ft.CrossAxisAlignment.STRETCH,
