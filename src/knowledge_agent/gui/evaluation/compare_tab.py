@@ -10,9 +10,9 @@ per metric in bold) plus grouped bars per score group.
 A comparability banner flags when the compared members used different recipes
 (normally they don't — a suite runs all its members under one recipe).
 
-Run-level `avg_*` columns are read straight from each run row — no in-GUI
-aggregation. `RunSummaryTab._fmt` / `._delta` are reused from Run Summary
-(single source, no second impl).
+Run-level `avg_*` columns come from each run row; under an active origin filter
+they are recomputed over the kept cases (`build_summary`). `RunSummaryTab._fmt`
+/ `._delta` are reused from Run Summary (single source, no second impl).
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 import flet as ft
 
 from knowledge_agent.gui._styles import dashboard_section_header, section_divider
+from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail, dataset_of
 from knowledge_agent.gui.evaluation.run_summary_tab import RunSummaryTab
 from knowledge_agent.gui.views._frame import view_header
@@ -55,8 +56,8 @@ class CompareDatasetsTab:
         self.body = ft.Column(
             [
                 ft.Text(
-                    "Select a run from a suite execution to compare its members — "
-                    "run a suite from the Run tab (Run scope → Whole suite).",
+                    "Select a run from a suite execution to compare its members. "
+                    "Run a suite from the Run tab using the Whole suite scope.",
                     italic=True,
                 )
             ],
@@ -67,7 +68,17 @@ class CompareDatasetsTab:
         return ft.Row(
             [
                 rail_ctl,
-                ft.Column([view_header("Compare Datasets"), self.body], expand=True, spacing=8),
+                ft.Column(
+                    [
+                        view_header(
+                            "Compare Datasets",
+                            trailing=info(self.app, "eval_compare.overview"),
+                        ),
+                        self.body,
+                    ],
+                    expand=True,
+                    spacing=8,
+                ),
             ],
             expand=True,
             vertical_alignment=ft.CrossAxisAlignment.STRETCH,
@@ -96,9 +107,9 @@ class CompareDatasetsTab:
         if suite_run_id is None:
             self.body.controls = [
                 ft.Text(
-                    "Select a run from a suite execution — Compare shows that "
+                    "Select a run from a suite execution. Compare shows that "
                     "suite-run's members (same facts, swept knobs) side by side. "
-                    "Run a suite from the Run tab (Run scope → Whole suite).",
+                    "Run a suite from the Run tab using the Whole suite scope.",
                     italic=True,
                 )
             ]
@@ -114,10 +125,19 @@ class CompareDatasetsTab:
             (dataset_of(r), filtered_run(self.app, r["run_id"], origins)[0])
             for r in ledger.get_suite_run(suite_run_id)
         ]
-        cols = [(ds, run) for ds, run in cols if run is not None]
+        # Drop a member with no cases left after the origin filter: it would
+        # otherwise render an all-zero column (pass_rate 0, every metric "Not
+        # evaluated") with no explanation. An active filter that empties every
+        # member then falls through to the message below.
+        cols = [(ds, run) for ds, run in cols if run is not None and run.get("case_count")]
         if len(cols) < 2:
             self.body.controls = [
-                ft.Text("This suite-run has fewer than 2 members to compare.", italic=True)
+                ft.Text(
+                    "No cases match the selected origin filter for this suite-run."
+                    if not cols
+                    else "This suite-run has fewer than 2 members to compare.",
+                    italic=True,
+                )
             ]
             self.app.page.update()
             return
@@ -138,7 +158,7 @@ class CompareDatasetsTab:
         recipe_hash means different thresholds / judges / enabled groups, so some
         metrics may not line up. None when every hash matches (the normal case:
         a suite runs all its members under one recipe)."""
-        hashes = {(run.get("recipe_hash") or "—") for _, run in cols}
+        hashes = {(run.get("recipe_hash") or "none") for _, run in cols}
         if len(hashes) <= 1:
             return None
         return ft.Container(
@@ -149,8 +169,8 @@ class CompareDatasetsTab:
                 [
                     ft.Icon(ft.Icons.WARNING_AMBER, size=16, color=ft.Colors.AMBER),
                     ft.Text(
-                        "These runs used different recipes (hashes differ) — metrics may "
-                        "not be directly comparable; only shared ones are shown.",
+                        "These runs used different recipes (hashes differ), so metrics "
+                        "may not be directly comparable; only shared ones are shown.",
                         size=12,
                         expand=True,
                     ),
@@ -270,13 +290,14 @@ class CompareDatasetsTab:
         return ft.Row(children, spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
     def _compare_bars(self, cols: list[tuple[str, dict[str, Any]]]) -> list[ft.Control]:
-        """Grouped bars per 0–1 score group — one bar per selected run per metric,
-        so the score groups read visually as well as in the table. Non-score
-        groups (tokens/latency) are table-only (they aren't 0–1)."""
+        """Grouped bars, one bar per run per 0-1 score metric, so the score groups
+        read visually as well as in the table. Only 0-1 metrics get a bar: count
+        metrics (fmt "d", e.g. disallowed keyword hits) and the tokens/latency/
+        summary groups stay table-only."""
         from knowledge_agent.evaluation.registry import GROUP_LABELS, METRICS, metric_labels
 
         labels = metric_labels()
-        score_groups = ("llm", "retrieval", "chunk", "kg", "citation")
+        score_groups = ("llm", "retrieval", "chunk", "kg", "citation", "keyword")
         legend = ft.Row(
             [
                 ft.Row(
@@ -298,6 +319,9 @@ class CompareDatasetsTab:
                 for m in METRICS
                 if m.group == group
                 and m.summary_avg_key
+                # 0-1 score metrics only: a count (fmt "d", e.g. disallowed keyword
+                # hits) is not a 0-1 value and would mis-scale on a proportional bar.
+                and m.fmt != "d"
                 and any(isinstance(run.get(m.summary_avg_key), (int, float)) for _, run in cols)
             ]
             if not metrics:
@@ -374,11 +398,11 @@ def _bar_color(i: int) -> str:
 
 
 def _labeled_bar(value: Any, color: str) -> ft.Control:
-    """A left-filled 0–1 proportional bar + its value, for the grouped-bar view.
-    A non-numeric value renders an empty track with '—'."""
+    """A left-filled 0-1 proportional bar + its value, for the grouped-bar view.
+    A non-numeric value renders an empty track with 'n/a'."""
     frac = value if isinstance(value, (int, float)) else 0.0
     frac = max(0.0, min(1.0, float(frac)))
-    text = f"{value:.2f}" if isinstance(value, (int, float)) else "—"
+    text = f"{value:.2f}" if isinstance(value, (int, float)) else "n/a"
     return ft.Row(
         [
             ft.Container(

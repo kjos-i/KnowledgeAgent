@@ -20,6 +20,7 @@ import flet as ft
 from flet import canvas as cv
 
 from knowledge_agent.gui._styles import dashboard_section_header, section_divider
+from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail
 from knowledge_agent.gui.views._frame import view_header
 
@@ -116,42 +117,62 @@ def _line_chart(
         shapes.append(cv.Line(_ML, y, _ML + plot_w, y, _paint(ft.Colors.GREY_800, 1.0)))
         tick = f"{y_max * frac:.2f}" if y_max <= 1 else f"{y_max * frac:g}"
         shapes.append(cv.Text(_ML - 6, y, tick, label_style, alignment=ft.Alignment(1, 0)))
-    for i, lbl in enumerate(x_labels):
+    # Draw the time labels + lines only when there is something to plot (>= 2 time
+    # points and at least one non-None value); otherwise keep the frame but add a
+    # centered "Not evaluated" note so the empty chart reads as intentional.
+    plotted = n >= 2 and any(v is not None for _, _, values in series for v in values)
+    if plotted:
+        for i, lbl in enumerate(x_labels):
+            shapes.append(
+                cv.Text(
+                    px(i),
+                    _MT + plot_h + 6,
+                    lbl,
+                    label_style,
+                    rotate=-0.5,
+                    alignment=ft.Alignment(1, -1),
+                )
+            )
+        for _label, color, values in series:
+            line_paint = _paint(color, 2.0)
+            dot_paint = _paint(color, 1.0, fill=True)
+            prev: tuple[float, float] | None = None
+            for i, v in enumerate(values):
+                if v is None:
+                    prev = None
+                    continue
+                cx, cy = px(i), py(float(v))
+                if prev is not None:
+                    shapes.append(cv.Line(prev[0], prev[1], cx, cy, line_paint))
+                shapes.append(cv.Circle(cx, cy, 2.5, dot_paint))
+                prev = (cx, cy)
+    else:
         shapes.append(
             cv.Text(
-                px(i),
-                _MT + plot_h + 6,
-                lbl,
-                label_style,
-                rotate=-0.5,
-                alignment=ft.Alignment(1, -1),
+                _ML + plot_w / 2,
+                _MT + plot_h / 2,
+                "Not evaluated",
+                ft.TextStyle(size=13, color=ft.Colors.GREY_500),
+                alignment=ft.Alignment(0, 0),
             )
         )
 
-    for _label, color, values in series:
-        line_paint = _paint(color, 2.0)
-        dot_paint = _paint(color, 1.0, fill=True)
-        prev: tuple[float, float] | None = None
-        for i, v in enumerate(values):
-            if v is None:
-                prev = None
-                continue
-            cx, cy = px(i), py(float(v))
-            if prev is not None:
-                shapes.append(cv.Line(prev[0], prev[1], cx, cy, line_paint))
-            shapes.append(cv.Circle(cx, cy, 2.5, dot_paint))
-            prev = (cx, cy)
-
+    # Legend lists every series (so the chart's full metric set is visible); a
+    # series with no data is greyed and tagged, so nothing silently vanishes.
     legend = ft.Column(
         [
             ft.Row(
                 [
                     ft.Container(width=12, height=12, bgcolor=color, border_radius=2),
-                    ft.Text(label, size=12),
+                    ft.Text(
+                        label if any(v is not None for v in values) else f"{label} (no data)",
+                        size=12,
+                        color=None if any(v is not None for v in values) else ft.Colors.GREY_500,
+                    ),
                 ],
                 spacing=6,
             )
-            for label, color, _ in series
+            for label, color, values in series
         ],
         spacing=4,
     )
@@ -194,7 +215,13 @@ class TrendsTab:
             [
                 rail_ctl,
                 ft.Column(
-                    [view_header("Historical Trends"), self.body],
+                    [
+                        view_header(
+                            "Historical Trends",
+                            trailing=info(self.app, "eval_trends.overview"),
+                        ),
+                        self.body,
+                    ],
                     expand=True,
                     spacing=8,
                 ),
@@ -218,32 +245,38 @@ class TrendsTab:
         self._render_body()
 
     def _render_body(self) -> None:
-        """Render the cross-run trend charts for the selected DATASET — the rail
-        owns the selectors; this owns the charts. Trends group by `dataset_hash`
-        (every run of the exact selected dataset file — same facts AND knobs), so
-        a trend is a genuine regression: only code/time varies over the series."""
+        """Render the cross-run trend charts for the selected DATASET. Trends group
+        by `dataset_hash` (every run of the exact selected dataset file, same facts
+        AND knobs), so a trend is a genuine regression: only code/time varies over
+        the series. The full chart set is ALWAYS drawn: with no run selected or
+        fewer than two runs, the frames still show (each empty chart marked "Not
+        evaluated") beneath a short guidance line, so the dashboard never collapses
+        to a single message."""
         if self.body is None:
             return
         runs = self._ledger().list_runs()
         selected = next((r for r in runs if r["run_id"] == self.coordinator.selected_run_id), None)
         dhash = selected.get("dataset_hash") if selected else None
+        chrono = [r for r in reversed(runs) if dhash is not None and r.get("dataset_hash") == dhash]
+        controls: list[ft.Control] = []
         if dhash is None:
-            self.body.controls = [
-                ft.Text("Select a run — Trends group by its dataset hash.", italic=True)
-            ]
-            self.app.page.update()
-            return
-        chrono = [r for r in reversed(runs) if r.get("dataset_hash") == dhash]
-        if len(chrono) < 2:
-            self.body.controls = [
+            controls.append(
+                ft.Text(
+                    "Select a run on the left to plot its dataset's trend.",
+                    italic=True,
+                    color=ft.Colors.GREY_500,
+                )
+            )
+        elif len(chrono) < 2:
+            controls.append(
                 ft.Text(
                     f"Need at least 2 runs of this dataset for a trend ({len(chrono)} recorded).",
                     italic=True,
+                    color=ft.Colors.GREY_500,
                 )
-            ]
-            self.app.page.update()
-            return
-        self.body.controls = self._build_charts(chrono)
+            )
+        controls.extend(self._build_charts(chrono))
+        self.body.controls = controls
         self.app.page.update()
 
     # ---- charts -----------------------------------------------------------
@@ -277,9 +310,10 @@ class TrendsTab:
             if not metrics:
                 continue
             specs = [(m.summary_avg_key, labels.get(m.summary_avg_key, m.label)) for m in metrics]
-            y_max = 1.0 if group in _SCORE_GROUPS else self._auto_max(specs, chrono)
-            if y_max <= 0:
-                continue
+            # Always draw the frame (never skip a group): a score group keeps its
+            # fixed 0-1 axis; latency/tokens auto-scale, falling back to a 0-1 axis
+            # when there is no data yet, so the empty chart still shows + is labelled.
+            y_max = 1.0 if group in _SCORE_GROUPS else (self._auto_max(specs, chrono) or 1.0)
             charts.append(
                 self._chart(header, specs, chrono, x_labels, y_max, _Y_LABELS.get(group, "Score"))
             )

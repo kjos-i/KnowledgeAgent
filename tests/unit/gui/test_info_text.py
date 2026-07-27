@@ -162,3 +162,21 @@ def test_eval_run_charts_overview_icon_present():
     assert spec.standard and spec.beginner and spec.technical, (
         "eval_run_charts.overview: a tier is empty"
     )
+
+
+def test_eval_compare_overview_icon_present():
+    """The Compare Datasets sub-tab body icon (right of the title) is registered
+    with all three tiers filled."""
+    spec = INFO["eval_compare.overview"]
+    assert spec.standard and spec.beginner and spec.technical, (
+        "eval_compare.overview: a tier is empty"
+    )
+
+
+def test_eval_trends_overview_icon_present():
+    """The Trends sub-tab body icon (right of the "Historical Trends" title) is
+    registered with all three tiers filled."""
+    spec = INFO["eval_trends.overview"]
+    assert spec.standard and spec.beginner and spec.technical, (
+        "eval_trends.overview: a tier is empty"
+    )
