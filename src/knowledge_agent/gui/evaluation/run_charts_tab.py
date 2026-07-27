@@ -32,7 +32,7 @@ from knowledge_agent.gui._styles import (
 )
 from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail
-from knowledge_agent.gui.evaluation._run_dashboard import dashboard_shell, resolve_run_or_empty
+from knowledge_agent.gui.evaluation._run_dashboard import dashboard_shell, resolve_run_or_skeleton
 from knowledge_agent.gui.evaluation.run_summary_tab import _score_color
 
 if TYPE_CHECKING:
@@ -132,6 +132,54 @@ def _stroke(color: str, width: float = 1.0) -> ft.Paint:
     return ft.Paint(color=color, stroke_width=width, style=ft.PaintingStyle.STROKE)
 
 
+def _empty_axes_canvas(
+    width: int, height: int, ml: int, mr: int, mt: int, mb: int, note: str = "Not evaluated"
+) -> cv.Canvas:
+    """An empty chart frame: the L-shaped axes + faint 0/mid/top gridlines + a
+    centered note, so a chart with no data still renders AS a chart (the always-show
+    rule) rather than collapsing to a line of text. Same look as the Trends tab's
+    empty line charts."""
+    plot_w = width - ml - mr
+    plot_h = height - mt - mb
+    baseline = mt + plot_h
+    shapes: list[cv.Shape] = [
+        cv.Line(ml, mt, ml, baseline, _stroke(ft.Colors.GREY_500)),
+        cv.Line(ml, baseline, width - mr, baseline, _stroke(ft.Colors.GREY_500)),
+    ]
+    for frac in (0.0, 0.5, 1.0):
+        y = mt + plot_h - frac * plot_h
+        shapes.append(cv.Line(ml, y, width - mr, y, _stroke(ft.Colors.GREY_800)))
+    shapes.append(
+        cv.Text(
+            ml + plot_w / 2,
+            mt + plot_h / 2,
+            note,
+            ft.TextStyle(size=13, color=ft.Colors.GREY_500),
+            alignment=ft.Alignment(0, 0),
+        )
+    )
+    return cv.Canvas(shapes=shapes, width=width, height=height)
+
+
+def _empty_box_canvas(width: int, height: int, note: str = "Not evaluated") -> cv.Canvas:
+    """An empty framed box + centered note, for a chart with no natural axes (the
+    correlation heatmap) so it too shows an empty frame rather than vanishing."""
+    return cv.Canvas(
+        shapes=[
+            cv.Rect(0.5, 0.5, width - 1, height - 1, paint=_stroke(ft.Colors.GREY_700)),
+            cv.Text(
+                width / 2,
+                height / 2,
+                note,
+                ft.TextStyle(size=13, color=ft.Colors.GREY_500),
+                alignment=ft.Alignment(0, 0),
+            ),
+        ],
+        width=width,
+        height=height,
+    )
+
+
 def _trunc(text: str, n: int) -> str:
     return text if len(text) <= n else text[: n - 1] + "…"
 
@@ -196,7 +244,9 @@ def _stacked_by_case_chart(
     A single-entry `series` is just a plain bar chart (e.g. total latency)."""
     data = _by_case_series(cases, [key for _, _, key in series])
     if not data:
-        return ft.Text("No per-case data for this chart.", italic=True)
+        return _empty_axes_canvas(
+            _CASE_MIN_W, _CASE_CHART_H, _CASE_ML, _CASE_MR, _CASE_MT, _CASE_MB
+        )
     y_top, step = _nice_axis(max((sum(vals) for _, vals in data), default=0.0))
 
     n = len(data)
@@ -316,21 +366,21 @@ class RunChartsTab:
         self._render_body()
 
     def _render_body(self) -> None:
-        """Render the deep-analysis body for the coordinator's selected run —
-        the rail owns the selectors + recipe panel; this owns the body."""
+        """Render the deep-analysis body for the coordinator's selected run — the
+        rail owns the selectors + recipe panel; this owns the body. With no run
+        selected (or not found) the full chart set still renders, every chart drawn
+        as an empty frame marked "Not evaluated" beneath a guidance line, never
+        collapsing to a single message (the always-show rule)."""
         if self.body is None:
             return
-        resolved = resolve_run_or_empty(self.app, self.coordinator, self.body)
-        if resolved is None:
-            return
-        run, cases = resolved
+        run, cases, notice = resolve_run_or_skeleton(self.app, self.coordinator)
         self._runs = self._ledger().list_runs()
         self._cases = cases
         # A newly loaded/refreshed run resets the chart filters to all-selected;
         # per-toggle changes (which don't re-enter refresh) persist within a run.
         self._chart_metrics = None
         self._chart_cases = None
-        self.body.controls = [
+        controls: list[ft.Control] = [
             self._metric_scores_by_case(cases),
             section_divider(),
             *self._balance_sections(run),
@@ -343,6 +393,9 @@ class RunChartsTab:
             section_divider(),
             self._token_usage_section(),
         ]
+        if notice:
+            controls.insert(0, ft.Text(notice, italic=True, color=ft.Colors.GREY_500))
+        self.body.controls = controls
         self.app.page.update()
 
     # ---- metric scores by case (grouped bar chart) ------------------------
@@ -373,11 +426,17 @@ class RunChartsTab:
         Two multi-select filters (Metrics / Cases) are collapsible checklists —
         Flet has no native multiselect dropdown — both defaulting to all
         selected. The metric set is registry-derived (no hardcodes)."""
-        if not cases:
-            return ft.Text("No case-level data for this run.", italic=True)
-        cols = self._chart_metric_cols(cases)
+        cols = self._chart_metric_cols(cases) if cases else []
         if not cols:
-            return ft.Text("No 0-1 score metrics to chart for this run.", italic=True)
+            # No chartable data yet: keep the section header + an empty chart frame
+            # (no filters to offer), so the section never collapses to a bare line.
+            return ft.Column(
+                [
+                    dashboard_section_header("Metric Scores by Case"),
+                    _empty_axes_canvas(_MSC_MIN_W, _MSC_H, _MSC_ML, _MSC_MR, _MSC_MT, _MSC_MB),
+                ],
+                spacing=8,
+            )
 
         metric_keys = [c for c, _ in cols]
         case_keys = [c.get("case_id") or "" for c in cases]
@@ -451,8 +510,6 @@ class RunChartsTab:
         (legend beside it); case labels are angled so long ids don't collide. A
         metric/case with no value simply draws no bar."""
         cols = self._chart_metric_cols(cases)
-        if not cols:
-            return ft.Text("No 0-1 score metrics to chart for this run.", italic=True)
         color_of = {
             col: _METRIC_PALETTE[i % len(_METRIC_PALETTE)] for i, (col, _) in enumerate(cols)
         }
@@ -462,7 +519,12 @@ class RunChartsTab:
         metrics = [col for col, _ in cols if col in selected_metrics]
         chosen = [c for c in cases if (c.get("case_id") or "") in selected_cases]
         if not metrics or not chosen:
-            return ft.Text("Select at least one metric and one case to chart.", italic=True)
+            # Nothing to plot (no chartable metrics, or the filters cleared them
+            # all): draw the empty axes frame + a note rather than dropping the chart.
+            note = (
+                "Not evaluated" if not cols else "Select at least one metric and one case to chart."
+            )
+            return _empty_axes_canvas(_MSC_MIN_W, _MSC_H, _MSC_ML, _MSC_MR, _MSC_MT, _MSC_MB, note)
 
         m = len(metrics)
         group_w = m * _MSC_BAR_W + (m - 1) * _MSC_BAR_INTRA
@@ -609,7 +671,7 @@ class RunChartsTab:
         for group in ("retrieval", "chunk", "llm"):
             body = rows_by_group[group] or [
                 ft.Text(
-                    "No data for this run; this metric group wasn't evaluated.",
+                    "Not evaluated.",
                     italic=True,
                     size=12,
                     color=ft.Colors.GREY_500,
@@ -683,7 +745,15 @@ class RunChartsTab:
     def _distribution_section(self) -> ft.Control:
         present = self._score_keys_present()
         if not present:
-            return ft.Text("No per-case score metrics to distribute.", italic=True)
+            # No per-case score metric to bin: keep the header + an empty histogram
+            # frame (no metric picker, there is nothing to pick).
+            return ft.Column(
+                [
+                    dashboard_section_header("Score Distribution"),
+                    _empty_axes_canvas(_HIST_W, _HIST_H, _HIST_ML, _HIST_MR, _HIST_MT, _HIST_MB),
+                ],
+                spacing=6,
+            )
         if self._hist_metric not in {k for k, _ in present}:
             self._hist_metric = present[0][0]
         self.hist_dropdown = ft.Dropdown(
@@ -716,7 +786,7 @@ class RunChartsTab:
         a native canvas — x = score bins 0..1, y = case count."""
         values = [float(c[key]) for c in self._cases if isinstance(c.get(key), (int, float))]
         if not values:
-            return ft.Text("No values.", italic=True)
+            return _empty_axes_canvas(_HIST_W, _HIST_H, _HIST_ML, _HIST_MR, _HIST_MT, _HIST_MB)
         bins = [0] * 10
         for v in values:
             bins[min(9, max(0, int(v * 10)))] += 1  # 0..1 -> bin 0..9 (1.0 -> 9)
@@ -802,7 +872,21 @@ class RunChartsTab:
         # hallucination) whose sign would invert — the reference excludes them.
         metrics = self._corr_metrics()
         if len(metrics) < 2:
-            return ft.Text("Correlation needs at least 2 comparable metrics.", italic=True)
+            # Needs >= 2 comparable metrics: keep the header + description + an empty
+            # framed box (a heatmap has no axes to draw) rather than a bare line.
+            return ft.Column(
+                [
+                    dashboard_section_header("Metric Correlations (Pearson)"),
+                    ft.Text(
+                        "Pearson correlation. Hallucination is excluded "
+                        "(lower = better, would invert the sign).",
+                        size=12,
+                        color=ft.Colors.GREY_400,
+                    ),
+                    _empty_box_canvas(300, 180, "Not evaluated (needs at least 2 metrics)."),
+                ],
+                spacing=6,
+            )
         return ft.Column(
             [
                 dashboard_section_header("Metric Correlations (Pearson)"),

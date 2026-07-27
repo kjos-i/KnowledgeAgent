@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import flet as ft
+from flet import canvas as cv
 
 from knowledge_agent.evaluation.ledger import EvalLedger
 from knowledge_agent.gui.evaluation._common import ALL_ORIGINS
@@ -77,7 +77,10 @@ def test_refresh_empty_ledger(fake_app, tmp_path):
     tab.build()
     with patch("knowledge_agent.gui.evaluation._common.active_eval_ledger", return_value=led):
         tab.refresh()
-    assert "No evaluation runs" in tab.body.controls[0].value
+    # Always-show: an empty ledger renders the full chart skeleton beneath a
+    # "no run selected" guidance line, not a single message.
+    assert "No run selected" in tab.body.controls[0].value
+    assert len(tab.body.controls) > 1  # the empty chart skeleton still renders
 
 
 def test_refresh_renders_analysis_and_histogram_switch(fake_app, tmp_path):
@@ -111,7 +114,7 @@ def test_n_present_counts_cases_with_a_value():
 def test_metric_scores_chart_defaults_all_and_filters(fake_app, tmp_path):
     """The 'Metric Scores by Case' chart (moved here from Run Summary) offers the
     0-1 score columns that have data, defaults every metric/case selected, and
-    de-selecting every metric swaps the chart for a 'select at least one' note."""
+    de-selecting every metric swaps the chart for an empty chart frame (canvas)."""
     led = EvalLedger(tmp_path / "l.db")
     led.save_run(_report_multi())  # c1/c2/c3 have hit_at_k + mrr values
     coordinator = MagicMock(selected_suite=None, selected_origins=set(ALL_ORIGINS))
@@ -128,4 +131,4 @@ def test_metric_scores_chart_defaults_all_and_filters(fake_app, tmp_path):
     assert "hit_at_k" not in tab._chart_metrics
     for metric in list(tab._chart_metrics):  # de-select the rest
         tab._on_metric_toggle(metric, False)
-    assert isinstance(tab._draw_metric_chart(tab._cases), ft.Text)  # guidance note
+    assert isinstance(tab._draw_metric_chart(tab._cases), cv.Canvas)  # empty chart frame

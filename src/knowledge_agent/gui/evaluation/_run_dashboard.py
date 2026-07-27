@@ -36,28 +36,46 @@ def dashboard_shell(
     )
 
 
-def resolve_run_or_empty(
-    app: GuiApp, coordinator: EvaluationView, body: ft.Column
-) -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
-    """Resolve the coordinator's selected run (re-scoped to the checked origins),
-    or populate `body` with the right empty-state text and return None.
+def resolve_run_or_skeleton(
+    app: GuiApp, coordinator: EvaluationView
+) -> tuple[dict[str, Any], list[dict[str, Any]], str | None]:
+    """Resolve the coordinator's selected run (re-scoped to the checked origins) for
+    a dashboard body, ALWAYS returning something to render.
 
-    The shared front half of both tabs' `_render_body`: the run-selected guard, the
-    origin `filtered_run`, and the not-found fallback. On the empty/not-found paths
-    it sets `body.controls` and calls `page.update()` itself; on success it returns
-    `(run, cases)` and leaves body-building to the caller."""
+    Returns `(run, cases, notice)`. For a real, found run: `(run, cases, None)` — the
+    caller builds its full body. When no run is selected or the run isn't found,
+    returns an empty skeleton `({}, [], guidance)`: the caller still renders its full
+    chart/section structure (each empty spot labelled "Not evaluated") beneath the
+    guidance line, per the always-show rule, instead of collapsing to one message.
+    The origin filter re-scopes a found run to the checked provenances (all checked =
+    the stored run, unchanged)."""
     run_id = coordinator.selected_run_id
     if run_id is None:
-        body.controls = [ft.Text("No evaluation runs recorded yet.", italic=True)]
-        app.page.update()
-        return None
+        return (
+            {},
+            [],
+            (
+                "No run selected yet. Run an evaluation from the Run tab, or press "
+                "Refresh, to fill this dashboard."
+            ),
+        )
     from knowledge_agent.gui.evaluation._common import filtered_run
 
-    # The shared origin filter re-scopes the run to the checked provenances
-    # (all checked = the stored run, unchanged).
     run, cases = filtered_run(app, run_id, coordinator.selected_origins)
     if run is None:
-        body.controls = [ft.Text("Run not found — press Refresh.", italic=True)]
-        app.page.update()
-        return None
-    return run, cases
+        return {}, [], "Run not found. Press Refresh to reload the ledger."
+    return run, cases, None
+
+
+def empty_slot(note: str = "Not evaluated", *, height: int = 160) -> ft.Control:
+    """A bordered placeholder standing in for a chart/section body with no data, so
+    the section keeps its frame + label instead of collapsing to a bare line (the
+    always-show rule). Used for the dashboard's non-chart empties (e.g. a per-case
+    table with no rows); canvas charts draw their own empty frame instead."""
+    return ft.Container(
+        height=height,
+        border=ft.Border.all(1, ft.Colors.GREY_800),
+        border_radius=6,
+        alignment=ft.Alignment(0, 0),
+        content=ft.Text(note, italic=True, size=13, color=ft.Colors.GREY_500),
+    )

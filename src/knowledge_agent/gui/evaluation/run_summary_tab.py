@@ -22,7 +22,11 @@ from knowledge_agent.gui._markdown import themed_markdown
 from knowledge_agent.gui._styles import dashboard_section_header, section_divider, thin_rule
 from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.evaluation._dashboard_rail import DashboardRail
-from knowledge_agent.gui.evaluation._run_dashboard import dashboard_shell, resolve_run_or_empty
+from knowledge_agent.gui.evaluation._run_dashboard import (
+    dashboard_shell,
+    empty_slot,
+    resolve_run_or_skeleton,
+)
 
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
@@ -104,26 +108,34 @@ class RunSummaryTab:
         self._render_body()
 
     def _render_body(self) -> None:
-        """Render the KPI + per-case body for the coordinator's selected run —
-        the rail owns the selectors + recipe panel; this owns the body."""
+        """Render the KPI + per-case body for the coordinator's selected run — the
+        rail owns the selectors + recipe panel; this owns the body. With no run
+        selected (or not found) it renders the full skeleton (KPI cards all "Not
+        evaluated", per-case sections framed-empty) beneath a guidance line, never
+        collapsing to a single message (the always-show rule)."""
         if self.body is None:
             return
-        resolved = resolve_run_or_empty(self.app, self.coordinator, self.body)
-        if resolved is None:
-            return
-        run, cases = resolved
+        run, cases, notice = resolve_run_or_skeleton(self.app, self.coordinator)
         self._cases = cases
         self._runs = self._ledger().list_runs()
         # Previous run (next-lower run_id) drives the delta pills on the KPI
         # cards — mirroring the Streamlit dashboard's compare-to-previous view.
         # Filter it too, so the delta is like-for-like under the active filter.
+        # Skipped when nothing is selected (no run_id to compare against).
         from knowledge_agent.gui.evaluation._common import filtered_run
 
         run_id = self.coordinator.selected_run_id
         origins = self.coordinator.selected_origins
-        prev_id = max((r["run_id"] for r in self._runs if r["run_id"] < run_id), default=None)
+        prev_id = (
+            max((r["run_id"] for r in self._runs if r["run_id"] < run_id), default=None)
+            if run_id is not None
+            else None
+        )
         prev_run = filtered_run(self.app, prev_id, origins)[0] if prev_id is not None else None
-        self.body.controls = self._build_body(run, prev_run, cases)
+        controls = self._build_body(run, prev_run, cases)
+        if notice:
+            controls.insert(0, ft.Text(notice, italic=True, color=ft.Colors.GREY_500))
+        self.body.controls = controls
         self.app.page.update()
 
     # ---- body: KPIs + table ----------------------------------------------
@@ -360,7 +372,13 @@ class RunSummaryTab:
         (repeat-click flips asc/desc). Flet's DataTable can't freeze a column, so
         it's two height-aligned tables side by side."""
         if not cases:
-            return ft.Text("No case-level data for this run.", italic=True)
+            return ft.Column(
+                [
+                    self._section_header("Per-case results"),
+                    empty_slot("No cases to show.", height=80),
+                ],
+                spacing=8,
+            )
 
         self._table_host = ft.Column(spacing=0)
         self._render_case_rows()
@@ -540,7 +558,13 @@ class RunSummaryTab:
         from knowledge_agent.evaluation.registry import metric_fmts
 
         if not cases:
-            return ft.Text("No case-level data for this run.", italic=True)
+            return ft.Column(
+                [
+                    self._section_header("Case Details"),
+                    empty_slot("No cases to show.", height=80),
+                ],
+                spacing=4,
+            )
 
         fmts = metric_fmts()
         tiles: list[ft.Control] = []

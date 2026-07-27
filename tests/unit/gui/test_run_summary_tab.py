@@ -96,7 +96,10 @@ def test_refresh_empty_ledger_shows_empty_state(fake_app: MagicMock, tmp_path):
     tab.build()
     with patch("knowledge_agent.gui.evaluation._common.active_eval_ledger", return_value=led):
         tab.refresh()
-    assert "No evaluation runs" in tab.body.controls[0].value
+    # Always-show: an empty ledger renders the full KPI + per-case skeleton
+    # beneath a "no run selected" guidance line, not a single message.
+    assert "No run selected" in tab.body.controls[0].value
+    assert len(tab.body.controls) > 1  # the empty skeleton still renders
 
 
 def test_refresh_renders_selected_run(fake_app: MagicMock, tmp_path):
