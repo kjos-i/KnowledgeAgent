@@ -96,3 +96,22 @@ def test_log_overview_icon_present():
     all three tiers filled."""
     spec = INFO["log.overview"]
     assert spec.standard and spec.beginner and spec.technical, "log.overview: a tier is empty"
+
+
+def test_eval_run_section_icons_present():
+    """The Evaluation Run sub-tab icons (2 column titles + 3 sections + 4
+    recipe/run sub-sections; the recipe ones are shared with Create test
+    cases) are registered with all three tiers filled."""
+    for key in (
+        "eval_run.overview",
+        "eval_run.test_cases",
+        "eval_run.evaluation_cases",
+        "eval_run.run_options",
+        "eval_run.run",
+        "eval_run.metric_groups",
+        "eval_run.judge_panel",
+        "eval_run.gate_thresholds",
+        "eval_run.tracing",
+    ):
+        spec = INFO[key]
+        assert spec.standard and spec.beginner and spec.technical, f"{key}: a tier is empty"

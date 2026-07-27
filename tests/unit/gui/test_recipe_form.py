@@ -25,11 +25,7 @@ def test_defaults_match_harness(fake_app: MagicMock):
     default thresholds."""
     r = _form(fake_app).to_recipe()
     assert set(r.enabled_groups) == {"source", "chunk", "kg"}
-    assert (r.judge_threshold, r.metadata_match_threshold, r.required_keyword_threshold) == (
-        0.5,
-        0.8,
-        0.5,
-    )
+    assert (r.judge_threshold, r.required_keyword_threshold) == (0.5, 0.5)
 
 
 def test_load_round_trip(fake_app: MagicMock):
@@ -40,7 +36,6 @@ def test_load_round_trip(fake_app: MagicMock):
             enabled_groups=["source", "judge"],
             judge_models=["m1", "m2"],
             judge_threshold=0.6,
-            metadata_match_threshold=0.7,
             required_keyword_threshold=0.4,
         )
     )
@@ -52,11 +47,7 @@ def test_load_round_trip(fake_app: MagicMock):
     out = rf.to_recipe()
     assert set(out.enabled_groups) == {"source", "judge"}
     assert out.judge_models == ["m1", "m2"]
-    assert (out.judge_threshold, out.metadata_match_threshold, out.required_keyword_threshold) == (
-        0.6,
-        0.7,
-        0.4,
-    )
+    assert (out.judge_threshold, out.required_keyword_threshold) == (0.6, 0.4)
 
 
 def test_load_none_gives_defaults(fake_app: MagicMock):
@@ -125,10 +116,8 @@ def test_thresholds_clamp_and_default(fake_app: MagicMock):
     """A blank / out-of-range / non-numeric threshold falls back or clamps —
     to_recipe() never raises on a half-typed field."""
     rf = _form(fake_app)
-    rf.threshold_fields["judge_threshold"].value = ""  # blank → default
-    rf.threshold_fields["metadata_match_threshold"].value = "5"  # >1 → clamp
-    rf.threshold_fields["required_keyword_threshold"].value = "x"  # bad → default
+    rf.threshold_fields["judge_threshold"].value = ""  # blank -> default
+    rf.threshold_fields["required_keyword_threshold"].value = "x"  # bad -> default
     r = rf.to_recipe()
     assert r.judge_threshold == 0.5
-    assert r.metadata_match_threshold == 1.0
     assert r.required_keyword_threshold == 0.5

@@ -42,7 +42,6 @@ DEFAULT_LANGSMITH_PROJECT = "knowledge-agent-eval"
 # Gate-threshold defaults — the SINGLE source shared by EvalConfig (here) and
 # EvalRecipe (models.py imports these), so retuning one can't silently diverge.
 DEFAULT_JUDGE_THRESHOLD = 0.5
-DEFAULT_METADATA_MATCH_THRESHOLD = 0.8
 DEFAULT_REQUIRED_KEYWORD_THRESHOLD = 0.5
 
 
@@ -67,7 +66,6 @@ class EvalConfig:
 
     # ---- gate thresholds -------------------------------------------------
     judge_threshold: float = DEFAULT_JUDGE_THRESHOLD
-    metadata_match_threshold: float = DEFAULT_METADATA_MATCH_THRESHOLD
     required_keyword_threshold: float = DEFAULT_REQUIRED_KEYWORD_THRESHOLD
 
     # ---- judge (Phase 3; used only when "judge" is enabled) --------------
@@ -117,7 +115,6 @@ class EvalConfig:
         historical row records the gates it was judged under)."""
         return {
             "judge_threshold": self.judge_threshold,
-            "metadata_match_threshold": self.metadata_match_threshold,
             "required_keyword_threshold": self.required_keyword_threshold,
         }
 

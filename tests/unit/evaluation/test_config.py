@@ -27,7 +27,6 @@ def test_gate_thresholds_dict():
     gates = EvalConfig().gate_thresholds()
     assert set(gates) == {
         "judge_threshold",
-        "metadata_match_threshold",
         "required_keyword_threshold",
     }
 

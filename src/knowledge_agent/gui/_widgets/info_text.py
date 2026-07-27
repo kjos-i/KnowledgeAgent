@@ -4382,6 +4382,341 @@ INFO: dict[str, InfoText] = {
             "alongside; both are reached via Open folder."
         ),
     ),
+    # ---- Evaluation: Run sub-tab (run_tab.py + shared _recipe_form.py) ----
+    "eval_run.overview": InfoText(
+        title="Run configuration",
+        standard=(
+            "The left column, where you set up an evaluation and start it; the right "
+            "column previews the exact cases that will run. Choose what to evaluate "
+            "(a named suite of dataset files, or a single file), review or edit the "
+            "recipe (which metric groups run, the judge panel, and the pass/fail "
+            "thresholds), set any run options (a case cap, optional tracing), then "
+            "press Run evaluation. A finished run is saved to this corpus's results "
+            "and opens automatically. Freezing (optional) locks the recipe onto the "
+            "dataset so later runs are comparable."
+        ),
+        beginner=(
+            "This whole left side is where you set up a test of how well the "
+            "assistant answers, and then start it. You pick which set of questions "
+            "to test against, check the settings for how they will be scored, and "
+            "press the Run button. Think of it as a graded quiz: the questions and "
+            "their correct answers live in a dataset file, and the run measures how "
+            "close the assistant gets. The right side shows you the exact questions "
+            "that will run before you commit. You do not need to master every "
+            "setting before your first run; the sections below explain each choice."
+        ),
+        technical=(
+            "Collects the form into an EvalConfig via load_eval_config(**overrides) "
+            "(recipe groups + judge panel + the two gate thresholds + max_cases + "
+            "the active corpus's corpus_config_path) and calls runner.run(cfg) for a "
+            "single file or runner.run_suite(cfgs) for a named suite, in-process, "
+            "with a progress callback. The active corpus is read-only here (switch "
+            "it in Library); its stores + keys are already bridged into the env at "
+            "GUI startup. Results land in <corpus>/eval_output (the ledger + "
+            "JSON/CSV reports); on completion the coordinator selects the new run "
+            "and jumps to Run Summary (or Compare for a suite). Freeze persists the "
+            "recipe + frozen=true onto the dataset file(s) after a successful run."
+        ),
+    ),
+    "eval_run.test_cases": InfoText(
+        title="Test cases",
+        standard=(
+            "A read-only preview of exactly what will run: one tab per suite member "
+            "(each labelled by its retrieval strategy), or a single tab for a single "
+            "file. The tabs share the same facts (questions and expected answers); "
+            "the strategy label is the knob difference between members. It shows "
+            "every gold field of each case. Max cases (in Run options) runs the "
+            "first N from the top; leave it blank to run all. This is a preview "
+            "only; edit cases in the Create test cases tab."
+        ),
+        beginner=(
+            "This panel shows the actual questions that will be tested, so you can "
+            "check them before spending time and money on a run. Each question "
+            "(called a case) appears as a card with its expected answer and any "
+            "other details. If you picked a suite, there is one tab per file in it, "
+            "each testing the same questions with a different search setting so you "
+            "can compare. You cannot edit anything here; it is a preview. To change "
+            "the questions, use the Create test cases tab."
+        ),
+        technical=(
+            "Renders the selected dataset's cases read-only via "
+            "render_case_cards(detailed=True): a TabBar with one Tab per path in the "
+            "current selection (each suite member, or the single browsed file), "
+            "rebuilt whole on every selection change. Member tabs are labelled by "
+            "the strategy suffix of <suite>__<strategy>.json (a single file falls "
+            "back to its whole stem). A file that fails to load shows an inline "
+            "message rather than raising. Nothing selected shows a hint. It is "
+            "display-only (no edit/delete) to keep runs comparable; how many "
+            "actually run is the deterministic top-N from Max cases."
+        ),
+    ),
+    "eval_run.evaluation_cases": InfoText(
+        title="Evaluation cases",
+        standard=(
+            "Choose what to evaluate, then review the recipe that will score it. "
+            "Pick EITHER a named suite (the Suite dropdown, which runs several "
+            "dataset files that share the same questions but sweep different "
+            "retrieval settings) OR a single file (Browse); the two are mutually "
+            "exclusive. The recipe below (metric groups, judge panel, gate "
+            "thresholds) is loaded from the selected dataset and is editable unless "
+            "the dataset is frozen. When a suite's files disagree on the recipe, a "
+            "warning shows and the first file's recipe is used. Whether the recipe "
+            "is locked onto the dataset is set by Freeze run settings (next to the "
+            "Run button) and Unfreeze (the lock shown at the top when it is frozen)."
+        ),
+        beginner=(
+            "Here you choose which questions to test. There are two ways, and you "
+            "use one or the other. A suite is a named group of dataset files that "
+            "ask the same questions but with different search settings, so you can "
+            "see which setting answers best; pick one from the Suite dropdown. Or "
+            "press Browse to pick a single dataset file. Underneath, the recipe "
+            "shows how the answers will be scored; it comes from the dataset and you "
+            "can adjust it unless it has been locked (frozen). A little lock at the "
+            "top shows when it is locked and lets you unlock it. If you are just "
+            "starting, pick one file and leave the recipe as it is."
+        ),
+        technical=(
+            "Selection is a suite XOR a single file. The Suite dropdown lists the "
+            "sorted union of every corpus dataset's `suites` header tag (corpus "
+            "files sharing a tag are that suite's members, run together via "
+            "run_suite); Browse picks one gold JSON from the corpus folder (run). "
+            "Picking one clears the other. _load_suite_state / _load_dataset_state "
+            "load the recipe into the shared RecipeForm and compute the selection's "
+            "AGGREGATE freeze state (final/frozen only when EVERY member is). A "
+            "suite whose members' recipe hashes differ (compute_recipe_hash) is "
+            "flagged diverged: the first member's recipe loads and a warning shows; "
+            "Run asks to confirm, and Freeze re-syncs all members. frozen greys the "
+            "whole recipe read-only (set_enabled); Unfreeze (confirmed) clears "
+            "frozen across the scope."
+        ),
+    ),
+    "eval_run.run_options": InfoText(
+        title="Run options",
+        standard=(
+            "Settings that shape the run without changing the recipe. Max cases "
+            "caps how many cases run (the first N from the preview, top-down); leave "
+            "it blank to run the whole dataset, or set a small number for a quick "
+            "check. Tracing (optional, off by default) uploads this run's data to "
+            "LangSmith for step-by-step inspection; turn it on only for a "
+            "non-sensitive corpus (see its own help). These apply only to the run "
+            "you are about to start; they are never saved onto the dataset "
+            "(freezing saves the recipe alone)."
+        ),
+        beginner=(
+            "A couple of extra choices for this run. Max cases lets you test only "
+            "the first few questions instead of all of them, which is handy for a "
+            "quick trial; leave it blank to run everything. Tracing is an advanced, "
+            "optional tool that records a detailed play-by-play of the run to an "
+            "outside service called LangSmith; it is off by default, and you should "
+            "only use it with the test documents, never with private ones (its own "
+            "help explains why). If you are unsure, leave Max cases blank and "
+            "Tracing off."
+        ),
+        technical=(
+            "max_cases maps to EvalConfig.max_cases (blank leaves it None = all; "
+            "else the runner takes the first N cases). Tracing is opt-in per run "
+            "(trace + langsmith_project passed to runner.run/run_suite); it needs a "
+            "LangSmith key (Settings, Keys) or the run is blocked, and it uploads "
+            "queries + retrieved chunk text + answers to LangSmith's cloud. Both "
+            "grey out when the dataset is frozen. Neither is part of the recipe: "
+            "they are per-run and are not persisted on freeze (the recipe = groups "
+            "+ judge + thresholds only)."
+        ),
+    ),
+    "eval_run.run": InfoText(
+        title="Run",
+        standard=(
+            "Starts the evaluation over your current selection (a suite runs every "
+            "member; a single file runs that file). Run evaluation is disabled while "
+            "a run is in progress; the bar shows per-case (or per-file) progress, "
+            "and the status line reports the result. Freeze run settings (the "
+            "checkbox) is an opt-in: tick it and, once the run succeeds, the current "
+            "recipe is locked onto the dataset so future runs stay comparable; it is "
+            "available only when the dataset is marked final and not already frozen. "
+            "The line below shows where results are saved (this corpus's eval_output "
+            "folder)."
+        ),
+        beginner=(
+            "This is the button that actually runs the test. Press Run evaluation "
+            "and it works through the questions, showing a progress bar; when it "
+            "finishes, the result appears and the app jumps to the results (a "
+            "summary for a single file, or the Compare view for a suite). The Freeze "
+            "run settings checkbox is optional: ticking it saves the current scoring "
+            "settings onto the dataset when the run finishes, so if you run it again "
+            "later it is measured the same way. You can only freeze a dataset you "
+            "have marked as final. The small line underneath just tells you which "
+            "folder the results are saved in."
+        ),
+        technical=(
+            "_on_run_clicked validates (at least one metric group; a suite or file "
+            "selected; a LangSmith key if tracing) then spawns _execute_run, which "
+            "builds the EvalConfig(s) and awaits runner.run / run_suite with a "
+            "progress callback; a second run can't start while _busy (the button "
+            "disables). On success the coordinator selects the run and opens Run "
+            "Summary (single) or Compare (suite). Freeze run settings is enabled "
+            "only when the selection is aggregate-final and not already frozen; when "
+            "ticked, a successful run calls _freeze_dataset (persists the recipe + "
+            "frozen=true across the scope, re-syncing divergent members). The output "
+            "path is active_output_dir(app) = <corpus>/eval_output, refreshed on a "
+            "corpus switch."
+        ),
+    ),
+    "eval_run.metric_groups": InfoText(
+        title="Metric groups",
+        standard=(
+            "Which families of metrics this run measures. Source, chunk, and kg "
+            "check retrieval quality (did the right documents, text chunks, and "
+            "knowledge-graph facts come back); they are deterministic and free, and "
+            "are on by default. Judge adds LLM-scored answer quality (faithfulness, "
+            "relevancy, and so on); it calls your provider and costs money, so it is "
+            "off by default and, when ticked, reveals the Judge panel below. A run "
+            "needs at least one group. The Metrics guide tab explains what each "
+            "group measures."
+        ),
+        beginner=(
+            "This picks what the test actually measures. The first three, source, "
+            "chunk, and kg, check whether the assistant found the right material to "
+            "answer from (the right documents, the right passages, and the right "
+            "facts). They are quick, free, and on to start. The fourth, judge, is "
+            "different: it asks other AI models to grade the quality of the written "
+            "answer, which costs money, so it is off unless you turn it on. Leave "
+            "the first three on for a normal run. You must keep at least one ticked. "
+            "The Metrics guide tab describes each one in plain terms."
+        ),
+        technical=(
+            "The EvalConfig.enabled_groups toggle set (source, chunk, kg, judge); "
+            "DEFAULT_ENABLED_GROUPS = source, chunk, kg (judge off). source/chunk/kg "
+            "are deterministic retrieval metrics (hit_at_k, mrr, recall, and so on) "
+            "computed locally at no cost; judge runs the DeepEval LLM judge panel "
+            "(paid) and is gated off by default. Ticking judge un-greys the Judge "
+            "panel (a disabled cascade, still visible). to_recipe() writes the "
+            "ticked groups into the recipe; at least one must be on "
+            "(any_group_selected guards Run). Per-metric definitions live in "
+            "registry.py and the Metrics guide tab."
+        ),
+    ),
+    "eval_run.judge_panel": InfoText(
+        title="Judge panel",
+        standard=(
+            "The LLM judges that score answer quality when the judge metric is on. "
+            "Add one or more models (from any installed provider); each judge scores "
+            "every case, and the per-metric result is the average across the panel. "
+            "Judges always run at temperature 0 for repeatable scores. Add none and "
+            "one default judge from your active provider is used. Because judges "
+            "call your provider, they cost money, which is why the judge metric is "
+            "off by default. The panel greys out while the judge metric is unticked."
+        ),
+        beginner=(
+            "When you turn on the judge metric, these are the AI graders that score "
+            "how good each answer is. You can add several, mixing providers if you "
+            "like; every grader scores every question, and their scores are "
+            "averaged, which smooths out any single grader being harsh or lenient. "
+            "If you add none, the app uses one grader from the provider you already "
+            "use. Graders run in a fixed, consistent mode so the same answer gets "
+            "the same score each time. Remember these cost money to run. This whole "
+            "box is greyed until the judge metric above is ticked."
+        ),
+        technical=(
+            "Each entry is a provider:model ref (model_options across installed "
+            "providers); resolve_judge_models falls back to "
+            "[get_settings().mode_classifier_model] when the panel is empty. Every "
+            "judge scores each case via the DeepEval panel at temperature 0; per "
+            "metric the panel result is the mean (safe_mean, None-safe so a judge "
+            "that errors is skipped), then direction-normalised before blending into "
+            "avg_judge_score. Stored in EvalConfig.judge_models and recorded per "
+            "run. The section's disabled state cascades from the judge group "
+            "checkbox (_sync_judge_grey); the Add button dedups into the list, each "
+            "row showing a fixed 'temp 0' badge."
+        ),
+    ),
+    "eval_run.gate_thresholds": InfoText(
+        title="Gate thresholds",
+        standard=(
+            "The pass/fail rules a case is scored against. Two are cutoffs you set: "
+            "the judge threshold (the faithfulness and answer-relevancy judge scores "
+            "must each reach it) and the required-keyword threshold (the share of a "
+            "case's required keywords that must appear). Set either to 0 to stop it "
+            "gating (a knob-profiling run does this to read the metric curves "
+            "without pass/fail). Two more conditions are fixed, shown read-only: a "
+            "case must retrieve all its expected sources (hit_at_k = 1.0, checked "
+            "only when the source group runs), and it must contain none of its "
+            "disallowed keywords (0 allowed). Only faithfulness and answer-relevancy "
+            "of the judge metrics gate; the other judge scores are reported but do "
+            "not decide pass/fail. A direct-retrieval case has no written answer, so "
+            "it skips the keyword and judge gates and is scored on retrieval alone. "
+            "An errored case is marked for review."
+        ),
+        beginner=(
+            "These are the rules that decide whether each test question counts as a "
+            "pass. Two of them you can adjust, and two are fixed. The adjustable "
+            "ones: the judge threshold is the grade an answer's quality must reach, "
+            "and the required-keyword threshold is how many of the must-have words "
+            "need to show up. Turn either down to 0 to switch that check off (useful "
+            "when you just want to see the raw scores, not pass or fail). The fixed "
+            "ones, shown but not editable: the answer must have pulled up all the "
+            "expected source documents, and it must avoid every banned word. Two "
+            "details worth knowing: only two of the quality scores (faithfulness and "
+            "relevancy) count toward passing, and a question set to return raw "
+            "results instead of a written answer is judged only on what it "
+            "retrieved. Anything that errored is set aside for review."
+        ),
+        technical=(
+            "The pass gate is engine._status. Two configurable cutoffs: "
+            "required_keyword_threshold (required_keyword_hit_rate >= it) and "
+            "judge_threshold (faithfulness AND answer_relevancy must each be >= it; "
+            "only these two of the seven JUDGE_METRIC_KEYS gate). Setting either to "
+            "0 disables that check. Two fixed conditions, shown read-only: the "
+            "source gate hit_at_k == 1.0 (applied only when the source group ran and "
+            "the case has expected_sources) and disallowed_keyword_hits == 0, both "
+            "binary by design and not configurable. A direct_retrieval case returns "
+            "chunks with no synthesized answer, so it is scored on retrieval alone "
+            "(the keyword + judge gates are skipped); an errored run is REVIEW. "
+            "These thresholds only set the per-case PASS/REVIEW label; they do not "
+            "change any measured metric, and the summary just tallies the labels."
+        ),
+    ),
+    "eval_run.tracing": InfoText(
+        title="Tracing (optional)",
+        standard=(
+            "Optional, off by default. When on, this run uploads its data (your "
+            "queries, the retrieved chunk text, and the answers) to LangSmith's "
+            "cloud so you can inspect each step there. Turn it on ONLY for a "
+            "non-sensitive corpus (for example the test corpus), never for private "
+            "documents. It needs a LangSmith API key (set it in the Settings Keys "
+            "tab; the run is blocked without one). The LangSmith project field names "
+            "where the traces are grouped. Open LangSmith opens the site in your "
+            "browser (to sign in or copy your key); Open project in LangSmith opens "
+            "this run's project, which exists only after a traced run has uploaded "
+            "to it."
+        ),
+        beginner=(
+            "This is an optional, advanced tool, and it is off unless you turn it "
+            "on. Tracing sends a detailed record of the run (the questions asked, "
+            "the document text pulled up, and the answers given) to an outside "
+            "website called LangSmith, where you can study exactly what happened. "
+            "Because it uploads your data, only use it with the test documents, "
+            "never with anything private. You need a key from LangSmith first, added "
+            "in the Settings Keys tab, or the run will not start. The project box "
+            "just names the folder your traces go into on LangSmith. The two buttons "
+            "open LangSmith in your browser: one opens the site, the other jumps "
+            "straight to this run's traces (which only exist after you have run it "
+            "with tracing on)."
+        ),
+        technical=(
+            "Opt-in per run (trace + langsmith_project passed to "
+            "runner.run/run_suite), OFF by default. Ticking reveals the data-safety "
+            "warning and enables the project field; a run with tracing on but no "
+            "keyring 'langsmith' key is blocked with a status message. It uploads "
+            "queries + retrieved chunk text + answers to LangSmith's cloud. The key "
+            "lives in the OS keyring (Settings, Keys), not here. The project field "
+            "defaults to DEFAULT_LANGSMITH_PROJECT ('knowledge-agent-eval'). Open "
+            "LangSmith is a static url button (smith.langchain.com); Open project in "
+            "LangSmith resolves the project URL via the LangSmith SDK (read_project "
+            "by name + key) and launches it, resolving only after a traced run has "
+            "created the project. The whole section greys out when the dataset is "
+            "frozen."
+        ),
+    ),
 }
 
 

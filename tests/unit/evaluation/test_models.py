@@ -306,7 +306,6 @@ def test_recipe_defaults_mirror_evalconfig():
     r = EvalRecipe()
     assert sorted(r.enabled_groups) == ["chunk", "kg", "source"]
     assert r.judge_threshold == 0.5
-    assert r.metadata_match_threshold == 0.8
     assert r.required_keyword_threshold == 0.5
     assert r.judge_models == []
 

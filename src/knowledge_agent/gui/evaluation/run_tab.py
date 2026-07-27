@@ -28,12 +28,12 @@ from knowledge_agent.gui._styles import (
     panel_box,
     panel_title,
     section_divider,
-    section_title,
     sub_section_header,
     sub_section_title,
     thin_rule,
 )
-from knowledge_agent.gui._widgets.info_icon import info_icon
+from knowledge_agent.gui._widgets.info_icon import section_header
+from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.config_store import get_api_key
 from knowledge_agent.gui.evaluation._case_view import render_case_cards
 from knowledge_agent.gui.evaluation._recipe_form import RecipeForm
@@ -178,7 +178,7 @@ class RunTab:
             tooltip="Lock this recipe onto the dataset when the run finishes (final datasets only)",
         )
         self.freeze_hint = ft.Text(
-            "Set the dataset's status to “final” (in Create test cases) to freeze it.",
+            "Set the dataset's status to 'final' (in Create test cases) to freeze it.",
             size=12,
             color=ft.Colors.GREY_600,
             italic=True,
@@ -188,7 +188,7 @@ class RunTab:
         # The badge shows only when frozen; Unfreeze is always present, just
         # disabled (greyed) until the dataset is frozen.
         self.frozen_indicator = ft.Text(
-            "\U0001f512 Recipe frozen — read-only",
+            "\U0001f512 Recipe frozen, read-only",
             size=12,
             color=ft.Colors.ORANGE,
             visible=False,
@@ -205,7 +205,7 @@ class RunTab:
         # re-syncs them. Hidden unless a divergent suite is selected.
         self.divergence_warning = ft.Text(
             "⚠ This suite's members have different run settings (likely hand-edited). "
-            "Showing the first member's recipe — Freeze re-syncs all members.",
+            "Showing the first member's recipe; Freeze re-syncs all members.",
             size=12,
             color=ft.Colors.ORANGE,
             visible=False,
@@ -228,22 +228,22 @@ class RunTab:
             icon=ft.Icons.OPEN_IN_NEW,
             url="https://smith.langchain.com",
             tooltip=(
-                "Open LangSmith in your browser — sign in to view traces or copy "
-                "your API key (set the key in Settings → Keys)"
+                "Open LangSmith in your browser to sign in to view traces or copy "
+                "your API key (set the key in the Settings Keys tab)"
             ),
         )
         self.open_project_button = ft.TextButton(
             "Open project in LangSmith",
             icon=ft.Icons.OPEN_IN_NEW,
             tooltip=(
-                "Open this run's LangSmith project traces — resolved from the "
+                "Open this run's LangSmith project traces, resolved from the "
                 "project name + your key. The project exists only after a traced run."
             ),
             on_click=self._on_open_project_clicked,
         )
         self.trace_warning = ft.Text(
-            "⚠ Tracing uploads this run's data — your queries, the retrieved "
-            "chunk text, and the answers — to LangSmith's cloud. Enable ONLY "
+            "⚠ Tracing uploads this run's data (your queries, the retrieved "
+            "chunk text, and the answers) to LangSmith's cloud. Enable ONLY "
             "for a non-sensitive corpus (e.g. the test corpus); never for "
             "private documents.",
             size=12,
@@ -251,8 +251,8 @@ class RunTab:
             visible=False,
         )
         self.trace_key_hint = ft.Text(
-            "⚠ No LangSmith API key set — add it in Settings → Keys first, "
-            "then this run can trace.",
+            "⚠ No LangSmith API key set. Add it in the Settings Keys tab "
+            "first, then this run can trace.",
             size=12,
             color=ft.Colors.ORANGE,
             visible=False,
@@ -291,7 +291,7 @@ class RunTab:
                 # ============ Section: Evaluation cases ============
                 # Pick EITHER a named suite OR a single file (mutually exclusive,
                 # Ingest-style "…or…"). The choice decides suite vs single run.
-                section_title("Evaluation cases"),
+                section_header(self.app, "Evaluation cases", key="eval_run.evaluation_cases"),
                 sub_section_title("Run a suite"),
                 labeled_field("Suite", self.suite_dd),
                 thin_rule(),
@@ -310,23 +310,12 @@ class RunTab:
                 recipe_body,
                 section_divider(),
                 # ============ Section: Run options ============
-                section_title("Run options"),
+                section_header(self.app, "Run options", key="eval_run.run_options"),
                 labeled_field("Max cases (blank = all)", self.max_cases_field),
                 # ---- Sub-section: Tracing (opt-in LangSmith) ----
                 sub_section_header(
                     "Tracing (optional)",
-                    trailing=info_icon(
-                        self.app,
-                        title="Tracing (optional)",
-                        text=(
-                            "Opt-in per run, OFF by default. When on, this run's "
-                            "data — your queries, the retrieved chunk text, and the "
-                            "answers — is uploaded to LangSmith's cloud. Enable ONLY "
-                            "for a non-sensitive corpus (e.g. the test corpus), never "
-                            "for private documents. The key is stored in your OS "
-                            "keyring (same as Settings → Keys)."
-                        ),
-                    ),
+                    trailing=info(self.app, "eval_run.tracing"),
                 ),
                 ft.Row(
                     [
@@ -344,7 +333,7 @@ class RunTab:
                 # ============ Section: Run ============
                 # Scope (suite vs single) comes from the selection at the top, so
                 # one button runs whichever is set.
-                section_title("Run"),
+                section_header(self.app, "Run", key="eval_run.run"),
                 ft.Row(
                     [self.run_button, self.freeze_check, self.progress],
                     spacing=12,
@@ -386,7 +375,14 @@ class RunTab:
                 ft.Container(
                     width=LEFT_COLUMN_WIDTH,
                     padding=ft.Padding.symmetric(horizontal=12, vertical=10),
-                    content=panel_title("Run configuration"),
+                    content=ft.Row(
+                        controls=[
+                            panel_title("Run configuration"),
+                            info(self.app, "eval_run.overview"),
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        spacing=8,
+                    ),
                 ),
                 ft.Container(
                     expand=1,
@@ -394,18 +390,7 @@ class RunTab:
                     content=ft.Row(
                         controls=[
                             panel_title("Test cases"),
-                            info_icon(
-                                self.app,
-                                title="Test cases",
-                                text=(
-                                    "Read-only preview of what will run — one tab "
-                                    "per suite member (labelled by its retrieval "
-                                    "strategy), or a single tab for a single file. "
-                                    "The tabs share the same facts; the strategy "
-                                    "label is the knob difference. Max cases runs "
-                                    "the first N, top-down; leave it blank to run all."
-                                ),
-                            ),
+                            info(self.app, "eval_run.test_cases"),
                         ],
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         spacing=8,
@@ -669,7 +654,7 @@ class RunTab:
         if self._suite_name is not None:
             names = ", ".join(p.stem for p in self._suite_paths)
             n = len(self._suite_paths)
-            self.selection_hint.value = f"Suite “{self._suite_name}” — {n} member(s): {names}"
+            self.selection_hint.value = f"Suite '{self._suite_name}': {n} member(s): {names}"
         elif self.dataset_field and self.dataset_field.value:
             self.selection_hint.value = f"Single file: {Path(self.dataset_field.value).name}"
         else:
@@ -732,7 +717,7 @@ class RunTab:
             return
         self._dataset_frozen = False
         self._apply_frozen_ui()
-        self._set_status("Unfroze run settings — the recipe is editable again.")
+        self._set_status("Unfroze run settings; the recipe is editable again.")
         self.app.page.update()
 
     def _freeze_dataset(self) -> None:
@@ -793,7 +778,9 @@ class RunTab:
             return
         key = get_api_key("langsmith")
         if not key:
-            self._set_status("Set a LangSmith API key in Settings → Keys to open the project.")
+            self._set_status(
+                "Set a LangSmith API key in the Settings Keys tab to open the project."
+            )
             return
         project = (self.project_field.value or "").strip() if self.project_field else ""
         if not project:
@@ -808,7 +795,7 @@ class RunTab:
         try:
             from langsmith import Client
         except ImportError:
-            self._set_status("LangSmith isn't installed — install the tracing extra first.")
+            self._set_status("LangSmith isn't installed; install the tracing extra first.")
             return
         self._set_status(f"Opening LangSmith project {project!r}…")
         try:
@@ -866,7 +853,7 @@ class RunTab:
             self._set_status("Select a suite or a dataset file.")
             return
         if self.trace_check and self.trace_check.value and not get_api_key("langsmith"):
-            self._set_status("Set a LangSmith API key in Settings → Keys to trace.")
+            self._set_status("Set a LangSmith API key in the Settings Keys tab to trace.")
             return
         # R4: a divergent suite runs the FIRST member's recipe for EVERY member —
         # make the user acknowledge that before spending tokens.
@@ -929,7 +916,7 @@ class RunTab:
         if suite:
             self._set_busy(
                 False,
-                f"done: suite of {len(outcome.results)} runs — opening Compare."
+                f"done: suite of {len(outcome.results)} runs, opening Compare."
                 + (" Recipe frozen." if froze else ""),
             )
             if froze:
@@ -939,7 +926,7 @@ class RunTab:
         summary = result.report.get("summary", {})
         self._set_busy(
             False,
-            f"done: run {result.run_id} — "
+            f"done: run {result.run_id}, "
             f"{summary.get('pass_count')}/{summary.get('case_count')} pass."
             + (" Recipe frozen." if froze else ""),
         )
@@ -965,7 +952,6 @@ class RunTab:
             overrides["enabled_groups"] = frozenset(recipe.enabled_groups)
             overrides["judge_models"] = tuple(recipe.judge_models)
             overrides["judge_threshold"] = recipe.judge_threshold
-            overrides["metadata_match_threshold"] = recipe.metadata_match_threshold
             overrides["required_keyword_threshold"] = recipe.required_keyword_threshold
         # A suite run passes each member's path explicitly; a single run reads
         # the browsed dataset field. Same recipe/overrides for every member.

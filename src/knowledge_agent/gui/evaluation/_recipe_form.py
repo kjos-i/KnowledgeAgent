@@ -31,7 +31,7 @@ import flet as ft
 
 from knowledge_agent.evaluation.config import DEFAULT_ENABLED_GROUPS
 from knowledge_agent.gui._styles import labeled_field, sub_section_header
-from knowledge_agent.gui._widgets.info_icon import info_icon
+from knowledge_agent.gui._widgets.info_text import info
 from knowledge_agent.gui.settings.llm_tab import model_options
 
 if TYPE_CHECKING:
@@ -48,8 +48,15 @@ _GROUPS: tuple[str, ...] = ("source", "chunk", "kg", "judge")
 _THRESHOLD_LABEL_WIDTH = 210
 _THRESHOLDS: tuple[tuple[str, float], ...] = (
     ("judge_threshold", 0.5),
-    ("metadata_match_threshold", 0.8),
     ("required_keyword_threshold", 0.5),
+)
+# The two non-configurable gate conditions, shown read-only beside the editable
+# cutoffs so the whole pass-gate is visible: the source gate requires a perfect
+# hit (hit_at_k == 1.0, checked when the source group runs) and no disallowed
+# keyword may appear. Fixed by design (engine._status), not stored on the recipe.
+_FIXED_GATES: tuple[tuple[str, str], ...] = (
+    ("hit_at_k (source, fixed)", "1.0"),
+    ("disallowed_keyword_hits (fixed)", "0"),
 )
 
 
@@ -113,7 +120,7 @@ class RecipeForm:
         )
         self.judge_panel = ft.Column(controls=[], spacing=4)  # added-judge list
         self.judge_fallback_hint = ft.Text(
-            "No judges added — one default judge from your active provider is used.",
+            "No judges added: one default judge from your active provider is used.",
             size=12,
             color=ft.Colors.GREY_600,
             italic=True,
@@ -124,17 +131,7 @@ class RecipeForm:
                 [
                     sub_section_header(
                         "Judge panel",
-                        trailing=info_icon(
-                            self.app,
-                            title="Judge panel",
-                            text=(
-                                "LLM judges — they call your provider and cost "
-                                "money, which is why the judge metric is OFF by "
-                                "default. Each model you add scores every case; the "
-                                "panel's mean is the judge score. Add none and one "
-                                "default judge from your active provider is used."
-                            ),
-                        ),
+                        trailing=info(self.app, "eval_run.judge_panel"),
                     ),
                     ft.Row(
                         [
@@ -156,29 +153,31 @@ class RecipeForm:
 
         content = ft.Column(
             [
-                sub_section_header("Metric groups"),
+                sub_section_header(
+                    "Metric groups",
+                    trailing=info(self.app, "eval_run.metric_groups"),
+                ),
                 ft.Row([self.group_checks[g] for g in _GROUPS], wrap=True),
                 self.judge_section,
                 sub_section_header(
                     "Gate thresholds",
-                    trailing=info_icon(
-                        self.app,
-                        title="Gate thresholds",
-                        text=(
-                            "The pass/fail cutoffs a case is judged against: the "
-                            "judge score, the metadata (source) match rate, and the "
-                            "required-keyword hit rate each need to clear its "
-                            "threshold. Set a threshold to 0 to stop it gating (a "
-                            "knob-profiling run does this to read metric curves "
-                            "without pass/fail)."
-                        ),
-                    ),
+                    trailing=info(self.app, "eval_run.gate_thresholds"),
                 ),
                 *(
                     labeled_field(
                         name, self.threshold_fields[name], label_width=_THRESHOLD_LABEL_WIDTH
                     )
                     for name, _ in _THRESHOLDS
+                ),
+                # The two fixed gate conditions, read-only, so the full pass-gate
+                # reads next to the editable cutoffs.
+                *(
+                    labeled_field(
+                        name,
+                        ft.TextField(value=val, width=90, dense=True, read_only=True),
+                        label_width=_THRESHOLD_LABEL_WIDTH,
+                    )
+                    for name, val in _FIXED_GATES
                 ),
             ],
             spacing=8,
@@ -211,9 +210,6 @@ class RecipeForm:
             enabled_groups=groups,
             judge_models=list(self.judge_models),
             judge_threshold=_unit_float(self.threshold_fields["judge_threshold"].value, 0.5),
-            metadata_match_threshold=_unit_float(
-                self.threshold_fields["metadata_match_threshold"].value, 0.8
-            ),
             required_keyword_threshold=_unit_float(
                 self.threshold_fields["required_keyword_threshold"].value, 0.5
             ),

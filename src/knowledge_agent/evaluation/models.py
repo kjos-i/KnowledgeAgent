@@ -28,7 +28,6 @@ from knowledge_agent.config import check_window_ordering
 from knowledge_agent.evaluation.config import (
     DEFAULT_ENABLED_GROUPS,
     DEFAULT_JUDGE_THRESHOLD,
-    DEFAULT_METADATA_MATCH_THRESHOLD,
     DEFAULT_REQUIRED_KEYWORD_THRESHOLD,
 )
 from knowledge_agent.retrieval_rules import active_knobs
@@ -302,9 +301,6 @@ class EvalRecipe(BaseModel):
         ),
     )
     judge_threshold: float = Field(default=DEFAULT_JUDGE_THRESHOLD, ge=0.0, le=1.0)
-    metadata_match_threshold: float = Field(
-        default=DEFAULT_METADATA_MATCH_THRESHOLD, ge=0.0, le=1.0
-    )
     required_keyword_threshold: float = Field(
         default=DEFAULT_REQUIRED_KEYWORD_THRESHOLD, ge=0.0, le=1.0
     )
