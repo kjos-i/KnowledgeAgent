@@ -25,7 +25,7 @@ class SearchQueryRewrite(BaseModel):
 
     The LLM reads the user's raw question and produces a search-optimised
     rewrite: keyword-dense, no conversational filler, no "and so on" tails.
-    For research-literature search this typically means extracting the
+    For document search this typically means extracting the
     domain terms and dropping question phrasing.
     """
 
