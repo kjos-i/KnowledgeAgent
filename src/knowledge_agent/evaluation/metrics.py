@@ -111,20 +111,34 @@ def compute_source_metrics(
 ) -> dict[str, float | None]:
     """Source-level retrieval metrics (relevance by doc_id membership).
 
-    Recall dedups documents (a doc retrieved 3× counts once toward finding
-    the gold doc); precision/ndcg/mrr/hit use the per-slot relevance list.
-    All None when the case has no gold `expected_sources`.
+    The source axis is document-level: the retrieved chunks are collapsed to
+    the distinct documents they came from (first-occurrence order, so a
+    document's rank is the position of its first retrieved chunk) BEFORE
+    scoring. Every metric then runs on that document list, so several chunks
+    from one document count as a single slot for all five (precision here is
+    distinct relevant docs / distinct retrieved docs). This keeps the whole
+    source axis on the document unit; per-passage granularity lives in
+    `compute_chunk_metrics`. All None when the case has no gold
+    `expected_sources`.
     """
     gold = set(expected_sources)
     if not gold:
         return dict.fromkeys(_SOURCE_KEYS, None)
-    rel = [doc_id in gold for doc_id in retrieved_doc_ids]
-    found_docs = {doc_id for doc_id in retrieved_doc_ids if doc_id in gold}
+    # Collapse retrieved chunks to distinct documents, keeping first-occurrence
+    # order (a document's rank = the position of its first retrieved chunk).
+    seen: set[str] = set()
+    unique_docs: list[str] = []
+    for doc_id in retrieved_doc_ids:
+        if doc_id not in seen:
+            seen.add(doc_id)
+            unique_docs.append(doc_id)
+    rel = [doc_id in gold for doc_id in unique_docs]
+    n_relevant_docs = sum(rel)  # distinct relevant docs (rel is over unique_docs)
     return {
         "hit_at_k": hit_at_k(rel),
         "mrr": mrr(rel),
         "precision_at_k": precision_at_k(rel),
-        "recall_at_k": len(found_docs) / len(gold),
+        "recall_at_k": n_relevant_docs / len(gold),
         "ndcg_at_k": ndcg_at_k(rel),
     }
 

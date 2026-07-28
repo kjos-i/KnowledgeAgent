@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 MetricGroup = Literal[
-    "summary", "retrieval", "chunk", "keyword", "citation", "kg", "llm", "tokens", "latency"
+    "summary", "retrieval", "chunk", "keyword", "kg", "orchestration", "llm", "tokens", "latency"
 ]
 ToggleGroup = Literal["source", "chunk", "kg", "judge"]
 
@@ -44,8 +44,8 @@ GROUP_LABELS: dict[str, str] = {
     "retrieval": "Average Source Retrieval Quality",
     "chunk": "Average Chunk Retrieval Quality",
     "kg": "Knowledge Graph",
+    "orchestration": "Orchestration",
     "keyword": "Keywords",
-    "citation": "Grounding",
     "tokens": "Tokens",
     "latency": "Latency",
 }
@@ -103,9 +103,9 @@ class MetricDef:
 
 
 # ---------------------------------------------------------------------------
-# The registry. Phase 1 = deterministic retrieval + chunk + keyword +
-# citation + always-on tokens/latency. KG (P2) + judge (P3) metrics get
-# appended in their phases.
+# The registry. Phase 1 = deterministic retrieval + chunk (incl. citation
+# grounding) + keyword + always-on tokens/latency. KG (P2) + judge (P3)
+# metrics get appended in their phases.
 # ---------------------------------------------------------------------------
 
 METRICS: list[MetricDef] = [
@@ -193,12 +193,14 @@ METRICS: list[MetricDef] = [
         summary_avg_key="avg_chunk_ndcg_at_k",
         toggle_group="chunk",
     ),
-    # ── citation grounding (flat; structural check that citations map to
-    #    actually-retrieved evidence) ──────────────────────────────────────
+    # ── citation grounding — a structural check that the answer's chunk
+    #    citations map to actually-retrieved chunks. Grouped with the chunk
+    #    metrics on the dashboard (it operates on chunk citations); always-on,
+    #    unlike the toggle_group="chunk" retrieval metrics. ─────────────────
     MetricDef(
         key="chunk_source_grounding",
         label="Chunk Citation Grounding",
-        group="citation",
+        group="chunk",
         sql_column="chunk_source_grounding",
         summary_avg_key="avg_chunk_source_grounding",
     ),
@@ -241,7 +243,7 @@ METRICS: list[MetricDef] = [
     ),
     MetricDef(
         key="kg_hit_at_k",
-        label="KG Hit@k",
+        label="KG Entity Hit",
         group="kg",
         sql_column="kg_hit_at_k",
         summary_avg_key="avg_kg_hit_at_k",
@@ -266,10 +268,9 @@ METRICS: list[MetricDef] = [
     MetricDef(
         key="mode_routing_correctness",
         label="Mode Routing Correct",
-        group="kg",
+        group="orchestration",
         sql_column="mode_routing_correctness",
         summary_avg_key="avg_mode_routing_correctness",
-        toggle_group="kg",
     ),
     # ── LLM-judge (DeepEval, Phase 3) — toggle "judge", stored at 4dp ─────
     MetricDef(

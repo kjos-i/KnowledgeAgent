@@ -47,15 +47,13 @@ _KG_KEYS = (
     "kg_hit_at_k",
     "kg_entity_recall",
     "kg_source_grounding",
-    "mode_routing_correctness",
 )
 
 
 def _kg_metrics(case: EvalCase, run: CaseRun) -> dict[str, Any]:
-    """The 6 deterministic KG metrics. Each is None when not applicable:
+    """The 5 deterministic KG metrics. Each is None when not applicable:
     the cypher metrics + KG-source grounding need a Cypher to have run; the
-    entity metrics need gold `expected_entities`; mode-routing needs an
-    auto-mode case with an `expected_mode`."""
+    entity metrics need gold `expected_entities`."""
     values: dict[str, Any] = dict.fromkeys(_KG_KEYS, None)
     values.update(M.compute_kg_entity_metrics(run.kg_hits, case.expected_entities))
 
@@ -64,11 +62,6 @@ def _kg_metrics(case: EvalCase, run: CaseRun) -> dict[str, Any]:
         values["cypher_nonempty"] = 1.0 if run.kg_hits else 0.0
         values["kg_source_grounding"] = M.kg_source_grounding(
             run.cited_kg_indices, len(run.kg_hits)
-        )
-
-    if case.expected_mode and case.retrieval.retrieval_mode == "auto":
-        values["mode_routing_correctness"] = M.mode_routing_correct(
-            run.routed_mode, case.expected_mode
         )
 
     return values
@@ -103,6 +96,13 @@ def _compute_metrics(case: EvalCase, run: CaseRun, cfg: EvalConfig) -> dict[str,
     )
     values["chunk_source_grounding"] = M.chunk_source_grounding(
         run.cited_chunk_ids, run.retrieved_chunk_ids
+    )
+    # Orchestration: routing correctness self-gates to None unless the case is
+    # auto-mode with an expected_mode (not tied to any store's toggle group).
+    values["mode_routing_correctness"] = (
+        M.mode_routing_correct(run.routed_mode, case.expected_mode)
+        if case.expected_mode and case.retrieval.retrieval_mode == "auto"
+        else None
     )
     values["agent_input_tokens"] = run.input_tokens
     values["agent_output_tokens"] = run.output_tokens

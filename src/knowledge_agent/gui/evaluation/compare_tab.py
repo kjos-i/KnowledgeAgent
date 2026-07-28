@@ -317,7 +317,7 @@ class CompareDatasetsTab:
         from knowledge_agent.evaluation.registry import GROUP_LABELS, METRICS, metric_labels
 
         labels = metric_labels()
-        score_groups = ("llm", "retrieval", "chunk", "kg", "citation", "keyword")
+        score_groups = ("llm", "retrieval", "chunk", "kg", "keyword")
         display_cols = cols or [("No run selected", {})]
         legend = ft.Row(
             [

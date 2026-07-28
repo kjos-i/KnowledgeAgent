@@ -39,6 +39,11 @@ _HEAD_RULE = ft.Colors.with_opacity(0.5, ft.Colors.WHITE)  # table header underl
 _SEMIBOLD = ft.FontWeight.W_600  # VS Code heading weight (not full bold)
 _CODE_THEME = ft.MarkdownCodeTheme.VS2015
 _INLINE_MD = re.compile(r"\[[^\]]+\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*")  # link / code / bold
+# A lone `<!--section-rule-->` line renders as a heavier, brighter horizontal rule
+# (a major-section divider): a thicker line at higher opacity than the thin `---`
+# between individual entries. Consumed here so `ft.Markdown` never sees the token.
+_SECTION_RULE_RE = re.compile(r"^[ \t]*<!--section-rule-->[ \t]*$\n?", re.MULTILINE)
+_SECTION_RULE_COLOR = ft.Colors.with_opacity(0.4, ft.Colors.WHITE)  # brighter than _RULE (0.18)
 
 _MD_STYLE = ft.MarkdownStyleSheet(
     # Body: paragraphs, links, emphasis, lists, table cells — soft foreground,
@@ -103,18 +108,29 @@ def themed_markdown(text: str, *, on_tap_link: Callable | None = None) -> ft.Mar
     )
 
 
+def _section_rule() -> ft.Control:
+    """A heavier, brighter horizontal rule for a major-section boundary: a thicker
+    line at higher opacity than the thin per-entry `---`. Emitted wherever the
+    source markdown carries a lone `<!--section-rule-->` line."""
+    return ft.Divider(thickness=2, height=24, color=_SECTION_RULE_COLOR)
+
+
 def render_markdown(text: str, *, on_tap_link: Callable | None = None) -> ft.Control:
     """Render markdown with GFM tables pulled out and drawn as native controls
-    (content-sized first column, wrapping body, horizontal rules). Returns a
-    single themed `ft.Markdown` when the text has no tables."""
+    (content-sized first column, wrapping body, horizontal rules), and lone
+    `<!--section-rule-->` lines drawn as heavier section dividers. Returns a
+    single themed `ft.Markdown` when the text has neither."""
     parts: list[ft.Control] = []
-    for kind, payload in _split_tables(text):
-        if kind == "md":
-            if str(payload).strip():
-                parts.append(themed_markdown(str(payload), on_tap_link=on_tap_link))
-        else:
-            header, rows = payload  # ("table", (header, rows))
-            parts.append(_render_table(header, rows, on_tap_link))
+    for block_idx, block in enumerate(_SECTION_RULE_RE.split(text)):
+        if block_idx:
+            parts.append(_section_rule())
+        for kind, payload in _split_tables(block):
+            if kind == "md":
+                if str(payload).strip():
+                    parts.append(themed_markdown(str(payload), on_tap_link=on_tap_link))
+            else:
+                header, rows = payload  # ("table", (header, rows))
+                parts.append(_render_table(header, rows, on_tap_link))
     if not parts:
         return themed_markdown(text, on_tap_link=on_tap_link)
     if len(parts) == 1:

@@ -92,7 +92,6 @@ def test_toggle_groups_resolve():
         "kg_hit_at_k",
         "kg_entity_recall",
         "kg_source_grounding",
-        "mode_routing_correctness",
     ]
 
 
@@ -104,6 +103,7 @@ def test_always_on_excludes_pass_rate_and_toggled():
         "required_keyword_hit_rate",
         "disallowed_keyword_hits",
         "chunk_source_grounding",
+        "mode_routing_correctness",  # moved out of the kg toggle group → always-on (Orchestration)
     } <= always
 
 

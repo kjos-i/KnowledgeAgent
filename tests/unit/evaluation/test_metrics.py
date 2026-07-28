@@ -60,7 +60,8 @@ def test_ndcg_never_exceeds_one_with_duplicate_gold_docs():
     reference harness; this was the >1 bug that showed 2.09)."""
     assert M.ndcg_at_k([True, True, True]) == 1.0
     assert M.ndcg_at_k([False, True, True]) <= 1.0
-    # via the family fn: one gold doc returned 3× → every slot relevant → 1.0.
+    # via the family fn: one gold doc returned 3× collapses to a single relevant
+    # document → 1.0.
     got = M.compute_source_metrics(["d1", "d1", "d1"], expected_sources=["d1"])
     assert got["ndcg_at_k"] == 1.0
 
@@ -76,11 +77,37 @@ def test_source_metrics_hit_and_ranking():
     assert got["recall_at_k"] == 0.5  # found d1 of {d1,d2}
 
 
-def test_source_recall_dedups_documents():
-    # d1 retrieved twice → counts once toward finding the gold doc.
+def test_source_metrics_collapse_to_documents():
+    # Source metrics collapse retrieved chunks to distinct documents first, so
+    # d1 retrieved 3× is a single relevant slot: recall found 1 of {d1, d2} = 0.5,
+    # and precision = the one distinct retrieved doc is relevant = 1.0.
     got = M.compute_source_metrics(["d1", "d1", "d1"], expected_sources=["d1", "d2"])
     assert got["recall_at_k"] == 0.5
-    assert got["precision_at_k"] == 1.0  # every slot is a gold doc
+    assert got["precision_at_k"] == 1.0
+
+
+def test_source_precision_dedups_documents():
+    # Two chunks from relevant d1 + one from noise dX collapse to docs {d1, dX}:
+    # precision = 1 relevant of 2 distinct docs = 0.5 (per-chunk would give 2/3).
+    got = M.compute_source_metrics(["d1", "d1", "dX"], expected_sources=["d1"])
+    assert got["precision_at_k"] == 0.5
+    assert got["hit_at_k"] == 1.0
+    assert got["recall_at_k"] == 1.0  # found the one gold doc
+
+
+def test_source_mrr_ranks_first_distinct_document():
+    # Same noise doc twice then the relevant doc collapses to [dX, d1], so the
+    # first relevant DOCUMENT is at rank 2 → 0.5 (per-chunk would give 1/3).
+    got = M.compute_source_metrics(["dX", "dX", "d1"], expected_sources=["d1"])
+    assert got["mrr"] == 0.5
+
+
+def test_source_ndcg_scored_on_distinct_documents():
+    # [dX, dX, d1] collapses to [dX, d1]; NDCG is scored on that 2-doc list, not
+    # the raw 3-chunk list — verify it equals the primitive on the deduped rel.
+    got = M.compute_source_metrics(["dX", "dX", "d1"], expected_sources=["d1"])
+    assert got["ndcg_at_k"] == M.ndcg_at_k([False, True])
+    assert got["ndcg_at_k"] != M.ndcg_at_k([False, False, True])
 
 
 def test_source_metrics_miss_all_zero():
