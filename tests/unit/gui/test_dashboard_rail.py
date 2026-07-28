@@ -193,8 +193,17 @@ def test_empty_ledger_no_selection(fake_app, tmp_path):
     rail, coord, _ = _rail(fake_app, led)
     assert rail.dataset_dd.options == []
     assert coord.selected_run_id is None
-    assert "No runs yet" in rail.context.controls[0].value
-    # empty-ledger default reads on all three selectors + the info panel
+    # Always-show: with no run the context panel still renders the full skeleton
+    # (all three section headers + every field labelled) with empty "n/a" values,
+    # NOT a single "No runs yet" message.
+    lines = [c.value for c in rail.context.controls if hasattr(c, "value")]
+    assert "Suite Information" in lines
+    assert "Dataset Information" in lines
+    assert "Run Information" in lines
+    assert "Suite: n/a" in lines
+    assert "Gate thresholds: n/a" in lines
+    assert "Model: n/a" in lines
+    # the "No runs yet" affordance now lives only on the three selectors
     assert rail.suite_dd.hint_text == "No runs yet"
     assert rail.dataset_dd.hint_text == "No runs yet"
     assert rail.run_dd.hint_text == "No runs yet"

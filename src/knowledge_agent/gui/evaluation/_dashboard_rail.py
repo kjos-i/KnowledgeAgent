@@ -275,59 +275,81 @@ class DashboardRail:
             check.value = origin in selected
 
     def _render_context(self, run: dict[str, Any] | None) -> None:
-        """The read-only info panel for the selected run — sourced from the run's
+        """The read-only info panel for the selected run, sourced from the run's
         ledger row (what it actually used), not the dataset JSON. Split into three
         sections, each anchored by one of the three hashes: Suite (facts hash),
-        Dataset (knobs hash), Run (run-settings hash)."""
+        Dataset (knobs hash), Run (run-settings hash).
+
+        Always-show: the full three-section skeleton renders unconditionally. With
+        no run selected (or a run that did not record a given field) every label
+        is still present, its value shown empty ("n/a" / "(none)"), rather than the
+        field or the whole panel collapsing to a single message."""
         if self.context is None:
             return
-        if run is None:
-            self.context.controls = [
-                ft.Text("No runs yet.", size=12, italic=True, color=ft.Colors.GREY_500)
-            ]
-            return
-        groups = _parse(run.get("enabled_groups")) or []
-        thresholds = _parse(run.get("gate_thresholds")) or {}
-        judges = _parse(run.get("judge_models")) or []
-
-        def _hash(h: Any) -> str:
-            return h[:8] if h else "n/a"
 
         def _header(text: str) -> ft.Text:
             return ft.Text(text, weight=ft.FontWeight.BOLD, size=12)
 
-        # Judge panel: the resolved models that ran; "(off)" when the judge group
-        # wasn't run; "(default)" for a legacy run that didn't record the panel.
-        if "judge" not in groups:
-            judge_line = "(off)"
-        elif judges:
-            judge_line = ", ".join(judges)
-        else:
-            judge_line = "(default)"
+        def _line(label: str, value: str) -> ft.Text:
+            return ft.Text(f"{label}: {value}", size=12)
 
-        lines: list[ft.Control] = [
+        if run:
+            groups = _parse(run.get("enabled_groups")) or []
+            thresholds = _parse(run.get("gate_thresholds")) or {}
+            judges = _parse(run.get("judge_models")) or []
+
+            def _hash(h: Any) -> str:
+                return h[:8] if h else "n/a"
+
+            suite = run.get("suite") or "(no suite)"
+            facts = _hash(run.get("facts_hash"))
+            dataset = dataset_of(run)
+            knobs = _hash(run.get("knob_hash"))
+            recipe = _hash(run.get("recipe_hash"))
+            metric_groups = ", ".join(groups) if groups else "(none)"
+            # Judge panel: the resolved models that ran; "(off)" when the judge
+            # group was not run; "(default)" for a legacy run that did not record it.
+            if "judge" not in groups:
+                judge = "(off)"
+            elif judges:
+                judge = ", ".join(judges)
+            else:
+                judge = "(default)"
+            # Gate thresholds are a variable dict (keys depend on the run's
+            # configured gates), so there is no fixed field set. Collapse to one
+            # always-present line: the list when present, "(none)" when empty.
+            thresholds_line = (
+                ", ".join(f"{k}={v}" for k, v in thresholds.items()) if thresholds else "(none)"
+            )
+            case_count = run.get("case_count")
+            cases = str(case_count) if case_count is not None else "n/a"
+            model = run.get("synthesizer_model")
+            model_line = f"{run.get('llm_provider') or '?'}/{model}" if model else "n/a"
+        else:
+            # No run selected, or none exist: every field still renders, empty.
+            suite = facts = dataset = knobs = recipe = "n/a"
+            metric_groups = judge = thresholds_line = cases = model_line = "n/a"
+
+        self.context.controls = [
             # ---- Suite (facts hash = the suite identity) ----
             _header("Suite Information"),
-            ft.Text(f"Suite: {run.get('suite') or '(no suite)'}", size=12),
-            ft.Text(f"Facts hash: {_hash(run.get('facts_hash'))}", size=12),
+            _line("Suite", suite),
+            _line("Facts hash", facts),
             ft.Container(height=6),
             # ---- Dataset (knobs hash = what tells suite members apart) ----
             _header("Dataset Information"),
-            ft.Text(f"Dataset: {dataset_of(run)}", size=12),
-            ft.Text(f"Knobs hash: {_hash(run.get('knob_hash'))}", size=12),
+            _line("Dataset", dataset),
+            _line("Knobs hash", knobs),
             ft.Container(height=6),
             # ---- Run (run-settings hash = the recipe that scored it) ----
             _header("Run Information"),
-            ft.Text(f"Run settings hash: {_hash(run.get('recipe_hash'))}", size=12),
-            ft.Text(f"Metric groups: {', '.join(groups) if groups else '(none)'}", size=12),
-            ft.Text(f"Judge panel: {judge_line}", size=12),
+            _line("Run settings hash", recipe),
+            _line("Metric groups", metric_groups),
+            _line("Judge panel", judge),
+            _line("Gate thresholds", thresholds_line),
+            _line("Cases (run total)", cases),
+            _line("Model", model_line),
         ]
-        lines += [ft.Text(f"{k}: {v}", size=12) for k, v in thresholds.items()]
-        lines.append(ft.Text(f"Cases (run total): {run.get('case_count')}", size=12))
-        model = run.get("synthesizer_model")
-        if model:
-            lines.append(ft.Text(f"Model: {run.get('llm_provider') or '?'}/{model}", size=12))
-        self.context.controls = lines
 
     # ---- handlers ---------------------------------------------------------
 
