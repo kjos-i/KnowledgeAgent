@@ -80,6 +80,9 @@ modules for how installs are planned/executed from the GUI.
   `ruff format` before committing; do not add `# noqa` for codes that are not
   enabled (RUF100 will flag it).
 - Async tests: `asyncio_mode = "auto"` — write `async def test_*`, no decorator.
+- **Full verify + audit checklist:** `CHECKS.md` (repo root) groups every check
+  (ruff, pre-commit, unit / integration / e2e, coverage, smoke scripts) and the
+  manual audit types, with one line on what each looks for.
 
 ## Where things live (the "user asks about X → go here" index)
 
