@@ -636,8 +636,20 @@ async def synthesizer_node(state: AgentState) -> dict[str, Any]:
 
     llm = _get_llm(settings.synthesizer_model, settings.synthesizer_temperature)
     structured = _with_retry(llm.with_structured_output(AgentAnswer))
+    # Direct-Cypher turns (user_cypher set) carry the raw Cypher as `query`,
+    # which reads oddly as a natural-language "Question:". Reframe it so the
+    # synthesizer knows it is summarizing the rows a user-written query returned.
+    user_cypher = state.get("user_cypher")
+    if user_cypher:
+        task = (
+            "The user ran this Cypher query against the knowledge graph:\n"
+            f"{user_cypher}\n\n"
+            "Summarize the rows it returned."
+        )
+    else:
+        task = f"Question: {state['query']}"
     user_msg = (
-        f"Question: {state['query']}\n\n"
+        f"{task}\n\n"
         f"Chunks:\n{_format_chunks_for_prompt(chunks)}\n\n"
         f"KG rows:\n{_format_kg_hits_for_prompt(kg_hits)}"
     )
