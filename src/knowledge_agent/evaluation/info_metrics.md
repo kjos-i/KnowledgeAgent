@@ -9,7 +9,7 @@ The harness has four toggleable metric groups configured via `EvalConfig.enabled
 - **`chunk`** — chunk-level retrieval metrics (snippet-substring match against `expected_chunks`), plus chunk-source grounding.
 - **`kg`** — knowledge-graph metrics (Cypher validity / non-empty, KG hit@k, entity recall, KG-source grounding). On by default — its metrics are None (skipped) for cases whose leg didn't run, so it costs nothing on non-KG corpora.
 
-Always-on regardless of toggles: `required_keyword_hit_rate`, `disallowed_keyword_hits`, chunk-source grounding, mode-routing correctness, agent tokens, latency, `pass_rate`, and `avg_judge_score`. Disabled metrics are stored as NULL in the ledger and CSV, and the dashboard renders them as "Not evaluated". Verdict gates skip sub-conditions whose metric group is disabled.
+Always-on regardless of toggles: `required_keyword_hit_rate`, `disallowed_keyword_hits`, chunk-source grounding, mode-routing correctness, agent tokens, latency, and `pass_rate`. Disabled metrics are stored as NULL in the ledger and CSV, and the dashboard renders them as "Not evaluated". Verdict gates skip sub-conditions whose metric group is disabled.
 
 **The judge is a panel.** Each judge scores the *same* rubric (the 7 metrics below); the only difference between judges is the **model**. Scores are averaged per metric across the panel to dilute any single model's bias. Use *different* models for a meaningful panel; an empty panel = one default judge resolved from the active provider. Judges run at temperature 0.
 
@@ -213,9 +213,9 @@ The DeepEval test case is built in `judge.build_judge_input`: `input` = the case
 | Computed by | DeepEval `HallucinationMetric` (built in `judge._build_metrics`) |
 | Pass condition | `score <= judge_threshold` (DeepEval inverts the comparison for this metric; not a verdict gate) |
 
-**What it evaluates:** Whether the agent's answer contradicts its reference context. Both Faithfulness and Hallucination are contradiction checks; they differ in two ways. First, *what* each compares the answer against: Faithfulness uses the retrieved context (the chunks), while Hallucination uses the case's gold expected-answer points (what the harness passes to DeepEval as the `context` field). Second, the *direction*: Faithfulness counts the claims that don't contradict (higher is better), while Hallucination counts the contexts that are contradicted (so it is inverted: lower is better).
+**What it evaluates:** Whether the agent's answer contradicts its reference context. Both Faithfulness and Hallucination are contradiction checks; they differ in two ways. First, *what* each compares the answer against: Faithfulness uses the retrieved context (the retrieved chunks plus the KG rows), while Hallucination uses the case's gold expected-answer points (what the harness passes to DeepEval as the `context` field). Second, the *direction*: Faithfulness counts the claims that don't contradict (higher is better), while Hallucination counts the contexts that are contradicted (so it is inverted: lower is better).
 
-**Why it is included:** A hallucinated answer is worse than an incomplete one because it actively misleads the user. It complements Faithfulness: Hallucination checks contradictions against the gold answer points, Faithfulness against the retrieved chunks.
+**Why it is included:** A hallucinated answer is worse than an incomplete one because it actively misleads the user. It complements Faithfulness: Hallucination checks contradictions against the gold answer points, Faithfulness against the retrieved context (chunks plus KG rows).
 
 **How it is calculated:** The judge LLM emits one verdict per context item (here each of the case's gold expected-answer points) indicating whether the answer contradicts it. Score = contradicting verdicts / total verdicts, so 0.0 means no contradictions detected and 1.0 means every context item was contradicted. DeepEval's `is_successful()` for this metric returns `score <= threshold`, the opposite of every other judge metric, so on the dashboard, treat the hallucination column as "smaller = better".
 
@@ -460,7 +460,7 @@ As with [MRR](#mean-reciprocal-rank-mrr), a single case's value is strictly the 
 
 **Why it is included:** Unlike source-level recall, this tracks distinct *passages* rather than distinct documents, so two expected passages from the same document each contribute one unit of recall. This catches the case where the retriever consistently grabs only one expected passage per document and misses the others.
 
-**How it is calculated:** `|{snippet : snippet ∈ some retrieved chunk}| / |expected_chunks|`. `None` if `expected_chunks` is empty; `0.0` if nothing was retrieved.
+**How it is calculated:** `(expected snippets found in at least one retrieved chunk) / (expected snippets)`, after first dropping any snippet that normalizes to empty (blank or punctuation-only), so the denominator is the count of usable snippets. `None` if `expected_chunks` has no usable snippet; `0.0` if nothing was retrieved.
 
 ---
 
@@ -586,7 +586,7 @@ Deterministic metrics over the Neo4j leg: the Cypher the agent ran and the rows 
 
 **Why it is included:** Where KG Entity Hit is binary, entity recall reports *how much* of the expected entity set the graph leg surfaced. `None` when the case has no `expected_entities`.
 
-**How it is calculated:** `(expected entities found in any KG row) / (total expected entities)`, after normalization.
+**How it is calculated:** `(expected entities found in any KG row) / (expected entities)`, after normalization and after dropping any entity that normalizes to empty.
 
 ---
 
@@ -656,7 +656,7 @@ Applied to the answer text; both the keywords and the answer are run through `no
 
 **Why it is included:** Some questions demand specific terms in the answer (e.g. a regulation number, a product name). This enforces that the answer contains the expected key terms — it catches the case where every judge metric passes but the answer paraphrases away from a required term.
 
-**How it is calculated:** Score = (required keywords found in the answer) / (total required keywords), after normalization. Returns 1.0 when no required keywords are defined (vacuous pass).
+**How it is calculated:** Score = (required keywords found in the answer) / (required keywords), after normalization and after dropping any keyword that normalizes to empty. Returns 1.0 when no required keywords are defined (vacuous pass).
 
 ---
 
@@ -676,7 +676,7 @@ Applied to the answer text; both the keywords and the answer are run through `no
 
 **Why it is included:** Some answers should avoid certain terms (e.g. a refusal phrase, a deprecated product name, a competitor mention). Any non-zero count is a failure signal; binary by design so even one hit fails the gate.
 
-**How it is calculated:** The count of distinct disallowed keywords that appear as substrings in the normalized answer. Returns 0 when no disallowed keywords are defined.
+**How it is calculated:** The count of disallowed keywords (from the case's list) that appear as substrings in the normalized answer. Returns 0 when no disallowed keywords are defined.
 
 <!--section-rule-->
 
@@ -779,7 +779,7 @@ Run-level aggregates surfaced at the top of each report and in the `eval_runs` r
 |-------|-------|
 | Range | 0.0 – 1.0 |
 | Direction | higher is better |
-| Toggle group | always (run-level summary; only meaningful when the judge group is enabled) |
+| Toggle group | judge (run-level summary; only meaningful when the judge group is enabled) |
 | Stored as | `eval_cases.avg_judge_score` (per case), `eval_runs.avg_judge_run_score` (run level) |
 | Computed by | `engine.evaluate_case` (per case) and `build_summary` in `report.py` (run level) |
 | Pass condition | (not gated) |
@@ -801,7 +801,7 @@ Each case's `status` is `"PASS"` only when **all applicable gates** pass; any fa
 |------|-----------|
 | **retrieval** | `hit_at_k == 1.0` — applied only when the `source` group ran **and** the case has gold `expected_sources` |
 | **keywords** | `required_keyword_hit_rate >= required_keyword_threshold` **and** `disallowed_keyword_hits == 0` |
-| **judge** | `faithfulness >= judge_threshold` **and** `answer_relevancy >= judge_threshold` — applied only when the `judge` group ran (and both scores are present) |
+| **judge** | `faithfulness >= judge_threshold` **and** `answer_relevancy >= judge_threshold` — applied only when the `judge` group ran (gating on whichever of the two scores are present) |
 
 **Pathway carve-out:** a `direct_retrieval` case is gated on the **retrieval** condition alone (there's no answer, so the keyword + judge gates are skipped and the judge panel isn't run).
 

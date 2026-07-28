@@ -79,7 +79,7 @@ def build_judge_input(run: CaseRun, case: EvalCase) -> dict[str, Any]:
     """Assemble the DeepEval test-case fields from the normalized run + gold.
 
     `retrieval_context` includes BOTH the retrieved chunk texts and the KG
-    rows, so faithfulness/correctness judge the answer against the full
+    rows, so faithfulness and the contextual metrics judge the answer against the full
     evidence (this is how the KG leg reaches the judge track — no separate
     KG judge metric needed).
 

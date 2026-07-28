@@ -225,7 +225,10 @@ def compute_kg_entity_metrics(
     """`kg_hit_at_k` (any gold entity present in the rows) + `kg_entity_recall`
     (fraction of gold entities present). Both None when the case has no gold
     `expected_entities`."""
-    ents = [normalize_text(e) for e in expected_entities if e.strip()]
+    # Filter on the NORMALIZED value (like the snippet/keyword families): an
+    # entity that is non-blank but normalizes to "" (pure punctuation) would
+    # otherwise survive and match every row ("" in blob), inflating recall/hit.
+    ents = [ne for e in expected_entities if (ne := normalize_text(e))]
     if not ents:
         return dict.fromkeys(_KG_ENTITY_KEYS, None)
     found = sum(1 for e in ents if any(_hit_contains_entity(h, e) for h in kg_hits))
