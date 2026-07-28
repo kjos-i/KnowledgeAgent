@@ -19,7 +19,9 @@ sub-tab). This widget owns only the scrollable doc body.
 
 from __future__ import annotations
 
+import logging
 import re
+import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,6 +32,8 @@ from knowledge_agent.gui.views._frame import empty_state
 
 if TYPE_CHECKING:
     from knowledge_agent.gui.app import GuiApp
+
+logger = logging.getLogger(__name__)
 
 # Each `<a id="X"></a>` starts a keyed section; the tag itself is removed from the
 # rendered text (Flet would show it literally) and reused as the scroll key.
@@ -107,4 +111,12 @@ class InfoDoc:
             if self._scroll is not None:
                 await self._scroll.scroll_to(scroll_key=href[1:], duration=300)
         elif href:
-            await self.app.page.launch_url(href)
+            # Flet's page.launch_url routes through the UrlLauncher service, which
+            # is unreliable on desktop builds (errors with "inexistent control"),
+            # so open the link in the system browser directly.
+            if "://" not in href:
+                href = f"https://{href}"
+            try:
+                webbrowser.open(href)
+            except Exception:
+                logger.warning("failed to open link: %s", href)

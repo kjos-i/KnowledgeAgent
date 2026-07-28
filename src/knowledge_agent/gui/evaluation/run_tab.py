@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -811,7 +812,7 @@ class RunTab:
         if not url:
             self._set_status(f"LangSmith returned no URL for {project!r}.")
             return
-        await self.app.page.launch_url(url)
+        webbrowser.open(url)
 
     # ---- run --------------------------------------------------------------
 
