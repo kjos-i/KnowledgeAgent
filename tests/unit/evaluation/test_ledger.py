@@ -266,3 +266,64 @@ def test_get_run_cases(tmp_path):
     assert [c["case_id"] for c in cases] == ["c1", "c2"]  # insertion order
     assert cases[0]["status"] == "PASS" and cases[0]["hit_at_k"] == 1.0
     assert led.get_run_cases(9999) == []  # unknown run → empty
+
+
+# ---- delete_run / delete_suite (ledger editor) ----------------------------
+
+
+def _report_suite(suite_run_id: str | None) -> dict:
+    r = _report()
+    r["suite_run_id"] = suite_run_id
+    return r
+
+
+def test_delete_run_removes_run_and_its_cases(tmp_path):
+    led = EvalLedger(tmp_path / "l.db")
+    run_id = led.save_run(_report())
+    assert led.get_run(run_id) is not None
+    assert len(led.get_run_cases(run_id)) == 2
+
+    removed = led.delete_run(run_id)
+
+    assert removed == 1
+    assert led.get_run(run_id) is None
+    assert led.get_run_cases(run_id) == []
+
+
+def test_delete_run_returns_zero_for_missing(tmp_path):
+    led = EvalLedger(tmp_path / "l.db")
+    assert led.delete_run(999) == 0
+
+
+def test_delete_run_leaves_other_runs_intact(tmp_path):
+    led = EvalLedger(tmp_path / "l.db")
+    keep = led.save_run(_report())
+    drop = led.save_run(_report())
+
+    led.delete_run(drop)
+
+    assert led.get_run(drop) is None
+    assert led.get_run(keep) is not None
+    assert len(led.get_run_cases(keep)) == 2  # untouched
+
+
+def test_delete_suite_removes_all_member_runs_and_cases(tmp_path):
+    led = EvalLedger(tmp_path / "l.db")
+    a = led.save_run(_report_suite("suite-1"))
+    b = led.save_run(_report_suite("suite-1"))
+    other = led.save_run(_report_suite("suite-2"))
+
+    removed = led.delete_suite("suite-1")
+
+    assert removed == 2
+    assert led.get_run(a) is None
+    assert led.get_run(b) is None
+    assert led.get_run_cases(a) == []
+    assert led.get_run_cases(b) == []
+    assert led.get_run(other) is not None  # different suite untouched
+
+
+def test_delete_suite_returns_zero_for_missing(tmp_path):
+    led = EvalLedger(tmp_path / "l.db")
+    led.save_run(_report())
+    assert led.delete_suite("no-such-suite") == 0

@@ -17,16 +17,19 @@ if TYPE_CHECKING:
 
 
 def _tab_label(t: ft.Tab) -> str:
-    """A tab's label as text — the four view tabs carry a coloured `ft.Text`
-    label, the authoring tabs a plain string."""
-    return t.label.value if isinstance(t.label, ft.Text) else t.label
+    """A tab's label as text — the view tabs carry a coloured `ft.Text` label,
+    the authoring tabs a plain string, and Ledger a `ft.Row` (edit icon + Text)."""
+    label = t.label
+    if isinstance(label, ft.Row):  # Ledger: icon + coloured Text
+        label = next(c for c in label.controls if isinstance(c, ft.Text))
+    return label.value if isinstance(label, ft.Text) else label
 
 
-def test_evaluation_view_builds_eight_sub_tabs(fake_app: MagicMock):
+def test_evaluation_view_builds_nine_sub_tabs(fake_app: MagicMock):
     view = EvaluationView(fake_app)
     ctl = view.build()
     assert isinstance(ctl, ft.Tabs)
-    assert ctl.length == len(SUB_TAB_LABELS) == 8
+    assert ctl.length == len(SUB_TAB_LABELS) == 9
     tab_bar = ctl.content.controls[0]
     sub_bodies = ctl.content.controls[1]
     assert [_tab_label(t) for t in tab_bar.tabs] == list(SUB_TAB_LABELS)
@@ -34,6 +37,8 @@ def test_evaluation_view_builds_eight_sub_tabs(fake_app: MagicMock):
     # Info sits between the authoring tabs and the dashboards.
     assert SUB_TAB_LABELS.index("Info") == SUB_TAB_LABELS.index("Create test cases") + 1
     assert SUB_TAB_LABELS.index("Info") == SUB_TAB_LABELS.index("Run Summary") - 1
+    # Ledger (the editing/management tab) sits last (rightmost).
+    assert SUB_TAB_LABELS[-1] == "Ledger"
 
 
 def test_view_tabs_are_tinted(fake_app: MagicMock):
@@ -46,6 +51,12 @@ def test_view_tabs_are_tinted(fake_app: MagicMock):
     assert by_label["Trends"].label.color == ft.Colors.BLUE_300
     assert by_label["Run evaluation"].label == "Run evaluation"  # plain authoring tab
     assert by_label["Info"].label == "Info"  # plain — not a tinted view tab
+    # Ledger: edit icon + amber Text label (the editing/management tab).
+    ledger_label = by_label["Ledger"].label
+    assert isinstance(ledger_label, ft.Row)
+    assert any(isinstance(c, ft.Icon) for c in ledger_label.controls)
+    text = next(c for c in ledger_label.controls if isinstance(c, ft.Text))
+    assert text.color == ft.Colors.AMBER_300
 
 
 def test_selecting_view_tab_auto_refreshes(fake_app: MagicMock):

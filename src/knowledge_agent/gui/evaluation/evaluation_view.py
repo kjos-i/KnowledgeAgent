@@ -34,6 +34,7 @@ import flet as ft
 from knowledge_agent.gui.evaluation._common import ALL_ORIGINS
 from knowledge_agent.gui.evaluation.compare_tab import CompareDatasetsTab
 from knowledge_agent.gui.evaluation.dataset_tab import DatasetTab
+from knowledge_agent.gui.evaluation.ledger_tab import LedgerTab
 from knowledge_agent.gui.evaluation.metrics_guide_tab import MetricsGuideTab
 from knowledge_agent.gui.evaluation.run_charts_tab import RunChartsTab
 from knowledge_agent.gui.evaluation.run_summary_tab import RunSummaryTab
@@ -55,6 +56,7 @@ SUB_TAB_LABELS = (
     "Compare Datasets",
     "Trends",
     "Metrics Guide",
+    "Ledger",
 )
 
 # The eval-output (view) tabs — tinted apart from the two authoring tabs, and
@@ -91,18 +93,15 @@ class EvaluationView:
         self.compare_tab = CompareDatasetsTab(app, coordinator=self)
         self.trends_tab = TrendsTab(app, coordinator=self)
         self.metrics_guide_tab = MetricsGuideTab(app, coordinator=self)
+        # Ledger: editing/management tab, disconnected from the shared cascade.
+        self.ledger_tab = LedgerTab(app, coordinator=self)
 
     def build(self) -> ft.Control:
         # The four view (eval-output) tabs get a tinted label so they read as a
         # distinct group from the two authoring tabs. (ft.Tab has no per-tab
         # background; a coloured label Control is the native way to tint one.)
         sub_bar = ft.TabBar(
-            tabs=[
-                ft.Tab(
-                    label=ft.Text(label, color=ft.Colors.BLUE_300) if label in _VIEW_TABS else label
-                )
-                for label in SUB_TAB_LABELS
-            ],
+            tabs=[self._tab_label(label) for label in SUB_TAB_LABELS],
             secondary=True,
         )
         sub_bodies = ft.TabBarView(
@@ -123,6 +122,7 @@ class EvaluationView:
                 ft.Container(content=self.compare_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.trends_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.metrics_guide_tab.build(), padding=8, expand=True),
+                ft.Container(content=self.ledger_tab.build(), padding=8, expand=True),
             ],
             expand=True,
         )
@@ -135,18 +135,40 @@ class EvaluationView:
         )
         return self._tabs
 
+    def _tab_label(self, label: str) -> ft.Tab:
+        """One sub-tab's label. Ledger gets an edit icon + amber label (it's the
+        editing/management tab); the five view tabs get a blue label; the two
+        authoring tabs stay plain."""
+        if label == "Ledger":
+            return ft.Tab(
+                label=ft.Row(
+                    [
+                        ft.Text("Ledger", color=ft.Colors.AMBER_300),
+                        ft.Icon(ft.Icons.EDIT_OUTLINED, size=14, color=ft.Colors.AMBER_300),
+                    ],
+                    spacing=4,
+                    tight=True,
+                )
+            )
+        if label in _VIEW_TABS:
+            return ft.Tab(label=ft.Text(label, color=ft.Colors.BLUE_300))
+        return ft.Tab(label=label)
+
     def _on_subtab_change(self, _e: ft.Event) -> None:
         """Auto-refresh a view tab when it's selected — the shared rail + body
         pick up the latest ledger without a manual Refresh. The two authoring
         tabs manage their own state, so they're skipped."""
         if self._tabs is None:
             return
+        # Ledger is disconnected from the shared cascade, but it still reloads
+        # its own runs from the ledger when selected (its first-show load).
         view_tabs = {
             SUB_TAB_LABELS.index("Run Summary"): self.run_summary_tab,
             SUB_TAB_LABELS.index("Run Charts"): self.run_charts_tab,
             SUB_TAB_LABELS.index("Compare Datasets"): self.compare_tab,
             SUB_TAB_LABELS.index("Trends"): self.trends_tab,
             SUB_TAB_LABELS.index("Metrics Guide"): self.metrics_guide_tab,
+            SUB_TAB_LABELS.index("Ledger"): self.ledger_tab,
         }
         tab = view_tabs.get(self._tabs.selected_index)
         if tab is not None:

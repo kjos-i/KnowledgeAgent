@@ -298,6 +298,38 @@ class EvalLedger:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def delete_run(self, run_id: int) -> int:
+        """Delete one run and all its per-case rows. Returns the number of
+        `eval_runs` rows removed (0 when there was no such run, else 1).
+
+        The run and its cases go in ONE transaction (single connection,
+        single commit), so a mid-way failure closes the connection without
+        committing and leaves nothing half-deleted. Cases are removed
+        explicitly rather than relying on a FK cascade. Removing a run also
+        removes it from every dashboard view (Summary / Charts / Compare /
+        Trends read this same per-corpus ledger).
+        """
+        with closing(self._connect()) as conn:
+            conn.execute("DELETE FROM eval_cases WHERE run_id = ?", (int(run_id),))
+            cur = conn.execute("DELETE FROM eval_runs WHERE run_id = ?", (int(run_id),))
+            conn.commit()
+            return cur.rowcount
+
+    def delete_suite(self, suite_run_id: str) -> int:
+        """Delete every run of one suite execution (all runs sharing
+        `suite_run_id`) plus their per-case rows, in ONE transaction.
+        Returns the number of `eval_runs` rows removed (0 when no such suite).
+        """
+        with closing(self._connect()) as conn:
+            conn.execute(
+                "DELETE FROM eval_cases WHERE run_id IN "
+                "(SELECT run_id FROM eval_runs WHERE suite_run_id = ?)",
+                (str(suite_run_id),),
+            )
+            cur = conn.execute("DELETE FROM eval_runs WHERE suite_run_id = ?", (str(suite_run_id),))
+            conn.commit()
+            return cur.rowcount
+
 
 def _json_or_none(value: Any) -> str | None:
     return json.dumps(value) if value is not None else None

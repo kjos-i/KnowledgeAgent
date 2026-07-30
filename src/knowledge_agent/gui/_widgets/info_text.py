@@ -5599,6 +5599,79 @@ INFO: dict[str, InfoText] = {
         ),
     ),
     # ---- Evaluation: shared dashboard left column (_dashboard_rail.py) ----
+    "eval_ledger.overview": InfoText(
+        title="Ledger",
+        standard=(
+            "The Ledger tab lets you browse and clean up this corpus's saved "
+            "evaluation history. Every evaluation you run is stored in a small "
+            "per-corpus database (the ledger); this tab lists those runs and lets "
+            "you delete ones you no longer want. It is deliberately separate from "
+            "the analysis tabs: selecting a run here does not move Run Summary, "
+            "Charts, Compare, or Trends. Its tab carries an edit icon to flag that "
+            "it can change stored data.\n\n"
+            "Left column: Refresh reloads the runs from the ledger; the filters "
+            "(Suite, Dataset, Date) narrow which runs the table shows; the Delete "
+            "section removes the selected run or its whole suite.\n\n"
+            "Right column: the Runs table lists the matching runs (click a row to "
+            "select it), and the Cases table below shows that run's individual "
+            "cases. The runs list has a fixed height and scrolls, so the cases "
+            "stay reachable no matter how many runs you have; both tables scroll "
+            "sideways if there are more columns than fit.\n\n"
+            "Deleting is permanent and also removes the run from the other "
+            "dashboard tabs (they read the same ledger). Delete run removes one "
+            "run and its cases; Delete suite removes every run that was executed "
+            "together as that suite, and is only available when the selected run "
+            "belongs to a suite."
+        ),
+        beginner=(
+            "This is where you look through the evaluations you have run for this "
+            "collection and tidy them up by deleting ones you do not need. Each "
+            "time you run an evaluation the app saves the result; this tab is the "
+            "list of those saved results, with buttons to remove them. It is kept "
+            "apart from the charts and summaries on purpose, so looking around "
+            "here never changes what those other tabs show. The small edit icon on "
+            "the tab is a reminder that this is the place where you can change "
+            "(delete) saved data.\n\n"
+            "On the left: Refresh reloads the list, the three filters (Suite, "
+            "Dataset, Date) let you narrow it down, and the Delete buttons remove "
+            "what you have selected.\n\n"
+            "On the right: the top table is the list of runs. Click one to pick "
+            "it, and its individual test cases appear in the table underneath. The "
+            "runs list stays a fixed size and scrolls, so the cases are always "
+            "just below it.\n\n"
+            "Deleting cannot be undone, and a deleted run also disappears from the "
+            "other results tabs, since they all read the same saved history. "
+            "'Delete run' removes one run; 'Delete suite' removes a whole group of "
+            "runs that were run together (only available when the run you picked "
+            "is part of such a group)."
+        ),
+        technical=(
+            "gui/evaluation/ledger_tab.py — a management view over the active "
+            "corpus's EvalLedger (one SQLite file per corpus, "
+            "eval_output/eval_ledger.db). Intentionally DISCONNECTED from the "
+            "shared DashboardRail / coordinator: it keeps its own _selected_run_id "
+            "and never touches selected_suite/dataset/run_id. Rightmost sub-tab, "
+            "labelled with an edit icon + amber text.\n\n"
+            "Data: refresh() calls EvalLedger.list_runs() (newest first), fills "
+            "the Suite/Dataset dropdowns from the distinct values present, applies "
+            "client-side filters (suite, dataset_name/path, and an optional "
+            "From/To date range in DD.MM.YYYY compared on the run's local date), "
+            "and renders. Clicking a run row sets "
+            "_selected_run_id and loads its cases via get_run_cases(). A "
+            "missing/unreadable ledger (no active corpus) degrades to a message, "
+            "never a crash. The runs window is a fixed-height scroll so the cases "
+            "panel stays reachable; both tables wrap in a horizontal scroll.\n\n"
+            "Delete: Delete run -> EvalLedger.delete_run(run_id) (the run + its "
+            "eval_cases in one transaction, returns rows removed); Delete suite -> "
+            "EvalLedger.delete_suite(suite_run_id) (all runs sharing suite_run_id "
+            "+ their cases). Both go through a confirm dialog; Delete suite is "
+            "disabled unless the selected run has a non-null suite_run_id. After a "
+            "delete the tab refreshes and clears the selection. Because the ledger "
+            "is shared by Run Summary / Charts / Compare / Trends, a deleted run is "
+            "gone from those too on their next refresh (the rail auto-falls back "
+            "to the newest remaining run)."
+        ),
+    ),
     "eval_dashboard.overview": InfoText(
         title="Dashboard controls",
         standard=(

@@ -38,8 +38,8 @@ from knowledge_agent.gui._styles import (
     FIELD_LABEL_SIZE,
     PANEL_BG_RAISED,
     PANEL_RADIUS,
-    section_divider,
     sub_section_header,
+    thin_rule,
 )
 from knowledge_agent.gui._widgets.info_text import info
 
@@ -179,8 +179,10 @@ class DashboardRail:
                     self.dataset_dd,
                     self.run_dd,
                     origin_filter,
-                    # Divider between the origin filter and the read-only info panel.
-                    section_divider(),
+                    # Rule between the origin filter and the read-only info panel.
+                    # thin_rule (not section_divider) to match the sub-section
+                    # rules above, so the last line isn't thicker/brighter.
+                    thin_rule(),
                     self.context,
                 ],
                 spacing=8,
