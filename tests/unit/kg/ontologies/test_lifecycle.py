@@ -676,9 +676,9 @@ def test_import_plan_summary_with_xrefs_collect_only_no_edge_writes():
     summary = plan.summary
     assert "collect_only" in summary
     assert "dangling_xrefs" in summary
-    # NOT a "will write resolved edges" promise - backfill_xrefs is
-    # mentioned as the materialisation route instead.
-    assert "backfill_xrefs" in summary
+    # NOT a "will write resolved edges" promise - the "Materialize xref
+    # edges" op is mentioned as the materialisation route instead.
+    assert "Materialize xref edges" in summary
 
 
 def test_import_plan_summary_xrefs_none_matches_legacy():
@@ -770,7 +770,7 @@ def test_install_xrefs_plan_summary_use_describes_immediate_writes():
     assert "5 of" in s  # n imported / 18
     assert "42" in s  # dangling count
     assert "100" in s  # existing edges
-    assert "backfill_xrefs" in s
+    assert "Materialize xref edges" in s
     assert "force-re-import" in s
 
 
@@ -785,7 +785,7 @@ def test_install_xrefs_plan_summary_collect_only_no_edge_writes():
     assert "collect_only" in s
     assert "will NOT" in s
     # collect_only's summary tells the user how to materialise later.
-    assert "backfill_xrefs" in s
+    assert "Materialize xref edges" in s
 
 
 def test_install_xrefs_plan_summary_none_describes_disable():
