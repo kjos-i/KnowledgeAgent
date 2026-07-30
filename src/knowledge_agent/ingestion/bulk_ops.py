@@ -51,7 +51,6 @@ from knowledge_agent.kg.reconcile import (
     reconcile_ontologies_to_config,
     reconcile_triples_to_config,
 )
-from knowledge_agent.kg.schema import ONTOLOGY_SUB_LABELS
 from knowledge_agent.search.client import get_search_client
 
 logger = logging.getLogger(__name__)
@@ -692,7 +691,7 @@ async def bulk_backfill_ontology_execute(
 
     # L10 :RELATED_BY_XREF rides on the :CANONICAL_TO surface just rebuilt,
     # so refresh it once at the end when the layer is on (mirrors
-    # backfill_xrefs). L8/L9 read raw entities, not canonicals, so they are
+    # materialize_xref_edges). L8/L9 read raw entities, not canonicals, so they are
     # unaffected by re-linking and are NOT recomputed. Fail-soft: a recompute
     # error is logged, not raised - the per-doc linking already succeeded.
     if config.layers.cross_doc_xrefs:
@@ -1541,36 +1540,65 @@ async def ingest_folder_execute(
     )
 
 
-# ---- backfill_xrefs (L7 cross-ontology xref resolution) ----
+# ---- xref bulk ops (L7): four single-purpose, per-ontology ops --------------
+#
+# Each op touches exactly ONE artifact and takes a multi-select list of
+# ontology names (the GUI picker's output):
+#   - materialize_xref_edges  : create :<X>_XREF edges       (edges,   L10)
+#   - clear_xref_edges        : delete :<X>_XREF edges        (edges,   L10)
+#   - strip_materialized_xrefs: prune resolved dangling list  (property, no L10)
+#   - strip_all_xrefs         : remove dangling_xrefs property (property, no L10)
+# Edge ops recompute L10 when cross_doc_xrefs is on (L10 rides on the edge
+# surface); property ops never touch edges, so they never recompute L10.
+
+
+def _xref_scope_labels(ontology_names: list[str]) -> list[tuple[str, str]]:
+    """Map user-facing ontology names to `(name, term_label)` pairs,
+    validating each against `ONTOLOGY_REGISTRY`. Raises `ValueError` on
+    the first unknown name (matches the plan contract used elsewhere)."""
+    pairs: list[tuple[str, str]] = []
+    for name in ontology_names:
+        if name not in ONTOLOGY_REGISTRY:
+            raise ValueError(f"unknown ontology {name!r}. Known: {sorted(ONTOLOGY_REGISTRY)}.")
+        pairs.append((name, ONTOLOGY_REGISTRY[name]["term_label"]))
+    return pairs
+
+
+def _l10_threshold(config: CorpusConfig) -> int:
+    """The L10 shared-count threshold for a corpus, defaulting when the
+    layer is off / unset."""
+    if config.cross_doc_xrefs is not None:
+        return config.cross_doc_xrefs.threshold
+    return cross_doc_xrefs_writes.DEFAULT_SHARED_COUNT_THRESHOLD
+
+
+# ---- materialize_xref_edges (L7: resolve dangling xrefs into edges) ----
 
 
 @dataclass(frozen=True)
-class BackfillXrefsPlan:
-    """Plan for the `backfill_xrefs` op.
+class MaterializeXrefEdgesPlan:
+    """Plan for `materialize_xref_edges` (edges only).
 
-    Walks every shipped ontology's `dangling_xrefs` lists, materialises
-    `:<X>_XREF` edges for entries whose targets are present, and
-    strips resolved entries from the lists. When the corpus has
-    `cross_doc_xrefs=true` ALSO triggers a graph-wide L10 recompute
-    so the concept-level cross-doc edges pick up the freshly-resolved
-    xref equivalence — that's the one-button "make L7+L10 consistent
-    again" path.
+    For each SELECTED ontology, resolves its `dangling_xrefs` entries
+    into `:<X>_XREF` edges wherever the target term exists. Edges only:
+    it does NOT strip the property (that is `strip_materialized_xrefs`),
+    so the dangling counts read high afterwards until that op runs — by
+    design, mirroring ingest-time `use`-mode. When the corpus has
+    `cross_doc_xrefs=true` it ALSO rebuilds L10 :RELATED_BY_XREF edges
+    graph-wide so they pick up the freshly-resolved equivalence.
 
     Fields:
-      - `xrefs_mode`: the corpus's current `layers.xrefs` value. Drives
-        whether the op is even useful — `"none"` short-circuits at
-        execute time (nothing to backfill).
-      - `n_dangling_sources`: total source-term count across all 18
-        sub-labels whose `dangling_xrefs` list is non-empty. Cheap
-        diagnostic via `count_dangling_xrefs`.
-      - `will_recompute_l10`: True when `layers.cross_doc_xrefs=true`.
-        The summary uses this to tell the user the op will be heavier
-        than a pure xref resolution.
-      - `l10_threshold`: forwarded to the L10 recompute call when
-        applicable. Drawn from `config.cross_doc_xrefs.threshold`
-        (auto-populated by validator when the layer is on).
+      - `ontology_names` / `term_labels`: the picker's selection and the
+        matching `:<X>Term` sub-labels.
+      - `xrefs_mode`: the corpus's `layers.xrefs`. `"none"` short-
+        circuits the execute (nothing was collected to resolve).
+      - `n_dangling_sources`: total source terms holding a non-empty
+        `dangling_xrefs` list across the selection.
+      - `will_recompute_l10` / `l10_threshold`: L10 recompute gate + arg.
     """
 
+    ontology_names: tuple[str, ...]
+    term_labels: tuple[str, ...]
     xrefs_mode: str
     n_dangling_sources: int
     will_recompute_l10: bool
@@ -1578,24 +1606,24 @@ class BackfillXrefsPlan:
 
     @property
     def summary(self) -> str:
+        scope = ", ".join(self.ontology_names) if self.ontology_names else "(none selected)"
         if self.xrefs_mode == "none":
             return (
-                'L7 xrefs layer is "none" — backfill is a no-op. '
-                'Set xrefs to "collect_only" or "use" first; '
-                "imports will then start storing the data this op "
-                "would resolve."
+                'L7 xrefs layer is "none" — materialize is a no-op. '
+                'Set xrefs to "collect_only" or "use" first so imports '
+                "store the xref strings this op would resolve."
             )
         head = (
-            f"Resolve dangling xrefs across all 18 shipped ontologies: "
-            f"{self.n_dangling_sources} terms currently hold "
-            f"unresolved xref strings. Edges are MERGEd (idempotent); "
-            f"resolved entries are stripped from each source's "
-            f"`dangling_xrefs` list."
+            f"Resolve dangling xrefs into :<X>_XREF edges for: {scope}. "
+            f"{self.n_dangling_sources} terms across the selection hold "
+            f"xref strings; edges are MERGEd (idempotent) for targets "
+            f"that exist. The `dangling_xrefs` lists are NOT stripped — "
+            f"run Clear materialized xrefs afterwards to tidy the counts."
         )
         if self.will_recompute_l10:
             return (
-                f"{head} L10 cross_doc_xrefs layer is on — the op will "
-                f"ALSO rebuild :RELATED_BY_XREF edges graph-wide "
+                f"{head} L10 cross_doc_xrefs is on — the op will ALSO "
+                f"rebuild :RELATED_BY_XREF edges graph-wide "
                 f"(threshold={self.l10_threshold}). Heavier; expect "
                 "minutes on a corpus with thousands of docs."
             )
@@ -1603,108 +1631,85 @@ class BackfillXrefsPlan:
 
 
 @dataclass(frozen=True)
-class BackfillXrefsResult:
-    """Outcome of `backfill_xrefs_execute`.
+class MaterializeXrefEdgesResult:
+    """Outcome of `materialize_xref_edges_execute`.
 
-    `xrefs_layer_skipped` is True when the corpus had `xrefs="none"`
-    at plan time — the execute is a documented no-op, NOT a failure.
+    `xrefs_layer_skipped` is True when the corpus had `xrefs="none"` at
+    plan time — a documented no-op, not a failure.
 
-    `per_ontology_counts` is the dict returned by
-    `kg.ontologies.xrefs.backfill_resolved_xrefs` — keyed by term
-    sub-label, each value `{"n_edges_attempted": int,
-    "n_sources_cleaned": int}`. None when the underlying call hit
-    a session-level error.
+    `per_ontology_edges` maps each selected term sub-label to the count
+    of MERGE rows produced, or None for an ontology whose resolve pass
+    raised (per-ontology fail-soft; the walk continues).
 
-    `n_l10_edges_written` carries the graph-wide L10 recompute's
-    return value. None when L10 wasn't requested (layer off) OR the
-    recompute failed; the boolean `l10_attempted` disambiguates.
+    `n_l10_edges_written` carries the graph-wide L10 recompute's return
+    value. None when L10 wasn't requested OR the recompute failed;
+    `l10_attempted` disambiguates.
     """
 
     xrefs_layer_skipped: bool
-    per_ontology_counts: dict[str, dict[str, int]] | None
+    per_ontology_edges: dict[str, int | None]
     l10_attempted: bool
     n_l10_edges_written: int | None
 
 
-async def backfill_xrefs_plan(config: CorpusConfig) -> BackfillXrefsPlan:
-    """Build the plan for the `backfill_xrefs` bulk_op.
-
-    Cheap: one count query per ontology sub-label (sum across 18) +
-    config introspection. No mutation.
-    """
+async def materialize_xref_edges_plan(
+    ontology_names: list[str],
+    config: CorpusConfig,
+) -> MaterializeXrefEdgesPlan:
+    """Build the plan. Cheap: one dangling-count per selected ontology +
+    config introspection. No mutation. Raises `ValueError` for an unknown
+    ontology name."""
+    pairs = _xref_scope_labels(ontology_names)
     kg_client = get_kg_client()
     total_dangling = 0
-    for term_label in ONTOLOGY_SUB_LABELS:
+    for _name, term_label in pairs:
         try:
-            total_dangling += await xrefs.count_dangling_xrefs(
+            total_dangling += await xrefs.count_dangling_xrefs(kg_client, term_label)
+        except Exception as exc:
+            logger.warning(
+                "materialize_xref_edges_plan: count_dangling_xrefs(%s) failed: %r",
+                term_label,
+                exc,
+            )
+    will_recompute_l10 = bool(config.layers.cross_doc_xrefs)
+    return MaterializeXrefEdgesPlan(
+        ontology_names=tuple(n for n, _ in pairs),
+        term_labels=tuple(t for _, t in pairs),
+        xrefs_mode=config.layers.xrefs,
+        n_dangling_sources=total_dangling,
+        will_recompute_l10=will_recompute_l10,
+        l10_threshold=_l10_threshold(config),
+    )
+
+
+async def materialize_xref_edges_execute(
+    plan: MaterializeXrefEdgesPlan,
+) -> MaterializeXrefEdgesResult:
+    """Resolve dangling xrefs into edges for each selected ontology
+    (per-ontology fail-soft), then rebuild L10 graph-wide when
+    `cross_doc_xrefs` is on. `xrefs_mode == "none"` short-circuits."""
+    if plan.xrefs_mode == "none":
+        return MaterializeXrefEdgesResult(
+            xrefs_layer_skipped=True,
+            per_ontology_edges={},
+            l10_attempted=False,
+            n_l10_edges_written=None,
+        )
+    kg_client = get_kg_client()
+    per_ontology: dict[str, int | None] = {}
+    for term_label in plan.term_labels:
+        try:
+            per_ontology[term_label] = await xrefs.materialize_xref_edges_for_ontology(
                 kg_client,
                 term_label,
             )
         except Exception as exc:
             logger.warning(
-                "backfill_xrefs_plan: count_dangling_xrefs(%s) failed: %r",
+                "materialize_xref_edges_execute (%s): failed: %r",
                 term_label,
                 exc,
             )
-
-    will_recompute_l10 = bool(config.layers.cross_doc_xrefs)
-    if will_recompute_l10:
-        # CorpusConfig validator auto-populates a default threshold;
-        # falling back defensively to 2 in case a future caller
-        # constructed a CorpusConfig without the validator (shouldn't
-        # happen via load_corpus_config).
-        threshold = (
-            config.cross_doc_xrefs.threshold
-            if config.cross_doc_xrefs is not None
-            else cross_doc_xrefs_writes.DEFAULT_SHARED_COUNT_THRESHOLD
-        )
-    else:
-        threshold = cross_doc_xrefs_writes.DEFAULT_SHARED_COUNT_THRESHOLD
-
-    return BackfillXrefsPlan(
-        xrefs_mode=config.layers.xrefs,
-        n_dangling_sources=total_dangling,
-        will_recompute_l10=will_recompute_l10,
-        l10_threshold=threshold,
-    )
-
-
-async def backfill_xrefs_execute(
-    plan: BackfillXrefsPlan,
-    config: CorpusConfig,
-) -> BackfillXrefsResult:
-    """Perform the backfill promised by `plan`.
-
-    Two-phase:
-      1. Always: `await xrefs.backfill_resolved_xrefs(client)` —
-         the per-ontology resolve + strip passes.
-      2. Conditional on `plan.will_recompute_l10`:
-         `await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(
-         client, plan.l10_threshold)`.
-
-    `xrefs_mode == "none"` short-circuits to a skipped result. The
-    plan's summary surfaces that case so the user knows clicking
-    Confirm won't do anything; the execute mirrors that for callers
-    that don't show the plan first.
-    """
-    if plan.xrefs_mode == "none":
-        return BackfillXrefsResult(
-            xrefs_layer_skipped=True,
-            per_ontology_counts=None,
-            l10_attempted=False,
-            n_l10_edges_written=None,
-        )
-
-    kg_client = get_kg_client()
-    try:
-        per_ontology = await xrefs.backfill_resolved_xrefs(kg_client)
-    except Exception as exc:
-        logger.warning(
-            "backfill_xrefs_execute: backfill_resolved_xrefs failed: %r",
-            exc,
-        )
-        per_ontology = None
-
+            per_ontology[term_label] = None
     n_l10 = None
     if plan.will_recompute_l10:
         try:
@@ -1714,14 +1719,13 @@ async def backfill_xrefs_execute(
             )
         except Exception as exc:
             logger.warning(
-                "backfill_xrefs_execute: recompute_cross_doc_xrefs_global failed: %r",
+                "materialize_xref_edges_execute: recompute_cross_doc_xrefs_global failed: %r",
                 exc,
             )
             n_l10 = None
-
-    return BackfillXrefsResult(
+    return MaterializeXrefEdgesResult(
         xrefs_layer_skipped=False,
-        per_ontology_counts=per_ontology,
+        per_ontology_edges=per_ontology,
         l10_attempted=plan.will_recompute_l10,
         n_l10_edges_written=n_l10,
     )
@@ -1859,60 +1863,44 @@ async def recompute_cross_doc_xrefs_execute(
     )
 
 
-# ---- clear_xref_edges (per-ontology xref wipe) ----
+# ---- clear_xref_edges (L7: delete :<X>_XREF edges for the selection) ----
 
 
 @dataclass(frozen=True)
 class ClearXrefEdgesPlan:
-    """Plan for wiping one ontology's xref surface.
+    """Plan for deleting the selected ontologies' xref EDGES.
 
-    Use cases:
-      - Maintenance: the user wants to clear MeSH's xref edges (e.g.
-        before re-running `backfill_xrefs` after manual ontology
-        cleanup).
-      - Reset: the user is switching `xrefs="use"` -> `"none"` and
-        wants the existing edges gone too.
-
-    Fields:
-      - `ontology_name`: the user-facing key (`"mesh"`, `"go"`, ...).
-      - `term_label`: the corresponding `:<X>Term` sub-label, mapped
-        via `ONTOLOGY_REGISTRY`. Stored on the plan so execute doesn't
-        need to re-map.
-      - `n_existing_edges`: count of outbound `:<X>_XREF` edges from
-        this ontology's terms.
-      - `n_dangling_sources`: source terms with non-empty
-        `dangling_xrefs` (which will also be cleared).
-      - `will_recompute_l10`: True when `layers.cross_doc_xrefs=true`.
-        Clearing removes equivalence links L10 rides on, so execute
-        rebuilds L10 graph-wide afterwards to keep it consistent.
-      - `l10_threshold`: forwarded to the L10 recompute when applicable.
+    Edges only — the `dangling_xrefs` property is left intact (use
+    `strip_all_xrefs` for that). Deletes only OUTBOUND `:<X>_XREF` edges
+    of each selected ontology; INBOUND edges from other ontologies are
+    left in place. Selecting every ontology therefore wipes both
+    directions; a partial selection is one-directional. When the corpus
+    has `cross_doc_xrefs=true`, execute rebuilds L10 graph-wide so it no
+    longer references the deleted equivalences.
     """
 
-    ontology_name: str
-    term_label: str
+    ontology_names: tuple[str, ...]
+    term_labels: tuple[str, ...]
     n_existing_edges: int
-    n_dangling_sources: int
-    will_recompute_l10: bool = False
-    l10_threshold: int = cross_doc_xrefs_writes.DEFAULT_SHARED_COUNT_THRESHOLD
+    will_recompute_l10: bool
+    l10_threshold: int
 
     @property
     def summary(self) -> str:
+        scope = ", ".join(self.ontology_names) if self.ontology_names else "(none selected)"
         base = (
-            f"Clear {self.ontology_name} xref surface: delete "
-            f"{self.n_existing_edges} outgoing :<X>_XREF edges and "
-            f"strip `dangling_xrefs` from {self.n_dangling_sources} "
-            f"source terms. INBOUND xref edges from OTHER ontologies "
-            f"pointing at {self.ontology_name} terms are LEFT IN "
-            f"PLACE — they belong to the other ontology's data. "
-            f"Run this op for those ontologies in turn to wipe both "
-            f"directions."
+            f"Delete outbound :<X>_XREF edges for: {scope} "
+            f"({self.n_existing_edges} edges across the selection). "
+            f"The `dangling_xrefs` property is left intact. INBOUND xref "
+            f"edges from OTHER ontologies are left in place — select "
+            f"every ontology to wipe both directions."
         )
         if self.will_recompute_l10:
             return (
                 f"{base} L10 cross_doc_xrefs is on, so :RELATED_BY_XREF "
                 f"edges are then rebuilt graph-wide "
                 f"(threshold={self.l10_threshold}) so they no longer "
-                f"reference the cleared equivalences."
+                f"reference the deleted equivalences."
             )
         return base
 
@@ -1921,96 +1909,65 @@ class ClearXrefEdgesPlan:
 class ClearXrefEdgesResult:
     """Outcome of `clear_xref_edges_execute`.
 
-    `n_cleared` is the sum of (edges deleted + properties removed)
-    returned by `xrefs.clear_xref_edges_for_ontology`. None
-    on Cypher failure (logged).
+    `per_ontology_deleted` maps each selected term sub-label to the count
+    of edges deleted, or None for an ontology whose delete raised
+    (per-ontology fail-soft). `l10_attempted` mirrors the plan gate.
     """
 
-    ontology_name: str
-    n_cleared: int | None
+    per_ontology_deleted: dict[str, int | None]
+    l10_attempted: bool
 
 
 async def clear_xref_edges_plan(
-    ontology_name: str,
+    ontology_names: list[str],
     config: CorpusConfig,
 ) -> ClearXrefEdgesPlan:
-    """Build the plan for clearing one ontology's xref surface.
-
-    Cheap: one edge count + one dangling-source count + config
-    introspection. No mutation.
-
-    Raises `ValueError` for an unknown ontology name (registry miss),
-    matching the `import_ontology_plan` / `delete_ontology_plan`
-    contract for unknown-ontology calls.
-    """
-    if ontology_name not in ONTOLOGY_REGISTRY:
-        raise ValueError(
-            f"clear_xref_edges_plan: unknown ontology "
-            f"{ontology_name!r}. Known: {sorted(ONTOLOGY_REGISTRY)}."
-        )
-    entry = ONTOLOGY_REGISTRY[ontology_name]
-    term_label = entry["term_label"]
-
+    """Build the plan. Cheap: one edge count per selected ontology +
+    config introspection. No mutation. Raises `ValueError` for an unknown
+    ontology name."""
+    pairs = _xref_scope_labels(ontology_names)
     kg_client = get_kg_client()
-    try:
-        n_edges = await xrefs.count_xref_edges(kg_client, term_label)
-    except Exception as exc:
-        logger.warning(
-            "clear_xref_edges_plan: count_xref_edges(%s) failed: %r",
-            term_label,
-            exc,
-        )
-        n_edges = 0
-    try:
-        n_dangling = await xrefs.count_dangling_xrefs(
-            kg_client,
-            term_label,
-        )
-    except Exception as exc:
-        logger.warning(
-            "clear_xref_edges_plan: count_dangling_xrefs(%s) failed: %r",
-            term_label,
-            exc,
-        )
-        n_dangling = 0
+    total_edges = 0
+    for _name, term_label in pairs:
+        try:
+            total_edges += await xrefs.count_xref_edges(kg_client, term_label)
+        except Exception as exc:
+            logger.warning(
+                "clear_xref_edges_plan: count_xref_edges(%s) failed: %r",
+                term_label,
+                exc,
+            )
     will_recompute_l10 = bool(config.layers.cross_doc_xrefs)
-    threshold = (
-        config.cross_doc_xrefs.threshold
-        if config.cross_doc_xrefs is not None
-        else cross_doc_xrefs_writes.DEFAULT_SHARED_COUNT_THRESHOLD
-    )
     return ClearXrefEdgesPlan(
-        ontology_name=ontology_name,
-        term_label=term_label,
-        n_existing_edges=n_edges,
-        n_dangling_sources=n_dangling,
+        ontology_names=tuple(n for n, _ in pairs),
+        term_labels=tuple(t for _, t in pairs),
+        n_existing_edges=total_edges,
         will_recompute_l10=will_recompute_l10,
-        l10_threshold=threshold,
+        l10_threshold=_l10_threshold(config),
     )
 
 
 async def clear_xref_edges_execute(
     plan: ClearXrefEdgesPlan,
 ) -> ClearXrefEdgesResult:
-    """Perform the wipe promised by `plan`.
-
-    When `plan.will_recompute_l10` (corpus has `cross_doc_xrefs=true`),
-    rebuilds L10 :RELATED_BY_XREF graph-wide afterwards so it no longer
-    references the equivalence edges just cleared. Fail-soft on either step.
-    """
+    """Delete outbound xref edges for each selected ontology
+    (per-ontology fail-soft), then rebuild L10 graph-wide when
+    `cross_doc_xrefs` is on."""
     kg_client = get_kg_client()
-    try:
-        n = await xrefs.clear_xref_edges_for_ontology(
-            kg_client,
-            plan.term_label,
-        )
-    except Exception as exc:
-        logger.warning(
-            "clear_xref_edges_execute (%s): failed: %r",
-            plan.term_label,
-            exc,
-        )
-        n = None
+    per_ontology: dict[str, int | None] = {}
+    for term_label in plan.term_labels:
+        try:
+            per_ontology[term_label] = await xrefs.remove_xref_edges_for_ontology(
+                kg_client,
+                term_label,
+            )
+        except Exception as exc:
+            logger.warning(
+                "clear_xref_edges_execute (%s): failed: %r",
+                term_label,
+                exc,
+            )
+            per_ontology[term_label] = None
     if plan.will_recompute_l10:
         try:
             await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(
@@ -2023,6 +1980,181 @@ async def clear_xref_edges_execute(
                 exc,
             )
     return ClearXrefEdgesResult(
-        ontology_name=plan.ontology_name,
-        n_cleared=n,
+        per_ontology_deleted=per_ontology,
+        l10_attempted=plan.will_recompute_l10,
     )
+
+
+# ---- strip_materialized_xrefs (L7: prune resolved dangling entries) ----
+
+
+@dataclass(frozen=True)
+class StripMaterializedXrefsPlan:
+    """Plan for pruning already-materialized entries from the selected
+    ontologies' `dangling_xrefs` lists.
+
+    Property only — no edges touched, so no L10 recompute. Removes each
+    entry that already has a matching `:<X>_XREF` edge, leaving the
+    genuinely-pending entries. This is the op that corrects the inflated
+    dangling count left by a materialize (or an ingest)."""
+
+    ontology_names: tuple[str, ...]
+    term_labels: tuple[str, ...]
+    n_dangling_sources: int
+
+    @property
+    def summary(self) -> str:
+        scope = ", ".join(self.ontology_names) if self.ontology_names else "(none selected)"
+        return (
+            f"Prune already-materialized xref entries from the "
+            f"`dangling_xrefs` lists of: {scope} "
+            f"({self.n_dangling_sources} source terms currently hold a "
+            f"non-empty list). Only entries that already have an edge are "
+            f"removed; genuinely-pending entries stay. No edges are "
+            f"touched and L10 is not recomputed."
+        )
+
+
+@dataclass(frozen=True)
+class StripMaterializedXrefsResult:
+    """Outcome of `strip_materialized_xrefs_execute`. Maps each selected
+    term sub-label to the count of source nodes tidied, or None on a
+    per-ontology failure."""
+
+    per_ontology_tidied: dict[str, int | None]
+
+
+async def strip_materialized_xrefs_plan(
+    ontology_names: list[str],
+    config: CorpusConfig,
+) -> StripMaterializedXrefsPlan:
+    """Build the plan. Cheap: one dangling-count per selected ontology.
+    No mutation. Raises `ValueError` for an unknown ontology name."""
+    pairs = _xref_scope_labels(ontology_names)
+    kg_client = get_kg_client()
+    total_dangling = 0
+    for _name, term_label in pairs:
+        try:
+            total_dangling += await xrefs.count_dangling_xrefs(kg_client, term_label)
+        except Exception as exc:
+            logger.warning(
+                "strip_materialized_xrefs_plan: count_dangling_xrefs(%s) failed: %r",
+                term_label,
+                exc,
+            )
+    return StripMaterializedXrefsPlan(
+        ontology_names=tuple(n for n, _ in pairs),
+        term_labels=tuple(t for _, t in pairs),
+        n_dangling_sources=total_dangling,
+    )
+
+
+async def strip_materialized_xrefs_execute(
+    plan: StripMaterializedXrefsPlan,
+) -> StripMaterializedXrefsResult:
+    """Prune resolved dangling entries for each selected ontology
+    (per-ontology fail-soft). No edges touched, no L10 recompute."""
+    kg_client = get_kg_client()
+    per_ontology: dict[str, int | None] = {}
+    for term_label in plan.term_labels:
+        try:
+            per_ontology[term_label] = await xrefs.strip_materialized_xrefs_for_ontology(
+                kg_client,
+                term_label,
+            )
+        except Exception as exc:
+            logger.warning(
+                "strip_materialized_xrefs_execute (%s): failed: %r",
+                term_label,
+                exc,
+            )
+            per_ontology[term_label] = None
+    return StripMaterializedXrefsResult(per_ontology_tidied=per_ontology)
+
+
+# ---- strip_all_xrefs (L7: remove the dangling_xrefs property) ----
+
+
+@dataclass(frozen=True)
+class StripAllXrefsPlan:
+    """Plan for removing the entire `dangling_xrefs` property from the
+    selected ontologies' terms.
+
+    Property only — no edges touched, so no L10 recompute. Wipes ALL
+    entries (resolved or not). After this an ontology cannot be
+    auto-connected by a future materialize until it is re-imported with
+    the xrefs layer on."""
+
+    ontology_names: tuple[str, ...]
+    term_labels: tuple[str, ...]
+    n_dangling_sources: int
+
+    @property
+    def summary(self) -> str:
+        scope = ", ".join(self.ontology_names) if self.ontology_names else "(none selected)"
+        return (
+            f"Remove the entire `dangling_xrefs` property from: {scope} "
+            f"({self.n_dangling_sources} source terms hold one). This "
+            f"wipes ALL declared xref strings, resolved or not; existing "
+            f":<X>_XREF edges are left in place. The affected ontologies "
+            f"can only be re-connected by re-importing them with the "
+            f"xrefs layer on. No edges are touched and L10 is not "
+            f"recomputed."
+        )
+
+
+@dataclass(frozen=True)
+class StripAllXrefsResult:
+    """Outcome of `strip_all_xrefs_execute`. Maps each selected term
+    sub-label to the count of source nodes whose property was removed,
+    or None on a per-ontology failure."""
+
+    per_ontology_cleared: dict[str, int | None]
+
+
+async def strip_all_xrefs_plan(
+    ontology_names: list[str],
+    config: CorpusConfig,
+) -> StripAllXrefsPlan:
+    """Build the plan. Cheap: one dangling-count per selected ontology.
+    No mutation. Raises `ValueError` for an unknown ontology name."""
+    pairs = _xref_scope_labels(ontology_names)
+    kg_client = get_kg_client()
+    total_dangling = 0
+    for _name, term_label in pairs:
+        try:
+            total_dangling += await xrefs.count_dangling_xrefs(kg_client, term_label)
+        except Exception as exc:
+            logger.warning(
+                "strip_all_xrefs_plan: count_dangling_xrefs(%s) failed: %r",
+                term_label,
+                exc,
+            )
+    return StripAllXrefsPlan(
+        ontology_names=tuple(n for n, _ in pairs),
+        term_labels=tuple(t for _, t in pairs),
+        n_dangling_sources=total_dangling,
+    )
+
+
+async def strip_all_xrefs_execute(
+    plan: StripAllXrefsPlan,
+) -> StripAllXrefsResult:
+    """Remove the `dangling_xrefs` property for each selected ontology
+    (per-ontology fail-soft). No edges touched, no L10 recompute."""
+    kg_client = get_kg_client()
+    per_ontology: dict[str, int | None] = {}
+    for term_label in plan.term_labels:
+        try:
+            per_ontology[term_label] = await xrefs.remove_dangling_xrefs_for_ontology(
+                kg_client,
+                term_label,
+            )
+        except Exception as exc:
+            logger.warning(
+                "strip_all_xrefs_execute (%s): failed: %r",
+                term_label,
+                exc,
+            )
+            per_ontology[term_label] = None
+    return StripAllXrefsResult(per_ontology_cleared=per_ontology)

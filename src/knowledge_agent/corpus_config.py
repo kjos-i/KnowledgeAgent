@@ -134,7 +134,7 @@ class LayerFlags(BaseModel):
             '- `"collect_only"`: extract xrefs, store the verbatim '
             "  list as a `dangling_xrefs` property on each source term, "
             "  but DON'T write resolved edges yet. Lets the user flip "
-            '  to `"use"` later via the fast `backfill_xrefs` '
+            '  to `"use"` later via the fast `Materialize xref edges` '
             "  bulk_op (no re-import needed).\n"
             '- `"use"`: extract xrefs, store the property, AND write '
             "  resolved `:<X>_XREF` edges immediately at import for "
@@ -992,7 +992,7 @@ class CorpusConfig(BaseModel):
                     "layer writes in 'use' mode. With xrefs=\"none\" "
                     'or "collect_only", no xref edges exist and '
                     "L10 would only catch identity equivalence. Set "
-                    'xrefs="use" (running backfill_xrefs after if '
+                    'xrefs="use" (running Materialize xref edges after if '
                     "ontologies are already imported), or turn "
                     "cross_doc_xrefs off."
                 )

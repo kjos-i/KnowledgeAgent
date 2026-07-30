@@ -354,7 +354,7 @@ async def ensure_ontology_imported(
     and `True` returns. Note: the idempotent short-circuit does NOT
     re-apply xref logic to an already-imported ontology. If the user
     flipped `xrefs` from `"none"` to `"use"` after the ontology was
-    already in the KG, run the `backfill_xrefs` bulk_op (which walks
+    already in the KG, run the `Materialize xref edges` bulk_op (which walks
     `dangling_xrefs` properties — none will exist for ontologies
     imported under the old `"none"` mode, so a force re-import is the
     right path in that case).

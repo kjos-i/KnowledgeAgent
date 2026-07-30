@@ -85,12 +85,24 @@ _BULK_OP_LABELS: dict[str, str] = {
     "bulk_re_embed": "Re-embed all chunks",
     "bulk_backfill_entities": "Re-extract all entities",
     "bulk_backfill_ontology": "Re-link all entities",
-    "backfill_xrefs": "Materialize xref edges",
-    "clear_xref_edges": "Clear xref edges…",
+    "materialize_xref_edges": "Materialize xref edges",
+    "clear_xref_edges": "Clear materialized xref edges",
+    "strip_materialized_xrefs": "Clear materialized xrefs",
+    "strip_all_xrefs": "Clear all xrefs",
     "bulk_backfill_triples": "Re-extract all triples",
     "bulk_backfill_cross_doc": "Rebuild cross-doc links",
     "recompute_cross_doc_xrefs": "Rebuild cross-doc xref links",
 }
+
+# The four L7 xref ops that share the multi-select ontology picker.
+_XREF_MULTISELECT_OPS: frozenset[str] = frozenset(
+    {
+        "materialize_xref_edges",
+        "clear_xref_edges",
+        "strip_materialized_xrefs",
+        "strip_all_xrefs",
+    }
+)
 
 
 class IngestTab:
@@ -726,8 +738,10 @@ class IngestTab:
                     spacing=8,
                     controls=[
                         op_button("bulk_backfill_ontology"),
-                        op_button("backfill_xrefs"),
+                        op_button("materialize_xref_edges"),
                         op_button("clear_xref_edges"),
+                        op_button("strip_materialized_xrefs"),
+                        op_button("strip_all_xrefs"),
                     ],
                 ),
             ],
@@ -802,9 +816,9 @@ class IngestTab:
     async def _run_bulk_op(self, op_name: str, config: object) -> None:
         from knowledge_agent.ingestion import bulk_ops
 
-        # clear_xref_edges needs the user to pick WHICH ontology first.
-        if op_name == "clear_xref_edges":
-            self._prompt_clear_xref_ontology(config)
+        # The four L7 xref ops share a multi-select ontology picker.
+        if op_name in _XREF_MULTISELECT_OPS:
+            self._prompt_xref_ontologies(op_name, config)
             return
 
         # op_name -> (plan_fn, execute_fn, plan_arg, execute_takes_config).
@@ -850,12 +864,6 @@ class IngestTab:
             "bulk_backfill_cross_doc": (
                 bulk_ops.bulk_backfill_cross_doc_plan,
                 bulk_ops.bulk_backfill_cross_doc_execute,
-                "config",
-                True,
-            ),
-            "backfill_xrefs": (
-                bulk_ops.backfill_xrefs_plan,
-                bulk_ops.backfill_xrefs_execute,
                 "config",
                 True,
             ),
@@ -911,39 +919,57 @@ class IngestTab:
             ),
         )
 
-    def _prompt_clear_xref_ontology(self, config: object) -> None:
-        """Ask which ontology's xref edges to clear, then plan + confirm."""
-        dropdown = ft.Dropdown(
-            label="Ontology",
-            options=[
-                ft.DropdownOption(key=key, text=text) for key, text in _ONTOLOGY_DISPLAY.items()
-            ],
-        )
+    def _prompt_xref_ontologies(self, op_name: str, config: object) -> None:
+        """Multi-select which ontologies an L7 xref op applies to, then plan
+        + confirm. Materialize defaults to all selected (the common case);
+        the destructive / tidy ops default to nothing selected so the user
+        picks deliberately."""
+        default_all = op_name == "materialize_xref_edges"
+        checkboxes = {
+            key: ft.Checkbox(label=text, value=default_all)
+            for key, text in _ONTOLOGY_DISPLAY.items()
+        }
+        select_all = ft.Checkbox(label="Select all", value=default_all)
+
+        def _on_select_all(_ev: ft.Event) -> None:
+            for cb in checkboxes.values():
+                cb.value = bool(select_all.value)
+            self.app.page.update()
+
+        select_all.on_change = _on_select_all
 
         def _cancel(_ev: ft.Event) -> None:
             self.app.page.pop_dialog()
 
         def _go(_ev: ft.Event) -> None:
-            name = dropdown.value
+            names = [k for k, cb in checkboxes.items() if cb.value]
             self.app.page.pop_dialog()
-            if not name:
-                self._set_status("Pick an ontology to clear.")
+            if not names:
+                self._set_status("Pick at least one ontology.")
                 return
-            self._spawn(self._run_clear_xref(name, config))
+            self._spawn(self._run_xref_op(op_name, names, config))
 
+        label = _BULK_OP_LABELS.get(op_name, op_name)
         dialog = ft.AlertDialog(
             modal=True,
-            title=ft.Text("Clear xref edges"),
-            content=ft.Column(
-                tight=True,
-                spacing=8,
-                controls=[
-                    ft.Text(
-                        "Which ontology's cross-ontology xref edges should be cleared?",
-                        size=12,
-                    ),
-                    dropdown,
-                ],
+            title=ft.Text(label.rstrip("… ").strip()),
+            content=ft.Container(
+                width=440,
+                content=ft.Column(
+                    tight=True,
+                    spacing=8,
+                    controls=[
+                        ft.Text("Apply to which ontologies?", size=12),
+                        select_all,
+                        thin_rule(),
+                        ft.Column(
+                            controls=list(checkboxes.values()),
+                            spacing=2,
+                            scroll=ft.ScrollMode.AUTO,
+                            height=300,
+                        ),
+                    ],
+                ),
             ),
             actions=[
                 ft.TextButton("Cancel", on_click=_cancel),
@@ -953,25 +979,40 @@ class IngestTab:
         self.app.page.show_dialog(dialog)
         self.app.page.update()
 
-    async def _run_clear_xref(self, ontology_name: str, config: object) -> None:
+    async def _run_xref_op(self, op_name: str, ontology_names: list[str], config: object) -> None:
         from knowledge_agent.ingestion import bulk_ops
 
+        # Dispatch through variables (not named calls) so the async-lint
+        # guard doesn't flag the executor factory below.
+        plan_fns = {
+            "materialize_xref_edges": bulk_ops.materialize_xref_edges_plan,
+            "clear_xref_edges": bulk_ops.clear_xref_edges_plan,
+            "strip_materialized_xrefs": bulk_ops.strip_materialized_xrefs_plan,
+            "strip_all_xrefs": bulk_ops.strip_all_xrefs_plan,
+        }
+        exec_fns = {
+            "materialize_xref_edges": bulk_ops.materialize_xref_edges_execute,
+            "clear_xref_edges": bulk_ops.clear_xref_edges_execute,
+            "strip_materialized_xrefs": bulk_ops.strip_materialized_xrefs_execute,
+            "strip_all_xrefs": bulk_ops.strip_all_xrefs_execute,
+        }
+        plan_fn = plan_fns[op_name]
+        exec_fn = exec_fns[op_name]
         try:
-            plan = await bulk_ops.clear_xref_edges_plan(ontology_name, config)
+            plan = await plan_fn(ontology_names, config)
         except Exception as exc:
-            self._set_status(f"clear_xref_edges: could not plan — {exc}")
+            self._set_status(f"{op_name}: could not plan — {exc}")
             return
-        exec_fn = bulk_ops.clear_xref_edges_execute
 
         def executor(pf=exec_fn, p=plan):
             return pf(p)
 
-        label = _BULK_OP_LABELS.get("clear_xref_edges", "clear_xref_edges")
+        label = _BULK_OP_LABELS.get(op_name, op_name)
         self._show_ingest_confirm(
             label,
             plan.summary,
             lambda: self._commit_then(
-                config, lambda: self._execute_bulk_op("clear_xref_edges", executor, label)
+                config, lambda: self._execute_bulk_op(op_name, executor, label)
             ),
         )
 
@@ -1003,6 +1044,14 @@ class IngestTab:
             if key == "failures":
                 if val:
                     parts.append(f"{len(val)} failures")
+            elif isinstance(val, dict):
+                # Per-ontology count maps (e.g. per_ontology_edges): sum the
+                # ints, count the Nones as per-ontology failures.
+                total = sum(v for v in val.values() if isinstance(v, int))
+                failed = sum(1 for v in val.values() if v is None)
+                parts.append(f"{key}={total}")
+                if failed:
+                    parts.append(f"{failed} failed")
             elif isinstance(val, int):  # bool is an int subclass — fine
                 parts.append(f"{key}={val}")
         return ", ".join(parts) if parts else "done"

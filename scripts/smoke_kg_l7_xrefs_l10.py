@@ -9,14 +9,15 @@ End-to-end exercise of the xrefs / L10 ship:
         as core graph data — so the resolved-edge count should be
         well above zero for any subset that includes it.
 
-  L7+ - Runs `backfill_resolved_xrefs(client)` to verify the
-        idempotency contract: the first call (right after import)
+  L7+ - Runs `materialize_xref_edges_for_ontology` +
+        `strip_materialized_xrefs_for_ontology` per ontology to verify
+        the idempotency contract: the first pass (right after import)
         should still find some work (xrefs whose targets weren't
         present at import time but ARE now because we imported all
-        three ontologies in this run), the second call should find
+        three ontologies in this run), the second pass should tidy
         nothing.
 
-  L7+ - Demonstrates `clear_xref_edges_for_ontology(client, "MeSHTerm")`
+  L7+ - Demonstrates `remove_xref_edges_for_ontology(client, "MeSHTerm")`
         and verifies the count drops to zero for MeSH's outgoing
         xref edges.
 
@@ -39,8 +40,8 @@ BEFORE any other knowledge_agent import that might trigger `get_settings()`.
 Lifecycle:
   1. Clear any leftover ontology terms from the 3 ontologies.
   2. Force re-import with `xrefs_mode="use"` (writes :<X>_XREF edges).
-  3. Run backfill + idempotency assertions.
-  4. Demo clear_xref_edges_for_ontology on MeSH.
+  3. Run materialize + strip + idempotency assertions.
+  4. Demo remove_xref_edges_for_ontology on MeSH.
   5. Optional: recompute L10 graph-wide (--include-l10).
   6. Pause - you inspect in Neo4j Desktop.
   7. Press Enter to clean up, Ctrl+C to keep the nodes for further poking.
@@ -226,51 +227,46 @@ async def main() -> None:
     print("Post-import state:")
     _summary(client)
 
-    print()
-    print("Running backfill_resolved_xrefs (call #1)...")
-    first = xrefs.backfill_resolved_xrefs(client)
-    if first is None:
-        print("  backfill returned None — session error.", file=sys.stderr)
-        await client.close()
-        sys.exit(1)
-    n1_attempted = sum(r["n_edges_attempted"] for r in first.values())
-    n1_cleaned = sum(r["n_sources_cleaned"] for r in first.values())
-    print(
-        f"  edges attempted across all ontologies: {n1_attempted}; "
-        f"source nodes cleaned: {n1_cleaned}"
-    )
+    labels = [MESH_TERM_LABEL, MONDO_TERM_LABEL, HPO_TERM_LABEL]
 
     print()
-    print("Running backfill_resolved_xrefs (call #2 — idempotency check)...")
-    second = xrefs.backfill_resolved_xrefs(client)
-    if second is None:
-        print("  backfill returned None on call #2.", file=sys.stderr)
-        await client.close()
-        sys.exit(1)
-    n2_cleaned = sum(r["n_sources_cleaned"] for r in second.values())
-    if n2_cleaned == 0:
+    print("Materialize + tidy xref edges across MeSH / MONDO / HPO (pass #1)...")
+    n1_edges = 0
+    n1_tidied = 0
+    for label in labels:
+        n1_edges += await xrefs.materialize_xref_edges_for_ontology(client, label)
+        n1_tidied += await xrefs.strip_materialized_xrefs_for_ontology(client, label)
+    print(f"  edges resolved: {n1_edges}; source nodes tidied: {n1_tidied}")
+
+    print()
+    print("Materialize + tidy again (idempotency check, pass #2)...")
+    n2_edges = 0
+    n2_tidied = 0
+    for label in labels:
+        n2_edges += await xrefs.materialize_xref_edges_for_ontology(client, label)
+        n2_tidied += await xrefs.strip_materialized_xrefs_for_ontology(client, label)
+    if n2_tidied == 0:
         print(
-            f"  edges attempted: "
-            f"{sum(r['n_edges_attempted'] for r in second.values())} "
-            "(MERGE-idempotent, expected), sources cleaned: 0 (idempotent ✓)"
+            f"  edges resolved: {n2_edges} (MERGE-idempotent, expected), "
+            "sources tidied: 0 (idempotent ✓)"
         )
     else:
         print(
-            f"  WARNING: second backfill cleaned {n2_cleaned} more sources. "
+            f"  WARNING: second pass tidied {n2_tidied} more sources. "
             "Idempotency contract suspect — investigate."
         )
 
     print()
-    print("Demonstrating clear_xref_edges_for_ontology(MeSHTerm)...")
+    print("Demonstrating remove_xref_edges_for_ontology(MeSHTerm)...")
     pre_mesh = _count_one_xref_type(client, MESH_TERM_LABEL)
     print(f"  before clear: {pre_mesh} outgoing :MESH_XREF edges")
-    n_cleared = await xrefs.clear_xref_edges_for_ontology(
+    n_deleted = await xrefs.remove_xref_edges_for_ontology(
         client,
         MESH_TERM_LABEL,
     )
     post_mesh = _count_one_xref_type(client, MESH_TERM_LABEL)
     print(
-        f"  clear_xref_edges_for_ontology returned: {n_cleared}; "
+        f"  remove_xref_edges_for_ontology deleted: {n_deleted}; "
         f"after clear: {post_mesh} outgoing :MESH_XREF edges"
     )
     if post_mesh != 0:

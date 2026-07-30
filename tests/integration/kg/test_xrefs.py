@@ -1,8 +1,9 @@
 """Integration tests for `kg/ontologies/xrefs` (L7 cross-ontology xref
 edges).
 
-Exercises the backfill / clear / count primitives against a real
-Neo4j test instance using SYNTHETIC :OntologyTerm nodes — does NOT
+Exercises the four xref edge/property primitives (materialize / remove
+edges / strip materialized / remove dangling) + the count diagnostics
+against a real Neo4j test instance using SYNTHETIC :OntologyTerm nodes — does NOT
 trigger the heavy `import_<ontology>` paths. The actual ontology
 imports are exercised by the manual smoke (`scripts/smoke_kg_l7_xrefs_l10.py`)
 which downloads + parses HPO + MONDO + MeSH (heavy, slow, not
@@ -58,13 +59,20 @@ async def _seed_target(client: Any, sub_label: str, term_id: str) -> None:
         )
 
 
-async def test_backfill_resolves_dangling_xrefs_when_target_exists(
+async def _resolve_and_tidy(client: Any, term_label: str) -> None:
+    """Replicate the old fused backfill for one ontology: resolve its
+    dangling xrefs into edges, then prune the now-resolved entries."""
+    await xrefs.materialize_xref_edges_for_ontology(client, term_label)
+    await xrefs.strip_materialized_xrefs_for_ontology(client, term_label)
+
+
+async def test_materialize_resolves_dangling_xrefs_when_target_exists(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
     """A MONDO term with `dangling_xrefs = ["MESH:D003920", "HPO:0001"]`,
     where one target exists and one doesn't, resolves the existing
     target into a :MONDO_XREF edge and leaves the unresolved string
-    in dangling_xrefs for a future backfill."""
+    in dangling_xrefs for a future materialize."""
     await _seed_target(kg_client, MESH_TERM_LABEL, "MESH:D003920")
     await _seed_terms(
         kg_client,
@@ -74,13 +82,11 @@ async def test_backfill_resolves_dangling_xrefs_when_target_exists(
         ],
     )
 
-    result = await xrefs.backfill_resolved_xrefs(kg_client)
-    assert result is not None
-
-    # The MONDO entry shows 1 edge attempted + 1 source cleaned.
-    mondo_stats = result.get(MONDO_TERM_LABEL, {})
-    assert mondo_stats.get("n_edges_attempted") >= 1
-    assert mondo_stats.get("n_sources_cleaned") >= 1
+    n_edges = await xrefs.materialize_xref_edges_for_ontology(kg_client, MONDO_TERM_LABEL)
+    n_tidied = await xrefs.strip_materialized_xrefs_for_ontology(kg_client, MONDO_TERM_LABEL)
+    # One target present -> one edge resolved and one source tidied.
+    assert n_edges >= 1
+    assert n_tidied >= 1
 
     # Edge landed; dangling stripped of the resolved entry; HPO:0001
     # remains because no HPO term with that id was seeded.
@@ -100,12 +106,11 @@ async def test_backfill_resolves_dangling_xrefs_when_target_exists(
     assert "HPO:0001" in dangling
 
 
-async def test_backfill_is_idempotent(
+async def test_materialize_strip_is_idempotent(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
-    """A second backfill on a fully-resolved corpus must not change
-    state (n_sources_cleaned drops to 0 on the second call — MERGE
-    is idempotent at the edge level)."""
+    """A second materialize+strip on a fully-resolved corpus must not
+    change state — MERGE is idempotent at the edge level."""
     await _seed_target(kg_client, MESH_TERM_LABEL, "MESH:D003920")
     await _seed_terms(
         kg_client,
@@ -115,16 +120,13 @@ async def test_backfill_is_idempotent(
         ],
     )
 
-    await xrefs.backfill_resolved_xrefs(kg_client)
-    second = await xrefs.backfill_resolved_xrefs(kg_client)
-    assert second is not None
+    await _resolve_and_tidy(kg_client, MONDO_TERM_LABEL)
+    await _resolve_and_tidy(kg_client, MONDO_TERM_LABEL)
 
     # Edge-level idempotency is the load-bearing contract: a second
-    # backfill on a fully-resolved corpus does not duplicate edges.
-    # (`n_sources_cleaned` may still report 1 because the strip pass
-    # touches the source node again with an idempotent SET — that's
-    # a noisy count, not a state change. The MERGE not duplicating
-    # is what matters.)
+    # materialize on a fully-resolved corpus does not duplicate edges
+    # (MERGE dedupes). The strip pass is a no-op the second time since
+    # the resolved entries were already pruned on the first pass.
     n_edges = await xrefs.count_xref_edges(kg_client, MONDO_TERM_LABEL)
     assert n_edges == 1
 
@@ -144,7 +146,7 @@ async def test_count_xref_edges_returns_per_ontology_count(
             ("MONDO:0002", ["MESH:D002"]),
         ],
     )
-    await xrefs.backfill_resolved_xrefs(kg_client)
+    await xrefs.materialize_xref_edges_for_ontology(kg_client, MONDO_TERM_LABEL)
 
     n_mondo = await xrefs.count_xref_edges(kg_client, MONDO_TERM_LABEL)
     n_mesh = await xrefs.count_xref_edges(kg_client, MESH_TERM_LABEL)
@@ -167,7 +169,7 @@ async def test_count_dangling_xrefs_counts_source_nodes(
             ("MONDO:0002", ["MESH:UNKNOWN_2"]),
         ],
     )
-    await xrefs.backfill_resolved_xrefs(kg_client)
+    await _resolve_and_tidy(kg_client, MONDO_TERM_LABEL)
 
     # MONDO:0001 still has MESH:UNKNOWN_1 dangling; MONDO:0002 still
     # has MESH:UNKNOWN_2 dangling — both count.
@@ -175,12 +177,13 @@ async def test_count_dangling_xrefs_counts_source_nodes(
     assert n_dangling == 2
 
 
-async def test_clear_xref_edges_for_ontology_drops_only_target(
+async def test_remove_xref_edges_for_ontology_drops_only_target(
     kg_client: Any, ensure_constraints: None, clean_kg: None
 ) -> None:
-    """`clear_xref_edges_for_ontology(client, term_label)` drops
-    outgoing :<X>_XREF edges from the target ontology only;
-    other ontologies' edges survive."""
+    """`remove_xref_edges_for_ontology(client, term_label)` deletes the
+    outgoing :<X>_XREF edges of the target ontology only; other
+    ontologies' edges survive, and the dangling_xrefs property is left
+    intact."""
     await _seed_target(kg_client, MESH_TERM_LABEL, "MESH:D001")
     await _seed_terms(
         kg_client,
@@ -196,17 +199,47 @@ async def test_clear_xref_edges_for_ontology_drops_only_target(
             ("HPO:0001", ["MESH:D001"]),
         ],
     )
-    await xrefs.backfill_resolved_xrefs(kg_client)
+    await xrefs.materialize_xref_edges_for_ontology(kg_client, MONDO_TERM_LABEL)
+    await xrefs.materialize_xref_edges_for_ontology(kg_client, HPO_TERM_LABEL)
 
     # Pre-clear: both MONDO and HPO have 1 outgoing edge.
     assert await xrefs.count_xref_edges(kg_client, MONDO_TERM_LABEL) == 1
     assert await xrefs.count_xref_edges(kg_client, HPO_TERM_LABEL) == 1
 
-    n_cleared = await xrefs.clear_xref_edges_for_ontology(kg_client, MONDO_TERM_LABEL)
-    # n_cleared = edges deleted + dangling_xrefs props removed
-    # = 1 (MONDO->MESH edge) + 1 (MONDO:0001 dangling_xrefs prop) = 2.
-    assert n_cleared == 2
+    n_deleted = await xrefs.remove_xref_edges_for_ontology(kg_client, MONDO_TERM_LABEL)
+    # Edges only: the single MONDO->MESH edge.
+    assert n_deleted == 1
 
-    # Post-clear: MONDO empty, HPO untouched.
+    # Post-clear: MONDO edges gone, HPO untouched; MONDO's property survives.
     assert await xrefs.count_xref_edges(kg_client, MONDO_TERM_LABEL) == 0
     assert await xrefs.count_xref_edges(kg_client, HPO_TERM_LABEL) == 1
+    async with kg_client.driver.session() as session:
+        res = await session.run(
+            f"MATCH (s:{MONDO_TERM_LABEL} {{id: 'MONDO:0001'}}) RETURN s.dangling_xrefs AS d"
+        )
+        row = await res.single()
+    assert row["d"] is not None
+
+
+async def test_remove_dangling_xrefs_for_ontology_wipes_property_keeps_edges(
+    kg_client: Any, ensure_constraints: None, clean_kg: None
+) -> None:
+    """`remove_dangling_xrefs_for_ontology` removes the dangling_xrefs
+    property but leaves the :<X>_XREF edges in place."""
+    await _seed_target(kg_client, MESH_TERM_LABEL, "MESH:D001")
+    await _seed_terms(
+        kg_client,
+        MONDO_TERM_LABEL,
+        [
+            ("MONDO:0001", ["MESH:D001"]),
+        ],
+    )
+    await xrefs.materialize_xref_edges_for_ontology(kg_client, MONDO_TERM_LABEL)
+    assert await xrefs.count_xref_edges(kg_client, MONDO_TERM_LABEL) == 1
+
+    n_cleared = await xrefs.remove_dangling_xrefs_for_ontology(kg_client, MONDO_TERM_LABEL)
+    assert n_cleared == 1
+
+    # Property gone, edge kept.
+    assert await xrefs.count_dangling_xrefs(kg_client, MONDO_TERM_LABEL) == 0
+    assert await xrefs.count_xref_edges(kg_client, MONDO_TERM_LABEL) == 1

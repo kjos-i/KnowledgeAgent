@@ -155,7 +155,7 @@ class ImportOntologyPlan:
                 f"ontology's cross-ontology xref strings will be "
                 f"stored as `dangling_xrefs` properties on each "
                 f"source term. No `:<X>_XREF` edges are written at "
-                f"import time; run the `backfill_xrefs` op (or flip "
+                f"import time; run the `Materialize xref edges` op (or flip "
                 f'the layer to "use") to materialise resolved edges.'
             )
         if self.xrefs_mode == "use":
@@ -625,7 +625,7 @@ class InstallXrefsPlan:
 
     Read-only: no `execute` side. The actual flip is a `corpus.toml`
     edit by the user / GUI; the data materialised by the flip happens
-    on the next ingest OR via the `backfill_xrefs` bulk_op.
+    on the next ingest OR via the `Materialize xref edges` bulk_op.
 
     Fields:
       - `new_xrefs_mode`: the mode the user is about to switch to
@@ -680,7 +680,7 @@ class InstallXrefsPlan:
                 "them as `dangling_xrefs` properties, but will NOT "
                 "write `:<X>_XREF` edges. Already-imported ontologies "
                 "stay unchanged — force-re-import them or run the "
-                "future-targeted `backfill_xrefs` op to start "
+                "future-targeted `Materialize xref edges` op to start "
                 "collecting their xrefs."
             )
         # "use"
@@ -691,7 +691,7 @@ class InstallXrefsPlan:
             "pointing at not-yet-imported ontologies stay in "
             "`dangling_xrefs` for a later backfill. Already-imported "
             "ontologies stay unchanged — force-re-import them or run "
-            "`backfill_xrefs` to materialise their xrefs."
+            "`Materialize xref edges` to materialise their xrefs."
         )
 
 

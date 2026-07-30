@@ -21,7 +21,6 @@ from knowledge_agent.corpus_config import (
 from knowledge_agent.ingestion.bulk_ops import (
     AddPlan,
     AddResult,
-    BackfillXrefsPlan,
     BulkBackfillPlan,
     BulkBackfillResult,
     BulkReEmbedPlan,
@@ -35,15 +34,16 @@ from knowledge_agent.ingestion.bulk_ops import (
     IngestFolderItem,
     IngestFolderPlan,
     IngestFolderResult,
+    MaterializeXrefEdgesPlan,
     RebuildVectorIndexPlan,
     RebuildVectorIndexResult,
     RecomputeCrossDocXrefsPlan,
+    StripAllXrefsPlan,
+    StripMaterializedXrefsPlan,
     SyncPlan,
     SyncResult,
     add_execute,
     add_plan,
-    backfill_xrefs_execute,
-    backfill_xrefs_plan,
     bulk_backfill_chunks_execute,
     bulk_backfill_chunks_plan,
     bulk_backfill_cross_doc_execute,
@@ -66,8 +66,14 @@ from knowledge_agent.ingestion.bulk_ops import (
     delete_doc_plan,
     ingest_folder_execute,
     ingest_folder_plan,
+    materialize_xref_edges_execute,
+    materialize_xref_edges_plan,
     recompute_cross_doc_xrefs_execute,
     recompute_cross_doc_xrefs_plan,
+    strip_all_xrefs_execute,
+    strip_all_xrefs_plan,
+    strip_materialized_xrefs_execute,
+    strip_materialized_xrefs_plan,
     sync_execute,
     sync_plan,
 )
@@ -1836,7 +1842,7 @@ async def test_bulk_resolve_openalex_execute_returns_result_dataclass():
     assert isinstance(result, BulkResolveOpenAlexResult)
 
 
-# ---- backfill_xrefs (L7 cross-ontology xref resolution) ----
+# ---- materialize_xref_edges (L7: resolve dangling xrefs into edges) ----
 
 
 def _config_xrefs(
@@ -1874,9 +1880,11 @@ def _config_xrefs(
     )
 
 
-def test_backfill_xrefs_plan_summary_when_layer_off():
+def test_materialize_xref_edges_plan_summary_when_layer_off():
     """xrefs="none" -> summary calls out the no-op state."""
-    plan = BackfillXrefsPlan(
+    plan = MaterializeXrefEdgesPlan(
+        ontology_names=("mesh",),
+        term_labels=("MeSHTerm",),
         xrefs_mode="none",
         n_dangling_sources=0,
         will_recompute_l10=False,
@@ -1886,9 +1894,12 @@ def test_backfill_xrefs_plan_summary_when_layer_off():
     assert '"none"' in plan.summary
 
 
-def test_backfill_xrefs_plan_summary_use_no_l10():
-    """xrefs on, L10 off -> summary describes resolution but not L10."""
-    plan = BackfillXrefsPlan(
+def test_materialize_xref_edges_plan_summary_use_no_l10():
+    """xrefs on, L10 off -> summary describes resolution but not L10, and
+    names the selected ontologies."""
+    plan = MaterializeXrefEdgesPlan(
+        ontology_names=("mesh", "go"),
+        term_labels=("MeSHTerm", "GOTerm"),
         xrefs_mode="use",
         n_dangling_sources=42,
         will_recompute_l10=False,
@@ -1897,12 +1908,15 @@ def test_backfill_xrefs_plan_summary_use_no_l10():
     s = plan.summary
     assert "42" in s
     assert "MERGEd" in s or "idempotent" in s
+    assert "mesh" in s and "go" in s
     # No L10 mention when the layer is off.
     assert "RELATED_BY_XREF" not in s
 
 
-def test_backfill_xrefs_plan_summary_use_plus_l10_mentions_rebuild():
-    plan = BackfillXrefsPlan(
+def test_materialize_xref_edges_plan_summary_use_plus_l10_mentions_rebuild():
+    plan = MaterializeXrefEdgesPlan(
+        ontology_names=("mesh",),
+        term_labels=("MeSHTerm",),
         xrefs_mode="use",
         n_dangling_sources=100,
         will_recompute_l10=True,
@@ -1914,52 +1928,55 @@ def test_backfill_xrefs_plan_summary_use_plus_l10_mentions_rebuild():
     assert "threshold=3" in s
 
 
-async def test_backfill_xrefs_plan_aggregates_dangling_across_all_sub_labels():
-    """The factory sums `count_dangling_xrefs` per sub-label."""
-    kg_mock = MagicMock()
-    counts = {"MeSHTerm": 4, "GOTerm": 7, "ChEBITerm": 11}
+async def test_materialize_xref_edges_plan_sums_dangling_across_selection():
+    """The plan sums `count_dangling_xrefs` over the selected ontologies
+    and maps names to term_labels."""
     with (
         patch(
             "knowledge_agent.ingestion.bulk_ops.get_kg_client",
-            return_value=kg_mock,
+            return_value=MagicMock(),
         ),
         patch(
             "knowledge_agent.ingestion.bulk_ops.xrefs.count_dangling_xrefs",
-            side_effect=lambda c, lbl: counts.get(lbl, 0),
+            side_effect=[5, 7],
         ),
     ):
-        plan = await backfill_xrefs_plan(_config_xrefs(xrefs_mode="use"))
-    assert plan.n_dangling_sources == 4 + 7 + 11
-    assert plan.will_recompute_l10 is False
+        plan = await materialize_xref_edges_plan(["mesh", "go"], _config_xrefs("use"))
+    assert plan.ontology_names == ("mesh", "go")
+    assert plan.term_labels == ("MeSHTerm", "GOTerm")
+    assert plan.n_dangling_sources == 12
     assert plan.xrefs_mode == "use"
 
 
-async def test_backfill_xrefs_plan_flags_l10_when_layer_on():
-    kg_mock = MagicMock()
+async def test_materialize_xref_edges_plan_unknown_ontology_raises():
+    with pytest.raises(ValueError):
+        await materialize_xref_edges_plan(["not-a-real-ontology"], _config_xrefs("use"))
+
+
+async def test_materialize_xref_edges_plan_flags_l10_when_layer_on():
     with (
         patch(
             "knowledge_agent.ingestion.bulk_ops.get_kg_client",
-            return_value=kg_mock,
+            return_value=MagicMock(),
         ),
         patch(
             "knowledge_agent.ingestion.bulk_ops.xrefs.count_dangling_xrefs",
             return_value=0,
         ),
     ):
-        plan = await backfill_xrefs_plan(
-            _config_xrefs(
-                xrefs_mode="use",
-                cross_doc_xrefs=True,
-                cross_doc_xrefs_threshold=5,
-            )
+        plan = await materialize_xref_edges_plan(
+            ["mesh"],
+            _config_xrefs("use", cross_doc_xrefs=True, cross_doc_xrefs_threshold=5),
         )
     assert plan.will_recompute_l10 is True
     assert plan.l10_threshold == 5
 
 
-async def test_backfill_xrefs_execute_skips_when_layer_off():
+async def test_materialize_xref_edges_execute_skips_when_layer_off():
     """xrefs="none" -> execute returns skipped result, no client calls."""
-    plan = BackfillXrefsPlan(
+    plan = MaterializeXrefEdgesPlan(
+        ontology_names=("mesh",),
+        term_labels=("MeSHTerm",),
         xrefs_mode="none",
         n_dangling_sources=0,
         will_recompute_l10=False,
@@ -1970,65 +1987,93 @@ async def test_backfill_xrefs_execute_skips_when_layer_off():
             "knowledge_agent.ingestion.bulk_ops.get_kg_client",
         ) as get_client,
         patch(
-            "knowledge_agent.ingestion.bulk_ops.xrefs.backfill_resolved_xrefs",
-        ) as backfill,
+            "knowledge_agent.ingestion.bulk_ops.xrefs.materialize_xref_edges_for_ontology",
+        ) as materialize,
     ):
-        result = await backfill_xrefs_execute(plan, _config_xrefs("none"))
+        result = await materialize_xref_edges_execute(plan)
     assert result.xrefs_layer_skipped is True
-    assert result.per_ontology_counts is None
+    assert result.per_ontology_edges == {}
     assert result.l10_attempted is False
     get_client.assert_not_called()
-    backfill.assert_not_called()
+    materialize.assert_not_called()
 
 
-async def test_backfill_xrefs_execute_calls_resolve_when_layer_on():
-    plan = BackfillXrefsPlan(
+async def test_materialize_xref_edges_execute_resolves_each_selected_ontology():
+    """Resolves each selected ontology; per_ontology_edges maps term_label
+    to count; L10 not touched when the layer is off."""
+    plan = MaterializeXrefEdgesPlan(
+        ontology_names=("mesh", "go"),
+        term_labels=("MeSHTerm", "GOTerm"),
         xrefs_mode="use",
         n_dangling_sources=5,
         will_recompute_l10=False,
         l10_threshold=2,
     )
-    fake_counts = {"MeSHTerm": {"n_edges_attempted": 5, "n_sources_cleaned": 3}}
     with (
         patch(
             "knowledge_agent.ingestion.bulk_ops.get_kg_client",
             return_value=MagicMock(),
         ),
         patch(
-            "knowledge_agent.ingestion.bulk_ops.xrefs.backfill_resolved_xrefs",
-            return_value=fake_counts,
-        ) as backfill,
+            "knowledge_agent.ingestion.bulk_ops.xrefs.materialize_xref_edges_for_ontology",
+            side_effect=[5, 7],
+        ) as materialize,
         patch(
             "knowledge_agent.ingestion.bulk_ops."
             "cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global",
         ) as l10_recompute,
     ):
-        result = await backfill_xrefs_execute(plan, _config_xrefs("use"))
-    backfill.assert_called_once()
+        result = await materialize_xref_edges_execute(plan)
+    assert materialize.call_count == 2
     l10_recompute.assert_not_called()
     assert result.xrefs_layer_skipped is False
-    assert result.per_ontology_counts == fake_counts
+    assert result.per_ontology_edges == {"MeSHTerm": 5, "GOTerm": 7}
     assert result.l10_attempted is False
 
 
-async def test_backfill_xrefs_execute_calls_l10_recompute_when_layer_on():
-    """When `plan.will_recompute_l10 is True`, the L10 global rebuild
-    is invoked with the plan's threshold."""
-    plan = BackfillXrefsPlan(
+async def test_materialize_xref_edges_execute_fail_soft_per_ontology():
+    """One ontology's resolve raising -> its entry is None, others still run."""
+    plan = MaterializeXrefEdgesPlan(
+        ontology_names=("mesh", "go"),
+        term_labels=("MeSHTerm", "GOTerm"),
         xrefs_mode="use",
         n_dangling_sources=5,
-        will_recompute_l10=True,
-        l10_threshold=3,
+        will_recompute_l10=False,
+        l10_threshold=2,
     )
-    fake_counts = {"MeSHTerm": {"n_edges_attempted": 5, "n_sources_cleaned": 3}}
     with (
         patch(
             "knowledge_agent.ingestion.bulk_ops.get_kg_client",
             return_value=MagicMock(),
         ),
         patch(
-            "knowledge_agent.ingestion.bulk_ops.xrefs.backfill_resolved_xrefs",
-            return_value=fake_counts,
+            "knowledge_agent.ingestion.bulk_ops.xrefs.materialize_xref_edges_for_ontology",
+            side_effect=[RuntimeError("boom"), 7],
+        ),
+    ):
+        result = await materialize_xref_edges_execute(plan)
+    assert result.per_ontology_edges == {"MeSHTerm": None, "GOTerm": 7}
+
+
+async def test_materialize_xref_edges_execute_recomputes_l10_when_planned():
+    """When `plan.will_recompute_l10 is True`, the L10 global rebuild is
+    invoked with the plan's threshold."""
+    plan = MaterializeXrefEdgesPlan(
+        ontology_names=("mesh",),
+        term_labels=("MeSHTerm",),
+        xrefs_mode="use",
+        n_dangling_sources=5,
+        will_recompute_l10=True,
+        l10_threshold=3,
+    )
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.get_kg_client",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.xrefs.materialize_xref_edges_for_ontology",
+            return_value=5,
         ),
         patch(
             "knowledge_agent.ingestion.bulk_ops."
@@ -2036,10 +2081,7 @@ async def test_backfill_xrefs_execute_calls_l10_recompute_when_layer_on():
             return_value=42,
         ) as l10_recompute,
     ):
-        result = await backfill_xrefs_execute(
-            plan,
-            _config_xrefs("use", cross_doc_xrefs=True),
-        )
+        result = await materialize_xref_edges_execute(plan)
     l10_recompute.assert_called_once()
     # Verify threshold flowed through positionally.
     args, _ = l10_recompute.call_args
@@ -2174,17 +2216,17 @@ async def test_recompute_cross_doc_xrefs_execute_reraises_on_failure():
         await recompute_cross_doc_xrefs_execute(plan)
 
 
-# ---- clear_xref_edges (per-ontology xref wipe) ----
+# ---- clear_xref_edges (L7: delete xref edges for the selection) ----
 
 
 async def test_clear_xref_edges_plan_unknown_ontology_raises():
     with pytest.raises(ValueError):
-        await clear_xref_edges_plan("not-a-real-ontology", _config())
+        await clear_xref_edges_plan(["not-a-real-ontology"], _config())
 
 
-async def test_clear_xref_edges_plan_carries_counts_and_term_label():
-    """Plan captures both edge + dangling counts so execute can run
-    deterministically without re-querying."""
+async def test_clear_xref_edges_plan_sums_edges_and_maps_labels():
+    """Plan sums the edge count across the selection and maps names to
+    term_labels, so execute runs without re-querying."""
     with (
         patch(
             "knowledge_agent.ingestion.bulk_ops.get_kg_client",
@@ -2192,18 +2234,13 @@ async def test_clear_xref_edges_plan_carries_counts_and_term_label():
         ),
         patch(
             "knowledge_agent.ingestion.bulk_ops.xrefs.count_xref_edges",
-            return_value=12,
-        ),
-        patch(
-            "knowledge_agent.ingestion.bulk_ops.xrefs.count_dangling_xrefs",
-            return_value=7,
+            side_effect=[12, 3],
         ),
     ):
-        plan = await clear_xref_edges_plan("mesh", _config())
-    assert plan.ontology_name == "mesh"
-    assert plan.term_label == "MeSHTerm"
-    assert plan.n_existing_edges == 12
-    assert plan.n_dangling_sources == 7
+        plan = await clear_xref_edges_plan(["mesh", "go"], _config())
+    assert plan.ontology_names == ("mesh", "go")
+    assert plan.term_labels == ("MeSHTerm", "GOTerm")
+    assert plan.n_existing_edges == 15
     # _config() has cross_doc_xrefs off -> no L10 recompute planned.
     assert plan.will_recompute_l10 is False
 
@@ -2211,26 +2248,28 @@ async def test_clear_xref_edges_plan_carries_counts_and_term_label():
 def test_clear_xref_edges_plan_summary_mentions_outbound_only():
     """The summary explicitly states inbound xrefs are left alone."""
     plan = ClearXrefEdgesPlan(
-        ontology_name="mesh",
-        term_label="MeSHTerm",
+        ontology_names=("mesh",),
+        term_labels=("MeSHTerm",),
         n_existing_edges=10,
-        n_dangling_sources=4,
+        will_recompute_l10=False,
+        l10_threshold=2,
     )
     s = plan.summary
-    assert "outgoing" in s
+    assert "outbound" in s.lower() or "outgoing" in s.lower()
     assert "INBOUND" in s
     assert "10" in s
-    assert "4" in s
+    assert "mesh" in s
 
 
-async def test_clear_xref_edges_execute_delegates_to_kg_helper():
-    """Execute calls `xrefs.clear_xref_edges_for_ontology` with
-    the plan's term_label and returns the sum."""
+async def test_clear_xref_edges_execute_deletes_each_selected_ontology():
+    """Execute deletes edges per selected ontology and maps term_label to
+    the count; L10 not touched when the layer is off."""
     plan = ClearXrefEdgesPlan(
-        ontology_name="mesh",
-        term_label="MeSHTerm",
-        n_existing_edges=10,
-        n_dangling_sources=4,
+        ontology_names=("mesh", "go"),
+        term_labels=("MeSHTerm", "GOTerm"),
+        n_existing_edges=14,
+        will_recompute_l10=False,
+        l10_threshold=2,
     )
     with (
         patch(
@@ -2238,25 +2277,29 @@ async def test_clear_xref_edges_execute_delegates_to_kg_helper():
             return_value=MagicMock(),
         ),
         patch(
-            "knowledge_agent.ingestion.bulk_ops.xrefs.clear_xref_edges_for_ontology",
-            return_value=14,
-        ) as clear_fn,
+            "knowledge_agent.ingestion.bulk_ops.xrefs.remove_xref_edges_for_ontology",
+            side_effect=[10, 4],
+        ) as remove_fn,
+        patch(
+            "knowledge_agent.ingestion.bulk_ops."
+            "cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global",
+        ) as l10_recompute,
     ):
         result = await clear_xref_edges_execute(plan)
-    clear_fn.assert_called_once()
-    args, _ = clear_fn.call_args
-    assert args[1] == "MeSHTerm"
-    assert result.ontology_name == "mesh"
-    assert result.n_cleared == 14
+    assert remove_fn.call_count == 2
+    l10_recompute.assert_not_called()
+    assert result.per_ontology_deleted == {"MeSHTerm": 10, "GOTerm": 4}
+    assert result.l10_attempted is False
 
 
-async def test_clear_xref_edges_execute_fail_soft_when_helper_returns_none():
-    """Helper returns None on Cypher error -> result.n_cleared is None."""
+async def test_clear_xref_edges_execute_fail_soft_per_ontology():
+    """One ontology's delete raising -> its entry is None, others still run."""
     plan = ClearXrefEdgesPlan(
-        ontology_name="mesh",
-        term_label="MeSHTerm",
+        ontology_names=("mesh", "go"),
+        term_labels=("MeSHTerm", "GOTerm"),
         n_existing_edges=0,
-        n_dangling_sources=0,
+        will_recompute_l10=False,
+        l10_threshold=2,
     )
     with (
         patch(
@@ -2264,13 +2307,12 @@ async def test_clear_xref_edges_execute_fail_soft_when_helper_returns_none():
             return_value=MagicMock(),
         ),
         patch(
-            "knowledge_agent.ingestion.bulk_ops.xrefs.clear_xref_edges_for_ontology",
-            return_value=None,
+            "knowledge_agent.ingestion.bulk_ops.xrefs.remove_xref_edges_for_ontology",
+            side_effect=[RuntimeError("boom"), 4],
         ),
     ):
         result = await clear_xref_edges_execute(plan)
-    assert result.n_cleared is None
-    assert result.ontology_name == "mesh"
+    assert result.per_ontology_deleted == {"MeSHTerm": None, "GOTerm": 4}
 
 
 async def test_clear_xref_edges_plan_flags_l10_when_layer_on():
@@ -2285,13 +2327,9 @@ async def test_clear_xref_edges_plan_flags_l10_when_layer_on():
             "knowledge_agent.ingestion.bulk_ops.xrefs.count_xref_edges",
             return_value=3,
         ),
-        patch(
-            "knowledge_agent.ingestion.bulk_ops.xrefs.count_dangling_xrefs",
-            return_value=1,
-        ),
     ):
         plan = await clear_xref_edges_plan(
-            "mesh",
+            ["mesh"],
             _config_xrefs("use", cross_doc_xrefs=True, cross_doc_xrefs_threshold=4),
         )
     assert plan.will_recompute_l10 is True
@@ -2304,10 +2342,9 @@ async def test_clear_xref_edges_execute_recomputes_l10_when_planned():
     rebuild with the plan's threshold, so L10 doesn't reference the
     now-deleted equivalences."""
     plan = ClearXrefEdgesPlan(
-        ontology_name="mesh",
-        term_label="MeSHTerm",
+        ontology_names=("mesh",),
+        term_labels=("MeSHTerm",),
         n_existing_edges=5,
-        n_dangling_sources=2,
         will_recompute_l10=True,
         l10_threshold=4,
     )
@@ -2317,7 +2354,7 @@ async def test_clear_xref_edges_execute_recomputes_l10_when_planned():
             return_value=MagicMock(),
         ),
         patch(
-            "knowledge_agent.ingestion.bulk_ops.xrefs.clear_xref_edges_for_ontology",
+            "knowledge_agent.ingestion.bulk_ops.xrefs.remove_xref_edges_for_ontology",
             return_value=5,
         ),
         patch(
@@ -2330,7 +2367,164 @@ async def test_clear_xref_edges_execute_recomputes_l10_when_planned():
     l10_recompute.assert_called_once()
     args, _ = l10_recompute.call_args
     assert args[1] == 4
-    assert result.n_cleared == 5
+    assert result.per_ontology_deleted == {"MeSHTerm": 5}
+
+
+# ---- strip_materialized_xrefs (L7: prune resolved dangling entries) ----
+
+
+async def test_strip_materialized_xrefs_plan_sums_dangling_and_maps_labels():
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.get_kg_client",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.xrefs.count_dangling_xrefs",
+            side_effect=[5, 2],
+        ),
+    ):
+        plan = await strip_materialized_xrefs_plan(["mesh", "go"], _config())
+    assert plan.ontology_names == ("mesh", "go")
+    assert plan.term_labels == ("MeSHTerm", "GOTerm")
+    assert plan.n_dangling_sources == 7
+
+
+def test_strip_materialized_xrefs_plan_summary_no_edges_no_l10():
+    plan = StripMaterializedXrefsPlan(
+        ontology_names=("mesh",),
+        term_labels=("MeSHTerm",),
+        n_dangling_sources=4,
+    )
+    s = plan.summary
+    assert "mesh" in s
+    assert "no edges" in s.lower()
+    assert "RELATED_BY_XREF" not in s
+
+
+async def test_strip_materialized_xrefs_execute_tidies_each_ontology_no_l10():
+    plan = StripMaterializedXrefsPlan(
+        ontology_names=("mesh", "go"),
+        term_labels=("MeSHTerm", "GOTerm"),
+        n_dangling_sources=6,
+    )
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.get_kg_client",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.xrefs.strip_materialized_xrefs_for_ontology",
+            side_effect=[3, 1],
+        ) as strip_fn,
+        patch(
+            "knowledge_agent.ingestion.bulk_ops."
+            "cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global",
+        ) as l10_recompute,
+    ):
+        result = await strip_materialized_xrefs_execute(plan)
+    assert strip_fn.call_count == 2
+    l10_recompute.assert_not_called()
+    assert result.per_ontology_tidied == {"MeSHTerm": 3, "GOTerm": 1}
+
+
+async def test_strip_materialized_xrefs_execute_fail_soft_per_ontology():
+    plan = StripMaterializedXrefsPlan(
+        ontology_names=("mesh", "go"),
+        term_labels=("MeSHTerm", "GOTerm"),
+        n_dangling_sources=6,
+    )
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.get_kg_client",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.xrefs.strip_materialized_xrefs_for_ontology",
+            side_effect=[RuntimeError("boom"), 1],
+        ),
+    ):
+        result = await strip_materialized_xrefs_execute(plan)
+    assert result.per_ontology_tidied == {"MeSHTerm": None, "GOTerm": 1}
+
+
+# ---- strip_all_xrefs (L7: remove the dangling_xrefs property) ----
+
+
+async def test_strip_all_xrefs_plan_sums_dangling_and_maps_labels():
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.get_kg_client",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.xrefs.count_dangling_xrefs",
+            side_effect=[5, 2],
+        ),
+    ):
+        plan = await strip_all_xrefs_plan(["mesh", "go"], _config())
+    assert plan.ontology_names == ("mesh", "go")
+    assert plan.term_labels == ("MeSHTerm", "GOTerm")
+    assert plan.n_dangling_sources == 7
+
+
+def test_strip_all_xrefs_plan_summary_warns_reimport_no_l10():
+    plan = StripAllXrefsPlan(
+        ontology_names=("mesh",),
+        term_labels=("MeSHTerm",),
+        n_dangling_sources=4,
+    )
+    s = plan.summary
+    assert "mesh" in s
+    assert "re-import" in s
+    assert "no edges" in s.lower()
+    assert "RELATED_BY_XREF" not in s
+
+
+async def test_strip_all_xrefs_execute_removes_property_each_ontology_no_l10():
+    plan = StripAllXrefsPlan(
+        ontology_names=("mesh", "go"),
+        term_labels=("MeSHTerm", "GOTerm"),
+        n_dangling_sources=6,
+    )
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.get_kg_client",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.xrefs.remove_dangling_xrefs_for_ontology",
+            side_effect=[3, 1],
+        ) as remove_fn,
+        patch(
+            "knowledge_agent.ingestion.bulk_ops."
+            "cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global",
+        ) as l10_recompute,
+    ):
+        result = await strip_all_xrefs_execute(plan)
+    assert remove_fn.call_count == 2
+    l10_recompute.assert_not_called()
+    assert result.per_ontology_cleared == {"MeSHTerm": 3, "GOTerm": 1}
+
+
+async def test_strip_all_xrefs_execute_fail_soft_per_ontology():
+    plan = StripAllXrefsPlan(
+        ontology_names=("mesh", "go"),
+        term_labels=("MeSHTerm", "GOTerm"),
+        n_dangling_sources=6,
+    )
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.get_kg_client",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.xrefs.remove_dangling_xrefs_for_ontology",
+            side_effect=[RuntimeError("boom"), 1],
+        ),
+    ):
+        result = await strip_all_xrefs_execute(plan)
+    assert result.per_ontology_cleared == {"MeSHTerm": None, "GOTerm": 1}
 
 
 # ---- end-of-action index maintenance (deferred optimize / auto-rebuild /

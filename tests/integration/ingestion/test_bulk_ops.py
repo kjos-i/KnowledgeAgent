@@ -21,7 +21,7 @@ Covers every bulk_op exposed to the GUI:
     - bulk_backfill_cross_doc (L9 — pure Cypher)
 
   Xref ops (L7 cross-ontology + L10):
-    - backfill_xrefs (uses synthetic OntologyTerm)
+    - materialize_xref_edges (uses synthetic OntologyTerm)
     - recompute_cross_doc_xrefs (uses synthetic OntologyTerm +
       canonical entities)
     - clear_xref_edges
@@ -65,17 +65,15 @@ from knowledge_agent.corpus_config import (
     OntologyConfig,
 )
 from knowledge_agent.ingestion.bulk_ops import (
-    BackfillXrefsPlan,
     BulkBackfillPlan,
     BulkReEmbedPlan,
     BulkResolveOpenAlexPlan,
     ClearXrefEdgesPlan,
     DeleteDocPlan,
     IngestFolderPlan,
+    MaterializeXrefEdgesPlan,
     RecomputeCrossDocXrefsPlan,
     SyncPlan,
-    backfill_xrefs_execute,
-    backfill_xrefs_plan,
     bulk_backfill_chunks_execute,
     bulk_backfill_chunks_plan,
     bulk_backfill_cross_doc_execute,
@@ -96,6 +94,8 @@ from knowledge_agent.ingestion.bulk_ops import (
     delete_doc_plan,
     ingest_folder_execute,
     ingest_folder_plan,
+    materialize_xref_edges_execute,
+    materialize_xref_edges_plan,
     recompute_cross_doc_xrefs_execute,
     recompute_cross_doc_xrefs_plan,
     sync_execute,
@@ -658,15 +658,16 @@ async def test_bulk_backfill_cross_doc_runs_recompute_per_doc(
 
 
 # ---------------------------------------------------------------------------
-# backfill_xrefs (synthetic OntologyTerm setup)
+# materialize_xref_edges (synthetic OntologyTerm setup)
 # ---------------------------------------------------------------------------
 
 
-async def test_backfill_xrefs_resolves_dangling_xrefs(
+async def test_materialize_xref_edges_resolves_dangling_xrefs(
     kg_client: Any, ensure_constraints: None
 ) -> None:
     """Pre-seed two :OntologyTerm nodes where one has a dangling_xref
-    pointing at the other; backfill_xrefs creates the resolved edge."""
+    pointing at the other; materialize_xref_edges creates the resolved
+    edge."""
     # Clean state then seed.
     async with kg_client.driver.session() as session:
         await session.run("MATCH (n) DETACH DELETE n")
@@ -690,13 +691,13 @@ async def test_backfill_xrefs_resolves_dangling_xrefs(
         },
     )
 
-    plan = await backfill_xrefs_plan(config)
-    assert isinstance(plan, BackfillXrefsPlan)
+    plan = await materialize_xref_edges_plan(["mondo"], config)
+    assert isinstance(plan, MaterializeXrefEdgesPlan)
     assert plan.n_dangling_sources >= 1
 
-    result = await backfill_xrefs_execute(plan, config)
+    result = await materialize_xref_edges_execute(plan)
     assert result.xrefs_layer_skipped is False
-    assert result.per_ontology_counts is not None
+    assert result.per_ontology_edges.get(MONDO_TERM_LABEL) is not None
 
     # The :MONDO_XREF edge from MONDO:0005066 → MESH:D008659 exists.
     async with kg_client.driver.session() as session:
@@ -709,16 +710,16 @@ async def test_backfill_xrefs_resolves_dangling_xrefs(
     assert row is not None
 
 
-async def test_backfill_xrefs_skips_when_xrefs_mode_none(
+async def test_materialize_xref_edges_skips_when_xrefs_mode_none(
     kg_client: Any, ensure_constraints: None
 ) -> None:
     """When `layers.xrefs == "none"`, execute returns a skipped
     result without touching the graph."""
     config = _entities_corpus_config()  # xrefs="none" by default
-    plan = await backfill_xrefs_plan(config)
-    result = await backfill_xrefs_execute(plan, config)
+    plan = await materialize_xref_edges_plan(["mondo"], config)
+    result = await materialize_xref_edges_execute(plan)
     assert result.xrefs_layer_skipped is True
-    assert result.per_ontology_counts is None
+    assert result.per_ontology_edges == {}
 
 
 # ---------------------------------------------------------------------------
@@ -818,11 +819,11 @@ async def test_clear_xref_edges_drops_target_ontology_edges(
             f"MERGE (s)-[:MESH_XREF]->(t)"
         )
 
-    plan = await clear_xref_edges_plan("mondo", _minimal_corpus_config())
+    plan = await clear_xref_edges_plan(["mondo"], _minimal_corpus_config())
     assert isinstance(plan, ClearXrefEdgesPlan)
     result = await clear_xref_edges_execute(plan)
-    # n_cleared = edges deleted + dangling_xrefs props removed.
-    assert result.n_cleared is not None and result.n_cleared >= 1
+    # Edges only: the MONDO_XREF edge is deleted.
+    assert result.per_ontology_deleted.get(MONDO_TERM_LABEL) == 1
 
     # MONDO_XREF gone; MESH_XREF survives.
     async with kg_client.driver.session() as session:

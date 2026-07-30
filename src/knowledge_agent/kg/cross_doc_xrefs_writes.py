@@ -42,7 +42,7 @@ Graph-wide recompute:
 
   - `recompute_cross_doc_xrefs_global(threshold)` wipes every
     `:RELATED_BY_XREF` edge in the graph then rebuilds from scratch
-    over all `(doc, other)` pairs. Used by the `backfill_xrefs`
+    over all `(doc, other)` pairs. Used by the `materialize_xref_edges`
     bulk_op when the user's already-imported corpus catches up on
     newly-resolved xref edges (e.g. after backfill turned dangling
     strings into real edges, the L10 view needs a refresh).
@@ -54,7 +54,7 @@ Idempotency:
   - `delete_doc` does NOT need an explicit L10 cleanup: the focal
     node's DETACH DELETE removes incident `:RELATED_BY_XREF` edges
     via Neo4j cascade, same as L9.
-  - Ontology delete (via `clear_xref_edges_for_ontology` or
+  - Ontology delete (via `remove_xref_edges_for_ontology` or
     `delete_ontology_terms`) invalidates concept equivalence; the
     bulk_op `recompute_cross_doc_xrefs` is the user-facing way to
     refresh after that kind of change.
@@ -219,7 +219,7 @@ async def recompute_cross_doc_xrefs_global(
     node IDs are used because they're guaranteed unique even
     across the `:Document` / `:Artifact` label split.
 
-    Used by the `backfill_xrefs` bulk_op after dangling-xref
+    Used by the `materialize_xref_edges` bulk_op after dangling-xref
     resolution, and by the dedicated `recompute_cross_doc_xrefs`
     bulk_op for manual refresh.
 

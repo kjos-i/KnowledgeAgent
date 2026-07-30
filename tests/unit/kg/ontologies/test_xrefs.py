@@ -1,15 +1,19 @@
 """Tests for kg.ontologies.xrefs - the L7 cross-ontology xref primitives.
 
-Covers the four public primitives:
-  - backfill_resolved_xrefs (per-ontology resolve + strip passes)
-  - clear_xref_edges_for_ontology (edges + dangling_xrefs property)
+Covers the four single-purpose per-ontology primitives:
+  - materialize_xref_edges_for_ontology  (create :<X>_XREF edges)
+  - remove_xref_edges_for_ontology       (delete :<X>_XREF edges)
+  - strip_materialized_xrefs_for_ontology (prune resolved dangling entries)
+  - remove_dangling_xrefs_for_ontology   (remove the dangling_xrefs property)
+plus the two diagnostics:
   - count_dangling_xrefs (diagnostic)
   - count_xref_edges (per-ontology + all-ontologies)
 
 Tests work with a stub driver / session that records every Cypher
 call + parameters. The actual query strings carry the ontology
 sub-label and the derived xref edge type, so assertions check both
-shape and the right ontology routing.
+shape and the right ontology routing. Each primitive opens ONE session
+and runs ONE query.
 """
 
 from __future__ import annotations
@@ -78,179 +82,133 @@ class _StubClient:
     driver: _StubDriver = field(default_factory=_StubDriver)
 
 
-# ---- backfill_resolved_xrefs ----
-
-
-async def test_backfill_returns_per_ontology_dict_for_all_18():
-    """Every shipped sub-label gets an entry in the returned dict."""
-    from knowledge_agent.kg.schema import ONTOLOGY_SUB_LABELS
-
+def _one_row(n: int) -> _StubClient:
+    """A client whose first session's first query returns {"n": n}."""
     client = _StubClient()
-    # Per-call canned: 2 queries per ontology (resolve + strip), 18 ontologies = 36 results.
-    client.driver.canned_results_per_session = [
-        [_StubResult(rows=[{"n": 0}]) for _ in range(36)],
-    ]
-    result = await xrefs.backfill_resolved_xrefs(client)
-    assert result is not None
-    assert set(result.keys()) == set(ONTOLOGY_SUB_LABELS)
-    for _label, counts in result.items():
-        assert "n_edges_attempted" in counts
-        assert "n_sources_cleaned" in counts
+    client.driver.canned_results_per_session = [[_StubResult(rows=[{"n": n}])]]
+    return client
 
 
-async def test_backfill_resolve_pass_queries_use_derived_xref_type():
-    """The resolve query for MeSHTerm uses :MESH_XREF, for GOTerm uses
-    :GO_XREF, etc. Verifies the per-ontology routing via the helper."""
-    client = _StubClient()
-    client.driver.canned_results_per_session = [
-        [_StubResult(rows=[{"n": 0}]) for _ in range(36)],
-    ]
-    await xrefs.backfill_resolved_xrefs(client)
-
-    # 36 calls (2 per ontology, 18 ontologies).
-    calls = client.driver.sessions[0].calls
-    # Resolve query for MeSHTerm comes first (matches ONTOLOGY_SUB_LABELS
-    # iteration order: MESH is first).
-    resolve_cypher, _ = calls[0]
-    assert ":MeSHTerm" in resolve_cypher
-    assert ":MESH_XREF" in resolve_cypher
-    assert "MERGE (s)-[r:MESH_XREF]" in resolve_cypher
+# ---- materialize_xref_edges_for_ontology ----
 
 
-async def test_backfill_strip_pass_queries_use_derived_xref_type():
-    """The strip query for the second ontology (GO) uses :GO_XREF."""
-    client = _StubClient()
-    client.driver.canned_results_per_session = [
-        [_StubResult(rows=[{"n": 0}]) for _ in range(36)],
-    ]
-    await xrefs.backfill_resolved_xrefs(client)
-
-    calls = client.driver.sessions[0].calls
-    # GO is the 2nd ontology; its 2 queries are at indices 2 and 3.
-    go_strip_cypher, _ = calls[3]
-    assert ":GOTerm" in go_strip_cypher
-    assert ":GO_XREF" in go_strip_cypher
-    assert "WHERE NOT x IN resolved" in go_strip_cypher
-
-
-async def test_backfill_aggregates_counts_per_ontology():
-    """`n_edges_attempted` and `n_sources_cleaned` reflect the returned
-    counts from each pass per ontology."""
-    client = _StubClient()
-    # 18 ontologies * (resolve_count, strip_count). Give MeSH = (5, 3), GO = (7, 4), rest 0.
-    canned = []
-    # MeSH (first)
-    canned.append(_StubResult(rows=[{"n": 5}]))
-    canned.append(_StubResult(rows=[{"n": 3}]))
-    # GO (second)
-    canned.append(_StubResult(rows=[{"n": 7}]))
-    canned.append(_StubResult(rows=[{"n": 4}]))
-    # Remaining 16 with zeros.
-    for _ in range(16 * 2):
-        canned.append(_StubResult(rows=[{"n": 0}]))
-    client.driver.canned_results_per_session = [canned]
-
-    result = await xrefs.backfill_resolved_xrefs(client)
-    assert result["MeSHTerm"] == {
-        "n_edges_attempted": 5,
-        "n_sources_cleaned": 3,
-    }
-    assert result["GOTerm"] == {
-        "n_edges_attempted": 7,
-        "n_sources_cleaned": 4,
-    }
+async def test_materialize_returns_count_and_uses_derived_xref_type():
+    """Resolves dangling xrefs into edges: one MERGE query using the
+    ontology's derived xref type; returns the count."""
+    client = _one_row(9)
+    n = await xrefs.materialize_xref_edges_for_ontology(client, "MeSHTerm")
+    assert n == 9
+    cypher, _ = client.driver.sessions[0].calls[0]
+    assert ":MeSHTerm" in cypher
+    assert ":OntologyTerm" in cypher
+    assert "MERGE (s)-[r:MESH_XREF]" in cypher
+    # Edges only — it must NOT strip the property.
+    assert "REMOVE s.dangling_xrefs" not in cypher
+    assert "WHERE NOT x IN resolved" not in cypher
 
 
-async def test_backfill_per_ontology_failure_records_zeros_keeps_going():
-    """Cypher errors on a per-ontology pass mark that ontology as 0/0
-    but don't break the rest of the loop (caller still gets results
-    for all 18 ontologies — failed ones at zero, successful ones at
-    their real counts).
-
-    Setup: a session whose every `await run()` raises. Both passes for each
-    ontology fail, so every ontology gets {0, 0} but the loop still
-    completes."""
-    from knowledge_agent.kg.schema import ONTOLOGY_SUB_LABELS
-
-    client = _StubClient(driver=_StubDriver(raise_on_run=RuntimeError("constraint violation")))
-    result = await xrefs.backfill_resolved_xrefs(client)
-    # NOT None — the outer session opened cleanly; only the per-query
-    # MATCHes raised, caught by the helpers' try/except.
-    assert result is not None
-    # All 18 ontologies present, all with zero counts.
-    assert set(result.keys()) == set(ONTOLOGY_SUB_LABELS)
-    for _label, counts in result.items():
-        assert counts == {
-            "n_edges_attempted": 0,
-            "n_sources_cleaned": 0,
-        }
-
-
-async def test_backfill_propagates_on_session_failure():
-    """Outer session exception (e.g. driver gone) propagates; the
-    orchestrator boundary catches and records the failure."""
-
-    @dataclass
-    class _BrokenDriver:
-        def session(self) -> Any:
-            raise RuntimeError("driver closed")
-
-    client = _StubClient(driver=_BrokenDriver())  # type: ignore[arg-type]
-    with pytest.raises(RuntimeError, match="driver closed"):
-        await xrefs.backfill_resolved_xrefs(client)
-
-
-# ---- clear_xref_edges_for_ontology ----
-
-
-async def test_clear_xref_edges_deletes_edges_and_clears_dangling_property():
-    """Two passes per call: DELETE the typed edges, then REMOVE the
-    dangling_xrefs property. Returned int is `n_edges + n_props`."""
-    client = _StubClient()
-    client.driver.canned_results_per_session = [
-        [
-            _StubResult(rows=[{"n": 12}]),  # edges deleted
-            _StubResult(rows=[{"n": 7}]),  # props cleared
-        ],
-    ]
-    n = await xrefs.clear_xref_edges_for_ontology(client, "MeSHTerm")
-    assert n == 12 + 7
-
-    calls = client.driver.sessions[0].calls
-    edge_cypher, _ = calls[0]
-    assert ":MeSHTerm" in edge_cypher
-    assert ":MESH_XREF" in edge_cypher
-    assert "DELETE r" in edge_cypher
-
-    prop_cypher, _ = calls[1]
-    assert ":MeSHTerm" in prop_cypher
-    assert "REMOVE s.dangling_xrefs" in prop_cypher
-
-
-async def test_clear_xref_edges_uses_derived_xref_type_for_each_ontology():
-    """ChEBI -> CHEBI_XREF; NCBITaxon -> NCBITAXON_XREF."""
-    client = _StubClient()
-    client.driver.canned_results_per_session = [
-        [_StubResult(rows=[{"n": 0}]), _StubResult(rows=[{"n": 0}])],
-    ]
-    await xrefs.clear_xref_edges_for_ontology(client, "ChEBITerm")
-    edge_cypher, _ = client.driver.sessions[0].calls[0]
-    assert ":CHEBI_XREF" in edge_cypher
-
-
-async def test_clear_xref_edges_rejects_unknown_term_label():
-    """Unknown sub-label raises ValueError without issuing any Cypher."""
+async def test_materialize_rejects_unknown_term_label():
     client = _StubClient()
     with pytest.raises(ValueError, match="unknown term_label"):
-        await xrefs.clear_xref_edges_for_ontology(client, "NotATerm")
+        await xrefs.materialize_xref_edges_for_ontology(client, "NotATerm")
     assert client.driver.sessions == []
 
 
-async def test_clear_xref_edges_propagates_cypher_exception():
-    """Cypher exception propagates; orchestrator boundary catches."""
+async def test_materialize_propagates_cypher_exception():
     client = _StubClient(driver=_StubDriver(raise_on_run=RuntimeError("boom")))
     with pytest.raises(RuntimeError, match="boom"):
-        await xrefs.clear_xref_edges_for_ontology(client, "MeSHTerm")
+        await xrefs.materialize_xref_edges_for_ontology(client, "MeSHTerm")
+
+
+# ---- remove_xref_edges_for_ontology ----
+
+
+async def test_remove_edges_deletes_only_outbound_typed_edges():
+    """One DELETE query on the derived xref type; returns edges deleted.
+    Leaves the dangling_xrefs property alone."""
+    client = _one_row(12)
+    n = await xrefs.remove_xref_edges_for_ontology(client, "ChEBITerm")
+    assert n == 12
+    cypher, _ = client.driver.sessions[0].calls[0]
+    assert ":ChEBITerm" in cypher
+    assert ":CHEBI_XREF" in cypher
+    assert "DELETE r" in cypher
+    assert "REMOVE s.dangling_xrefs" not in cypher
+
+
+async def test_remove_edges_rejects_unknown_term_label():
+    client = _StubClient()
+    with pytest.raises(ValueError, match="unknown term_label"):
+        await xrefs.remove_xref_edges_for_ontology(client, "NotATerm")
+    assert client.driver.sessions == []
+
+
+async def test_remove_edges_propagates_cypher_exception():
+    client = _StubClient(driver=_StubDriver(raise_on_run=RuntimeError("boom")))
+    with pytest.raises(RuntimeError, match="boom"):
+        await xrefs.remove_xref_edges_for_ontology(client, "MeSHTerm")
+
+
+# ---- strip_materialized_xrefs_for_ontology ----
+
+
+async def test_strip_materialized_prunes_resolved_entries_only():
+    """One property-rewrite query keyed off existing edges of the derived
+    type; returns source nodes tidied. Touches no edges."""
+    client = _one_row(7)
+    n = await xrefs.strip_materialized_xrefs_for_ontology(client, "GOTerm")
+    assert n == 7
+    cypher, _ = client.driver.sessions[0].calls[0]
+    assert ":GOTerm" in cypher
+    assert ":GO_XREF" in cypher
+    assert "WHERE NOT x IN resolved" in cypher
+    assert "SET s.dangling_xrefs" in cypher
+    # Property tidy only — no edge deletion / creation.
+    assert "DELETE r" not in cypher
+    assert "MERGE (s)-[r" not in cypher
+
+
+async def test_strip_materialized_rejects_unknown_term_label():
+    client = _StubClient()
+    with pytest.raises(ValueError, match="unknown term_label"):
+        await xrefs.strip_materialized_xrefs_for_ontology(client, "NotATerm")
+    assert client.driver.sessions == []
+
+
+async def test_strip_materialized_propagates_cypher_exception():
+    client = _StubClient(driver=_StubDriver(raise_on_run=RuntimeError("boom")))
+    with pytest.raises(RuntimeError, match="boom"):
+        await xrefs.strip_materialized_xrefs_for_ontology(client, "MeSHTerm")
+
+
+# ---- remove_dangling_xrefs_for_ontology ----
+
+
+async def test_remove_dangling_removes_whole_property():
+    """One REMOVE query wiping the entire dangling_xrefs property; returns
+    source nodes cleared. Touches no edges."""
+    client = _one_row(4)
+    n = await xrefs.remove_dangling_xrefs_for_ontology(client, "MeSHTerm")
+    assert n == 4
+    cypher, _ = client.driver.sessions[0].calls[0]
+    assert ":MeSHTerm" in cypher
+    assert "REMOVE s.dangling_xrefs" in cypher
+    # Full wipe, not the selective strip.
+    assert "WHERE NOT x IN resolved" not in cypher
+    assert "DELETE r" not in cypher
+
+
+async def test_remove_dangling_rejects_unknown_term_label():
+    client = _StubClient()
+    with pytest.raises(ValueError, match="unknown term_label"):
+        await xrefs.remove_dangling_xrefs_for_ontology(client, "NotATerm")
+    assert client.driver.sessions == []
+
+
+async def test_remove_dangling_propagates_cypher_exception():
+    client = _StubClient(driver=_StubDriver(raise_on_run=RuntimeError("boom")))
+    with pytest.raises(RuntimeError, match="boom"):
+        await xrefs.remove_dangling_xrefs_for_ontology(client, "MeSHTerm")
 
 
 # ---- count_dangling_xrefs ----
