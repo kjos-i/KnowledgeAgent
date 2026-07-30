@@ -49,8 +49,8 @@ class RunResult:
     """
 
     report: dict[str, Any]
-    json_path: Path
-    csv_path: Path
+    json_path: Path | None
+    csv_path: Path | None
     run_id: int
 
 
@@ -80,12 +80,18 @@ async def run(
     langsmith_project: str | None = None,
     suite: str | None = None,
     suite_run_id: str | None = None,
+    save_json: bool = True,
+    save_csv: bool = True,
 ) -> RunResult:
     """Execute one evaluation run end-to-end; return a `RunResult`.
 
-    Presentation-free: writes the JSON/CSV report + ledger row and returns
-    the report + paths, but prints nothing (the CLI wrapper prints; the GUI
-    renders). `on_progress(done, total)` is passed through to `evaluate_cases`
+    Presentation-free: writes the ledger row (always) plus the JSON/CSV report
+    files and returns the report + paths, but prints nothing (the CLI wrapper
+    prints; the GUI renders). `save_json` / `save_csv` gate the two optional
+    file exports (default on; the Run tab's Save-options toggles); a skipped
+    file yields a `None` path on the result. The ledger write is unconditional,
+    so `run_id` always exists and the dashboards can always read the run.
+    `on_progress(done, total)` is passed through to `evaluate_cases`
     so a caller can drive a progress bar / print line. Heavy deps (engine ->
     adapter -> langchain) import lazily so merely importing this module stays
     cheap for `ka`'s other subcommands.
@@ -182,7 +188,9 @@ async def run(
         suite=suite,
         suite_run_id=suite_run_id,
     )
-    json_path, csv_path = report_mod.write_report(report, cfg.output_dir)
+    json_path, csv_path = report_mod.write_report(
+        report, cfg.output_dir, save_json=save_json, save_csv=save_csv
+    )
     run_id = EvalLedger(cfg.ledger_path).save_run(report)
 
     return RunResult(report=report, json_path=json_path, csv_path=csv_path, run_id=run_id)
@@ -195,6 +203,8 @@ async def run_suite(
     suite: str | None = None,
     trace: bool = False,
     langsmith_project: str | None = None,
+    save_json: bool = True,
+    save_csv: bool = True,
 ) -> SuiteRunResult:
     """Run every member of a test-dataset suite under ONE shared `suite_run_id`.
 
@@ -217,6 +227,8 @@ async def run_suite(
             langsmith_project=langsmith_project,
             suite=suite,
             suite_run_id=suite_run_id,
+            save_json=save_json,
+            save_csv=save_csv,
         )
         results.append(result)
         if on_run_complete is not None:
@@ -238,8 +250,10 @@ def _print_summary(result: RunResult) -> None:
         if val is None:
             continue
         print(f"  {labels.get(avg_key, avg_key):26s} {format(val, fmts.get(avg_key, '.2f'))}")
-    print(f"report: {result.json_path}")
-    print(f"csv:    {result.csv_path}")
+    if result.json_path is not None:
+        print(f"report: {result.json_path}")
+    if result.csv_path is not None:
+        print(f"csv:    {result.csv_path}")
     print(f"ledger: run_id={result.run_id}")
 
 

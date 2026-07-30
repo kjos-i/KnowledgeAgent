@@ -508,3 +508,85 @@ def test_run_wraps_evaluate_in_langsmith_when_trace(tmp_path, monkeypatch):
     result = asyncio.run(RN.run(cfg, trace=True, langsmith_project="custom-proj"))
     assert result.run_id == 1
     assert entered["project"] == "custom-proj"
+
+
+# ---------------------------------------------------------------------------
+# Save-options toggles — the Run tab's CSV/JSON checkboxes gate ONLY the file
+# exports; the ledger write is unconditional (run_id + row always exist).
+# ---------------------------------------------------------------------------
+
+
+def _stub_case(monkeypatch):
+    """Stub the graph + provenance so a run touches no LLM/DB/git."""
+
+    async def fake_run_case(case, corpus_config):
+        return CaseRun(
+            question=case.question,
+            answer="a",
+            retrieved_texts=["t"],
+            retrieved_doc_ids=["d"],
+            retrieved_chunk_ids=["c"],
+        )
+
+    monkeypatch.setattr(E, "run_case", fake_run_case)
+    monkeypatch.setattr(
+        RP, "capture_provenance", lambda: {"git_commit": None, "model_config": {}, "prompts": {}}
+    )
+
+
+def _one_case_dataset(path):
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "c1",
+                    "question": "q?",
+                    "retrieval": {"num_candidates": 100, "rrf_rank_constant": 60},
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.mark.parametrize(("save_json", "save_csv"), [(True, False), (False, True), (False, False)])
+def test_run_save_toggles_skip_files_but_always_ledger(tmp_path, monkeypatch, save_json, save_csv):
+    """A skipped export is absent on disk AND None on the result; whatever the
+    toggles, the ledger row + run_id always exist so the dashboards can read it."""
+    _stub_case(monkeypatch)
+    cfg = load_eval_config(
+        dataset_path=_one_case_dataset(tmp_path / "gold.json"),
+        output_dir=tmp_path / "out",
+        max_cases=1,
+    )
+    result = asyncio.run(RN.run(cfg, save_json=save_json, save_csv=save_csv))
+
+    out = tmp_path / "out"
+    assert len(list(out.glob("eval_report_*.json"))) == (1 if save_json else 0)
+    assert (result.json_path is not None) == save_json
+    assert len(list(out.glob("eval_summary_*.csv"))) == (1 if save_csv else 0)
+    assert (result.csv_path is not None) == save_csv
+    # Ledger is always written, whatever the toggles.
+    assert result.run_id == 1
+    with sqlite3.connect(out / "eval_ledger.db") as conn:
+        assert conn.execute("SELECT COUNT(*) FROM eval_runs").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM eval_cases").fetchone()[0] == 1
+
+
+def test_run_suite_forwards_save_toggles_to_members(tmp_path, monkeypatch):
+    """run_suite passes the Save-options flags to every member: both off → no
+    JSON/CSV files land, but each member still writes its ledger row."""
+    _stub_case(monkeypatch)
+    out = tmp_path / "out"
+    members = [
+        load_eval_config(dataset_path=_one_case_dataset(tmp_path / f"m{i}.json"), output_dir=out)
+        for i in (1, 2)
+    ]
+    suite = asyncio.run(RN.run_suite(members, suite="s", save_json=False, save_csv=False))
+
+    assert all(r.json_path is None and r.csv_path is None for r in suite.results)
+    assert list(out.glob("eval_report_*.json")) == []
+    assert list(out.glob("eval_summary_*.csv")) == []
+    with sqlite3.connect(out / "eval_ledger.db") as conn:
+        assert conn.execute("SELECT COUNT(*) FROM eval_runs").fetchone()[0] == 2

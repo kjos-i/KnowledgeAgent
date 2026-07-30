@@ -164,6 +164,33 @@ def test_write_report_creates_json_and_csv(tmp_path, monkeypatch):
     assert len(rows) == 3  # header + 2 cases
 
 
+def test_write_report_toggles_skip_files(tmp_path, monkeypatch):
+    """save_json / save_csv gate each file independently: a skipped file is not
+    written and its returned path is None. With both off nothing is written (the
+    output dir isn't even created)."""
+    monkeypatch.setattr(
+        RP, "capture_provenance", lambda: {"git_commit": None, "model_config": {}, "prompts": {}}
+    )
+    rep = RP.build_report(EvalConfig(), _results(), "2026-07-05T10:00:00")
+
+    # JSON only
+    j, c = RP.write_report(rep, tmp_path / "a", save_csv=False)
+    assert j is not None and j.exists()
+    assert c is None
+    assert list((tmp_path / "a").glob("eval_summary_*.csv")) == []
+
+    # CSV only
+    j, c = RP.write_report(rep, tmp_path / "b", save_json=False)
+    assert c is not None and c.exists()
+    assert j is None
+    assert list((tmp_path / "b").glob("eval_report_*.json")) == []
+
+    # neither -> nothing written, dir not even created
+    j, c = RP.write_report(rep, tmp_path / "c", save_json=False, save_csv=False)
+    assert j is None and c is None
+    assert not (tmp_path / "c").exists()
+
+
 def test_filename_stamp():
     assert RP._filename_stamp("2026-07-05T10:00:00") == "20260705100000"
 

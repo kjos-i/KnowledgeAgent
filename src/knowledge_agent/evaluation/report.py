@@ -229,18 +229,30 @@ def _unique_stem(output_dir: Path, base: str) -> str:
     return stem
 
 
-def write_report(report: dict[str, Any], output_dir: Path) -> tuple[Path, Path]:
-    """Write `eval_report_<ts>_<dataset>.json` + `eval_summary_<ts>_<dataset>.csv`;
-    return paths. The dataset name (+ a uniqueness counter) keeps a suite's
-    per-member reports distinct even when they share a run timestamp."""
+def write_report(
+    report: dict[str, Any],
+    output_dir: Path,
+    *,
+    save_json: bool = True,
+    save_csv: bool = True,
+) -> tuple[Path | None, Path | None]:
+    """Write `eval_report_<ts>_<dataset>.json` and/or `eval_summary_<ts>_<dataset>.csv`;
+    return each path (None for a skipped file). Both default on; a caller can skip
+    either (the Run tab's Save-options toggles). The dataset name (+ a uniqueness
+    counter) keeps a suite's per-member reports distinct even when they share a run
+    timestamp."""
+    if not save_json and not save_csv:
+        return None, None
     output_dir.mkdir(parents=True, exist_ok=True)
     base = _filename_stamp(report["run_timestamp"]) + _dataset_slug(report.get("dataset_name"))
     stem = _unique_stem(output_dir, base)
     json_path = output_dir / f"eval_report_{stem}.json"
     csv_path = output_dir / f"eval_summary_{stem}.csv"
-    json_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
-    _write_csv(csv_path, report["results"])
-    return json_path, csv_path
+    if save_json:
+        json_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+    if save_csv:
+        _write_csv(csv_path, report["results"])
+    return (json_path if save_json else None), (csv_path if save_csv else None)
 
 
 def _write_csv(path: Path, results: list[dict[str, Any]]) -> None:

@@ -3650,14 +3650,19 @@ INFO: dict[str, InfoText] = {
             "Text, and the 'Look up DOI online' Checkbox (default False). "
             "authors_display is the denormalised display string, not the graph "
             ":Author nodes.\n\n"
-            "Save (_save → _collect_edit_patch → _schedule_save → "
+            "Save (_save → _collect_edit_patch → pop_dialog → _run_edit_save → "
             "_save_metadata): _collect_edit_patch writes the six "
             "_EDIT_STRING_KEYS with strip() (blank clears to ''), writes year "
             "only when it parses as int (blank/garbage omitted, so year is "
             "never cleared), and always stamps metadata_status='manual'. "
             "_save_metadata calls search.update_doc_metadata(doc_id, patch), a "
             "LanceDB-only native partial update (chunk text + embeddings "
-            "untouched, no Neo4j). Cancel just pop_dialog().\n\n"
+            "untouched, no Neo4j). _save closes the dialog immediately, then "
+            "_run_edit_save spins the row's Edit button while the write (and any "
+            "online DOI lookup) runs; on success the list reloads, on failure "
+            "the button is restored and the error lands on the op-status line "
+            "(the same place a failed re-ingest reports). Cancel just "
+            "pop_dialog().\n\n"
             "Look up DOI online: _save passes lookup_doi only when "
             "checkbox.value and the DOI field is non-empty. _save_metadata "
             "then calls metadata_resolution.lookup_known_doi(doc_id, doi) "
@@ -5015,6 +5020,41 @@ INFO: dict[str, InfoText] = {
             "grey out when the dataset is frozen. Neither is part of the recipe: "
             "they are per-run and are not persisted on freeze (the recipe = groups "
             "+ judge + thresholds only)."
+        ),
+    ),
+    "eval_run.save_options": InfoText(
+        title="Save options",
+        standard=(
+            "Which result files this run writes. The ledger is always saved (the "
+            "small history database in this corpus's eval_output folder); every "
+            "results tab reads from it, so it cannot be turned off and shows as a "
+            "locked, ticked box. The other two are optional file exports, on by "
+            "default: Save evaluation summary CSV writes a per-case spreadsheet "
+            "(eval_summary_<...>.csv), and Save evaluation report JSON writes the "
+            "full run report (eval_report_<...>.json). Unticking either only skips "
+            "that file; the run still records to the ledger and still appears in the "
+            "dashboards. These are per-run choices; they are not saved onto the "
+            "dataset."
+        ),
+        beginner=(
+            "This decides which files the run leaves behind. The first box, the "
+            "ledger, is always on and cannot be changed: it is the running history "
+            "the results screens read from, so every run is kept there. The other "
+            "two are extra copies you can keep as files, and both start on. Save "
+            "evaluation summary CSV makes a spreadsheet you can open in Excel; Save "
+            "evaluation report JSON makes one full, detailed file. If you do not "
+            "need those loose files, untick them and nothing else changes: the run "
+            "is still saved and still shows up in the results tabs."
+        ),
+        technical=(
+            "The two boxes map to runner.run(save_json=, save_csv=) (and are "
+            "forwarded to every member by run_suite). The ledger write "
+            "(EvalLedger.save_run) is unconditional, so run_id always exists and the "
+            "post-run navigation + dashboards are unaffected. The flags gate "
+            "report.write_report, which writes eval_report_<stem>.json and/or "
+            "eval_summary_<stem>.csv into cfg.output_dir; a skipped file returns a "
+            "None path on RunResult. They are per-run output preferences, not part "
+            "of the recipe, and are not persisted on freeze."
         ),
     ),
     "eval_run.run": InfoText(

@@ -95,6 +95,12 @@ class RunTab:
         self.open_langsmith_button: ft.TextButton | None = None
         # Resolves this run's project (name + key → URL) and opens its traces.
         self.open_project_button: ft.TextButton | None = None
+        # Save options — which artifacts this run writes. The ledger is ALWAYS
+        # written (the dashboards read from it), shown as a locked, ticked box;
+        # CSV + JSON are optional file exports (default on, per-run only).
+        self.save_ledger_check: ft.Checkbox | None = None
+        self.save_csv_check: ft.Checkbox | None = None
+        self.save_json_check: ft.Checkbox | None = None
         self.run_button: ft.Button | None = None
         self.progress: ft.ProgressBar | None = None
         self.status: ft.Text | None = None
@@ -279,6 +285,26 @@ class RunTab:
         # single file). Sits under the two fields.
         self.selection_hint = ft.Text("", size=12, color=ft.Colors.GREY_600, italic=True)
 
+        # Save options. The ledger box is checked + disabled — it can't be turned
+        # off (every run records to the ledger the dashboards read from); the CSV
+        # and JSON boxes are real, default-on toggles for the optional file exports.
+        self.save_ledger_check = ft.Checkbox(
+            label="Always saves to ledger",
+            value=True,
+            disabled=True,
+            tooltip="Always saved; Run Summary, Charts, Compare and Trends read from the ledger.",
+        )
+        self.save_csv_check = ft.Checkbox(
+            label="Save evaluation summary CSV",
+            value=True,
+            tooltip="Also write a per-case eval_summary_<...>.csv to this corpus's eval_output folder.",
+        )
+        self.save_json_check = ft.Checkbox(
+            label="Save evaluation report JSON",
+            value=True,
+            tooltip="Also write the full eval_report_<...>.json to this corpus's eval_output folder.",
+        )
+
         self.run_button = ft.Button(
             "Run evaluation",
             icon=ft.Icons.PLAY_ARROW,
@@ -330,6 +356,14 @@ class RunTab:
                 self.trace_key_hint,
                 self.trace_warning,
                 self._project_row,
+                section_divider(),
+                # ============ Section: Save options ============
+                # Which result files this run writes. Ledger always on (locked);
+                # the CSV + JSON exports are optional (default on).
+                section_header(self.app, "Save options", key="eval_run.save_options"),
+                self.save_ledger_check,
+                self.save_csv_check,
+                self.save_json_check,
                 section_divider(),
                 # ============ Section: Run ============
                 # Scope (suite vs single) comes from the selection at the top, so
@@ -881,6 +915,9 @@ class RunTab:
         suite = self._suite_selected()
         trace = bool(self.trace_check and self.trace_check.value)
         project = (self.project_field.value or "").strip() if self.project_field else ""
+        # Optional file exports (the ledger always writes; those boxes are locked on).
+        save_csv = bool(self.save_csv_check and self.save_csv_check.value)
+        save_json = bool(self.save_json_check and self.save_json_check.value)
         try:
             # Same recipe/overrides for every member; only the dataset path differs.
             cfgs = [self._build_config(p) for p in self._suite_paths] if suite else None
@@ -899,6 +936,8 @@ class RunTab:
                     suite=self._suite_name,
                     trace=trace,
                     langsmith_project=project or None,
+                    save_json=save_json,
+                    save_csv=save_csv,
                 )
             else:
                 result = await runner.run(
@@ -906,6 +945,8 @@ class RunTab:
                     on_progress=self._on_progress,
                     trace=trace,
                     langsmith_project=project or None,
+                    save_json=save_json,
+                    save_csv=save_csv,
                 )
         except Exception as exc:  # broad: one failed run must not crash the GUI
             logger.exception("eval run failed")
