@@ -43,3 +43,69 @@ async def test_do_delete_surfaces_not_ok_result_via_status():
         await DocumentsView._do_delete(view, plan)
     view._set_op_status.assert_called_once()
     view.reload.assert_awaited_once()
+
+
+async def test_save_metadata_returns_true_on_success():
+    """_save_metadata reports True (and reloads) when the LanceDB write lands."""
+    view = MagicMock()
+    view.reload = AsyncMock()
+    client = MagicMock()
+    client.update_doc_metadata = AsyncMock()
+    with patch(
+        "knowledge_agent.search.client.get_search_client",
+        return_value=client,
+    ):
+        ok = await DocumentsView._save_metadata(view, "d1", {"title": "X"})
+    assert ok is True
+    view.reload.assert_awaited_once()
+
+
+async def test_save_metadata_returns_false_on_write_failure():
+    """A failed metadata write reports False and does NOT reload."""
+    view = MagicMock()
+    view.reload = AsyncMock()
+    client = MagicMock()
+    client.update_doc_metadata = AsyncMock(side_effect=RuntimeError("boom"))
+    with patch(
+        "knowledge_agent.search.client.get_search_client",
+        return_value=client,
+    ):
+        ok = await DocumentsView._save_metadata(view, "d1", {"title": "X"})
+    assert ok is False
+    view.reload.assert_not_awaited()
+
+
+async def test_run_edit_save_success_posts_no_error_status():
+    """A successful edit save posts no error status (the reload is the feedback)."""
+    view = MagicMock()
+    view._save_metadata = AsyncMock(return_value=True)
+    view._set_button_busy = MagicMock()
+    view._set_op_status = MagicMock()
+    await DocumentsView._run_edit_save(view, "d1", {"title": "X"}, MagicMock())
+    view._set_op_status.assert_not_called()
+
+
+async def test_run_edit_save_failure_restores_button_and_posts_op_status():
+    """A failed edit save restores the Edit button and reports on the op-status
+    line (the same place a failed re-ingest lands)."""
+    view = MagicMock()
+    view._save_metadata = AsyncMock(return_value=False)
+    view._set_button_busy = MagicMock()
+    view._set_op_status = MagicMock()
+    await DocumentsView._run_edit_save(view, "d1", {"title": "X"}, MagicMock())
+    view._set_op_status.assert_called_once()
+    # last _set_button_busy call restores the button (busy=False)
+    assert view._set_button_busy.call_args_list[-1].args[1] is False
+
+
+async def test_run_edit_save_restores_button_when_save_raises():
+    """A raise from _save_metadata (e.g. the post-write list refresh failing)
+    must still restore the Edit button and post a message, never leave the
+    wheel spinning."""
+    view = MagicMock()
+    view._save_metadata = AsyncMock(side_effect=RuntimeError("render boom"))
+    view._set_button_busy = MagicMock()
+    view._set_op_status = MagicMock()
+    await DocumentsView._run_edit_save(view, "d1", {"title": "X"}, MagicMock())
+    view._set_op_status.assert_called_once()
+    assert view._set_button_busy.call_args_list[-1].args[1] is False

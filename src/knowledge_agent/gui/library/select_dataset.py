@@ -312,10 +312,10 @@ class SelectDatasetTab:
         # after sibling-tab mutations (corpus switch / ingest).
         self._populate_info_card()
 
-        # Left column: the read-only info card + a status line. Corpus
+        # Info-card pane: read-only info card + a status line. Corpus
         # selection + management moved to the global top-bar `Corpus ▾`
-        # dropdown + `⚙ Manage` dialog.
-        left_pane = ft.Container(
+        # dropdown + `⚙ Manage` dialog. Placed on the RIGHT (see `body`).
+        info_pane = ft.Container(
             width=LEFT_COLUMN_WIDTH,
             content=ft.Column(
                 expand=True,
@@ -329,8 +329,8 @@ class SelectDatasetTab:
             ),
         )
 
-        # Right column: documents area (scrollable).
-        right_pane = panel_box(
+        # Documents pane (scrollable). Placed on the LEFT (see `body`).
+        docs_pane = panel_box(
             ft.Column(
                 expand=True,
                 scroll=ft.ScrollMode.AUTO,
@@ -344,30 +344,20 @@ class SelectDatasetTab:
             expand=True,
             vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             spacing=12,
-            controls=[left_pane, right_pane],
+            # Documents on the LEFT, corpus info card on the RIGHT (swapped).
+            controls=[docs_pane, info_pane],
         )
 
         # Two column titles in a fixed header above the panes (the Ingest
-        # idiom): left = the selected corpus, right = "Documents (N)" — the
-        # count rides in from DocumentsView, which no longer draws its own
-        # header. Left container is pinned to the card column's width so the
-        # titles sit squarely over their panes.
+        # idiom): left = "Documents (N)" (the count rides in from
+        # DocumentsView, which no longer draws its own header), right = the
+        # selected corpus. Each title container matches the width of the pane
+        # below it (expand over the docs pane, fixed width over the info card)
+        # so the titles sit squarely over their panes.
         header = ft.Row(
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=12,
             controls=[
-                ft.Container(
-                    width=LEFT_COLUMN_WIDTH,
-                    padding=ft.Padding.symmetric(horizontal=12, vertical=10),
-                    content=ft.Row(
-                        controls=[
-                            self.selected_title,
-                            info(self.app, "select.selected_dataset"),
-                        ],
-                        spacing=4,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                ),
                 ft.Container(
                     expand=1,
                     padding=ft.Padding.symmetric(horizontal=12, vertical=10),
@@ -378,6 +368,18 @@ class SelectDatasetTab:
                             info(self.app, "select.documents"),
                         ],
                         spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                ),
+                ft.Container(
+                    width=LEFT_COLUMN_WIDTH,
+                    padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                    content=ft.Row(
+                        controls=[
+                            self.selected_title,
+                            info(self.app, "select.selected_dataset"),
+                        ],
+                        spacing=4,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                 ),

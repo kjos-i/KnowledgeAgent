@@ -347,15 +347,11 @@ class DocumentsView:
             border_radius=8,
         )
         snap = dict(row)
-        edit_button = ft.Button(
-            content="Edit",
-            height=28,
-            on_click=lambda e, s=snap: self._open_edit_dialog(s),
-        )
-        reingest_button = ft.Button(
-            content="Re-ingest",
-            height=28,
-            on_click=lambda e, s=snap: self._on_reingest_clicked(s),
+        edit_button = ft.Button(content="Edit", height=28)
+        edit_button.on_click = lambda e, s=snap, b=edit_button: self._open_edit_dialog(s, b)
+        reingest_button = ft.Button(content="Re-ingest", height=28)
+        reingest_button.on_click = lambda e, s=snap, b=reingest_button: self._on_reingest_clicked(
+            s, b
         )
         delete_button = ft.Button(
             content="Delete",
@@ -398,7 +394,7 @@ class DocumentsView:
 
     # ----- edit modal ----------------------------------------------------
 
-    def _open_edit_dialog(self, row: dict[str, Any]) -> None:
+    def _open_edit_dialog(self, row: dict[str, Any], button: ft.Button | None = None) -> None:
         doc_id = row.get("doc_id") or ""
         fields = {
             key: ft.TextField(
@@ -426,11 +422,16 @@ class DocumentsView:
             self.app.page.pop_dialog()
 
         def _save(_ev: ft.Event) -> None:
-            self.app.page.pop_dialog()
+            if not self._loop_running():
+                return
             patch = self._collect_edit_patch()
             doi = (fields["doi"].value or "").strip()
             lookup = doi if (lookup_checkbox.value and doi) else None
-            self._schedule_save(doc_id, patch, lookup_doi=lookup)
+            # Close the dialog immediately (so it can't double-fire), then run
+            # the save in the background with a spinner on the row's Edit
+            # button; a failure surfaces on the shared op-status line.
+            self.app.page.pop_dialog()
+            self._spawn(self._run_edit_save(doc_id, patch, button, lookup_doi=lookup))
 
         dialog = ft.AlertDialog(
             modal=True,
@@ -504,16 +505,30 @@ class DocumentsView:
         patch["metadata_status"] = "manual"
         return patch
 
-    def _schedule_save(
+    async def _run_edit_save(
         self,
         doc_id: str,
         patch: dict[str, Any],
+        button: ft.Button | None = None,
         *,
         lookup_doi: str | None = None,
     ) -> None:
-        if not self._loop_running():
-            return
-        self._spawn(self._save_metadata(doc_id, patch, lookup_doi=lookup_doi))
+        """Run the edit save after the dialog has closed, with a spinner on the
+        row's Edit button. On success the list reloads (rebuilding the row, so
+        the spinning button is replaced); on failure the button is restored and
+        the error lands on the shared op-status line, the same place a failed
+        re-ingest reports."""
+        self._set_button_busy(button, True, "Edit")
+        try:
+            ok = await self._save_metadata(doc_id, patch, lookup_doi=lookup_doi)
+        except Exception as exc:
+            # A raise here (e.g. the post-write list refresh failing) must not
+            # leave the Edit button spinning forever with no message.
+            logger.warning("DocumentsView: edit save failed: %r", exc)
+            ok = False
+        if not ok:
+            self._set_button_busy(button, False, "Edit")
+            self._set_op_status("Metadata save failed. See the log for details.")
 
     async def _save_metadata(
         self,
@@ -521,9 +536,14 @@ class DocumentsView:
         patch: dict[str, Any],
         *,
         lookup_doi: str | None = None,
-    ) -> None:
+    ) -> bool:
+        """Write the metadata patch (+ optional online DOI enrichment).
+
+        Returns True when the metadata write succeeds (a failed online DOI
+        lookup is non-fatal and still returns True; the manual edit already
+        landed), False when the write itself fails."""
         if not doc_id or not patch:
-            return
+            return False
         from knowledge_agent.search.client import get_search_client
 
         try:
@@ -534,9 +554,9 @@ class DocumentsView:
                 doc_id,
                 exc,
             )
-            return
+            return False
         # RAA parity: with the box checked + a DOI, enrich from OpenAlex
-        # (promotes status manual → enriched). Failure is non-fatal — the
+        # (promotes status manual -> enriched). Failure is non-fatal: the
         # manual edit already landed.
         if lookup_doi:
             from knowledge_agent.ingestion.metadata_resolution import (
@@ -552,6 +572,7 @@ class DocumentsView:
                     exc,
                 )
         await self.reload(force=True)
+        return True
 
     # ----- re-ingest -----------------------------------------------------
 
@@ -559,13 +580,28 @@ class DocumentsView:
         self.op_status.value = msg or _OP_STATUS_IDLE
         self.app.page.update()
 
-    def _on_reingest_clicked(self, row: dict[str, Any]) -> None:
+    def _set_button_busy(self, button: ft.Button | None, busy: bool, label: str) -> None:
+        """Swap a row/dialog button between its text label and an inline
+        spinner. `busy=True` shows a small ProgressRing and disables the
+        button; `busy=False` restores `label` and re-enables it. No-op when
+        the button was rebuilt away (None)."""
+        if button is None:
+            return
+        if busy:
+            button.content = ft.ProgressRing(width=16, height=16, stroke_width=2)
+            button.disabled = True
+        else:
+            button.content = label
+            button.disabled = False
+        self.app.page.update()
+
+    def _on_reingest_clicked(self, row: dict[str, Any], button: ft.Button | None = None) -> None:
         if self._op_busy:
             self._set_op_status("A re-ingest is already running…")
             return
-        self._open_reingest_confirm(row)
+        self._open_reingest_confirm(row, button)
 
-    def _open_reingest_confirm(self, row: dict[str, Any]) -> None:
+    def _open_reingest_confirm(self, row: dict[str, Any], button: ft.Button | None = None) -> None:
         """Validate the source file exists, then confirm before re-running
         the full pipeline on this one document."""
         source_path = (row.get("source_path") or "").strip()
@@ -588,7 +624,7 @@ class DocumentsView:
         def _confirm(_ev: ft.Event) -> None:
             self.app.page.pop_dialog()
             if self._loop_running():
-                self._spawn(self._do_reingest(dict(row)))
+                self._spawn(self._do_reingest(dict(row), button))
 
         dialog = ft.AlertDialog(
             modal=True,
@@ -608,7 +644,7 @@ class DocumentsView:
         self.app.page.show_dialog(dialog)
         self.app.page.update()
 
-    async def _do_reingest(self, row: dict[str, Any]) -> None:
+    async def _do_reingest(self, row: dict[str, Any], button: ft.Button | None = None) -> None:
         from knowledge_agent.corpus_config import load_corpus_config
         from knowledge_agent.ingestion import pipeline
 
@@ -625,6 +661,7 @@ class DocumentsView:
             return
         self._op_busy = True
         self._set_op_status(f"Re-ingesting '{name}'…")
+        self._set_button_busy(button, True, "Re-ingest")
         try:
             # preserve_existing_labels: keep the doc's stored type on a
             # re-ingest of the same file (its labels don't change).
@@ -645,6 +682,7 @@ class DocumentsView:
                 exc,
             )
             self._op_busy = False
+            self._set_button_busy(button, False, "Re-ingest")
             self._set_op_status(f"Re-ingest of '{name}' failed: {exc}")
             return
         self._op_busy = False
