@@ -158,9 +158,12 @@ class DocumentsView:
         # Per-doc op (re-ingest / delete) status. Always visible; falls back
         # to the idle placeholder so the line never blanks into an empty gap.
         self.op_status = ft.Text(_OP_STATUS_IDLE, size=12, color=ft.Colors.GREY_400)
-        # Plain Column — the parent (select_dataset right pane) already
-        # scrolls, so nesting a scroll here would fight it.
-        self.doc_list = ft.Column(spacing=6)
+        # The card list is a ListView (Flet's dedicated scrolling list), NOT a
+        # plain Column: it's the single scroll owner under the fixed filter/
+        # header, and it reliably repaints cards populated by the async reload.
+        # (A plain Column here was built correctly but did not paint its cards
+        # when this pane sat on the left — a Flet async-update quirk.)
+        self.doc_list = ft.ListView(spacing=6, expand=True)
 
     # ----- build ---------------------------------------------------------
 
@@ -170,6 +173,13 @@ class DocumentsView:
         # No own "Documents" header here — the Select tab draws the sticky
         # column title ("Documents (N)") above the pane and shows
         # `coverage_text` there, so this view is just the filter + list.
+        #
+        # expand=True so this fills the pane's height; the fixed filter/header
+        # rows sit at the top and `doc_list` (a ListView, expand=True) takes the
+        # rest and scrolls internally — the canonical fixed-header + scrolling-
+        # list layout. The pane must therefore NOT wrap this in its own scroll
+        # column (a nested scroll would give the ListView unbounded height and
+        # it would not paint); see select_dataset's docs pane.
         return ft.Column(
             spacing=8,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,

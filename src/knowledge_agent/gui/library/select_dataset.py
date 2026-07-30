@@ -329,16 +329,12 @@ class SelectDatasetTab:
             ),
         )
 
-        # Documents pane (scrollable). Placed on the LEFT (see `body`).
-        docs_pane = panel_box(
-            ft.Column(
-                expand=True,
-                scroll=ft.ScrollMode.AUTO,
-                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-                spacing=10,
-                controls=[self.documents.build()],
-            )
-        )
+        # Documents pane. Placed on the LEFT (see `body`). No scroll wrapper
+        # here: DocumentsView.build() owns its scrolling (a fixed filter/header
+        # above a ListView that scrolls internally). Wrapping it in an extra
+        # scroll Column would give that ListView unbounded height, and its cards
+        # would not paint.
+        docs_pane = panel_box(self.documents.build())
 
         body = ft.Row(
             expand=True,
