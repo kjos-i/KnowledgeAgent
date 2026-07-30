@@ -125,9 +125,12 @@ OpenAlex citation graph), and `:OntologyTerm` with a subtype such as `:MeSHTerm`
 ## The evaluation ledger (SQLite) schema
 
 `eval_output/eval_ledger.db` accumulates your evaluation history so the dashboard
-can plot trends across runs. It is **append-only** (every run adds rows, nothing
-prunes), **one file per corpus**, and git-ignored, disposable data — to reset,
-delete the file and only the trend history is lost. It has two tables joined on
+can plot trends across runs. Every run adds rows and nothing is pruned
+automatically, so the history grows on its own; it is **one file per corpus** and
+git-ignored, disposable data. You can remove runs you no longer want from the
+Evaluation → Ledger tab (delete a single run, or a whole suite at once); to reset
+it entirely, delete the file, and only the trend history is lost. It has two
+tables joined on
 `run_id`: `eval_runs` (one row per run) and `eval_cases` (one row per case per
 run). The columns below are the **stable backbone**; per-metric score columns are
 **registry-driven**, so the exact set grows as metrics are added (add-only, no
