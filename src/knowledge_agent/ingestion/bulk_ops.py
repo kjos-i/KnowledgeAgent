@@ -358,6 +358,12 @@ class BulkReEmbedResult:
     n_succeeded: int
     n_failed: int
     failures: tuple[tuple[str, str], ...]
+    # True when docs re-embedded but the post-embed vector-index rebuild
+    # failed: every vector was rewritten yet the IVF_PQ centroids still
+    # reflect the OLD vectors, so recall is silently degraded until a manual
+    # "Rebuild vector index" succeeds. Surfaced so the op is never reported
+    # as a clean success when recall is actually compromised.
+    rebuild_failed: bool = False
 
 
 async def bulk_re_embed_plan() -> BulkReEmbedPlan:
@@ -413,16 +419,19 @@ async def bulk_re_embed_execute(
     # trained on the old vectors are now wrong. Always retrain (this also
     # folds + compacts), regardless of optimize_indexes_per_ingest. Only
     # when at least one doc's rewrite landed.
+    rebuild_failed = False
     if n_succeeded > 0:
         try:
             await pipeline.rebuild_vector_index()
         except Exception as exc:
             logger.warning("bulk_re_embed_execute: vector index rebuild failed: %r", exc)
+            rebuild_failed = True
 
     return BulkReEmbedResult(
         n_succeeded=n_succeeded,
         n_failed=n_failed,
         failures=tuple(failures),
+        rebuild_failed=rebuild_failed,
     )
 
 
@@ -1453,13 +1462,14 @@ async def sync_execute(
         _tick()
 
     # End-of-action index maintenance. NEW + EDITED write rows (fold /
-    # auto-rebuild-on-growth); MOVED is a metadata-only patch (excluded);
-    # ORPHAN deletes trigger a compaction (handled inside when no write-side
-    # optimize already ran).
+    # auto-rebuild-on-growth); MOVED is a copy-on-write metadata patch that
+    # tombstones old row versions, so it triggers a compaction; ORPHAN
+    # deletes do too (both handled inside when no write-side optimize ran).
     await pipeline.maintain_indexes_after_action(
         config,
         n_written=n_new_ingested + n_edited_succeeded,
         n_deleted=n_orphans_deleted,
+        n_moved=n_moved,
     )
 
     return SyncResult(
@@ -1710,8 +1720,17 @@ async def materialize_xref_edges_execute(
                 exc,
             )
             per_ontology[term_label] = None
+    # Only rebuild L10 when the layer is on AND at least one ontology
+    # actually produced xref edges. A no-op run (every ontology 0, or all
+    # failed -> None) leaves the :<X>_XREF surface unchanged, so the
+    # graph-wide L10 recompute (minutes on a large corpus) would be pure
+    # waste. (MERGE counts matched-existing edges too, so a re-run that only
+    # re-touches existing edges still recomputes; the win is skipping the
+    # genuinely-empty / all-failed case.)
+    edges_changed = any(bool(v) for v in per_ontology.values())
+    l10_attempted = plan.will_recompute_l10 and edges_changed
     n_l10 = None
-    if plan.will_recompute_l10:
+    if l10_attempted:
         try:
             n_l10 = await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(
                 kg_client,
@@ -1726,7 +1745,7 @@ async def materialize_xref_edges_execute(
     return MaterializeXrefEdgesResult(
         xrefs_layer_skipped=False,
         per_ontology_edges=per_ontology,
-        l10_attempted=plan.will_recompute_l10,
+        l10_attempted=l10_attempted,
         n_l10_edges_written=n_l10,
     )
 
@@ -1968,7 +1987,13 @@ async def clear_xref_edges_execute(
                 exc,
             )
             per_ontology[term_label] = None
-    if plan.will_recompute_l10:
+    # Only rebuild L10 when the layer is on AND at least one ontology
+    # actually had edges deleted. Clearing a zero-edge ontology (or an
+    # all-failed run -> every value None) leaves the :<X>_XREF surface
+    # unchanged, so the graph-wide L10 recompute would be pure waste.
+    edges_changed = any(bool(v) for v in per_ontology.values())
+    l10_attempted = plan.will_recompute_l10 and edges_changed
+    if l10_attempted:
         try:
             await cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global(
                 kg_client,
@@ -1981,7 +2006,7 @@ async def clear_xref_edges_execute(
             )
     return ClearXrefEdgesResult(
         per_ontology_deleted=per_ontology,
-        l10_attempted=plan.will_recompute_l10,
+        l10_attempted=l10_attempted,
     )
 
 

@@ -364,16 +364,19 @@ async def maintain_indexes_after_action(
     *,
     n_written: int,
     n_deleted: int = 0,
+    n_moved: int = 0,
 ) -> None:
     """Run once at the end of an ingest/sync action.
 
     When rows were written, either auto-rebuilds the vector index (if the
     corpus grew past `vector_index_rebuild_growth_factor`) or, when
     `optimize_indexes_per_ingest` is off, folds the deferred rows in with
-    an optimize. When rows were only deleted (and no write-side optimize
-    already ran) it compacts to clear the tombstones. Index-maintenance
-    failures are logged, never raised - they must not fail an otherwise
-    successful action.
+    an optimize. When rows were only deleted or MOVED (a LanceDB
+    copy-on-write metadata patch that tombstones the old row versions), and
+    no write-side optimize already ran, it compacts to clear the tombstones
+    so a delete-only or move-only action doesn't leave dead fragments
+    lingering. Index-maintenance failures are logged, never raised - they
+    must not fail an otherwise successful action.
     """
     try:
         search_client = get_search_client()
@@ -384,7 +387,7 @@ async def maintain_indexes_after_action(
                 growth_factor=config.vector_index_rebuild_growth_factor,
                 optimize_if_no_rebuild=not config.optimize_indexes_per_ingest,
             )
-        if n_deleted > 0 and not optimized:
+        if (n_deleted > 0 or n_moved > 0) and not optimized:
             await search_client.compact()
     except Exception as exc:
         logger.warning("maintain_indexes_after_action failed: %r", exc)

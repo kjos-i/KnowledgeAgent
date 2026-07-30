@@ -40,6 +40,7 @@ from knowledge_agent.ingestion.pipeline import (
     backfill_triples,
     delete_doc,
     ingest_document,
+    maintain_indexes_after_action,
     re_embed,
 )
 from knowledge_agent.kg.client import Neo4jClient
@@ -264,6 +265,24 @@ def _config_with_ontologies(*names: str) -> CorpusConfig:
         entities=EntityConfig(extractor="llm"),
         ontology=ontology_cfg,
     )
+
+
+async def test_maintain_indexes_after_action_compacts_on_moved_only():
+    """A MOVED-only sync (no writes/deletes) still compacts, to clear the
+    LanceDB copy-on-write tombstones the metadata update leaves behind (I6)."""
+    search_mock = MagicMock()
+    search_mock.maintain_indexes = AsyncMock(return_value=False)
+    search_mock.compact = AsyncMock(return_value=None)
+    with patch(
+        "knowledge_agent.ingestion.pipeline.get_search_client",
+        return_value=search_mock,
+    ):
+        await maintain_indexes_after_action(
+            _config_with_ontologies(), n_written=0, n_deleted=0, n_moved=3
+        )
+
+    search_mock.compact.assert_awaited_once()
+    search_mock.maintain_indexes.assert_not_called()
 
 
 async def test_backfill_ontology_iterates_each_enabled_ontology():

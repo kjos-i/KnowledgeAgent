@@ -667,7 +667,7 @@ class CorpusConfigEditor:
             on_change_end=self._on_triples_extractor_temperature_committed,
         )
         self.triples_chunks_per_batch_field = ft.TextField(
-            value="1",
+            value=str(CorpusConfig.model_fields["triples_chunks_per_batch"].default),
             border=ft.InputBorder.OUTLINE,
             border_color=FRAME_BORDER_COLOR,
             bgcolor=PANEL_BG,

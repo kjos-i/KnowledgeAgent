@@ -94,6 +94,17 @@ _BULK_OP_LABELS: dict[str, str] = {
     "recompute_cross_doc_xrefs": "Rebuild cross-doc xref links",
 }
 
+# Readable status-line text for boolean *Result flags surfaced by
+# _fmt_bulk_result. A raw "flag=False" is noise, so only a True flag is
+# shown, mapped through this table (unknown flags fall back to a spaced key).
+_BULK_FLAG_LABELS: dict[str, str] = {
+    "rebuild_failed": (
+        "vector index rebuild FAILED - recall degraded until you run Rebuild vector index"
+    ),
+    "xrefs_layer_skipped": "xrefs layer off (skipped)",
+    "l10_attempted": "cross-doc xref links (L10) recomputed",
+}
+
 # The four L7 xref ops that share the multi-select ontology picker.
 _XREF_MULTISELECT_OPS: frozenset[str] = frozenset(
     {
@@ -1052,7 +1063,13 @@ class IngestTab:
                 parts.append(f"{key}={total}")
                 if failed:
                     parts.append(f"{failed} failed")
-            elif isinstance(val, int):  # bool is an int subclass — fine
+            elif isinstance(val, bool):
+                # bool is an int subclass, so this MUST precede the int
+                # branch. A raw "flag=False" is noise; surface only a True
+                # flag, mapped to readable text.
+                if val:
+                    parts.append(_BULK_FLAG_LABELS.get(key, key.replace("_", " ")))
+            elif isinstance(val, int):
                 parts.append(f"{key}={val}")
         return ", ".join(parts) if parts else "done"
 

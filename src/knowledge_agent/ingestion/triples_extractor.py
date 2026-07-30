@@ -380,7 +380,14 @@ async def extract_batched(
             return []
         return [(_attribute_chunk_id(t.evidence_span, batch), t) for t in triples]
 
-    for pairs in await asyncio.gather(*(_run_batch(b) for b in batches)):
+    # return_exceptions=True so an unexpected error in a single batch (e.g.
+    # outside `_run_batch`'s own LLM try/except) is isolated to that batch
+    # rather than aborting extraction for the whole document.
+    results = await asyncio.gather(*(_run_batch(b) for b in batches), return_exceptions=True)
+    for pairs in results:
+        if isinstance(pairs, BaseException):
+            logger.warning("triples extract_batched: a batch raised %r; skipping", pairs)
+            continue
         for chunk_id, triple in pairs:
             by_chunk[chunk_id].append(triple)
     return [(chunk_id, by_chunk[chunk_id]) for chunk_id, _t, _v in chunks]

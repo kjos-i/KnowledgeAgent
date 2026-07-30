@@ -447,6 +447,15 @@ class LanceClient:
                 # raising here.
                 logger.info("LanceDB: vector index create skipped: %r", exc)
 
+        # Record the growth baseline the first time a vector index exists
+        # (created just now or already present), so the auto-rebuild-on-growth
+        # check in maintain_indexes measures from the first-train row count
+        # rather than from a much larger first end-of-action count. Guarded on
+        # trained <= 0 so it writes once; self-heals if an earlier baseline
+        # write failed (the next ensure_indexes retries it).
+        if row_count >= threshold and self._read_trained_rows() <= 0:
+            self._write_trained_rows(row_count)
+
         # ---- FTS index (always attempted, no threshold).
         try:
             await table.create_index(
@@ -507,6 +516,9 @@ class LanceClient:
         disk failures propagate to the caller.
         """
         conn = await self._ensure_conn()
+        if CHUNKS_TABLE not in (await conn.list_tables()).tables:
+            logger.info("LanceDB: vector rebuild skipped - no chunks table yet")
+            return
         table = await conn.open_table(CHUNKS_TABLE)
         row_count = await table.count_rows()
         threshold = self._settings.min_rows_for_vector_index
@@ -546,6 +558,16 @@ class LanceClient:
              i.e. `optimize_indexes_per_ingest` is off), create-if-missing
              + optimize to fold this action's rows in; return True.
           3. Else (per-doc optimize already ran this action): no-op; False.
+
+        Known limitation (multi-window / multi-process): the row-count read,
+        the trained-baseline read, the `create_index(replace=True)`, and the
+        baseline write form a check-then-act with no cross-process lock. Two
+        app windows finishing an ingest on the SAME corpus at the same instant
+        can both cross the growth threshold and rebuild concurrently, and both
+        overwrite the `.vector_index_meta.json` baseline (last writer wins). No
+        document data is corrupted; worst case is a redundant rebuild and a
+        slightly stale baseline. A file lock would close this but is heavier
+        than the risk today, so it is left as a documented limitation.
 
         LanceDB / disk failures propagate to the caller.
         """

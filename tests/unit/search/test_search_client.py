@@ -1021,6 +1021,20 @@ async def test_ensure_indexes_builds_a_cosine_vector_index():
     assert embed_cfgs[0].distance_type == "cosine"
 
 
+async def test_ensure_indexes_records_growth_baseline_on_first_build(tmp_path):
+    """The first vector-index build records the row count as the growth
+    baseline, so auto-rebuild-on-growth measures from the first train rather
+    than from a much larger first end-of-action count (I2)."""
+    table = RecordingTable(query_builder=_RecordingQueryBuilder(), row_count=1000)
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    settings = _configured_settings(min_rows_for_vector_index=256, lancedb_path=str(tmp_path))
+    client = _client_with_conn(settings, conn)
+
+    assert client._read_trained_rows() == 0
+    await client.ensure_indexes()
+    assert client._read_trained_rows() == 1000
+
+
 async def test_rebuild_vector_index_replaces_with_cosine():
     """rebuild_vector_index force-recreates the vector index (replace=True)
     so the IVF_PQ centroids retrain on the current vectors."""

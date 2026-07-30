@@ -1411,6 +1411,42 @@ async def test_bulk_re_embed_execute_counts_successes_and_failures():
     assert failed_ids == {"d2", "d3"}
 
 
+async def test_bulk_re_embed_execute_flags_rebuild_failure():
+    """Docs re-embed but the post-embed index rebuild raises: the result
+    reports rebuild_failed=True rather than a clean success over stale
+    centroids (I1)."""
+    plan = BulkReEmbedPlan(target_doc_ids=("d1",), total_chunks=0)
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.re_embed",
+            return_value={"embed_ok": True, "lancedb_ok": True, "n_chunks": 5},
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.rebuild_vector_index",
+            side_effect=RuntimeError("index boom"),
+        ),
+    ):
+        result = await bulk_re_embed_execute(plan, _config())
+
+    assert result.n_succeeded == 1
+    assert result.rebuild_failed is True
+
+
+async def test_bulk_re_embed_execute_rebuild_ok_not_flagged():
+    """A successful post-embed rebuild leaves rebuild_failed False (I1)."""
+    plan = BulkReEmbedPlan(target_doc_ids=("d1",), total_chunks=0)
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.re_embed",
+            return_value={"embed_ok": True, "lancedb_ok": True, "n_chunks": 5},
+        ),
+        patch("knowledge_agent.ingestion.bulk_ops.pipeline.rebuild_vector_index"),
+    ):
+        result = await bulk_re_embed_execute(plan, _config())
+
+    assert result.rebuild_failed is False
+
+
 # ---- bulk_backfill_chunks / entities / ontology ----
 
 
@@ -2088,6 +2124,37 @@ async def test_materialize_xref_edges_execute_recomputes_l10_when_planned():
     assert args[1] == 3
     assert result.l10_attempted is True
     assert result.n_l10_edges_written == 42
+
+
+async def test_materialize_skips_l10_recompute_when_no_edges_changed():
+    """Layer on but every selected ontology produced 0 edges: the heavy
+    graph-wide L10 recompute is skipped and l10_attempted is False (X2)."""
+    plan = MaterializeXrefEdgesPlan(
+        ontology_names=("mesh",),
+        term_labels=("MeSHTerm",),
+        xrefs_mode="use",
+        n_dangling_sources=5,
+        will_recompute_l10=True,
+        l10_threshold=3,
+    )
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.get_kg_client",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.xrefs.materialize_xref_edges_for_ontology",
+            return_value=0,
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops."
+            "cross_doc_xrefs_writes.recompute_cross_doc_xrefs_global",
+        ) as l10_recompute,
+    ):
+        result = await materialize_xref_edges_execute(plan)
+
+    l10_recompute.assert_not_called()
+    assert result.l10_attempted is False
 
 
 # ---- recompute_cross_doc_xrefs (standalone L10 rebuild) ----

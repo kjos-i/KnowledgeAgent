@@ -578,17 +578,6 @@ class Settings(BaseSettings):
             "state's `use_mmr` field."
         ),
     )
-    optimize_indexes_per_ingest: bool = Field(
-        default=True,
-        description=(
-            "When True, `ingest_document()` calls `LanceClient.ensure_indexes()` "
-            "after each successful write so vector + FTS indexes stay current. "
-            "INCREMENTAL optimize - not a full rebuild - typically <1s per doc. "
-            "Turn off only for bulk loads where you want to defer all index "
-            "work to a single optimize at the end (bulk_ops.py will do this "
-            "automatically when it lands)."
-        ),
-    )
     min_rows_for_vector_index: int = Field(
         default=256,
         ge=1,
