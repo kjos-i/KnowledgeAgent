@@ -1077,6 +1077,50 @@ async def test_maintain_indexes_folds_when_deferred():
     assert "text" in cols
 
 
+async def test_maintain_indexes_sets_baseline_then_rebuilds_on_growth(tmp_path):
+    """auto_rebuild=True: the first above-threshold action records the training
+    baseline (no rebuild); a later action retrains only once the corpus has
+    grown past growth_factor x that baseline. Exercises the sidecar round-trip
+    and the trained*growth_factor trigger arithmetic (real disk via tmp_path)."""
+    settings = _configured_settings(min_rows_for_vector_index=256, lancedb_path=str(tmp_path))
+    table = RecordingTable(query_builder=_RecordingQueryBuilder(), row_count=300)
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    client = _client_with_conn(settings, conn)
+
+    def _embed_index_calls():
+        return [k for (_a, k) in table.create_index_calls if k.get("column") == "embedding"]
+
+    # 1) First action above the 256-row threshold: set baseline (300), NO rebuild.
+    did = await client.maintain_indexes(
+        auto_rebuild=True, growth_factor=3.0, optimize_if_no_rebuild=False
+    )
+    assert did is False
+    assert not _embed_index_calls()
+    assert (tmp_path / ".vector_index_meta.json").exists()
+    assert client._read_trained_rows() == 300
+
+    # 2) Grown but not yet tripled (300 -> 800 < 900): still NO rebuild, baseline unchanged.
+    table.row_count = 800
+    table.create_index_calls.clear()
+    did = await client.maintain_indexes(
+        auto_rebuild=True, growth_factor=3.0, optimize_if_no_rebuild=False
+    )
+    assert did is False
+    assert not _embed_index_calls()
+    assert client._read_trained_rows() == 300
+
+    # 3) Tripled (>= 900): retrain fires with replace=True and advances the baseline.
+    table.row_count = 900
+    table.create_index_calls.clear()
+    did = await client.maintain_indexes(
+        auto_rebuild=True, growth_factor=3.0, optimize_if_no_rebuild=False
+    )
+    assert did is True
+    embed = _embed_index_calls()
+    assert embed and embed[0]["replace"] is True
+    assert client._read_trained_rows() == 900
+
+
 async def test_retrieve_dispatches_to_mode_specific_method(monkeypatch):
     """`retrieve(mode=...)` is a pure dispatcher: each mode value
     routes to the matching `*_search` method. Patch the three and

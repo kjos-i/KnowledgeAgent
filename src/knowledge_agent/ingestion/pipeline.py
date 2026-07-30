@@ -247,8 +247,10 @@ async def re_embed(doc_id: str, config: CorpusConfig) -> dict[str, Any]:
       - Delete-then-insert in LanceDB to update the vector column (LanceDB
         has no in-place column update; rewriting all doc-level fields
         is the trade-off, acceptable because re-embed is rare).
-      - Rebuilds vector index when `config.optimize_indexes_per_ingest`
-        is True.
+      - Folds the rewritten rows into the indexes (ensure_indexes) when
+        `config.optimize_indexes_per_ingest` is True. This does NOT retrain
+        the vector-index centroids; the full centroid rebuild after a
+        re-embed is done once by `bulk_re_embed_execute`, its only caller.
 
     Downstream NOT affected: embeddings are isolated to LanceDB; nothing
     in KG (`:Chunk`, `:Entity`, ontology links) depends on the vector.
