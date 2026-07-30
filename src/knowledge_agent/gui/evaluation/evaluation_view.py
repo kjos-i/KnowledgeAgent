@@ -2,13 +2,13 @@
 
 Sub-tabs (fixed order), by display label:
 
+  - Create test cases — browse/author the gold dataset: a scrollable case
+    list + a full-field view of the selected case (editing / Add-Delete /
+    capture-from-Search / LLM generation).
   - Run evaluation — configure + trigger an eval run (dataset, metric
     groups, judge panel, max-cases) → `runner.run(cfg)` in-process with a
     progress bar; on completion, refresh + select the new run and hop to
     Run Summary.
-  - Create test cases — browse/author the gold dataset: a scrollable case
-    list + a full-field view of the selected case (editing / Add-Delete /
-    capture-from-Search / LLM generation).
   - Info — the Evaluation help doc (info_evaluation.md), rendered read-only.
   - Run Summary — KPI cards + per-case table for the selected run.
   - Run Charts — metric-balance / distribution / correlation for the run.
@@ -48,8 +48,8 @@ if TYPE_CHECKING:
 
 
 SUB_TAB_LABELS = (
-    "Run evaluation",
     "Create test cases",
+    "Run evaluation",
     "Info",
     "Run Summary",
     "Run Charts",
@@ -106,8 +106,8 @@ class EvaluationView:
         )
         sub_bodies = ft.TabBarView(
             controls=[
-                ft.Container(content=self.run_tab.build(), padding=8, expand=True),
                 ft.Container(content=self.dataset_tab.build(), padding=8, expand=True),
+                ft.Container(content=self.run_tab.build(), padding=8, expand=True),
                 ft.Container(
                     content=InfoDoc(
                         self.app,
