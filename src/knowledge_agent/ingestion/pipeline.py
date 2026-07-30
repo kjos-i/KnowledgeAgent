@@ -792,31 +792,23 @@ async def backfill_triples(doc_id: str, config: CorpusConfig) -> dict[str, Any]:
         logger.warning("backfill_triples (%s): delete_triples failed: %r", doc_id, exc)
         return {"triples_ok": False, "n_triples": 0}
 
-    chunk_triples: list[tuple[str, list[ExtractedTriple]]] = []
-    n_triples = 0
-    for row in chunk_rows:
-        chunk_id = row["chunk_id"]
-        entity_vocab = chunk_entities.get(chunk_id, [])
-        if not entity_vocab:
-            chunk_triples.append((chunk_id, []))
-            continue
-        try:
-            triples = await triples_extractor.extract(
-                row["text"],
-                entity_vocab,
-                model=config.triples_extractor_model,
-                temperature=config.triples_extractor_temperature,
-            )
-        except Exception as exc:
-            logger.warning(
-                "backfill_triples (%s): extraction failed for chunk %s: %r; skipping",
-                doc_id,
-                chunk_id,
-                exc,
-            )
-            triples = []
-        chunk_triples.append((chunk_id, triples))
-        n_triples += len(triples)
+    # Batched over `triples_chunks_per_batch` consecutive chunks (1 =
+    # per-chunk, the original behaviour). chunk_rows are chunk_index-ordered
+    # (get_chunks_by_doc_id sorts), so batches are consecutive.
+    chunk_inputs: list[triples_extractor.ChunkInput] = [
+        (row["chunk_id"], row["text"], chunk_entities.get(row["chunk_id"], []))
+        for row in chunk_rows
+    ]
+    chunk_triples: list[
+        tuple[str, list[ExtractedTriple]]
+    ] = await triples_extractor.extract_batched(
+        chunk_inputs,
+        batch_size=config.triples_chunks_per_batch,
+        model=config.triples_extractor_model,
+        temperature=config.triples_extractor_temperature,
+        max_concurrent=get_settings().pipeline_max_concurrent_chunks,
+    )
+    n_triples = sum(len(t) for _, t in chunk_triples)
 
     try:
         await kg_client.write_triples(doc_id, chunk_triples)
@@ -1367,37 +1359,28 @@ async def ingest_document(
                 "n_links": n_links,
             }
 
-    # ---- 9. L8 triples extraction — PARALLEL per-chunk fan-out ----
+    # ---- 9. L8 triples extraction — batched over N consecutive chunks ----
     kg_triples_ok = False
     kg_triples_error: ErrorDetail | None = None
     n_triples_written = 0
     if config.layers.triples and kg_entities_ok:
-        sem_l8 = asyncio.Semaphore(settings.pipeline_max_concurrent_chunks)
         chunk_text_by_id = {make_chunk_id(doc_id, c.chunk_index): c.text for c in chunks}
-
-        async def _extract_triples_one(chunk_id, mentions):
-            entity_vocab = [(m.raw_text.lower(), m.entity_type) for m in mentions]
-            if not entity_vocab:
-                return chunk_id, []
-            async with sem_l8:
-                try:
-                    triples = await triples_extractor.extract(
-                        chunk_text_by_id[chunk_id],
-                        entity_vocab,
-                        model=config.triples_extractor_model,
-                        temperature=config.triples_extractor_temperature,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "L8: extraction failed for chunk %s: %r; skipping",
-                        chunk_id,
-                        exc,
-                    )
-                    triples = []
-            return chunk_id, triples
-
-        chunk_triples = list(
-            await asyncio.gather(*(_extract_triples_one(cid, m) for cid, m in chunk_mentions))
+        # chunk_mentions is in `chunks` order (L6 gather preserves it), so the
+        # non-overlapping batches below are consecutive chunks within this doc.
+        chunk_inputs: list[triples_extractor.ChunkInput] = [
+            (
+                chunk_id,
+                chunk_text_by_id[chunk_id],
+                [(m.raw_text.lower(), m.entity_type) for m in mentions],
+            )
+            for chunk_id, mentions in chunk_mentions
+        ]
+        chunk_triples = await triples_extractor.extract_batched(
+            chunk_inputs,
+            batch_size=config.triples_chunks_per_batch,
+            model=config.triples_extractor_model,
+            temperature=config.triples_extractor_temperature,
+            max_concurrent=settings.pipeline_max_concurrent_chunks,
         )
         n_triples_written = sum(len(t) for _, t in chunk_triples)
         try:

@@ -316,3 +316,113 @@ async def test_extract_returns_empty_when_llm_returns_no_triples():
         )
 
     assert result == []
+
+
+# ---- extract_batched (window of N consecutive chunks) ----------------------
+
+
+def _et(subject: str, predicate: str, obj: str, evidence: str) -> ExtractedTriple:
+    return ExtractedTriple(
+        subject_key=subject,
+        subject_entity_type="T",
+        predicate=predicate,
+        object_key=obj,
+        object_entity_type="T",
+        evidence_span=evidence,
+    )
+
+
+async def test_extract_batched_size_1_is_per_chunk():
+    """batch_size=1 makes one call per chunk and attributes each triple to
+    its own chunk (the original per-chunk behaviour)."""
+    chunks = [
+        ("c0", "alpha inhibits beta.", [("alpha", "T"), ("beta", "T")]),
+        ("c1", "gamma activates delta.", [("gamma", "T"), ("delta", "T")]),
+    ]
+    calls: list[str] = []
+
+    async def fake_extract(text, vocab, *, model, temperature):
+        calls.append(text)
+        if "alpha" in text:
+            return [_et("alpha", "INHIBITS", "beta", "alpha inhibits beta")]
+        return [_et("gamma", "ACTIVATES", "delta", "gamma activates delta")]
+
+    with patch("knowledge_agent.ingestion.triples_extractor.extract", side_effect=fake_extract):
+        out = await triples_extractor.extract_batched(
+            chunks, batch_size=1, model="m", temperature=0.0
+        )
+
+    assert len(calls) == 2  # one call per chunk
+    assert [cid for cid, _ in out] == ["c0", "c1"]
+    assert out[0][1][0].predicate == "INHIBITS"
+    assert out[1][1][0].predicate == "ACTIVATES"
+
+
+async def test_extract_batched_groups_and_attributes_by_evidence():
+    """batch_size=2 groups consecutive chunks into one call over combined text
+    + pooled vocab, and attributes a triple to the chunk its evidence lives in."""
+    chunks = [
+        ("c0", "alpha is here.", [("alpha", "T")]),
+        ("c1", "beta appears and alpha inhibits beta downstream.", [("beta", "T")]),
+        ("c2", "gamma solo.", [("gamma", "T")]),
+    ]
+    calls: list[dict[str, str]] = []
+
+    async def fake_extract(text, vocab, *, model, temperature):
+        calls.append(dict(vocab))
+        if "alpha is here" in text:  # the c0+c1 batch
+            return [_et("alpha", "INHIBITS", "beta", "alpha inhibits beta downstream")]
+        return []
+
+    with patch("knowledge_agent.ingestion.triples_extractor.extract", side_effect=fake_extract):
+        out = await triples_extractor.extract_batched(
+            chunks, batch_size=2, model="m", temperature=0.0
+        )
+
+    assert len(calls) == 2  # [c0,c1] and [c2] -> 2 non-overlapping batches
+    assert set(calls[0].keys()) == {"alpha", "beta"}  # pooled vocab of the batch
+    assert [cid for cid, _ in out] == ["c0", "c1", "c2"]  # one entry per chunk, in order
+    by = dict(out)
+    assert by["c0"] == []
+    assert len(by["c1"]) == 1 and by["c1"][0].predicate == "INHIBITS"  # matched to c1
+    assert by["c2"] == []
+
+
+async def test_extract_batched_fallback_to_first_chunk_when_no_evidence_match():
+    """When the evidence span matches no single chunk in the batch, the triple
+    falls back to the batch's first chunk (verbatim span still stored)."""
+    chunks = [
+        ("c0", "alpha text.", [("alpha", "T")]),
+        ("c1", "beta text.", [("beta", "T")]),
+    ]
+
+    async def fake_extract(text, vocab, *, model, temperature):
+        return [_et("alpha", "INHIBITS", "beta", "paraphrased span not present verbatim")]
+
+    with patch("knowledge_agent.ingestion.triples_extractor.extract", side_effect=fake_extract):
+        out = await triples_extractor.extract_batched(
+            chunks, batch_size=2, model="m", temperature=0.0
+        )
+
+    by = dict(out)
+    assert len(by["c0"]) == 1  # fallback = first chunk of the batch
+    assert by["c1"] == []
+
+
+async def test_extract_batched_skips_empty_vocab_batch():
+    """A batch whose chunks have no entities makes no LLM call."""
+    chunks = [("c0", "no entities here.", [])]
+    called = False
+
+    async def fake_extract(*a, **k):
+        nonlocal called
+        called = True
+        return []
+
+    with patch("knowledge_agent.ingestion.triples_extractor.extract", side_effect=fake_extract):
+        out = await triples_extractor.extract_batched(
+            chunks, batch_size=1, model="m", temperature=0.0
+        )
+
+    assert called is False
+    assert out == [("c0", [])]

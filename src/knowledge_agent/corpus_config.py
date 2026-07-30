@@ -807,6 +807,23 @@ class CorpusConfig(BaseModel):
             "`layers.triples=true`. Per-corpus."
         ),
     )
+    triples_chunks_per_batch: int = Field(
+        default=1,
+        ge=1,
+        description=(
+            "How many consecutive chunks the L8 triples-extractor reads "
+            "together in one LLM call. 1 (default) = one call per chunk, "
+            "the original behaviour. Higher values batch that many chunks "
+            "into a single call (non-overlapping, never crossing a "
+            "document boundary), so relationships stated across adjacent "
+            "chunks can be captured; a triple's chunk_id is resolved by "
+            "matching its evidence span to the containing chunk, falling "
+            "back to the batch's first chunk. 2-4 is a sensible range; "
+            "very large values grow the entity vocabulary per call and can "
+            "dilute extraction quality (and risk the context window). "
+            "Consulted only when `layers.triples=true`. Per-corpus."
+        ),
+    )
     embedding_provider: EmbeddingProvider = Field(
         default="voyage",
         description=(

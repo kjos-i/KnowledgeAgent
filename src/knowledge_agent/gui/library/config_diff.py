@@ -47,6 +47,7 @@ _SCALAR_FIELDS: tuple[str, ...] = (
     "entity_extractor_temperature",
     "triples_extractor_model",
     "triples_extractor_temperature",
+    "triples_chunks_per_batch",
 )
 
 

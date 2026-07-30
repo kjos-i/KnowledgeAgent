@@ -301,6 +301,7 @@ class CorpusConfigEditor:
         self.triples_extractor_model_field: ft.Dropdown | None = None
         self.triples_extractor_temperature_slider: ft.Slider | None = None
         self.triples_extractor_temperature_readout: ft.Text | None = None
+        self.triples_chunks_per_batch_field: ft.TextField | None = None
 
         # ----- Chunks (L5) per-corpus fields (promoted 2026-07-02) -----
         # Previously read from global Settings; now editable per corpus.
@@ -664,6 +665,21 @@ class CorpusConfigEditor:
             divisions=20,
             on_change=self._on_triples_extractor_temperature_slide,
             on_change_end=self._on_triples_extractor_temperature_committed,
+        )
+        self.triples_chunks_per_batch_field = ft.TextField(
+            value="1",
+            border=ft.InputBorder.OUTLINE,
+            border_color=FRAME_BORDER_COLOR,
+            bgcolor=PANEL_BG,
+            on_blur=self._on_triples_chunks_per_batch_blur,
+            tooltip=(
+                "How many consecutive chunks the triples extractor reads "
+                "together in one LLM call. 1 (default) = one call per chunk. "
+                "Higher values batch that many chunks (non-overlapping, "
+                "within a document) so relationships stated across adjacent "
+                "chunks can be captured. 2-4 is a sensible range; very large "
+                "values dilute quality and risk the context window."
+            ),
         )
         self._sync_extractor_temp_enabled()
         # Entities per-extractor group containers — built ONCE here so
@@ -1235,6 +1251,10 @@ class CorpusConfigEditor:
                                     self.triples_extractor_temperature_slider,
                                     trailing=self.triples_extractor_temperature_readout,
                                 ),
+                                labeled_field(
+                                    "chunks_per_batch",
+                                    self.triples_chunks_per_batch_field,
+                                ),
                             ],
                         ),
                     ],
@@ -1475,6 +1495,8 @@ class CorpusConfigEditor:
             self.triples_extractor_temperature_readout.value = _fmt_float(
                 cfg.triples_extractor_temperature,
             )
+        if self.triples_chunks_per_batch_field is not None:
+            self.triples_chunks_per_batch_field.value = str(cfg.triples_chunks_per_batch)
         # Loaded models may be sampling-free — grey their temp sliders.
         self._sync_extractor_temp_enabled()
         # Entity extraction — ordered multi-extractor selection.
@@ -1609,6 +1631,7 @@ class CorpusConfigEditor:
             for name in (
                 "triples_extractor_model",
                 "triples_extractor_temperature",
+                "triples_chunks_per_batch",
             ):
                 if getattr(base, name) != getattr(cfg, name):
                     knob_deltas += 1
@@ -2453,6 +2476,29 @@ class CorpusConfigEditor:
         )
         self._after_mutation()
 
+    def _on_triples_chunks_per_batch_blur(self, e: ft.Event) -> None:
+        if self._corpus_config is None or self.triples_chunks_per_batch_field is None:
+            return
+        raw = (self.triples_chunks_per_batch_field.value or "").strip()
+        current = self._corpus_config.triples_chunks_per_batch
+        try:
+            new_value = int(raw)
+            if new_value < 1:
+                raise ValueError("must be >= 1")
+        except ValueError:
+            self.triples_chunks_per_batch_field.value = str(current)
+            self.app.page.update()
+            return
+        if new_value == current:
+            self.triples_chunks_per_batch_field.value = str(new_value)
+            self.app.page.update()
+            return
+        self._corpus_config = self._corpus_config.model_copy(
+            update={"triples_chunks_per_batch": new_value},
+        )
+        self.triples_chunks_per_batch_field.value = str(new_value)
+        self._after_mutation()
+
     # ----- Chunks (L5) per-corpus field handlers --------------------------
 
     def _on_chunker_strategy_changed(self, e: ft.Event) -> None:
@@ -2920,7 +2966,11 @@ class CorpusConfigEditor:
             not entities_on,
         )
         _set_disabled(
-            [self.triples_extractor_model_field, self.triples_extractor_temperature_slider],
+            [
+                self.triples_extractor_model_field,
+                self.triples_extractor_temperature_slider,
+                self.triples_chunks_per_batch_field,
+            ],
             not cfg.layers.triples,
         )
         _set_disabled([self.cross_doc_threshold_field], not cfg.layers.cross_doc)

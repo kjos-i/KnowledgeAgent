@@ -40,6 +40,9 @@ Defensive policies:
     a chunk that crashes the LLM doesn't poison the whole doc.
 """
 
+import asyncio
+import logging
+
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
@@ -47,6 +50,8 @@ from knowledge_agent.kg.schema import TRIPLE_PREDICATE_RELS
 from knowledge_agent.kg.triples_writes import ExtractedTriple
 from knowledge_agent.llm_factory import get_llm_ref as _get_llm
 from knowledge_agent.llm_factory import with_retry as _with_retry
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Structured-output schema. Pydantic models are LLM-facing only; the public
@@ -276,3 +281,106 @@ async def extract(
         ]
     )
     return _filter_and_convert_triples(result, entity_vocab)
+
+
+# ---------------------------------------------------------------------------
+# Batched extraction (window of N consecutive chunks per LLM call).
+# ---------------------------------------------------------------------------
+
+# One chunk's input to the batched extractor: (chunk_id, text, entity_vocab).
+ChunkInput = tuple[str, str, list[tuple[str, str]]]
+
+
+def _normalise_for_match(s: str) -> str:
+    """Whitespace-collapsed, lowercased form for evidence-span matching.
+
+    The LLM's evidence span should be a verbatim slice of chunk text, but
+    newlines / repeated spaces (and the occasional case tweak) make a raw
+    substring test brittle. Collapsing whitespace + lowercasing both sides
+    makes the containment test robust without being fuzzy.
+    """
+    return " ".join(s.split()).lower()
+
+
+def _attribute_chunk_id(evidence_span: str, batch: list[ChunkInput]) -> str:
+    """Resolve a triple's `chunk_id` within its batch.
+
+    Primary: the chunk whose text contains the evidence span. Fallback:
+    the batch's FIRST chunk - used when the span was paraphrased or
+    straddles two chunks (exactly the cross-chunk case a window captures).
+    The verbatim span is stored either way, so the citation text stays
+    intact; only the chunk pointer is approximate in the fallback case.
+    """
+    snippet = _normalise_for_match(evidence_span)
+    if snippet:
+        for chunk_id, text, _vocab in batch:
+            if snippet in _normalise_for_match(text):
+                return chunk_id
+    return batch[0][0]
+
+
+async def extract_batched(
+    chunks: list[ChunkInput],
+    *,
+    batch_size: int,
+    model: str,
+    temperature: float,
+    max_concurrent: int | None = None,
+) -> list[tuple[str, list[ExtractedTriple]]]:
+    """Extract L8 triples over non-overlapping batches of consecutive chunks.
+
+    `chunks` is one document's chunks IN ORDER, each `(chunk_id, text,
+    entity_vocab)`. They are grouped into consecutive, non-overlapping
+    batches of `batch_size` (the last may be shorter, and batches never
+    cross a document boundary because the caller passes one document's
+    chunks). Each batch is ONE LLM call over the concatenated text + the
+    UNION of the batch's L6 entity vocab, so relationships stated across
+    adjacent chunks can be captured. `batch_size=1` reproduces the original
+    per-chunk extraction exactly.
+
+    Each triple is attributed to a chunk via `_attribute_chunk_id`. Returns
+    one `(chunk_id, [triples])` entry per input chunk, in order (chunks
+    with no triples get an empty list) - the shape `write_triples` consumes.
+
+    `max_concurrent` bounds how many batches run at once (asyncio
+    Semaphore); None gathers them all (still throttled by the provider's
+    own rate limiter). A per-batch LLM failure is caught + logged so one
+    bad call doesn't lose the rest of the document.
+    """
+    by_chunk: dict[str, list[ExtractedTriple]] = {chunk_id: [] for chunk_id, _t, _v in chunks}
+    size = max(1, batch_size)
+    batches = [chunks[i : i + size] for i in range(0, len(chunks), size)]
+    sem = asyncio.Semaphore(max_concurrent) if max_concurrent else None
+
+    async def _run_batch(batch: list[ChunkInput]) -> list[tuple[str, ExtractedTriple]]:
+        vocab_map: dict[str, str] = {}
+        for _chunk_id, _text, vocab in batch:
+            for key, entity_type in vocab:
+                vocab_map.setdefault(key, entity_type)
+        if not vocab_map:  # no entities across the whole batch -> no triples
+            return []
+        combined_text = "\n\n".join(text for _chunk_id, text, _v in batch)
+
+        async def _call() -> list[ExtractedTriple]:
+            return await extract(
+                combined_text,
+                list(vocab_map.items()),
+                model=model,
+                temperature=temperature,
+            )
+
+        try:
+            if sem is not None:
+                async with sem:
+                    triples = await _call()
+            else:
+                triples = await _call()
+        except Exception as exc:
+            logger.warning("triples extract_batched: a batch failed: %r; skipping", exc)
+            return []
+        return [(_attribute_chunk_id(t.evidence_span, batch), t) for t in triples]
+
+    for pairs in await asyncio.gather(*(_run_batch(b) for b in batches)):
+        for chunk_id, triple in pairs:
+            by_chunk[chunk_id].append(triple)
+    return [(chunk_id, by_chunk[chunk_id]) for chunk_id, _t, _v in chunks]
