@@ -5,8 +5,9 @@ project. It's self-contained and portable: copy the folder and you've copied the
 whole knowledge base.
 
 Jump to: [Inside the folder](#inside) · [Your documents](#documents) ·
-[Vector store schema](#schema) · [Graph schema](#graph-schema) · [The idea](#idea) ·
-[Other saved files](#saved) · [Installs downloads](#installs)
+[Vector store schema](#schema) · [Graph schema](#graph-schema) ·
+[Ledger schema](#ledger-schema) · [The idea](#idea) · [Other saved files](#saved) ·
+[Installs downloads](#installs)
 
 <a id="inside"></a>
 ## Inside a corpus folder
@@ -20,7 +21,7 @@ The corpus folder holds:
 | `figures/` | figure images pulled from documents, under `figures/<doc_id>/` |
 | `.ka_session.json` | GUI session state (gitignored) |
 | `<dataset>.json` | evaluation datasets you create |
-| `eval_output/` | evaluation results: `eval_ledger.db` (run history), plus per-run `eval_report_<ts>_<dataset>.json` and `eval_summary_<ts>_<dataset>.csv` |
+| `eval_output/` | evaluation results: `eval_ledger.db` (run history, see [ledger schema below](#ledger-schema)), plus per-run `eval_report_<ts>_<dataset>.json` and `eval_summary_<ts>_<dataset>.csv` |
 
 <a id="documents"></a>
 ## Your original documents
@@ -119,6 +120,70 @@ OpenAlex citation graph), and `:OntologyTerm` with a subtype such as `:MeSHTerm`
 | `(:Document)-[:RELATED_TO]-(:Document)` | cross-document link; shares ≥ 2 entities; undirected |
 
 `doc_id` and `chunk_id` are the universal join keys back to the LanceDB store.
+
+<a id="ledger-schema"></a>
+## The evaluation ledger (SQLite) schema
+
+`eval_output/eval_ledger.db` accumulates your evaluation history so the dashboard
+can plot trends across runs. It is **append-only** (every run adds rows, nothing
+prunes), **one file per corpus**, and git-ignored, disposable data — to reset,
+delete the file and only the trend history is lost. It has two tables joined on
+`run_id`: `eval_runs` (one row per run) and `eval_cases` (one row per case per
+run). The columns below are the **stable backbone**; per-metric score columns are
+**registry-driven**, so the exact set grows as metrics are added (add-only, no
+wipe), the same way the graph schema depends on which layers are on.
+
+**Evaluation run table - one row per evaluation run:**
+
+| Column | Type | Req | Notes |
+|---|---|---|---|
+| `run_id` | int | ✓ | unique run id; the join key for `eval_cases` |
+| `run_timestamp` | text | ✓ | when the run ran |
+| `dataset_path` | text | | the scored dataset file |
+| `dataset_name` | text | | the scored dataset's name (filterable) |
+| `dataset_hash` | text | | SHA-256 of the scored cases (provenance) |
+| `git_commit` | text | | repo commit at run time |
+| `case_count` | int | | number of cases scored |
+| `pass_count` | int | | number of cases that passed the gate |
+| `pass_rate` | real | | passes ÷ cases |
+| `avg_<metric>` | real | | run-level mean for a metric (one column per metric) |
+| `n_<metric>` | int | | how many cases had a score for that metric (the mean's denominator) |
+| `enabled_groups` | text | | JSON list: which metric groups ran |
+| `gate_thresholds` | text | | JSON dict: the pass-gate thresholds used |
+| `corpus_name` | text | | corpus the run scored (filterable) |
+| `llm_provider` | text | | provider used |
+| `synthesizer_model` | text | | model that wrote the answers |
+| `judge_models` | text | | JSON list: the judge panel that ran |
+| `recipe_hash` | text | | dataset-recipe fingerprint (provenance) |
+| `facts_hash` | text | | SHA-256 of gold content, shared across a suite (provenance) |
+| `knob_hash` | text | | SHA-256 of the swept retrieval knobs (provenance) |
+| `suite` | text | | the named suite this run was executed as (dashboard grouping) |
+| `suite_run_id` | text | | shared id linking the members of one suite launch |
+| `prompts_snapshot` | text | | JSON: prompt provenance |
+
+**Evaluation case table - one row per case per run:**
+
+| Column | Type | Req | Notes |
+|---|---|---|---|
+| `case_row_id` | int | ✓ | unique row id |
+| `run_id` | int | ✓ | the run this case belongs to (references `eval_runs`) |
+| `run_timestamp` | text | ✓ | the run's timestamp (denormalised for convenience) |
+| `case_id` | text | ✓ | the case's id within the dataset |
+| `category` | text | | the case's category |
+| `question` | text | | the question asked |
+| `status` | text | | pass, fail, or error |
+| `<metric>` | (per metric) | | per-case score for a metric (one column per metric) |
+| `answer` | text | | the model's answer |
+| `expected_output` | text | | the gold answer (joined expected points) |
+| `errors` | text | | JSON list: per-case errors |
+| `origin` | text | | where the case came from: manual, llm, search, or chat (filterable) |
+| `case_settings` | text | | JSON: the retrieval settings this case ran under (for Case Details) |
+| `source_conversation` | text | | JSON: the chat turns behind a chat-origin case (for Case Details) |
+
+**Req** = required (non-null). Foreign key `eval_cases.run_id` references
+`eval_runs.run_id`, so every case belongs to a real run. The provenance and
+filter columns are what the dashboard's rail and Compare / Trends tabs group and
+filter by; they are never read by scoring or the pass-gate.
 
 <a id="idea"></a>
 ## The idea
