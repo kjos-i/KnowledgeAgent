@@ -28,6 +28,7 @@ results/
 lance_data/
 lance_data_test/
 test_lancedb/
+lancedb/
 
 # Evaluation harness output (SQLite ledger + JSON/CSV reports)
 eval_output/
