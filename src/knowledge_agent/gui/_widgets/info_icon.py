@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import flet as ft
 
+from knowledge_agent.gui._markdown import compact_markdown
 from knowledge_agent.gui._styles import section_title
 
 if TYPE_CHECKING:
@@ -52,6 +53,18 @@ _TIER_FLAGS: dict[str, str] = {
 }
 
 
+def _dialog_body(tier: str, text: str) -> ft.Control:
+    """One help body. Beginner + standard render as themed markdown (real
+    headings + bullet lists); technical stays plain ft.Text — it is dense
+    power-user prose full of code tokens and <placeholder> angle-brackets that
+    markdown would mangle. For the markdown tiers we HTML-escape < and > so
+    literal placeholders like <name> display instead of being swallowed as HTML
+    tags (these bodies never use <> for markdown)."""
+    if tier == "technical":
+        return ft.Text(text, size=13, selectable=True)
+    return compact_markdown(text.replace("<", "&lt;").replace(">", "&gt;"))
+
+
 def _tier_icon(app: GuiApp, tier: str, *, title: str, text: str) -> ft.IconButton:
     """One tier's `(i)` button — opens a help dialog, self-registers so the
     per-tier toggle can flip it live, starts hidden if its tier is off."""
@@ -63,7 +76,7 @@ def _tier_icon(app: GuiApp, tier: str, *, title: str, text: str) -> ft.IconButto
             # scrollable so a long body (e.g. a combined multi-control note)
             # scrolls within the dialog instead of clipping off-screen.
             scrollable=True,
-            title=ft.Text(title, weight=ft.FontWeight.BOLD),
+            title=ft.Text(title, size=15, weight=ft.FontWeight.BOLD),
             content=ft.Container(
                 width=440,
                 content=ft.Column(
@@ -71,7 +84,7 @@ def _tier_icon(app: GuiApp, tier: str, *, title: str, text: str) -> ft.IconButto
                     spacing=6,
                     controls=[
                         ft.Text(spec.label, size=12, italic=True, color=spec.color),
-                        ft.Text(text, size=13, selectable=True),
+                        _dialog_body(tier, text),
                     ],
                 ),
             ),

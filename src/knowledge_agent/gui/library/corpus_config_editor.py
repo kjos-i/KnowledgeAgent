@@ -315,6 +315,8 @@ class CorpusConfigEditor:
         self.extract_figures_checkbox: ft.Checkbox | None = None
         self.embed_images_checkbox: ft.Checkbox | None = None
         self.min_figure_bytes_field: ft.TextField | None = None
+        self.auto_rebuild_checkbox: ft.Checkbox | None = None
+        self.rebuild_growth_factor_field: ft.TextField | None = None
         self.optimize_indexes_checkbox: ft.Checkbox | None = None
 
         # ----- Embedding (per-corpus) -----
@@ -829,13 +831,43 @@ class CorpusConfigEditor:
                 "Applies only when extract_figures=true."
             ),
         )
+        self.auto_rebuild_checkbox = ft.Checkbox(
+            label="auto_rebuild_vector_index — retrain the index as the corpus grows",
+            value=True,
+            tooltip=(
+                "When on, the vector search index is retrained (fresh "
+                "centroids) automatically once the corpus has grown past "
+                "the growth factor below since the last training. Keeps "
+                "search recall healthy as the corpus grows, with no manual "
+                "step; rebuilds get rarer as it stabilises. The first index "
+                "build happens regardless of this setting."
+            ),
+            on_change=lambda e: self._on_chunks_bool_changed(
+                "auto_rebuild_vector_index",
+            ),
+        )
+        self.rebuild_growth_factor_field = ft.TextField(
+            value="3.0",
+            border=ft.InputBorder.OUTLINE,
+            border_color=FRAME_BORDER_COLOR,
+            bgcolor=PANEL_BG,
+            on_blur=self._on_growth_factor_blur,
+            tooltip=(
+                "Growth multiple that triggers the automatic rebuild above: "
+                "rebuild once the chunk count reaches this many times the "
+                "count at the last training (e.g. 3.0 = after the corpus "
+                "roughly triples). Must be greater than 1. Ignored when "
+                "auto-rebuild is off."
+            ),
+        )
         self.optimize_indexes_checkbox = ft.Checkbox(
             label="optimize_indexes_per_ingest — refresh LanceDB indexes",
             value=True,
             tooltip=(
-                "When on, LanceDB vector + FTS indexes rebuild after "
-                "every ingest. Turn off for bulk ingest sessions to "
-                "defer to a single optimize at the end."
+                "When on, LanceDB vector + FTS indexes refresh after "
+                "every document. Turn off for bulk ingest sessions to "
+                "defer to a single optimize at the end of the batch (the "
+                "batch still refreshes once when it finishes)."
             ),
             on_change=lambda e: self._on_chunks_bool_changed(
                 "optimize_indexes_per_ingest",
@@ -1019,7 +1051,11 @@ class CorpusConfigEditor:
                         # tightly-stacked checkboxes.
                         ft.Container(
                             padding=ft.Padding.symmetric(vertical=6),
-                            content=labeled_field("Images scale", self.images_scale_field),
+                            content=labeled_field(
+                                "Images scale",
+                                self.images_scale_field,
+                                trailing=info(self.app, "ingest.images_scale"),
+                            ),
                         ),
                         ft.Row(
                             controls=[
@@ -1031,7 +1067,19 @@ class CorpusConfigEditor:
                         ),
                         ft.Container(
                             padding=ft.Padding.symmetric(vertical=6),
-                            content=labeled_field("Min figure bytes", self.min_figure_bytes_field),
+                            content=labeled_field(
+                                "Min figure bytes",
+                                self.min_figure_bytes_field,
+                                trailing=info(self.app, "ingest.min_figure_bytes"),
+                            ),
+                        ),
+                        self.auto_rebuild_checkbox,
+                        ft.Container(
+                            padding=ft.Padding.symmetric(vertical=6),
+                            content=labeled_field(
+                                "Rebuild growth factor",
+                                self.rebuild_growth_factor_field,
+                            ),
                         ),
                         self.optimize_indexes_checkbox,
                         # --- Sub-section: Embedding model (per-corpus) ---
@@ -1096,7 +1144,17 @@ class CorpusConfigEditor:
                                 sub_section_header("Types to extract"),
                                 ft.Container(
                                     padding=ft.Padding.symmetric(vertical=6),
-                                    content=self.entity_types_field,
+                                    content=ft.Row(
+                                        controls=[
+                                            ft.Container(
+                                                content=self.entity_types_field,
+                                                expand=True,
+                                            ),
+                                            info(self.app, "ingest.entities.types"),
+                                        ],
+                                        spacing=6,
+                                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                    ),
                                 ),
                                 self.entity_types_mode_radio,
                                 # Per-adapter settings — each group toggles `.visible`
@@ -1378,6 +1436,10 @@ class CorpusConfigEditor:
             self.embed_images_checkbox.value = cfg.embed_images
         if self.min_figure_bytes_field is not None:
             self.min_figure_bytes_field.value = str(cfg.min_figure_bytes)
+        if self.auto_rebuild_checkbox is not None:
+            self.auto_rebuild_checkbox.value = cfg.auto_rebuild_vector_index
+        if self.rebuild_growth_factor_field is not None:
+            self.rebuild_growth_factor_field.value = str(cfg.vector_index_rebuild_growth_factor)
         if self.optimize_indexes_checkbox is not None:
             self.optimize_indexes_checkbox.value = cfg.optimize_indexes_per_ingest
         # Embedding (per-corpus): one composite provider:model picker spanning
@@ -2473,10 +2535,34 @@ class CorpusConfigEditor:
         self.images_scale_field.value = str(new_value)
         self._after_mutation()
 
+    def _on_growth_factor_blur(self, e: ft.Event) -> None:
+        if self._corpus_config is None or self.rebuild_growth_factor_field is None:
+            return
+        raw = (self.rebuild_growth_factor_field.value or "").strip()
+        current = self._corpus_config.vector_index_rebuild_growth_factor
+        try:
+            new_value = float(raw)
+            if new_value <= 1.0:
+                raise ValueError("must be > 1")
+        except ValueError:
+            self.rebuild_growth_factor_field.value = str(current)
+            self.app.page.update()
+            return
+        if new_value == current:
+            self.rebuild_growth_factor_field.value = str(new_value)
+            self.app.page.update()
+            return
+        self._corpus_config = self._corpus_config.model_copy(
+            update={"vector_index_rebuild_growth_factor": new_value},
+        )
+        self.rebuild_growth_factor_field.value = str(new_value)
+        self._after_mutation()
+
     def _on_chunks_bool_changed(self, field_name: str) -> None:
-        """Shared handler for the 6 bool checkboxes in the Chunks
+        """Shared handler for the 7 bool checkboxes in the Chunks
         section: merge_peers, enable_pdf_ocr, enable_image_ocr,
-        extract_figures, embed_images, optimize_indexes_per_ingest."""
+        extract_figures, embed_images, auto_rebuild_vector_index,
+        optimize_indexes_per_ingest."""
         if self._corpus_config is None:
             return
         checkbox = {
@@ -2485,6 +2571,7 @@ class CorpusConfigEditor:
             "enable_image_ocr": self.enable_image_ocr_checkbox,
             "extract_figures": self.extract_figures_checkbox,
             "embed_images": self.embed_images_checkbox,
+            "auto_rebuild_vector_index": self.auto_rebuild_checkbox,
             "optimize_indexes_per_ingest": self.optimize_indexes_checkbox,
         }.get(field_name)
         if checkbox is None:
@@ -2817,6 +2904,8 @@ class CorpusConfigEditor:
                 self.extract_figures_checkbox,
                 self.embed_images_checkbox,
                 self.min_figure_bytes_field,
+                self.auto_rebuild_checkbox,
+                self.rebuild_growth_factor_field,
                 self.optimize_indexes_checkbox,
             ],
             not chunks_on,

@@ -81,6 +81,7 @@ logger = logging.getLogger(__name__)
 _BULK_OP_LABELS: dict[str, str] = {
     "bulk_resolve_openalex": "Resolve all papers",
     "bulk_backfill_chunks": "Rebuild graph from chunks",
+    "bulk_rebuild_vector_index": "Rebuild vector index",
     "bulk_re_embed": "Re-embed all chunks",
     "bulk_backfill_entities": "Re-extract all entities",
     "bulk_backfill_ontology": "Re-link all entities",
@@ -689,6 +690,7 @@ class IngestTab:
                     spacing=8,
                     controls=[
                         op_button("bulk_backfill_chunks"),
+                        op_button("bulk_rebuild_vector_index"),
                         op_button("bulk_re_embed"),
                     ],
                 ),
@@ -820,6 +822,12 @@ class IngestTab:
                 bulk_ops.bulk_re_embed_execute,
                 "none",
                 True,
+            ),
+            "bulk_rebuild_vector_index": (
+                bulk_ops.bulk_rebuild_vector_index_plan,
+                bulk_ops.bulk_rebuild_vector_index_execute,
+                "none",
+                False,
             ),
             "bulk_backfill_entities": (
                 bulk_ops.bulk_backfill_entities_plan,
@@ -1561,6 +1569,10 @@ class IngestTab:
                 sub,
                 preserve_existing_labels=not overwrite,
             )
+            # A single file is an ingest action of size 1: refresh the index
+            # once at its end (deferred-optimize fold / auto-rebuild-on-growth)
+            # so a flag-off, single-file-only workflow still stays indexed.
+            await pipeline.maintain_indexes_after_action(config, n_written=1)
         except Exception as exc:
             self._set_busy(False, f"Ingest failed: {exc}")
             return

@@ -35,6 +35,8 @@ from knowledge_agent.ingestion.bulk_ops import (
     IngestFolderItem,
     IngestFolderPlan,
     IngestFolderResult,
+    RebuildVectorIndexPlan,
+    RebuildVectorIndexResult,
     RecomputeCrossDocXrefsPlan,
     SyncPlan,
     SyncResult,
@@ -54,6 +56,8 @@ from knowledge_agent.ingestion.bulk_ops import (
     bulk_backfill_triples_plan,
     bulk_re_embed_execute,
     bulk_re_embed_plan,
+    bulk_rebuild_vector_index_execute,
+    bulk_rebuild_vector_index_plan,
     bulk_resolve_openalex_execute,
     bulk_resolve_openalex_plan,
     clear_xref_edges_execute,
@@ -2327,3 +2331,204 @@ async def test_clear_xref_edges_execute_recomputes_l10_when_planned():
     args, _ = l10_recompute.call_args
     assert args[1] == 4
     assert result.n_cleared == 5
+
+
+# ---- end-of-action index maintenance (deferred optimize / auto-rebuild /
+#      delete-compaction) + the manual Rebuild-vector-index op ----------------
+
+
+async def test_ingest_folder_execute_runs_end_of_action_maintenance():
+    plan = IngestFolderPlan(
+        folder=Path("/tmp"),
+        main_label="Document",
+        sub_label="Paper",
+        items=(_ifi("/tmp/a.pdf", "d1"), _ifi("/tmp/b.pdf", "d2")),
+    )
+    with (
+        patch("knowledge_agent.ingestion.bulk_ops.pipeline.ingest_document"),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.maintain_indexes_after_action",
+            new_callable=AsyncMock,
+        ) as maint,
+    ):
+        await ingest_folder_execute(plan, _config())
+
+    maint.assert_awaited_once()
+    assert maint.await_args.kwargs["n_written"] == 2
+
+
+async def test_add_execute_runs_end_of_action_maintenance():
+    plan = AddPlan(
+        folder=Path("/tmp"),
+        main_label="Document",
+        sub_label="Paper",
+        new_items=(_ifi("/tmp/a.pdf", "d1"),),
+        n_skipped=0,
+    )
+    with (
+        patch("knowledge_agent.ingestion.bulk_ops.pipeline.ingest_document"),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.maintain_indexes_after_action",
+            new_callable=AsyncMock,
+        ) as maint,
+    ):
+        await add_execute(plan, _config())
+
+    maint.assert_awaited_once()
+    assert maint.await_args.kwargs["n_written"] == 1
+
+
+async def test_sync_execute_maintenance_counts_writes_and_deletes():
+    """NEW+EDITED feed n_written; ORPHAN deletes feed n_deleted; MOVED excluded."""
+    plan = SyncPlan(
+        folder=Path("/tmp"),
+        main_label="Document",
+        sub_label="Paper",
+        buckets=_buckets(
+            new=[_disk("/a.pdf", "d1"), _disk("/b.pdf", "d2")],
+            orphan=[_ix("d-orphan")],
+        ),
+    )
+    search_mock = MagicMock()
+    with (
+        patch("knowledge_agent.ingestion.bulk_ops.pipeline.ingest_document"),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.delete_doc",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch("knowledge_agent.ingestion.bulk_ops.get_search_client", return_value=search_mock),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.maintain_indexes_after_action",
+            new_callable=AsyncMock,
+        ) as maint,
+    ):
+        await sync_execute(plan, _config(), preserve_existing_labels=False)
+
+    maint.assert_awaited_once()
+    assert maint.await_args.kwargs["n_written"] == 2
+    assert maint.await_args.kwargs["n_deleted"] == 1
+
+
+async def test_sync_execute_maintenance_move_only_is_no_write_no_delete():
+    plan = SyncPlan(
+        folder=Path("/tmp"),
+        main_label="Document",
+        sub_label=None,
+        buckets=_buckets(moved=[(_disk("/new/p.pdf", "d1"), _ix("d1", stored_path="/old/p.pdf"))]),
+    )
+    search_mock = MagicMock()
+    search_mock.update_doc_metadata = AsyncMock(return_value=True)
+    with (
+        patch("knowledge_agent.ingestion.bulk_ops.get_search_client", return_value=search_mock),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.maintain_indexes_after_action",
+            new_callable=AsyncMock,
+        ) as maint,
+    ):
+        await sync_execute(plan, _config(), preserve_existing_labels=False)
+
+    maint.assert_awaited_once()
+    assert maint.await_args.kwargs["n_written"] == 0
+    assert maint.await_args.kwargs["n_deleted"] == 0
+
+
+async def test_bulk_re_embed_execute_rebuilds_vector_index_on_success():
+    plan = BulkReEmbedPlan(target_doc_ids=("d1",), total_chunks=0)
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.re_embed",
+            new_callable=AsyncMock,
+            return_value={"embed_ok": True, "lancedb_ok": True, "n_chunks": 5},
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.rebuild_vector_index",
+            new_callable=AsyncMock,
+        ) as rebuild,
+    ):
+        await bulk_re_embed_execute(plan, _config())
+
+    rebuild.assert_awaited_once()
+
+
+async def test_bulk_re_embed_execute_skips_rebuild_when_none_succeed():
+    plan = BulkReEmbedPlan(target_doc_ids=("d1",), total_chunks=0)
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.re_embed",
+            new_callable=AsyncMock,
+            return_value={"embed_ok": False, "lancedb_ok": False, "n_chunks": 0},
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.rebuild_vector_index",
+            new_callable=AsyncMock,
+        ) as rebuild,
+    ):
+        await bulk_re_embed_execute(plan, _config())
+
+    rebuild.assert_not_awaited()
+
+
+async def test_delete_doc_execute_compacts_after_delete():
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.delete_doc",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.compact_indexes",
+            new_callable=AsyncMock,
+        ) as compact,
+    ):
+        result = await delete_doc_execute(
+            DeleteDocPlan(doc_id="d1", title="T", n_chunks=3, source_path="/p/d1.pdf")
+        )
+
+    assert result.ok is True
+    compact.assert_awaited_once()
+
+
+async def test_delete_doc_execute_skips_compact_when_delete_fails():
+    with (
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.delete_doc",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "knowledge_agent.ingestion.bulk_ops.pipeline.compact_indexes",
+            new_callable=AsyncMock,
+        ) as compact,
+    ):
+        result = await delete_doc_execute(
+            DeleteDocPlan(doc_id="d1", title="T", n_chunks=3, source_path="/p/d1.pdf")
+        )
+
+    assert result.ok is False
+    compact.assert_not_awaited()
+
+
+async def test_bulk_rebuild_vector_index_execute_calls_rebuild():
+    with patch(
+        "knowledge_agent.ingestion.bulk_ops.pipeline.rebuild_vector_index",
+        new_callable=AsyncMock,
+    ) as rebuild:
+        result = await bulk_rebuild_vector_index_execute(RebuildVectorIndexPlan(n_chunks=10))
+
+    rebuild.assert_awaited_once()
+    assert isinstance(result, RebuildVectorIndexResult)
+    assert result.n_chunks == 10
+
+
+async def test_bulk_rebuild_vector_index_plan_reads_chunk_count():
+    search_mock = MagicMock()
+    search_mock.count_chunks = AsyncMock(return_value=42)
+    with patch(
+        "knowledge_agent.ingestion.bulk_ops.get_search_client",
+        return_value=search_mock,
+    ):
+        plan = await bulk_rebuild_vector_index_plan()
+
+    assert plan.n_chunks == 42
+    assert "42" in plan.summary

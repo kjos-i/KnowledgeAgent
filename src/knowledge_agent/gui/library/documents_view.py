@@ -635,6 +635,9 @@ class DocumentsView:
                 row.get("sub_label"),
                 preserve_existing_labels=True,
             )
+            # Single-file action: refresh the index once at its end so a
+            # flag-off, one-doc-at-a-time workflow still stays indexed.
+            await pipeline.maintain_indexes_after_action(config, n_written=1)
         except Exception as exc:
             logger.warning(
                 "DocumentsView: re-ingest(%s) failed: %r",

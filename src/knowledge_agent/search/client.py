@@ -37,19 +37,21 @@ RRF).
 """
 
 import asyncio
+import json
 import logging
 import math
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Literal
 
-import lancedb
-from lancedb import AsyncConnection
 from lancedb.rerankers import RRFReranker
 
+import lancedb
 from knowledge_agent.config import Settings, get_settings
 from knowledge_agent.ingestion.embed import embed_texts
 from knowledge_agent.models import RetrievedChunk
 from knowledge_agent.search.schema import CHUNKS_TABLE, chunks_schema
+from lancedb import AsyncConnection
 
 logger = logging.getLogger(__name__)
 
@@ -459,6 +461,144 @@ class LanceClient:
         # ---- Fold new rows into existing indexes. Failures here
         # (disk full, lock contention) are real and must propagate.
         await table.optimize()
+
+    async def compact(self) -> None:
+        """Compact the table and prune deleted rows. Idempotent.
+
+        A LanceDB delete only tombstones rows; the bytes and the index
+        entries linger until an `optimize()` rewrites the fragments. This
+        is the post-delete cleanup the bulk executors call once at the end
+        of a delete-bearing action so tombstones don't accumulate. No-op
+        (returns) when the chunks table doesn't exist. LanceDB / disk
+        failures propagate.
+        """
+        conn = await self._ensure_conn()
+        if CHUNKS_TABLE not in (await conn.list_tables()).tables:
+            return
+        table = await conn.open_table(CHUNKS_TABLE)
+        await table.optimize()
+
+    async def count_chunks(self) -> int:
+        """Total chunk rows in the corpus (0 when the table doesn't exist).
+
+        Cheap metadata read (LanceDB `count_rows`), used for plan summaries
+        and the growth check. LanceDB / disk failures propagate.
+        """
+        conn = await self._ensure_conn()
+        if CHUNKS_TABLE not in (await conn.list_tables()).tables:
+            return 0
+        table = await conn.open_table(CHUNKS_TABLE)
+        return await table.count_rows()
+
+    async def rebuild_vector_index(self) -> None:
+        """Retrain the IVF_PQ vector index on the CURRENT embeddings.
+
+        `create_index(..., replace=True)` forces a fresh train of the
+        centroids (LanceDB always trains vector indexes on current data),
+        unlike `ensure_indexes()`, whose `optimize()` only folds new rows
+        into the *existing* centroids. Use after a full re-embed (the
+        vectors changed wholesale) and for the manual "Rebuild vector
+        index" action.
+
+        Below `min_rows_for_vector_index` there is no vector index to
+        train, so this just compacts. FTS needs no retrain (no centroids).
+        Records the row count as the new training baseline so the
+        auto-rebuild-on-growth check measures from here. Real LanceDB /
+        disk failures propagate to the caller.
+        """
+        conn = await self._ensure_conn()
+        table = await conn.open_table(CHUNKS_TABLE)
+        row_count = await table.count_rows()
+        threshold = self._settings.min_rows_for_vector_index
+        if row_count >= threshold:
+            await table.create_index(
+                column="embedding",
+                config=lancedb.index.IvfPq(distance_type="cosine"),
+                replace=True,
+            )
+            self._write_trained_rows(row_count)
+            logger.info("LanceDB: rebuilt vector index (%d rows)", row_count)
+        else:
+            logger.info(
+                "LanceDB: vector rebuild skipped - %d rows < %d threshold",
+                row_count,
+                threshold,
+            )
+        await table.optimize()
+
+    async def maintain_indexes(
+        self,
+        *,
+        auto_rebuild: bool,
+        growth_factor: float,
+        optimize_if_no_rebuild: bool,
+    ) -> bool:
+        """End-of-action index maintenance. Returns True iff it optimized or
+        rebuilt (so a caller can skip a redundant delete-compaction).
+
+        Order of decision:
+          1. If `auto_rebuild` and the table has grown past `growth_factor`
+             times the row count at the last training, retrain the vector
+             index (fresh centroids) and return True. The first time growth
+             is tracked (no baseline yet) it records the baseline without
+             rebuilding.
+          2. Else if `optimize_if_no_rebuild` (the deferred-optimize case,
+             i.e. `optimize_indexes_per_ingest` is off), create-if-missing
+             + optimize to fold this action's rows in; return True.
+          3. Else (per-doc optimize already ran this action): no-op; False.
+
+        LanceDB / disk failures propagate to the caller.
+        """
+        conn = await self._ensure_conn()
+        table = await conn.open_table(CHUNKS_TABLE)
+        row_count = await table.count_rows()
+        threshold = self._settings.min_rows_for_vector_index
+        if auto_rebuild and row_count >= threshold:
+            trained = self._read_trained_rows()
+            if trained <= 0:
+                # First time tracking growth for this corpus: set the
+                # baseline (no rebuild - we have no prior training size).
+                self._write_trained_rows(row_count)
+            elif row_count >= trained * growth_factor:
+                await self.rebuild_vector_index()
+                logger.info(
+                    "LanceDB: auto-rebuilt vector index on growth "
+                    "(%d rows, last trained %d, factor %.2f)",
+                    row_count,
+                    trained,
+                    growth_factor,
+                )
+                return True
+        if optimize_if_no_rebuild:
+            await self.ensure_indexes()
+            return True
+        return False
+
+    def _index_meta_path(self) -> Path:
+        """Sidecar recording the row count at the last vector-index train.
+
+        Lives beside the LanceDB store (a dotfile LanceDB ignores). Only
+        touched after `_ensure_conn`, so the path is a real active-corpus
+        directory, never the no-corpus sentinel.
+        """
+        return self._settings.lancedb_path / ".vector_index_meta.json"
+
+    def _read_trained_rows(self) -> int:
+        """Row count at the last vector-index (re)train, or 0 if unknown."""
+        try:
+            p = self._index_meta_path()
+            if not p.exists():
+                return 0
+            return int(json.loads(p.read_text()).get("trained_rows", 0))
+        except (OSError, ValueError, TypeError):
+            return 0
+
+    def _write_trained_rows(self, n: int) -> None:
+        """Persist the training-baseline row count (best-effort)."""
+        try:
+            self._index_meta_path().write_text(json.dumps({"trained_rows": int(n)}))
+        except (OSError, TypeError) as exc:
+            logger.warning("LanceDB: could not persist vector-index trained-rows: %r", exc)
 
     # ---- search ----
 

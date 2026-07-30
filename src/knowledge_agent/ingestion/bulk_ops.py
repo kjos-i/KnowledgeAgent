@@ -410,11 +410,63 @@ async def bulk_re_embed_execute(
             failures.append((doc_id, repr(exc)))
             n_failed += 1
 
+    # A full re-embed replaces every vector, so the IVF_PQ centroids
+    # trained on the old vectors are now wrong. Always retrain (this also
+    # folds + compacts), regardless of optimize_indexes_per_ingest. Only
+    # when at least one doc's rewrite landed.
+    if n_succeeded > 0:
+        try:
+            await pipeline.rebuild_vector_index()
+        except Exception as exc:
+            logger.warning("bulk_re_embed_execute: vector index rebuild failed: %r", exc)
+
     return BulkReEmbedResult(
         n_succeeded=n_succeeded,
         n_failed=n_failed,
         failures=tuple(failures),
     )
+
+
+# ---- rebuild vector index (manual maintenance action) ----
+
+
+@dataclass(frozen=True)
+class RebuildVectorIndexPlan:
+    """Plan for the manual Rebuild-vector-index op."""
+
+    n_chunks: int
+
+    @property
+    def summary(self) -> str:
+        return (
+            f"Rebuild the vector search index over {self.n_chunks} chunks "
+            "(retrains it on the current embeddings). Recommended after a "
+            "full re-embed or a large amount of new ingestion; may take a "
+            "while on a large corpus."
+        )
+
+
+@dataclass(frozen=True)
+class RebuildVectorIndexResult:
+    n_chunks: int
+
+
+async def bulk_rebuild_vector_index_plan() -> RebuildVectorIndexPlan:
+    """Read the chunk count for the confirmation summary."""
+    return RebuildVectorIndexPlan(n_chunks=await get_search_client().count_chunks())
+
+
+async def bulk_rebuild_vector_index_execute(
+    plan: RebuildVectorIndexPlan,
+) -> RebuildVectorIndexResult:
+    """Retrain the vector index on current embeddings.
+
+    A real failure propagates to the GUI's bulk-op boundary (which reports
+    it as failed) rather than being swallowed into a false success. The
+    result carries the chunk count so the status line reads meaningfully.
+    """
+    await pipeline.rebuild_vector_index()
+    return RebuildVectorIndexResult(n_chunks=plan.n_chunks)
 
 
 # ---- bulk_backfill_* (ops #5/6/7 bulk in the UI-intent list) ----
@@ -795,6 +847,11 @@ async def delete_doc_execute(plan: DeleteDocPlan) -> DeleteDocResult:
     `ingest_document`'s delete-then-write step).
     """
     ok = await pipeline.delete_doc(plan.doc_id)
+    # Always compact after a delete so the tombstoned rows don't linger in
+    # the data files / indexes (matches the "always compact after a delete"
+    # rule; single-delete has no per-doc optimize).
+    if ok:
+        await pipeline.compact_indexes()
     return DeleteDocResult(doc_id=plan.doc_id, ok=ok)
 
 
@@ -1097,6 +1154,10 @@ async def add_execute(
         if progress_cb is not None:
             progress_cb(done, total)
 
+    # End-of-action index maintenance (deferred-optimize fold and/or
+    # auto-rebuild-on-growth).
+    await pipeline.maintain_indexes_after_action(config, n_written=n_succeeded)
+
     return AddResult(
         n_succeeded=n_succeeded,
         n_failed=n_failed,
@@ -1392,6 +1453,16 @@ async def sync_execute(
             failures.append((f"ORPHAN {label}", "delete returned False"))
         _tick()
 
+    # End-of-action index maintenance. NEW + EDITED write rows (fold /
+    # auto-rebuild-on-growth); MOVED is a metadata-only patch (excluded);
+    # ORPHAN deletes trigger a compaction (handled inside when no write-side
+    # optimize already ran).
+    await pipeline.maintain_indexes_after_action(
+        config,
+        n_written=n_new_ingested + n_edited_succeeded,
+        n_deleted=n_orphans_deleted,
+    )
+
     return SyncResult(
         n_new_ingested=n_new_ingested,
         n_new_failed=n_new_failed,
@@ -1457,6 +1528,11 @@ async def ingest_folder_execute(
             n_failed += 1
         if progress_cb is not None:
             progress_cb(done, total)
+
+    # End-of-action index maintenance (deferred-optimize fold and/or
+    # auto-rebuild-on-growth). Runs on a cancelled-mid-batch run too so the
+    # docs already written this action get indexed.
+    await pipeline.maintain_indexes_after_action(config, n_written=n_succeeded)
 
     return IngestFolderResult(
         n_succeeded=n_succeeded,

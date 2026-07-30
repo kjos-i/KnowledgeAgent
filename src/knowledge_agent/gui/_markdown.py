@@ -23,6 +23,7 @@ use the closest highlight.js theme, VS2015).
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from typing import TYPE_CHECKING
 
@@ -92,6 +93,30 @@ _MD_STYLE = ft.MarkdownStyleSheet(
     block_spacing=16,
     list_indent=28,
 )
+
+
+# Compact heading scale for cramped surfaces — the (i) help dialogs, where the
+# full h1-h3 sizes (25/21/18) look oversized next to the small dialog title.
+# Only the headings shrink; body, lists, code, etc. inherit from _MD_STYLE.
+_MD_STYLE_COMPACT = dataclasses.replace(
+    _MD_STYLE,
+    h1_text_style=ft.TextStyle(size=19, weight=_SEMIBOLD, height=1.25, color=_FG),
+    h2_text_style=ft.TextStyle(size=16, weight=_SEMIBOLD, height=1.25, color=_FG),
+    h3_text_style=ft.TextStyle(size=15, weight=_SEMIBOLD, height=1.3, color=_FG),
+    h3_padding=ft.Padding.only(top=10, bottom=2),
+)
+
+
+def compact_markdown(text: str) -> ft.Markdown:
+    """Themed markdown with a smaller heading scale, for the (i) help dialogs
+    where the standard h1-h3 sizes look oversized in a narrow pop-up."""
+    return ft.Markdown(
+        text,
+        selectable=True,
+        extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+        md_style_sheet=_MD_STYLE_COMPACT,
+        code_theme=_CODE_THEME,
+    )
 
 
 def themed_markdown(text: str, *, on_tap_link: Callable | None = None) -> ft.Markdown:

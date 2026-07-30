@@ -69,7 +69,7 @@ def test_status_report_all_ok_false_when_config_error_set():
     """A config_error means Settings couldn't load — not healthy, even
     with no failing components (empty is vacuously all-ok only when
     config_error is None)."""
-    assert StatusReport(components=(), config_error="Neo4j password not set").all_ok is False
+    assert StatusReport(components=(), config_error="No active corpus").all_ok is False
 
 
 def test_config_error_message_maps_missing_field_to_guidance():
@@ -78,7 +78,10 @@ def test_config_error_message_maps_missing_field_to_guidance():
         "Settings",
         [{"type": "missing", "loc": ("neo4j_password",), "input": {}}],
     )
-    assert config_error_message(exc) == "Neo4j password not set; create a corpus in Library"
+    assert config_error_message(exc) == (
+        "No active corpus (or its Neo4j password isn't stored); "
+        "create or select a corpus in Library"
+    )
 
 
 def test_config_error_message_falls_back_for_non_validation_error():
@@ -311,7 +314,10 @@ async def test_system_status_returns_config_error_when_settings_unbuildable():
         report = await system_status()
 
     assert report.components == ()
-    assert report.config_error == "Neo4j password not set; create a corpus in Library"
+    assert report.config_error == (
+        "No active corpus (or its Neo4j password isn't stored); "
+        "create or select a corpus in Library"
+    )
     assert report.all_ok is False
 
 
@@ -341,6 +347,7 @@ def test_render_report_text_shows_config_error():
     """config_error set → the CLI renderer prints just that hint, not the
     empty-components placeholder."""
     report = StatusReport(
-        components=(), config_error="Neo4j password not set; create a corpus in Library"
+        components=(),
+        config_error="No active corpus; create or select a corpus in Library",
     )
-    assert render_report_text(report) == "Neo4j password not set; create a corpus in Library"
+    assert render_report_text(report) == "No active corpus; create or select a corpus in Library"

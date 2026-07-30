@@ -731,8 +731,32 @@ class CorpusConfig(BaseModel):
             "When true, `ingest_document` calls "
             "`LanceClient.ensure_indexes()` after each successful write "
             "so LanceDB vector + FTS indexes stay current. Turn off for "
-            "bulk ingest sessions when you'd rather defer index rebuild "
-            "to a single optimize at the end. Per-corpus."
+            "bulk ingest sessions when you'd rather defer index optimize "
+            "to a single pass at the end of the batch (the batch executors "
+            "run that end-of-action optimize either way). Per-corpus."
+        ),
+    )
+    auto_rebuild_vector_index: bool = Field(
+        default=True,
+        description=(
+            "When true, the vector search index is retrained (fresh IVF_PQ "
+            "centroids) automatically once the corpus has grown past "
+            "`vector_index_rebuild_growth_factor` times the row count at the "
+            "last training. Keeps recall healthy as the corpus grows without "
+            "a manual step; rebuilds get rarer as the corpus stabilises. The "
+            "first index build (at `min_rows_for_vector_index` rows) happens "
+            "regardless of this flag. Per-corpus."
+        ),
+    )
+    vector_index_rebuild_growth_factor: float = Field(
+        default=3.0,
+        gt=1.0,
+        description=(
+            "Growth multiple that triggers an automatic vector-index rebuild "
+            "when `auto_rebuild_vector_index` is on: rebuild once the chunk "
+            "count reaches this factor times the count at the last training "
+            "(e.g. 3.0 = rebuild after the corpus roughly triples). Must be "
+            "> 1. Ignored when auto-rebuild is off. Per-corpus."
         ),
     )
     entity_extractor_model: str = Field(

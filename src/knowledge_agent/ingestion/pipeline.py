@@ -347,6 +347,66 @@ async def re_embed(doc_id: str, config: CorpusConfig) -> dict[str, Any]:
     }
 
 
+# ---- end-of-action index maintenance (Layer 2) ----
+#
+# The per-doc `ensure_indexes()` calls above stay gated on
+# `optimize_indexes_per_ingest`. These helpers add the one-per-action
+# maintenance the bulk executors + single-file GUI paths run at the end
+# of an ingest/sync/delete: fold deferred rows (flag off), auto-rebuild
+# the vector index on growth, and compact after deletes. Kept here in
+# Layer 2 so `bulk_ops` never reaches into the LanceDB client directly.
+
+
+async def maintain_indexes_after_action(
+    config: CorpusConfig,
+    *,
+    n_written: int,
+    n_deleted: int = 0,
+) -> None:
+    """Run once at the end of an ingest/sync action.
+
+    When rows were written, either auto-rebuilds the vector index (if the
+    corpus grew past `vector_index_rebuild_growth_factor`) or, when
+    `optimize_indexes_per_ingest` is off, folds the deferred rows in with
+    an optimize. When rows were only deleted (and no write-side optimize
+    already ran) it compacts to clear the tombstones. Index-maintenance
+    failures are logged, never raised - they must not fail an otherwise
+    successful action.
+    """
+    try:
+        search_client = get_search_client()
+        optimized = False
+        if n_written > 0:
+            optimized = await search_client.maintain_indexes(
+                auto_rebuild=config.auto_rebuild_vector_index,
+                growth_factor=config.vector_index_rebuild_growth_factor,
+                optimize_if_no_rebuild=not config.optimize_indexes_per_ingest,
+            )
+        if n_deleted > 0 and not optimized:
+            await search_client.compact()
+    except Exception as exc:
+        logger.warning("maintain_indexes_after_action failed: %r", exc)
+
+
+async def compact_indexes() -> None:
+    """Compact the store once after a delete-only action (e.g. a single-doc
+    delete). Failures logged, never raised."""
+    try:
+        await get_search_client().compact()
+    except Exception as exc:
+        logger.warning("compact_indexes failed: %r", exc)
+
+
+async def rebuild_vector_index() -> None:
+    """Retrain the vector index on current embeddings (Layer-2 wrapper).
+
+    Called by the bulk Re-embed executor (always, after a full re-embed)
+    and the manual Rebuild-vector-index action. Failures propagate so the
+    bulk op can report ok/failed.
+    """
+    await get_search_client().rebuild_vector_index()
+
+
 async def backfill_chunks(doc_id: str, config: CorpusConfig) -> dict[str, Any]:
     """Re-write KG L5 (`:Chunk`) + downstream layers from existing LanceDB
     chunks. Per-doc partial op.

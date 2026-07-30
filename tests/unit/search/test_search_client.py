@@ -10,11 +10,11 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-import lancedb
 import pyarrow as pa
 import pytest
 from lancedb.rerankers import RRFReranker
 
+import lancedb
 from knowledge_agent.config import Settings
 from knowledge_agent.search.client import (
     NO_CORPUS_SENTINEL,
@@ -1019,6 +1019,62 @@ async def test_ensure_indexes_builds_a_cosine_vector_index():
     ]
     assert embed_cfgs, "expected a vector index build on the embedding column"
     assert embed_cfgs[0].distance_type == "cosine"
+
+
+async def test_rebuild_vector_index_replaces_with_cosine():
+    """rebuild_vector_index force-recreates the vector index (replace=True)
+    so the IVF_PQ centroids retrain on the current vectors."""
+    table = RecordingTable(query_builder=_RecordingQueryBuilder(), row_count=1000)
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    client = _client_with_conn(_configured_settings(min_rows_for_vector_index=256), conn)
+
+    await client.rebuild_vector_index()
+
+    embed = [k for (_a, k) in table.create_index_calls if k.get("column") == "embedding"]
+    assert embed, "rebuild must (re)create the vector index"
+    assert embed[0]["replace"] is True
+    assert embed[0]["config"].distance_type == "cosine"
+
+
+async def test_rebuild_vector_index_skips_below_threshold():
+    """Under min_rows_for_vector_index there is no vector index to retrain."""
+    table = RecordingTable(query_builder=_RecordingQueryBuilder(), row_count=10)
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    client = _client_with_conn(_configured_settings(min_rows_for_vector_index=256), conn)
+
+    await client.rebuild_vector_index()
+
+    assert not [k for (_a, k) in table.create_index_calls if k.get("column") == "embedding"]
+
+
+async def test_maintain_indexes_noop_when_flag_on_and_no_growth():
+    """flag on (optimize_if_no_rebuild=False), auto-rebuild off -> no-op, False."""
+    table = RecordingTable(query_builder=_RecordingQueryBuilder(), row_count=1000)
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    client = _client_with_conn(_configured_settings(min_rows_for_vector_index=256), conn)
+
+    did = await client.maintain_indexes(
+        auto_rebuild=False, growth_factor=3.0, optimize_if_no_rebuild=False
+    )
+
+    assert did is False
+    assert table.create_index_calls == []
+
+
+async def test_maintain_indexes_folds_when_deferred():
+    """flag off (optimize_if_no_rebuild=True) -> ensure_indexes fold, True."""
+    table = RecordingTable(query_builder=_RecordingQueryBuilder(), row_count=1000)
+    conn = RecordingConnection(tables={CHUNKS_TABLE: table})
+    client = _client_with_conn(_configured_settings(min_rows_for_vector_index=256), conn)
+
+    did = await client.maintain_indexes(
+        auto_rebuild=False, growth_factor=3.0, optimize_if_no_rebuild=True
+    )
+
+    assert did is True
+    cols = {k.get("column") for (_a, k) in table.create_index_calls}
+    assert "embedding" in cols
+    assert "text" in cols
 
 
 async def test_retrieve_dispatches_to_mode_specific_method(monkeypatch):

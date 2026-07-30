@@ -37,6 +37,8 @@ _SCALAR_FIELDS: tuple[str, ...] = (
     "extract_figures",
     "embed_images",
     "min_figure_bytes",
+    "auto_rebuild_vector_index",
+    "vector_index_rebuild_growth_factor",
     "optimize_indexes_per_ingest",
     "embedding_provider",
     "embedding_model",
