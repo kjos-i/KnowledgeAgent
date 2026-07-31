@@ -656,12 +656,12 @@ class DatasetTab:
                             ft.Text("nr. of cases:", size=14, color=ft.Colors.GREY_300),
                             self.gen_count,
                             self.gen_spinner,
+                            ft.Text("using retrieval modes:", size=14, color=ft.Colors.GREY_300),
                         ],
                         wrap=True,
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-                    sub_section_title("Generate cases for these retrieval modes"),
                     ft.Row(
                         list(self.mode_checks.values())[:3],
                         wrap=True,
