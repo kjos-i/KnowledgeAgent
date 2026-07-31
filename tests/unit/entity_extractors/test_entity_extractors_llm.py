@@ -16,6 +16,8 @@ read. Tests pass them explicitly.
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from knowledge_agent.entity_extractors import llm
 from knowledge_agent.entity_extractors.base import Mention
 from knowledge_agent.entity_extractors.llm import (
@@ -173,10 +175,40 @@ async def test_extract_passes_chunk_text_in_human_message():
             temperature=_TEST_TEMPERATURE,
         )
 
-    # invoke is called with a list of [SystemMessage, HumanMessage].
+    # invoke is called with a list of [SystemMessage, HumanMessage]. The chunk
+    # text is wrapped in the untrusted-content fence (audit H) but appears
+    # verbatim inside it.
     messages = mock_structured.ainvoke.call_args.args[0]
     human = messages[1]
-    assert human.content == "This text mentions BRCA1."
+    assert "This text mentions BRCA1." in human.content
+    assert "BEGIN DOCUMENT TEXT" in human.content
+    assert "END DOCUMENT TEXT" in human.content
+
+
+@pytest.mark.security
+async def test_extract_closed_mode_drops_out_of_vocab_types():
+    """Closed mode drops any mention whose type the LLM invented outside the
+    corpus's declared allowed-types list (audit H, defense-in-depth)."""
+    output = _ExtractedMentions(
+        mentions=[
+            _ExtractedMention(raw_text="BRCA1", entity_type="GENE"),
+            _ExtractedMention(raw_text="ignore me", entity_type="INJECTED_TYPE"),
+        ]
+    )
+    mock_llm = _mock_llm_returning(output)
+    with patch(
+        "knowledge_agent.entity_extractors.llm._get_llm",
+        return_value=mock_llm,
+    ):
+        result = await llm.extract(
+            "text with BRCA1",
+            ["GENE", "DISEASE"],
+            model=_TEST_MODEL,
+            temperature=_TEST_TEMPERATURE,
+        )
+    types = {m.entity_type for m in result}
+    assert "GENE" in types
+    assert "INJECTED_TYPE" not in types
 
 
 async def test_extract_offset_and_confidence_always_none_for_llm():

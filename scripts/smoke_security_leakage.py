@@ -26,11 +26,11 @@ counterpart: tests/unit/test_config.py::test_secret_keys_never_leak_in_repr_or_d
 
 from __future__ import annotations
 
+import io
 import logging
 import os
 import socket
 import sys
-import tempfile
 from pathlib import Path
 
 # Load the TEST env (never the real .env) before any config import. Leakage
@@ -89,11 +89,12 @@ def check_secret_in_logs() -> bool:
         }
     )
 
-    tmp_dir = Path(tempfile.mkdtemp(prefix="ka-smoke-leak-"))
-    log_path = tmp_dir / "probe.log"
+    # Capture through the real logging stack into an in-memory buffer (no file,
+    # so nothing to close / clean up).
+    buffer = io.StringIO()
     logger = logging.getLogger("knowledge_agent.smoke_security_probe")
     logger.setLevel(logging.DEBUG)
-    handler = logging.FileHandler(log_path, encoding="utf-8")
+    handler = logging.StreamHandler(buffer)
     handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(handler)
     try:
@@ -101,15 +102,13 @@ def check_secret_in_logs() -> bool:
         logger.debug("settings model_dump: %s", settings.model_dump())
         logger.debug("settings model_dump_json: %s", settings.model_dump_json())
     finally:
-        handler.close()
+        handler.flush()
         logger.removeHandler(handler)
 
-    content = log_path.read_text(encoding="utf-8")
+    content = buffer.getvalue()
     leaked = _PROBE_KEY in content
-    log_path.unlink(missing_ok=True)
-    tmp_dir.rmdir()
     if leaked:
-        print(f"  RAW KEY FOUND in log output at {log_path}")
+        print("  RAW KEY FOUND in log output!")
     else:
         print("  probe key masked in repr / model_dump / model_dump_json")
     return not leaked

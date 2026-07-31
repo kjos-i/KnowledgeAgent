@@ -47,6 +47,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from knowledge_agent._prompt_safety import neutralize_fence_markers
 from knowledge_agent.config import get_settings
 from knowledge_agent.errors import ErrorDetail
 from knowledge_agent.kg.client import get_kg_client
@@ -575,7 +576,7 @@ def _format_chunks_for_prompt(chunks: list[RetrievedChunk]) -> str:
         if c.authors_display:
             header_bits.append(f"authors={c.authors_display!r}")
         header = f"[{i}] " + " ".join(header_bits)
-        parts.append(f"{header}\n{c.text}")
+        parts.append(f"{header}\n{neutralize_fence_markers(c.text)}")
     return "\n\n".join(parts)
 
 
