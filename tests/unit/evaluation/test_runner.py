@@ -53,13 +53,21 @@ def test_end_to_end_with_stubbed_graph(tmp_path, monkeypatch):
                     "id": "c1",
                     "question": "How does ESCRT-III remodel the membrane?",
                     "expected_chunks": ["ESCRT-III", "membrane"],
-                    "retrieval": {"num_candidates": 100, "rrf_rank_constant": 60},
+                    "retrieval": {
+                        "retrieval_mode": "lancedb_only",
+                        "num_candidates": 100,
+                        "rrf_rank_constant": 60,
+                    },
                 },
                 {
                     "id": "c2",
                     "question": "How do ESCRTs drive scission?",
                     "expected_chunks": ["scission"],
-                    "retrieval": {"num_candidates": 100, "rrf_rank_constant": 60},
+                    "retrieval": {
+                        "retrieval_mode": "lancedb_only",
+                        "num_candidates": 100,
+                        "rrf_rank_constant": 60,
+                    },
                 },
             ]
         ),
@@ -136,7 +144,11 @@ def test_run_builds_report_off_the_event_loop(tmp_path, monkeypatch):
                 {
                     "id": "c1",
                     "question": "q?",
-                    "retrieval": {"num_candidates": 100, "rrf_rank_constant": 60},
+                    "retrieval": {
+                        "retrieval_mode": "lancedb_only",
+                        "num_candidates": 100,
+                        "rrf_rank_constant": 60,
+                    },
                 }
             ]
         ),
@@ -498,7 +510,11 @@ def test_run_wraps_evaluate_in_langsmith_when_trace(tmp_path, monkeypatch):
                 {
                     "id": "c1",
                     "question": "q?",
-                    "retrieval": {"num_candidates": 100, "rrf_rank_constant": 60},
+                    "retrieval": {
+                        "retrieval_mode": "lancedb_only",
+                        "num_candidates": 100,
+                        "rrf_rank_constant": 60,
+                    },
                 }
             ]
         ),
@@ -541,7 +557,11 @@ def _one_case_dataset(path):
                 {
                     "id": "c1",
                     "question": "q?",
-                    "retrieval": {"num_candidates": 100, "rrf_rank_constant": 60},
+                    "retrieval": {
+                        "retrieval_mode": "lancedb_only",
+                        "num_candidates": 100,
+                        "rrf_rank_constant": 60,
+                    },
                 }
             ]
         ),

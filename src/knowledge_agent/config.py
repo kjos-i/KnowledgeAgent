@@ -314,7 +314,7 @@ class Settings(BaseSettings):
         "parallel_fused",
         "auto",
     ] = Field(
-        default="lancedb_only",
+        default="auto",
         description=(
             "Default retrieval topology when the caller doesn't specify one. "
             "Per-invocation override lives on the graph state's "
@@ -871,6 +871,29 @@ def load_test_env() -> None:
 
     load_dotenv(_ENV_TEST_FILE, override=True)
     get_settings.cache_clear()
+
+
+def retrieval_defaults() -> dict[str, object]:
+    """The fixed baseline retrieval-knob defaults, read from the `Settings`
+    field defaults so there is ONE source. The GUI retrieval form, `GuiConfig`,
+    and the eval case form + generator all read these instead of re-declaring
+    the values, so a default can never drift between them.
+
+    Keyed by the per-case / GUI knob names, which differ from a couple of the
+    Settings field names (`default_retrieval_mode` -> `retrieval_mode`,
+    `default_use_mmr` -> `use_mmr`). These are the fixed field defaults, NOT the
+    user's live settings, so an authored or generated case stays reproducible."""
+    f = Settings.model_fields
+    return {
+        "retrieval_mode": f["default_retrieval_mode"].default,
+        "lancedb_search_mode": f["lancedb_search_mode"].default,
+        "top_k": f["top_k"].default,
+        "num_candidates": f["num_candidates"].default,
+        "rrf_rank_constant": f["rrf_rank_constant"].default,
+        "mmr_lambda": f["mmr_lambda"].default,
+        "use_mmr": f["default_use_mmr"].default,
+        "kg_max_rows": f["kg_max_rows"].default,
+    }
 
 
 @lru_cache(maxsize=1)

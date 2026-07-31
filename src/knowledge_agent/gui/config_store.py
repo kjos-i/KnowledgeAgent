@@ -44,6 +44,7 @@ from knowledge_agent.config import (
     PROVIDER_NODE_DEFAULTS,
     EmbeddingProvider,
     LlmProvider,
+    retrieval_defaults,
 )
 
 logger = logging.getLogger(__name__)
@@ -133,7 +134,7 @@ class GuiConfig(BaseModel):
 
     # ---- retrieval ----------------------------------------------------
     top_k: int = Field(
-        default=5,
+        default_factory=lambda: retrieval_defaults()["top_k"],
         ge=1,
         le=50,
         description="Default retrieval depth per query.",
@@ -146,7 +147,7 @@ class GuiConfig(BaseModel):
         "neo4j_then_lancedb",
         "parallel_fused",
     ] = Field(
-        default="auto",
+        default_factory=lambda: retrieval_defaults()["retrieval_mode"],
         description=(
             "Retrieval mode for the agent graph. `auto` uses the "
             "mode-classifier LLM; the others force a specific mode."
@@ -195,21 +196,21 @@ class GuiConfig(BaseModel):
     # the same name. Bridged at startup so backend `pydantic-settings`
     # picks them up; the user edits them through Settings → Retrieval.
     lancedb_search_mode: Literal["hybrid", "fts", "vector"] = Field(
-        default="hybrid",
+        default_factory=lambda: retrieval_defaults()["lancedb_search_mode"],
         description=(
             "Default search mode WITHIN LanceDB. Distinct from "
             "`retrieval_mode` (which picks store(s) at the agent level)."
         ),
     )
     num_candidates: int = Field(
-        default=100,
+        default_factory=lambda: retrieval_defaults()["num_candidates"],
         ge=1,
         description=(
             "Candidate-pool size fetched before truncating/re-ranking to top_k. Must be >= top_k."
         ),
     )
     rrf_rank_constant: int = Field(
-        default=60,
+        default_factory=lambda: retrieval_defaults()["rrf_rank_constant"],
         ge=1,
         description=(
             "RRF rank constant `k` in 1/(k + rank). Lower = top-ranked "
@@ -218,7 +219,7 @@ class GuiConfig(BaseModel):
         ),
     )
     use_mmr: bool = Field(
-        default=False,
+        default_factory=lambda: retrieval_defaults()["use_mmr"],
         description=(
             "When True, hybrid/vector LanceDB searches MMR-rerank the "
             "candidate pool for diversity. Bridged to USE_MMR; backend "
@@ -227,7 +228,7 @@ class GuiConfig(BaseModel):
         ),
     )
     mmr_lambda: float = Field(
-        default=0.6,
+        default_factory=lambda: retrieval_defaults()["mmr_lambda"],
         ge=0.0,
         le=1.0,
         description=(
@@ -235,7 +236,7 @@ class GuiConfig(BaseModel):
         ),
     )
     kg_max_rows: int = Field(
-        default=50,
+        default_factory=lambda: retrieval_defaults()["kg_max_rows"],
         ge=1,
         description=(
             "Maximum rows returned from a single Neo4j query. Wrapped "

@@ -194,8 +194,8 @@ def test_settings_defaults_for_optional_fields() -> None:
     assert s.embedding_model == "voyage-multimodal-3"
     assert s.embedding_dims == 1024
 
-    # Retrieval mode default (the only one shipped today is lancedb_only).
-    assert s.default_retrieval_mode == "lancedb_only"
+    # Retrieval mode default: auto (the mode-classifier picks the store).
+    assert s.default_retrieval_mode == "auto"
 
     # Window defaults satisfy the invariant.
     assert s.top_k == 5

@@ -1,19 +1,20 @@
-"""LLM eval-case generator — draft candidate `EvalCase`s from corpus text.
+"""LLM eval-case generator: draft candidate `EvalCase`s from a corpus.
 
-Slice 5 of the eval-dataset authoring UI. Samples text passages from the
-active corpus, asks the configured LLM to write one self-contained
-question + key answer facts + salient keywords per passage, and returns
-them as `EvalCase`s flagged `origin="llm"`.
+Grounds each case in a whole document (its full text) and, where the corpus
+has a knowledge graph, that document's entities and relationships, then asks
+the configured LLM to write a question + key answer facts + salient keywords,
+returning them as `EvalCase`s flagged `origin="llm"`. It can also write the
+gold for a fixed question (the "Query from chat" flow).
 
-These are CANDIDATES, NOT gold. Treating an LLM's own output as ground
-truth is circular — especially if the generator shares a model family with
-the agent's synthesizer — so every generated case lands flagged for human
-review (the Dataset tab's Edit form is the promote step). Best practice:
-keep the generator model distinct from the judge and the synthesizer.
+These are CANDIDATES, NOT gold. Treating an LLM's own output as ground truth
+is circular (especially if the generator shares a model family with the
+agent's synthesizer), so every generated case lands flagged for human review
+(the Dataset tab's Edit form is the promote step). Best practice: keep the
+generator model distinct from the judge and the synthesizer.
 
-Provider-agnostic: builds its LLM via `llm_factory.get_llm` (the active
+Provider-agnostic: builds its LLM via `llm_factory.get_llm_ref` (the active
 provider) defaulting to the mode-classifier model (a cheap tier), the same
-choose-your-provider pattern as `judge.resolve_judge_models` — no hardcoded
+choose-your-provider pattern as `judge.resolve_judge_models`, no hardcoded
 cross-provider model.
 """
 
@@ -33,7 +34,6 @@ from knowledge_agent.llm_factory import get_llm_ref, with_retry
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
-    from knowledge_agent.config import Settings
     from knowledge_agent.kg.client import Neo4jClient
     from knowledge_agent.search.client import LanceClient
 
@@ -84,24 +84,18 @@ def _is_connection_error(exc: BaseException) -> bool:
     return False
 
 
-def _pinned_retrieval(settings: Settings) -> dict[str, object]:
-    """A fully-pinned per-case retrieval config from the active GLOBAL defaults.
+def _pinned_retrieval() -> dict[str, object]:
+    """A fully-pinned per-case retrieval config from the fixed config defaults.
 
     Generated cases must pin every knob (not leave it None) or the runner
-    rejects them as non-reproducible (see `models.validate_case`). We read the
-    same global Settings the manual Dataset form seeds its defaults from, so
-    generated and hand-authored cases share one source of truth and both run
-    out of the box."""
-    return {
-        "retrieval_mode": settings.default_retrieval_mode,
-        "lancedb_search_mode": settings.lancedb_search_mode,
-        "top_k": settings.top_k,
-        "num_candidates": settings.num_candidates,
-        "rrf_rank_constant": settings.rrf_rank_constant,
-        "mmr_lambda": settings.mmr_lambda,
-        "use_mmr": settings.default_use_mmr,
-        "kg_max_rows": settings.kg_max_rows,
-    }
+    rejects them as non-reproducible (see `models.validate_case`). Reads the
+    FIXED config field defaults (`config.retrieval_defaults`), the same baseline
+    the manual Dataset form seeds a new case with, not the user's live settings,
+    so generated and hand-authored cases share one source of truth and stay
+    reproducible."""
+    from knowledge_agent.config import retrieval_defaults
+
+    return retrieval_defaults()
 
 
 @dataclass
@@ -112,162 +106,26 @@ class Passage:
     text: str
 
 
-class GeneratedCase(BaseModel):
-    """The LLM's structured draft for one passage."""
-
-    question: str = Field(description="A specific question answerable using ONLY this passage.")
-    answer_points: list[str] = Field(
-        default_factory=list,
-        description="The key facts a correct answer must contain.",
-    )
-    keywords: list[str] = Field(
-        default_factory=list,
-        description="A few salient terms that should appear in a correct answer.",
-    )
-
-
-_GEN_SYSTEM = (
-    "You write evaluation cases for a retrieval-augmented question-answering "
-    "system. You are given ONE passage from a document. Produce:\n"
-    "  - question: a single, specific question answerable using ONLY this "
-    "passage — not general knowledge, not other documents;\n"
-    "  - answer_points: the key facts a correct answer must contain;\n"
-    "  - keywords: a few salient terms that should appear in a correct answer.\n"
-    "Do NOT invent anything beyond the passage. Make the question natural and "
-    "self-contained — do NOT say 'according to the passage' or 'in the text'."
-)
-
-
 def _slug(text: str, *, max_len: int = 40) -> str:
     """A short lowercase-hyphenated slug from the question, for a readable id."""
     s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return s[:max_len].strip("-") or "case"
 
 
-async def generate_cases(
-    passages: list[Passage],
-    *,
-    model: str | None = None,
-    temperature: float = 0.3,
-    llm: BaseChatModel | None = None,
-) -> list[EvalCase]:
-    """Draft one `origin="llm"` `EvalCase` per passage.
-
-    `llm` is injectable (tests pass a fake); when None, one is built via
-    `get_llm_ref(model, temperature)` (the model ref's provider, or the active
-    provider for a bare ref) with `model` defaulting to the mode-classifier model. A passage whose generation
-    fails (rate limit, malformed structured output, …) is skipped
-    best-effort — one bad passage doesn't abort the batch.
-    """
-    from knowledge_agent.config import get_settings
-
-    settings = get_settings()
-    if llm is None:
-        model = model or settings.mode_classifier_model
-        llm = get_llm_ref(model, temperature)
-    structured = with_retry(llm.with_structured_output(GeneratedCase))
-    # Pin every retrieval knob from the active global defaults so each
-    # generated case is runnable + reproducible out of the box.
-    retrieval = _pinned_retrieval(settings)
-
-    cases: list[EvalCase] = []
-    for i, passage in enumerate(passages):
-        try:
-            gen: GeneratedCase = await structured.ainvoke(
-                [SystemMessage(content=_GEN_SYSTEM), HumanMessage(content=passage.text)]
-            )
-        except Exception as exc:
-            if _is_connection_error(exc):
-                # Not this passage's fault — the LLM API is unreachable, so
-                # every remaining call would fail the same way. Abort the whole
-                # batch with one clear, retryable message instead of N skips.
-                raise EvalGenerationConnectionError(_CONN_MSG) from exc
-            # Best-effort: skip a passage the LLM couldn't turn into a case
-            # (e.g. malformed structured output) rather than aborting the batch.
-            logger.warning(
-                "generate_cases: skipping passage %d (doc %s): %r", i, passage.doc_id, exc
-            )
-            continue
-        question = (gen.question or "").strip()
-        if not question:
-            continue
-        cases.append(
-            EvalCase(
-                id=f"gen-{i:02d}-{_slug(question)}",
-                question=question,
-                expected_sources=[passage.doc_id],
-                expected_answer_points=list(gen.answer_points),
-                required_keywords=list(gen.keywords),
-                origin="llm",
-                category="generated",
-                notes="LLM-generated candidate — review before trusting.",
-                retrieval=retrieval,
-            )
-        )
-    return cases
-
-
-async def sample_passages(
-    n: int,
-    *,
-    client: LanceClient | None = None,
-    min_chars: int = 200,
-) -> list[Passage]:
-    """Pull up to `n` text passages (each >= `min_chars`) from the corpus.
-
-    Takes the FIRST chunk per document that clears `min_chars`, so the
-    sample spreads ACROSS documents rather than concentrating in one — one
-    passage per doc, up to `n`. `client` is injectable for tests; None uses
-    the active `get_search_client()`.
-    """
-    if n <= 0:
-        return []
-    if client is None:
-        from knowledge_agent.search.client import get_search_client
-
-        client = get_search_client()
-    passages: list[Passage] = []
-    for doc in await client.list_indexed_docs():
-        doc_id = doc.get("doc_id")
-        if not doc_id:
-            continue
-        for chunk in await client.get_chunks_by_doc_id(doc_id):
-            text = (chunk.get("text") or "").strip()
-            if len(text) >= min_chars:
-                passages.append(Passage(doc_id=doc_id, text=text))
-                break  # one passage per doc → spread coverage across the corpus
-        if len(passages) >= n:
-            break
-    return passages[:n]
-
-
-async def generate_from_corpus(
-    n: int,
-    *,
-    model: str | None = None,
-    temperature: float = 0.3,
-) -> list[EvalCase]:
-    """Sample up to `n` passages from the active corpus and draft a case
-    per passage. Live glue over `sample_passages` + `generate_cases`."""
-    passages = await sample_passages(n)
-    return await generate_cases(passages, model=model, temperature=temperature)
-
-
-# ==================== Advanced generator (602) ====================
-# The Lazy path above samples ONE chunk per document. "Advanced" grounds each
-# case in the WHOLE document (all its chunks) and, where the corpus has a
-# knowledge graph, in that document's entities + their relationships — so it can
-# write BOTH hybrid (text-answerable) and KG (relationship-answerable) cases,
-# plus a few CROSS-DOCUMENT cases from entities that appear in more than one
-# document. Graph reads go through the existing Neo4j client (read_query) — no
-# new Cypher layer — and degrade to full-doc hybrid cases when there's no graph.
-# Because it grounds in the ACTUAL sampled docs/entities, it fills
+# ==================== Case generator ====================
+# Grounds each case in the WHOLE document (all its chunks) and, where the corpus
+# has a knowledge graph, in that document's entities and their relationships, so
+# it can write BOTH hybrid (text-answerable) and KG (relationship-answerable)
+# cases, plus a few CROSS-DOCUMENT cases from entities that appear in more than
+# one document. Graph reads go through the existing Neo4j client (read_query),
+# no new Cypher layer, and degrade to full-doc hybrid cases when there's no
+# graph. Because it grounds in the ACTUAL sampled docs/entities, it fills
 # expected_sources / expected_entities (the "paste into ChatGPT" flow can't).
 
 
 class GeneratedAdvancedCase(BaseModel):
-    """The LLM's richer draft — picks hybrid vs KG and fills more gold fields
-    than the Lazy `GeneratedCase`."""
+    """The LLM's structured draft: picks hybrid vs KG and fills the gold fields
+    (question, answer points, keywords, and expected entities for KG cases)."""
 
     case_type: Literal["hybrid", "kg"] = Field(
         default="hybrid",
@@ -332,8 +190,8 @@ async def _sample_doc_ids(client: LanceClient, n: int) -> list[str]:
 
 
 async def _full_doc_text(client: LanceClient, doc_id: str, *, max_chars: int = 8000) -> str:
-    """The document's chunks concatenated (capped) — full-doc grounding vs the
-    Lazy generator's single chunk."""
+    """The document's chunks concatenated (capped): full-doc grounding for a
+    generated case."""
     parts: list[str] = []
     total = 0
     for chunk in await client.get_chunks_by_doc_id(doc_id):
@@ -415,17 +273,15 @@ def _cross_context(key: str, a: str, ta: str, b: str, tb: str) -> str:
     return f"SHARED ENTITY: {key}\n\nDOCUMENT A [{a}]:\n{ta}\n\nDOCUMENT B [{b}]:\n{tb}"
 
 
-def _advanced_to_case(
-    i: int, doc_ids: list[str], gen: GeneratedAdvancedCase, settings: Settings
-) -> EvalCase | None:
+def _advanced_to_case(i: int, doc_ids: list[str], gen: GeneratedAdvancedCase) -> EvalCase | None:
     """Map an LLM draft to a runnable `EvalCase`, pinning retrieval to the KG or
-    text leg per the chosen type (retrieval stays fully pinned → reproducible)."""
+    text leg per the chosen type (retrieval stays fully pinned, reproducible)."""
     question = (gen.question or "").strip()
     if not question:
         return None
     is_kg = gen.case_type == "kg" and bool(gen.expected_entities)
     retrieval = {
-        **_pinned_retrieval(settings),
+        **_pinned_retrieval(),
         "retrieval_mode": "neo4j_only" if is_kg else "lancedb_only",
     }
     return EvalCase(
@@ -478,9 +334,8 @@ async def generate_advanced(
 
     if n <= 0:
         return []
-    settings = get_settings()
     if llm is None:
-        model = model or settings.mode_classifier_model
+        model = model or get_settings().mode_classifier_model
         llm = get_llm_ref(model, temperature)
     if lance_client is None:
         from knowledge_agent.search.client import get_search_client
@@ -509,7 +364,7 @@ async def generate_advanced(
         gen = await _draft(per_case, _ADVANCED_SYSTEM, _doc_context(doc_id, text, facts), doc_id)
         if gen is None:
             continue
-        case = _advanced_to_case(len(cases), [doc_id], gen, settings)
+        case = _advanced_to_case(len(cases), [doc_id], gen)
         if case:
             cases.append(case)
 
@@ -522,7 +377,7 @@ async def generate_advanced(
         )
         if gen is None:
             continue
-        case = _advanced_to_case(len(cases), [a, b], gen, settings)
+        case = _advanced_to_case(len(cases), [a, b], gen)
         if case:
             cases.append(case)
 
@@ -532,10 +387,9 @@ async def generate_advanced(
 class GeneratedGold(BaseModel):
     """The LLM's gold (answer facts + keywords) for a GIVEN question.
 
-    Unlike `GeneratedCase`, the question is fixed (e.g. a chat router's
-    distilled query) — the LLM only writes the gold FOR it, grounded in the
-    passages that were retrieved for that question. Still a CANDIDATE for human
-    review, not trusted truth (same caveat as `GeneratedCase`)."""
+    Here the question is fixed (e.g. a chat router's distilled query): the LLM
+    only writes the gold FOR it, grounded in the passages that were retrieved
+    for that question. Still a CANDIDATE for human review, not trusted truth."""
 
     answer_points: list[str] = Field(
         default_factory=list,

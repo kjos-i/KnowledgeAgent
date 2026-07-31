@@ -29,7 +29,7 @@ from knowledge_agent.evaluation.models import (
 def test_minimal_case_defaults():
     c = EvalCase(id="x", question="what?")
     assert c.expected_sources == [] and c.expected_chunks == []
-    assert c.retrieval.retrieval_mode == "lancedb_only"
+    assert c.retrieval.retrieval_mode == "auto"  # inherits the config default (SSOT)
     assert c.retrieval.lancedb_search_mode == "hybrid"
     assert c.retrieval.top_k == 5
     assert c.expected_mode is None
@@ -357,21 +357,26 @@ def test_tuning_knob_defaults_are_blank():
     assert rs.use_mmr is False
 
 
-def test_required_knobs_lancedb_hybrid_default():
-    # Default case (lancedb_only + hybrid, no MMR): pool + RRF constant.
-    assert required_knobs(RetrievalSettings()) == {"num_candidates", "rrf_rank_constant"}
+def test_required_knobs_lancedb_hybrid():
+    # lancedb_only + hybrid, no MMR: pool + RRF constant.
+    assert required_knobs(RetrievalSettings(retrieval_mode="lancedb_only")) == {
+        "num_candidates",
+        "rrf_rank_constant",
+    }
 
 
 def test_required_knobs_fts_drops_pool_and_rrf():
     # fts fetches no candidate pool (it limits to top_k) and isn't hybrid, so it
     # requires neither num_candidates nor rrf_rank_constant.
-    assert required_knobs(RetrievalSettings(lancedb_search_mode="fts")) == set()
+    fts = RetrievalSettings(retrieval_mode="lancedb_only", lancedb_search_mode="fts")
+    assert required_knobs(fts) == set()
     # vector still fetches the pool (just no RRF fusion).
-    assert required_knobs(RetrievalSettings(lancedb_search_mode="vector")) == {"num_candidates"}
+    vector = RetrievalSettings(retrieval_mode="lancedb_only", lancedb_search_mode="vector")
+    assert required_knobs(vector) == {"num_candidates"}
 
 
 def test_required_knobs_mmr_adds_lambda():
-    assert required_knobs(RetrievalSettings(use_mmr=True)) == {
+    assert required_knobs(RetrievalSettings(retrieval_mode="lancedb_only", use_mmr=True)) == {
         "num_candidates",
         "rrf_rank_constant",
         "mmr_lambda",
@@ -381,7 +386,8 @@ def test_required_knobs_mmr_adds_lambda():
 def test_required_knobs_fts_never_requires_mmr_lambda():
     # MMR needs vectors, so it never runs under FTS even with use_mmr set. FTS
     # also fetches no candidate pool and isn't hybrid, so nothing is required.
-    assert required_knobs(RetrievalSettings(lancedb_search_mode="fts", use_mmr=True)) == set()
+    rs = RetrievalSettings(retrieval_mode="lancedb_only", lancedb_search_mode="fts", use_mmr=True)
+    assert required_knobs(rs) == set()
 
 
 def test_required_knobs_neo4j_only_is_kg_max_rows_only():
@@ -408,7 +414,11 @@ def test_validate_case_ok_when_required_pinned():
     case = EvalCase(
         id="x",
         question="q?",
-        retrieval={"num_candidates": 50, "rrf_rank_constant": 60},
+        retrieval={
+            "retrieval_mode": "lancedb_only",
+            "num_candidates": 50,
+            "rrf_rank_constant": 60,
+        },
     )
     assert validate_case(case) == []
 
@@ -436,7 +446,13 @@ def test_validate_case_flags_pool_smaller_than_top_k():
 
 def test_validate_dataset_maps_only_invalid_ids():
     good = EvalCase(
-        id="good", question="q?", retrieval={"num_candidates": 50, "rrf_rank_constant": 60}
+        id="good",
+        question="q?",
+        retrieval={
+            "retrieval_mode": "lancedb_only",
+            "num_candidates": 50,
+            "rrf_rank_constant": 60,
+        },
     )
     bad = EvalCase(id="bad", question="q?")  # blank required knobs
     result = validate_dataset([good, bad])

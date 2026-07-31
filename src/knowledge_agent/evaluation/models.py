@@ -24,7 +24,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from knowledge_agent.config import check_window_ordering
+from knowledge_agent.config import check_window_ordering, retrieval_defaults
 from knowledge_agent.evaluation.config import (
     DEFAULT_ENABLED_GROUPS,
     DEFAULT_JUDGE_THRESHOLD,
@@ -49,14 +49,19 @@ class RetrievalSettings(BaseModel):
     """Per-case retrieval knobs — the KA graph's invoke overrides."""
 
     retrieval_mode: RetrievalMode = Field(
-        default="lancedb_only",
+        default_factory=lambda: retrieval_defaults()["retrieval_mode"],
         description="Agent-level retrieval topology for this case.",
     )
     lancedb_search_mode: LanceDbSearchMode = Field(
-        default="hybrid",
+        default_factory=lambda: retrieval_defaults()["lancedb_search_mode"],
         description="Within-LanceDB search mode (hybrid / fts / vector).",
     )
-    top_k: int = Field(default=5, ge=1, le=50, description="Final result depth.")
+    top_k: int = Field(
+        default_factory=lambda: retrieval_defaults()["top_k"],
+        ge=1,
+        le=50,
+        description="Final result depth.",
+    )
     skip_query_builder: bool = Field(
         default=False,
         description=(
@@ -110,7 +115,7 @@ class RetrievalSettings(BaseModel):
         ),
     )
     use_mmr: bool = Field(
-        default=False,
+        default_factory=lambda: retrieval_defaults()["use_mmr"],
         description=(
             "Apply MMR re-ranking to the LanceDB candidate pool. Maps to state['use_mmr']."
         ),

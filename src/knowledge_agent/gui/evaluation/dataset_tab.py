@@ -152,9 +152,6 @@ class DatasetTab:
         # One "LLM" generate button (602): drafts `gen_count` cases into the form
         # buffer (was two buttons — Generate one / multiple).
         self.gen_button: ft.Control | None = None
-        # Lazy (default) vs Advanced generator radios (602): Advanced grounds each
-        # case in the whole doc + the knowledge graph (hybrid AND KG cases).
-        self.gen_mode_radio: ft.RadioGroup | None = None
         # Spinner shown beside the LLM button while its calls run.
         self.gen_spinner: ft.ProgressRing | None = None
         # LLM model + temperature used for case generation.
@@ -258,30 +255,6 @@ class DatasetTab:
         self.gen_button = ft.TextButton(
             "LLM", icon=ft.Icons.AUTO_AWESOME, on_click=self._on_generate
         )
-        # Lazy → one chunk per doc (fast); Advanced → whole-doc + knowledge-graph
-        # grounding, writing both hybrid and KG cases (602).
-        self.gen_mode_radio = ft.RadioGroup(
-            value="lazy",
-            content=ft.Row(
-                [
-                    ft.Radio(
-                        value="lazy",
-                        label="Lazy",
-                        tooltip="One text chunk per document (fast, basic coverage).",
-                    ),
-                    ft.Radio(
-                        value="advanced",
-                        label="Advanced",
-                        tooltip=(
-                            "Whole-document + knowledge-graph grounding; writes "
-                            "both text (hybrid) and graph (KG) cases."
-                        ),
-                    ),
-                ],
-                spacing=8,
-                tight=True,
-            ),
-        )
         # Orthogonal to the three seeds: when on, a seeded case's QUESTION is the
         # last chat's distilled query (origin=chat) and the seeds only fill the
         # rest. A chat is one conversation → one case, so it forces the count to 1.
@@ -375,7 +348,7 @@ class DatasetTab:
         # eval form renders the SAME widgets as Settings → Retrieval (radios show
         # all options at once; the slider replaces a raw number box).
         self._lancedb_radios, lancedb_mode_radio, self._lancedb_mode_box = build_search_mode_radios(
-            "hybrid", oc
+            str(DEFAULT_VALUES["lancedb_search_mode"]), oc
         )
         mmr_slider, self._mmr_value_text = build_mmr_slider(
             float(DEFAULT_VALUES["mmr_lambda"]), on_change=oc
@@ -397,7 +370,7 @@ class DatasetTab:
             ),
             "retrieval_mode": ft.Dropdown(
                 options=[ft.DropdownOption(key=m, text=m) for m in modes],
-                value="lancedb_only",
+                value=str(DEFAULT_VALUES["retrieval_mode"]),
                 expand=True,
                 on_select=oc,
             ),
@@ -415,7 +388,9 @@ class DatasetTab:
             "rrf_rank_constant": ft.TextField(
                 value=str(DEFAULT_VALUES["rrf_rank_constant"]), width=100, dense=True, on_change=oc
             ),
-            "use_mmr": ft.Checkbox(label="use_mmr", value=False, on_change=oc),
+            "use_mmr": ft.Checkbox(
+                label="use_mmr", value=bool(DEFAULT_VALUES["use_mmr"]), on_change=oc
+            ),
             "mmr_lambda": mmr_slider,  # shared slider (see above)
             "kg_max_rows": ft.TextField(
                 value=str(DEFAULT_VALUES["kg_max_rows"]), width=100, dense=True, on_change=oc
@@ -657,7 +632,6 @@ class DatasetTab:
                             self.gen_button,
                             ft.Text("nr. of cases:", size=14, color=ft.Colors.GREY_300),
                             self.gen_count,
-                            self.gen_mode_radio,
                             self.gen_spinner,
                         ],
                         wrap=True,
@@ -1572,12 +1546,12 @@ class DatasetTab:
         ):
             f[key].value = ""
         f["origin"].value = "manual"
-        f["retrieval_mode"].value = "lancedb_only"
-        f["lancedb_search_mode"].value = "hybrid"
+        f["retrieval_mode"].value = str(DEFAULT_VALUES["retrieval_mode"])
+        f["lancedb_search_mode"].value = str(DEFAULT_VALUES["lancedb_search_mode"])
         f["top_k"].value = str(DEFAULT_VALUES["top_k"])
         f["num_candidates"].value = str(DEFAULT_VALUES["num_candidates"])
         f["rrf_rank_constant"].value = str(DEFAULT_VALUES["rrf_rank_constant"])
-        f["use_mmr"].value = False
+        f["use_mmr"].value = bool(DEFAULT_VALUES["use_mmr"])
         f["mmr_lambda"].value = float(DEFAULT_VALUES["mmr_lambda"])
         self._mmr_value_text.value = f"{float(DEFAULT_VALUES['mmr_lambda']):.2f}"
         f["kg_max_rows"].value = str(DEFAULT_VALUES["kg_max_rows"])
@@ -1962,16 +1936,12 @@ class DatasetTab:
         from knowledge_agent.evaluation.generator import (
             EvalGenerationConnectionError,
             generate_advanced,
-            generate_from_corpus,
         )
 
-        advanced = self.gen_mode_radio is not None and self.gen_mode_radio.value == "advanced"
         self._set_busy(self.gen_button, self.gen_spinner, True)
-        kind = "advanced" if advanced else "quick"
-        self._set_status(f"drafting {n} {kind} candidate case(s) from the active corpus…")
-        gen_fn = generate_advanced if advanced else generate_from_corpus
+        self._set_status(f"drafting {n} candidate case(s) from the active corpus…")
         try:
-            cases = await gen_fn(
+            cases = await generate_advanced(
                 n, model=self._selected_gen_model(), temperature=self._selected_gen_temp()
             )
         except EvalGenerationConnectionError as exc:

@@ -172,7 +172,7 @@ def test_kg_metrics_computed_for_neo4j_case(monkeypatch):
 
 
 def test_kg_metrics_none_for_lancedb_case(monkeypatch):
-    case = EvalCase(id="k2", question="q?")  # lancedb_only, no cypher runs
+    case = EvalCase(id="k2", question="q?", retrieval={"retrieval_mode": "lancedb_only"})
     _patch_run(monkeypatch, _run(answer="a"))
     result = asyncio.run(E.evaluate_case(case, None, EvalConfig()))
     assert result["cypher_validity"] is None

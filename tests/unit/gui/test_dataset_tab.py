@@ -352,7 +352,7 @@ async def test_generate_multiple_drafts_batch_into_buffer(fake_app, tmp_path):
         EvalCase(id="gen-01-b", question="B?", origin="llm", expected_sources=["d2"]),
     ]
     with patch(
-        "knowledge_agent.evaluation.generator.generate_from_corpus",
+        "knowledge_agent.evaluation.generator.generate_advanced",
         new_callable=AsyncMock,
         return_value=fake_cases,
     ) as gen_mock:
@@ -389,38 +389,12 @@ async def test_generate_warns_when_form_has_unsaved_content(fake_app, tmp_path):
     tab.gen_model_dropdown.value = "some-model"  # past the required-model guard
     tab.f["question"].value = "a half-typed draft"  # unsaved content
     with patch(
-        "knowledge_agent.evaluation.generator.generate_from_corpus",
+        "knowledge_agent.evaluation.generator.generate_advanced",
         new_callable=AsyncMock,
     ) as gen_mock:
         await tab._on_generate(MagicMock())
     fake_app.page.show_dialog.assert_called_once()  # discard warning shown
     gen_mock.assert_not_awaited()  # not generated over the unsaved draft
-
-
-async def test_advanced_toggle_dispatches_to_generate_advanced(fake_app, tmp_path):
-    """The Advanced checkbox routes the LLM button to generate_advanced (whole-
-    doc + KG), not the Lazy generate_from_corpus."""
-    p = tmp_path / "adv.json"
-    tab = _tab(fake_app, p)
-    tab.gen_model_dropdown.value = "some-model"
-    tab.gen_mode_radio.value = "advanced"
-    tab.gen_count.value = "2"
-    adv = EvalCase(id="adv-00-x", question="Q?", origin="llm")
-    with (
-        patch(
-            "knowledge_agent.evaluation.generator.generate_advanced",
-            new_callable=AsyncMock,
-            return_value=[adv],
-        ) as adv_mock,
-        patch(
-            "knowledge_agent.evaluation.generator.generate_from_corpus",
-            new_callable=AsyncMock,
-        ) as lazy_mock,
-    ):
-        await tab._on_generate(MagicMock())
-    adv_mock.assert_awaited_once()  # Advanced path
-    lazy_mock.assert_not_awaited()  # not the Lazy path
-    assert tab.f["id"].value == "adv-00-x"  # loaded into the buffer
 
 
 async def test_generate_one_fills_form_without_saving(fake_app, tmp_path):
@@ -431,7 +405,7 @@ async def test_generate_one_fills_form_without_saving(fake_app, tmp_path):
     tab.gen_model_dropdown.value = "some-model"  # past the required-model guard
     candidate = EvalCase(id="draft-1", question="Q?", origin="llm", required_keywords=["k"])
     with patch(
-        "knowledge_agent.evaluation.generator.generate_from_corpus",
+        "knowledge_agent.evaluation.generator.generate_advanced",
         new_callable=AsyncMock,
         return_value=[candidate],
     ):

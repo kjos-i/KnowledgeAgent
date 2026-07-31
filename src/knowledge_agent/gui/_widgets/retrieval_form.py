@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 import flet as ft
 
+from knowledge_agent.config import retrieval_defaults
 from knowledge_agent.retrieval_rules import LANCE_MODES, active_knobs, mmr_applicable
 
 if TYPE_CHECKING:
@@ -28,17 +29,13 @@ if TYPE_CHECKING:
 
 FADED_OPACITY = 0.4  # opacity of a block the current mode can't use
 
-# Standard starting values for a retrieval config — the defaults the eval
-# Dataset form seeds a NEW case with (a fixed baseline, NOT the user's live
-# global settings, so a case is reproducible regardless of anyone's config).
-# Chosen to match the config.py Settings field defaults (the standard baseline).
-DEFAULT_VALUES: dict[str, int | float] = {
-    "top_k": 5,
-    "num_candidates": 100,
-    "rrf_rank_constant": 60,
-    "mmr_lambda": 0.6,
-    "kg_max_rows": 50,
-}
+# The fixed baseline retrieval defaults, sourced directly from the config.py
+# Settings field defaults (via `retrieval_defaults`) so the eval Dataset form
+# and the Settings retrieval tab can never drift from the backend. These are the
+# fixed field defaults, NOT the user's live settings, so an authored case is
+# reproducible regardless of anyone's config. Full knob set (categorical +
+# numeric), keyed by the per-case knob names.
+DEFAULT_VALUES: dict[str, object] = retrieval_defaults()
 
 
 @dataclass

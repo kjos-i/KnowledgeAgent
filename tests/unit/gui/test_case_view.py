@@ -135,7 +135,7 @@ def test_render_case_cards_selected_highlights() -> None:
 def test_card_warns_on_unrunnable_case() -> None:
     """A real EvalCase with a required retrieval knob left blank shows a
     'not runnable' warning on its card; a fully-pinned one does not."""
-    invalid = EvalCase(id="bad", question="Q?")  # defaults: lancedb_only + None knobs
+    invalid = EvalCase(id="bad", question="Q?")  # defaults: auto + None knobs (not runnable)
     assert "not runnable" in _all_text(case_card(invalid, 0))
 
     valid = EvalCase(
