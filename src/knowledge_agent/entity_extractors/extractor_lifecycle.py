@@ -46,9 +46,12 @@ import asyncio
 import logging
 import sys
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from knowledge_agent import DISTRIBUTION_NAME
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -1037,6 +1040,35 @@ def download_extractor_weights_plan(
     )
 
 
+def _scan_pickle_weights(model_dir: Path) -> str | None:
+    """Scan pickle weight files under `model_dir` for dangerous opcodes.
+
+    Returns None when clean (or picklescan is unavailable), else a short message
+    naming the flagged file(s). Runs BEFORE any load so a malicious
+    `pytorch_model.bin` never reaches `torch.load` — defense-in-depth behind the
+    pinned-SHA + consent controls for pickle-format extractor weights (audit H).
+    picklescan ships with the pickle-weight extractor extras; if it is somehow
+    absent the scan is skipped with a warning (the other controls still apply).
+    """
+    try:
+        from picklescan.scanner import scan_file_path
+    except ImportError:
+        logger.warning(
+            "picklescan not installed; skipping pickle-weight scan under %s "
+            "(pinned-SHA + consent still apply)",
+            model_dir,
+        )
+        return None
+
+    flagged: list[str] = []
+    for pattern in ("*.bin", "*.pt", "*.pth", "*.ckpt"):
+        for weight in model_dir.rglob(pattern):
+            result = scan_file_path(str(weight))
+            if result.scan_err or result.infected_files > 0:
+                flagged.append(f"{weight.name} (infected_files={result.infected_files})")
+    return "; ".join(flagged) if flagged else None
+
+
 async def download_extractor_weights_execute(
     plan: DownloadExtractorWeightsPlan,
 ) -> DownloadExtractorWeightsResult:
@@ -1077,14 +1109,14 @@ async def download_extractor_weights_execute(
             on_disk_bytes=plan.on_disk_bytes,
         )
 
-    def _do_download() -> None:
-        snapshot_download(
+    def _do_download() -> str:
+        return snapshot_download(
             repo_id=plan.provenance.model_name,
             revision=plan.provenance.pinned_revision,
         )
 
     try:
-        await asyncio.to_thread(_do_download)
+        snapshot_path = await asyncio.to_thread(_do_download)
     except Exception as exc:
         logger.warning(
             "download_extractor_weights_execute (%s) failed: %r",
@@ -1098,6 +1130,35 @@ async def download_extractor_weights_execute(
             download_error=repr(exc),
             on_disk_bytes=_weights_size_bytes(plan.provenance),
         )
+
+    # Defense-in-depth (audit H): pickle-format weights execute code on load, so
+    # scan them BEFORE the model is ever loaded. A hit fails the install and
+    # removes the cached snapshot so it cannot be used.
+    if not plan.provenance.safetensors:
+        from pathlib import Path
+
+        flagged = await asyncio.to_thread(_scan_pickle_weights, Path(snapshot_path))
+        if flagged is not None:
+            import shutil
+
+            shutil.rmtree(snapshot_path, ignore_errors=True)
+            logger.error(
+                "download_extractor_weights_execute (%s): picklescan REJECTED the "
+                "weights and they were removed: %s",
+                plan.extractor_name,
+                flagged,
+            )
+            return DownloadExtractorWeightsResult(
+                extractor_name=plan.extractor_name,
+                did_download=True,
+                download_ok=False,
+                download_error=(
+                    f"SECURITY: the downloaded pickle weights failed a picklescan "
+                    f"safety scan ({flagged}) and were removed. Do not use this model."
+                ),
+                on_disk_bytes=0,
+            )
+
     return DownloadExtractorWeightsResult(
         extractor_name=plan.extractor_name,
         did_download=True,

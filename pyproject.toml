@@ -106,6 +106,9 @@ dev = [
     "ruff>=0.7.0",
     "pre-commit>=4,<5",
     "hypothesis>=6.100,<7",
+    # So the pickle-weight scan test (audit H) runs in the standard suite;
+    # picklescan is also a runtime dep of the pickle extractor extras.
+    "picklescan>=0.0.21",
 ]
 # Security scanners (audit track F in CHECKS.md). Both pure-Python and
 # cross-platform (Linux/macOS/Windows). `bandit` = static risky-pattern
@@ -142,8 +145,10 @@ entities-gliner = [
 entities-gliner-biomed = [
     "gliner>=0.2.5,<0.3",
     # Ships pickle .bin weights (no safetensors): require torch>=2.6 so
-    # torch.load defaults to weights_only=True (safe deserialization).
+    # torch.load defaults to weights_only=True, AND picklescan to scan the
+    # .bin for dangerous opcodes before load (audit H, download lifecycle).
     "torch>=2.6,<3",
+    "picklescan>=0.0.21",
 ]
 # HunFlair2 biomedical NER. Pinned model `hunflair/hunflair2-ner`
 # (~1.24 GB) auto-downloads on first inference. Single unified
@@ -159,8 +164,10 @@ entities-hunflair2 = [
     "flair>=0.14,<0.16",
     "huggingface-hub>=0.20",
     # Ships pickle .bin weights (no safetensors): require torch>=2.6 so
-    # torch.load defaults to weights_only=True (safe deserialization).
+    # torch.load defaults to weights_only=True, AND picklescan to scan the
+    # .bin for dangerous opcodes before load (audit H, download lifecycle).
     "torch>=2.6,<3",
+    "picklescan>=0.0.21",
 ]
 # Phase 4 parser strategy extras. Only install what your corpus needs.
 # `parsers-asr` enables docling's audio + video pipeline (Whisper Turbo

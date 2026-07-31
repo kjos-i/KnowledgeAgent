@@ -14,6 +14,7 @@ from knowledge_agent.entity_extractors.extractor_lifecycle import (
     ModelProvenance,
     UninstallExtractorPlan,
     UninstallExtractorResult,
+    _scan_pickle_weights,
     delete_extractor_cache_execute,
     delete_extractor_cache_plan,
     install_extractor_execute,
@@ -21,6 +22,31 @@ from knowledge_agent.entity_extractors.extractor_lifecycle import (
     uninstall_extractor_execute,
     uninstall_extractor_plan,
 )
+
+
+@pytest.mark.security
+def test_scan_pickle_weights_rejects_malicious_pickle(tmp_path):
+    """A pickle carrying a code-exec __reduce__ is flagged before load (audit H)."""
+    pytest.importorskip("picklescan")
+    import os
+    import pickle
+
+    class _Evil:
+        def __reduce__(self):
+            return (os.system, ("echo pwned",))
+
+    (tmp_path / "pytorch_model.bin").write_bytes(pickle.dumps(_Evil()))
+    assert _scan_pickle_weights(tmp_path) is not None
+
+
+@pytest.mark.security
+def test_scan_pickle_weights_passes_clean_pickle(tmp_path):
+    """A plain-data pickle is not flagged (audit H)."""
+    pytest.importorskip("picklescan")
+    import pickle
+
+    (tmp_path / "pytorch_model.bin").write_bytes(pickle.dumps({"weights": [1, 2, 3]}))
+    assert _scan_pickle_weights(tmp_path) is None
 
 
 def _sample_provenance(**overrides) -> ModelProvenance:
