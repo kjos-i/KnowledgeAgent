@@ -169,8 +169,8 @@ class DatasetTab:
         self.page_next: ft.IconButton | None = None
         self.page_delete: ft.IconButton | None = None
         self.blank_button: ft.TextButton | None = None
-        # Right column: two commit buttons. Only one is live at a time — Add for
-        # a new case, Update for an existing one (Add is also grayed in suite mode).
+        # Right column: two commit buttons. Only one is live at a time: Add for
+        # a new case, Update for an existing one.
         self.add_button: ft.Button | None = None
         self.update_button: ft.Button | None = None
         # Suite-mode widgets (601) — created in build(); referenced by handlers.
@@ -494,8 +494,8 @@ class DatasetTab:
         )
 
         # Right column: two commit buttons. Both route through _on_save_case; the
-        # disabled state (set in _sync_commit_buttons) gates which applies, and
-        # _selected drives append-vs-overwrite. Add is also grayed in suite mode.
+        # disabled state (set in _render_preview) gates which applies, and
+        # _selected drives append-vs-overwrite.
         self.add_button = ft.Button("Add case(s)", icon=ft.Icons.ADD, on_click=self._on_save_case)
         self.update_button = ft.Button("Update case", on_click=self._on_save_case)
         refresh_button = ft.Button(
@@ -504,18 +504,12 @@ class DatasetTab:
         )
 
         # ----- Suite mode (601): assemble a knob-sweep suite -----
-        # The checkbox reveals the suite panel + grays "Add case": in suite
-        # mode you add the shared facts via "Add case(s) info and fact" (the
-        # form's Info + Fact become a case) and assemble the knob-sets below.
-        # Generate then clones those facts once per knob-set.
+        # The checkbox reveals the suite panel. The suite's facts are simply the
+        # dataset's cases (added the normal way via "Add case(s)"); Suite setup
+        # only assembles the knob-sets below, and Generate clones those cases once
+        # per knob-set (each case's own retrieval replaced by the knob-set's).
         self.generate_suite_check = ft.Checkbox(
             label="Suite setup", value=False, on_change=self._on_suite_toggled
-        )
-        self.add_info_fact_button = ft.Button(
-            "Add case(s) info and fact",
-            icon=ft.Icons.ADD,
-            tooltip="Add the form's case(s) as shared suite facts (the whole batch at once)",
-            on_click=self._on_save_case,
         )
         # Two premade dropdowns (Hybrid / KG groups) — picking one drops it into
         # the knob-set list (read-only), like adding a judge to the judge panel.
@@ -560,21 +554,12 @@ class DatasetTab:
                 spacing=8,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                 controls=[
-                    # Suite name at the top, with "Add Info and Fact" (+ its help
-                    # (i)) to the RIGHT of the field — that button seeds each
-                    # shared suite fact from the form (613/614).
+                    # Suite name at the top, with its help (i) to the right of
+                    # the field.
                     labeled_field(
                         "Suite name",
                         self.suite_name_field,
-                        trailing=ft.Row(
-                            [
-                                self.add_info_fact_button,
-                                info(self.app, "eval_dataset.suite"),
-                            ],
-                            spacing=4,
-                            tight=True,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        ),
+                        trailing=info(self.app, "eval_dataset.suite"),
                     ),
                     # Plain title, no rule, but keep the sub-section's top
                     # breathing room (613 removed the rule, not the spacing).
@@ -967,13 +952,11 @@ class DatasetTab:
     def _render_preview(self) -> None:
         """Sync the commit buttons + the draft-batch pager (the form itself is the
         preview). Exactly one commit button is live: Add case(s) for drafts,
-        Update when editing an existing case; Add is ALSO grayed in suite mode
-        (you build a suite via the panel). The pager shows only for a multi-page
-        batch."""
+        Update when editing an existing case. The pager shows only for a
+        multi-page batch."""
         editing = self._selected is not None
-        suite = self.generate_suite_check is not None and bool(self.generate_suite_check.value)
         if self.add_button is not None:
-            self.add_button.disabled = editing or suite
+            self.add_button.disabled = editing
         if self.update_button is not None:
             self.update_button.disabled = not editing
         self._render_pager(editing)
@@ -1110,14 +1093,14 @@ class DatasetTab:
     # ---- suite mode (601) -------------------------------------------------
 
     def _on_suite_toggled(self, _e: ft.Event) -> None:
-        """Reveal/hide the suite panel; suite mode also grays "Add case"
-        (you build the suite via the panel, not per-case Add)."""
+        """Reveal/hide the suite panel. Cases are still added the normal way
+        (Add case(s)); Suite setup only assembles the knob-sweep, so the commit
+        buttons are unaffected."""
         on = self.generate_suite_check is not None and bool(self.generate_suite_check.value)
         if self.suite_panel is not None:
             self.suite_panel.visible = on
         if on:
             self._render_suite_members()
-        self._render_preview()  # re-syncs Add/Update (suite grays Add)
         self.app.page.update()
 
     def _add_preset_member(self, dropdown: ft.Dropdown) -> None:
@@ -1228,7 +1211,7 @@ class DatasetTab:
         from knowledge_agent.gui.evaluation._common import active_corpus_dir
 
         if self._dataset is None or not self._dataset.cases:
-            self._set_suite_status("Add at least one fact first (Add case(s) info and fact).")
+            self._set_suite_status("Add at least one case to the dataset first.")
             return
         suite = (self.suite_name_field.value or "").strip() if self.suite_name_field else ""
         if not suite:

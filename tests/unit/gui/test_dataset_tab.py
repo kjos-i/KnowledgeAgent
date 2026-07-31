@@ -753,13 +753,21 @@ def test_new_knobs_round_trip(fake_app, tmp_path):
 # ---- suite mode (601) ----
 
 
-def test_suite_toggle_reveals_panel_and_grays_add(fake_app):
+def test_suite_toggle_reveals_panel_without_graying_add(fake_app):
+    """Ticking Suite setup reveals the panel but does NOT grey 'Add case' —
+    cases are added the normal way, then swept by the knob-sets."""
     tab = _tab(fake_app)
     assert tab.suite_panel.visible is False
+    assert tab.add_button.disabled is False
     tab.generate_suite_check.value = True
     tab._on_suite_toggled(MagicMock())
     assert tab.suite_panel.visible is True
-    assert tab.add_button.disabled is True  # suite mode grays "Add case"
+    assert tab.add_button.disabled is False  # Add stays live in suite mode
+    # Re-render the preview WHILE suite is on: Add must still be live. This
+    # directly exercises _render_preview's gating, so a lone reintroduction of
+    # "disabled = editing or suite" would be caught here.
+    tab._render_preview()
+    assert tab.add_button.disabled is False
     tab.generate_suite_check.value = False
     tab._on_suite_toggled(MagicMock())
     assert tab.suite_panel.visible is False
