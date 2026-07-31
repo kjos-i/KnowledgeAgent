@@ -100,11 +100,11 @@ def fresh_config_state() -> Iterator[None]:
 
 def test_settings_minimal_required_construct_succeeds() -> None:
     s = Settings(**_minimal_required())  # type: ignore[arg-type]
-    assert s.anthropic_api_key == "test-anthropic"
-    assert s.voyage_api_key == "test-voyage"
+    assert s.anthropic_api_key.get_secret_value() == "test-anthropic"
+    assert s.voyage_api_key.get_secret_value() == "test-voyage"
     assert s.neo4j_uri == "neo4j://127.0.0.1:7687"
     assert s.neo4j_user == "neo4j"
-    assert s.neo4j_password == "test-password"
+    assert s.neo4j_password.get_secret_value() == "test-password"
     assert s.lancedb_path == Path("/tmp/test-lance")
 
 

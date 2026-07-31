@@ -16,13 +16,24 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, get_args
 
 from platformdirs import user_cache_dir
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if TYPE_CHECKING:
     from knowledge_agent.kg.client import Neo4jClient
 
 logger = logging.getLogger(__name__)
+
+
+def secret_str_value(secret: SecretStr | None) -> str | None:
+    """Unwrap a `SecretStr` for handing to an external client, else None.
+
+    Secrets (API keys, Neo4j password) are stored as `SecretStr` so they render
+    as `**********` in any repr / log / model_dump — leak-by-accident is
+    impossible. Reading the real value is therefore always an explicit call,
+    routed through this one helper so the unwrap has a single home.
+    """
+    return secret.get_secret_value() if secret is not None else None
 
 
 # Zero-arg callbacks invoked at the END of every reset_after_settings_change().
@@ -175,20 +186,20 @@ class Settings(BaseSettings):
     # All optional. The active provider's key is validated lazily at first call
     # (llm_factory / embedder_factory) - a pure-OpenAI user never needs an
     # Anthropic/Voyage key. No provider is privileged as always-required.
-    anthropic_api_key: str | None = Field(
+    anthropic_api_key: SecretStr | None = Field(
         default=None,
         description=(
             "Anthropic API key. Required when `llm_provider='anthropic'`. "
             "Validated lazily at first call."
         ),
     )
-    voyage_api_key: str | None = Field(
+    voyage_api_key: SecretStr | None = Field(
         default=None,
         description=(
             "Voyage AI API key. Required when `embedding_provider='voyage'`. Validated lazily."
         ),
     )
-    openai_api_key: str | None = Field(
+    openai_api_key: SecretStr | None = Field(
         default=None,
         description=(
             "OpenAI API key. Required only when `llm_provider='openai'` "
@@ -196,7 +207,7 @@ class Settings(BaseSettings):
             "call so users who never touch OpenAI don't need to set it."
         ),
     )
-    google_api_key: str | None = Field(
+    google_api_key: SecretStr | None = Field(
         default=None,
         description=(
             "Google Generative AI (Gemini) API key. Required only when "
@@ -626,7 +637,7 @@ class Settings(BaseSettings):
             ".env / .env.test."
         ),
     )
-    neo4j_password: str = Field(
+    neo4j_password: SecretStr = Field(
         ...,
         description=(
             "Neo4j password. Required - no safe default. Set via "

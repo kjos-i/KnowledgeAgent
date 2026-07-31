@@ -62,7 +62,7 @@ import logging
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
-from knowledge_agent.config import LLM_PROVIDERS, get_settings
+from knowledge_agent.config import LLM_PROVIDERS, get_settings, secret_str_value
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
@@ -251,11 +251,11 @@ def _build_llm(provider: str, model: str, temperature: float) -> BaseChatModel:
     # mapping below mirrors each provider's LangChain integration
     # contract.
     if provider == "anthropic":
-        kwargs["api_key"] = settings.anthropic_api_key
+        kwargs["api_key"] = secret_str_value(settings.anthropic_api_key)
     elif provider == "openai":
-        kwargs["api_key"] = settings.openai_api_key
+        kwargs["api_key"] = secret_str_value(settings.openai_api_key)
     elif provider == "google":
-        kwargs["api_key"] = settings.google_api_key
+        kwargs["api_key"] = secret_str_value(settings.google_api_key)
     elif provider == "ollama":
         kwargs["base_url"] = settings.ollama_base_url
 

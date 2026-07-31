@@ -75,7 +75,7 @@ import logging
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
-from knowledge_agent.config import get_settings
+from knowledge_agent.config import get_settings, secret_str_value
 from knowledge_agent.llm_factory import ConfigError
 
 if TYPE_CHECKING:
@@ -129,7 +129,7 @@ def _build_voyage_client():
     """Lazy Voyage client. Kept on its native API for multimodal support."""
     import voyageai
 
-    return voyageai.Client(api_key=get_settings().voyage_api_key)
+    return voyageai.Client(api_key=secret_str_value(get_settings().voyage_api_key))
 
 
 @lru_cache(maxsize=4)
@@ -144,11 +144,13 @@ def _build_langchain_embedder(provider: str, model: str) -> Embeddings:
     if provider == "openai":
         from langchain_openai import OpenAIEmbeddings
 
-        return OpenAIEmbeddings(model=model, api_key=settings.openai_api_key)
+        return OpenAIEmbeddings(model=model, api_key=secret_str_value(settings.openai_api_key))
     if provider == "google":
         from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-        return GoogleGenerativeAIEmbeddings(model=model, google_api_key=settings.google_api_key)
+        return GoogleGenerativeAIEmbeddings(
+            model=model, google_api_key=secret_str_value(settings.google_api_key)
+        )
     if provider == "huggingface":
         # langchain-huggingface ships HuggingFaceEmbeddings which wraps
         # sentence-transformers. The `embed-huggingface` extra pulls

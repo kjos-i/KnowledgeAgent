@@ -9,6 +9,7 @@ run without any provider's API key set in the environment.
 from unittest.mock import patch
 
 import pytest
+from pydantic import SecretStr
 
 from knowledge_agent.llm_factory import (
     ConfigError,
@@ -25,6 +26,11 @@ from knowledge_agent.llm_factory import (
 # init_chat_model is imported lazily inside `_build_llm`, so we patch
 # the source module — not knowledge_agent.llm_factory — to intercept.
 _INIT_PATCH = "langchain.chat_models.init_chat_model"
+
+
+def _secret(value: str | None) -> SecretStr | None:
+    """Wrap a raw test key as `SecretStr` (matching real `Settings`), or None."""
+    return SecretStr(value) if value is not None else None
 
 
 class _FakeSettings:
@@ -50,9 +56,9 @@ class _FakeSettings:
         llm_max_retries: int = 3,
     ):
         self.llm_provider = llm_provider
-        self.anthropic_api_key = anthropic_api_key
-        self.openai_api_key = openai_api_key
-        self.google_api_key = google_api_key
+        self.anthropic_api_key = _secret(anthropic_api_key)
+        self.openai_api_key = _secret(openai_api_key)
+        self.google_api_key = _secret(google_api_key)
         self.ollama_base_url = ollama_base_url
         self.anthropic_requests_per_second = anthropic_requests_per_second
         self.openai_requests_per_second = openai_requests_per_second

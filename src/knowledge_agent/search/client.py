@@ -234,7 +234,7 @@ class LanceClient:
         if CHUNKS_TABLE not in (await conn.list_tables()).tables:
             return
         table = await conn.open_table(CHUNKS_TABLE)
-        await table.delete(f"doc_id = '{doc_id}'")
+        await table.delete(f"doc_id = {_sql_literal(doc_id)}")
 
     async def update_doc_metadata(self, doc_id: str, fields: dict[str, Any]) -> None:
         """Patch doc-level columns for every chunk row of a doc. Idempotent.
@@ -274,7 +274,7 @@ class LanceClient:
         # doc-metadata write (bulk resolve, Edit-metadata modal, sync-moved
         # source_path patch) because the callers swallowed the error and
         # reported false success.
-        await table.update(where=f"doc_id = '{doc_id}'", updates=fields)
+        await table.update(where=f"doc_id = {_sql_literal(doc_id)}", updates=fields)
 
     async def list_indexed_docs(self) -> list[dict[str, Any]]:
         """One entry per unique `doc_id` with doc-level metadata + counts.
@@ -389,7 +389,7 @@ class LanceClient:
         if CHUNKS_TABLE not in (await conn.list_tables()).tables:
             return []
         table = await conn.open_table(CHUNKS_TABLE)
-        query = table.query().where(f"doc_id = '{doc_id}'").limit(_LANCEDB_SCAN_LIMIT)
+        query = table.query().where(f"doc_id = {_sql_literal(doc_id)}").limit(_LANCEDB_SCAN_LIMIT)
         rows = await query.to_list()
         rows.sort(key=lambda r: r["chunk_index"])
         return rows

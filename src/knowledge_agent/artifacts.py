@@ -105,6 +105,29 @@ def _slugify(text: str, max_length: int = 50) -> str:
 # ===========================================================================
 
 
+_KG_PROVENANCE_KEYS = ("doc_id", "chunk_id", "evidence_span")
+
+
+def _kg_source_provenance(row: dict | None) -> list[tuple[str, str]]:
+    """Extract (label, value) provenance pairs from a cited KG row.
+
+    Surfaces doc_id / chunk_id / evidence_span when the Cypher row carried
+    them, tolerating RETURN aliases such as `r.doc_id`. These IDs join the
+    graph finding back to its LanceDB source chunk. Empty list when the row
+    has no recognizable provenance column (or no row was captured).
+    """
+    if not row:
+        return []
+    found: dict[str, str] = {}
+    for want in _KG_PROVENANCE_KEYS:
+        for key, val in row.items():
+            if val is None:
+                continue
+            if key.split(".")[-1].lower() == want and want not in found:
+                found[want] = str(val)
+    return [(key, found[key]) for key in _KG_PROVENANCE_KEYS if key in found]
+
+
 def render_answer_markdown(answer: AgentAnswer, query: str) -> str:
     """Render an AgentAnswer (text + sources) as Markdown for display / disk.
 
@@ -147,6 +170,8 @@ def render_answer_markdown(answer: AgentAnswer, query: str) -> str:
         lines += ["### KG sources", ""]
         for k in answer.kg_sources:
             lines.append(f"**[K{k.hit_index}]**")
+            for label, val in _kg_source_provenance(k.row):
+                lines += ["", f"> _{label}:_ {val}"]
             if k.quote:
                 lines += ["", f"> {k.quote}"]
             lines.append("")
@@ -181,6 +206,8 @@ def render_answer_txt(answer: AgentAnswer, query: str) -> str:
         for k in answer.kg_sources:
             suffix = f" {k.quote}" if k.quote else ""
             lines.append(f"  [K{k.hit_index}]{suffix}")
+            for label, val in _kg_source_provenance(k.row):
+                lines.append(f"      {label}: {val}")
         lines.append("")
     return "\n".join(lines) + "\n"
 
@@ -225,6 +252,8 @@ def render_answer_docx(answer: AgentAnswer, query: str):
         doc.add_heading("KG sources", level=2)
         for k in answer.kg_sources:
             doc.add_paragraph().add_run(f"[K{k.hit_index}]").bold = True
+            for label, val in _kg_source_provenance(k.row):
+                doc.add_paragraph().add_run(f"{label}: {val}").italic = True
             if k.quote:
                 doc.add_paragraph().add_run(k.quote).italic = True
     return doc

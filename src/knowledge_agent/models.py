@@ -232,6 +232,16 @@ class KGSource(BaseModel):
             "was used."
         ),
     )
+    row: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "The full cited row data (`kg_hits[hit_index].data`), copied in "
+            "deterministically after synthesis (not LLM-produced). Carries the "
+            "graph finding's provenance (doc_id / chunk_id / evidence_span when "
+            "the query returned them), which joins back to the LanceDB source "
+            "chunk the finding came from. None until enriched."
+        ),
+    )
 
 
 class AgentAnswer(BaseModel):

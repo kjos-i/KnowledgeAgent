@@ -4,7 +4,7 @@ Two helpers used by the neo4j_retriever_node:
 
 - `is_cypher_read_only(cypher)` rejects any Cypher containing a write
   keyword (CREATE, MERGE, DELETE, DROP, SET, REMOVE), a procedure / bulk-load
-  keyword (CALL, LOAD), or the apoc/dbms namespace (inline functions like
+  keyword (CALL, LOAD), a SHOW metadata/admin command, or the apoc/dbms namespace (inline functions like
   `apoc.cypher.*` that execute arbitrary Cypher). The retriever runs this
   BEFORE sending to Neo4j; rejected queries skip execution entirely. This is
   what blocks the apoc.load.* / LOAD CSV SSRF + local-file-read + cred-exfil
@@ -52,6 +52,11 @@ FORBIDDEN_KEYWORDS: tuple[str, ...] = (
     # MATCH...RETURN graph reads (text/vector search is LanceDB's job).
     "CALL",
     "LOAD",
+    # Metadata / admin commands. SHOW USERS | ROLES | DATABASES | INDEXES |
+    # CONSTRAINTS | SETTINGS leaks schema/security metadata (and needs no CALL).
+    # The cypher-builder only ever emits MATCH...RETURN graph reads, so blocking
+    # SHOW has no false-positive cost.
+    "SHOW",
 )
 
 # Word-boundary regex for the forbidden keywords. Compiled once at module

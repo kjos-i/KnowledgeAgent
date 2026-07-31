@@ -99,6 +99,17 @@ dev = [
     "pre-commit>=4,<5",
     "hypothesis>=6.100,<7",
 ]
+# Security scanners (audit track F in CHECKS.md). Both pure-Python and
+# cross-platform (Linux/macOS/Windows). `bandit` = static risky-pattern
+# scan over src/; `pip-audit` = known-CVE scan of the installed
+# dependency tree. Run ad-hoc or before a release. NO semgrep here:
+# redundant with bandit + the manual G audit for a project this size,
+# and it has no native-Windows support — reconsider only if/when a
+# CI-Linux pipeline exists (see CHECKS.md "F. Security scan").
+security = [
+    "bandit>=1.9,<2",
+    "pip-audit>=2.10,<3",
+]
 # L6 entity extractor backends. Only install what your corpus uses.
 # The `llm` adapter has no extra deps of its own — it runs on whatever
 # LLM provider you install (the `llm-*` extras); each NER adapter brings
@@ -122,6 +133,9 @@ entities-gliner = [
 # `extractor_lifecycle.py:_GLINER_BIOMED_PROVENANCE`.
 entities-gliner-biomed = [
     "gliner>=0.2.5,<0.3",
+    # Ships pickle .bin weights (no safetensors): require torch>=2.6 so
+    # torch.load defaults to weights_only=True (safe deserialization).
+    "torch>=2.6,<3",
 ]
 # HunFlair2 biomedical NER. Pinned model `hunflair/hunflair2-ner`
 # (~1.24 GB) auto-downloads on first inference. Single unified
@@ -136,6 +150,9 @@ entities-gliner-biomed = [
 entities-hunflair2 = [
     "flair>=0.14,<0.16",
     "huggingface-hub>=0.20",
+    # Ships pickle .bin weights (no safetensors): require torch>=2.6 so
+    # torch.load defaults to weights_only=True (safe deserialization).
+    "torch>=2.6,<3",
 ]
 # Phase 4 parser strategy extras. Only install what your corpus needs.
 # `parsers-asr` enables docling's audio + video pipeline (Whisper Turbo
@@ -214,7 +231,9 @@ embed-google = [
 # `embedder_lifecycle.py` for the 2-step UX (libs first, then model).
 embed-huggingface = [
     "sentence-transformers>=3,<4",
-    "torch>=2,<3",
+    # Consistent safe floor (torch>=2.6 => weights_only=True load default),
+    # matching the pickle-weight extractor extras above.
+    "torch>=2.6,<3",
 ]
 
 [tool.hatch.build.targets.wheel]

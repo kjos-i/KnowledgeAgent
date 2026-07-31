@@ -925,9 +925,11 @@ def test_synthesizer_llm_branch_passes_kg_hits_to_user_message():
     human_msg_content = messages[1].content
     assert "Unique Title XYZ" in human_msg_content
     assert "[K0]" in human_msg_content
-    # And the LLM's structured output flowed back through unchanged.
-    assert result["final_answer"] is answer_obj
+    # The LLM's structured output flows back, now enriched with each KG
+    # citation's source row (deterministic provenance copy, Finding 6).
+    assert result["final_answer"].answer == answer_obj.answer
     assert result["final_answer"].kg_sources[0].hit_index == 0
+    assert result["final_answer"].kg_sources[0].row == {"title": "Unique Title XYZ"}
 
 
 def test_synthesizer_direct_populates_multimodal_fields_on_chunk_sources():
