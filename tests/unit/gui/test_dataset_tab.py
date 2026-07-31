@@ -351,14 +351,24 @@ async def test_generate_multiple_drafts_batch_into_buffer(fake_app, tmp_path):
         EvalCase(id="gen-00-a", question="A?", origin="llm", expected_sources=["d1"]),
         EvalCase(id="gen-01-b", question="B?", origin="llm", expected_sources=["d2"]),
     ]
-    with patch(
-        "knowledge_agent.evaluation.generator.generate_advanced",
-        new_callable=AsyncMock,
-        return_value=fake_cases,
-    ) as gen_mock:
+    caps = {"text": True, "graph": False, "cross_related": False, "cross_xref": False}
+    with (
+        patch(
+            "knowledge_agent.evaluation.generator.generation_capabilities",
+            new_callable=AsyncMock,
+            return_value=caps,
+        ),
+        patch(
+            "knowledge_agent.evaluation.generator.generate_targeted",
+            new_callable=AsyncMock,
+            return_value=fake_cases,
+        ) as gen_mock,
+    ):
         await tab._on_generate(MagicMock())
 
-    gen_mock.assert_awaited_once_with(2, model="some-model", temperature=0.3)
+    gen_mock.assert_awaited_once_with(
+        2, modes=["lancedb_only"], cross_doc=[], model="some-model", temperature=0.3
+    )
     assert len(tab._drafts) == 2  # a two-page batch in the buffer
     assert tab.pager.visible is True  # multi-page → pager shown
     assert tab.f["id"].value == "gen-00-a"  # form shows page 1
@@ -389,7 +399,7 @@ async def test_generate_warns_when_form_has_unsaved_content(fake_app, tmp_path):
     tab.gen_model_dropdown.value = "some-model"  # past the required-model guard
     tab.f["question"].value = "a half-typed draft"  # unsaved content
     with patch(
-        "knowledge_agent.evaluation.generator.generate_advanced",
+        "knowledge_agent.evaluation.generator.generate_targeted",
         new_callable=AsyncMock,
     ) as gen_mock:
         await tab._on_generate(MagicMock())
@@ -404,16 +414,62 @@ async def test_generate_one_fills_form_without_saving(fake_app, tmp_path):
     tab = _tab(fake_app, p)
     tab.gen_model_dropdown.value = "some-model"  # past the required-model guard
     candidate = EvalCase(id="draft-1", question="Q?", origin="llm", required_keywords=["k"])
-    with patch(
-        "knowledge_agent.evaluation.generator.generate_advanced",
-        new_callable=AsyncMock,
-        return_value=[candidate],
+    caps = {"text": True, "graph": False, "cross_related": False, "cross_xref": False}
+    with (
+        patch(
+            "knowledge_agent.evaluation.generator.generation_capabilities",
+            new_callable=AsyncMock,
+            return_value=caps,
+        ),
+        patch(
+            "knowledge_agent.evaluation.generator.generate_targeted",
+            new_callable=AsyncMock,
+            return_value=[candidate],
+        ),
     ):
         await tab._on_generate(MagicMock())
     assert tab.f["id"].value == "draft-1"
     assert tab.f["origin"].value == "llm"
     assert tab._selected is None  # new case → commits via Add
     assert not p.exists()  # nothing written until Add case
+
+
+def test_apply_gen_caps_greys_unsupported_targets(fake_app):
+    """Grey-out disables + unticks the graph modes and cross-doc boxes when the
+    corpus lacks the data; the text modes stay available."""
+    tab = _tab(fake_app)
+    tab.mode_checks["neo4j_only"].value = True  # user had ticked a graph mode
+    tab.cross_checks["related"].value = True
+    tab._apply_gen_caps({"text": True, "graph": False, "cross_related": False, "cross_xref": False})
+    assert tab.mode_checks["lancedb_only"].disabled is False  # text stays
+    assert tab.mode_checks["neo4j_only"].disabled is True  # graph greyed
+    assert tab.mode_checks["neo4j_only"].value is False  # and unticked
+    assert tab.cross_checks["related"].disabled is True
+    assert tab.cross_checks["related"].value is False
+
+
+async def test_generate_needs_a_ticked_target(fake_app, tmp_path):
+    """With every target unticked (and none supported), Generate posts a prompt
+    to tick one instead of calling the generator."""
+    p = tmp_path / "g.json"
+    tab = _tab(fake_app, p)
+    tab.gen_model_dropdown.value = "some-model"
+    tab.mode_checks["lancedb_only"].value = False  # untick the sole default
+    caps = {"text": True, "graph": False, "cross_related": False, "cross_xref": False}
+    with (
+        patch(
+            "knowledge_agent.evaluation.generator.generation_capabilities",
+            new_callable=AsyncMock,
+            return_value=caps,
+        ),
+        patch(
+            "knowledge_agent.evaluation.generator.generate_targeted",
+            new_callable=AsyncMock,
+        ) as gen_mock,
+    ):
+        await tab._on_generate(MagicMock())
+    gen_mock.assert_not_awaited()
+    assert "tick at least one" in tab.status.value.lower()
 
 
 # ---- draft buffer / pager (602) ----

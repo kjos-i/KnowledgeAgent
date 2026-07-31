@@ -154,6 +154,11 @@ class DatasetTab:
         self.gen_button: ft.Control | None = None
         # Spinner shown beside the LLM button while its calls run.
         self.gen_spinner: ft.ProgressRing | None = None
+        # Generation-target checkboxes: which retrieval modes + cross-doc kinds
+        # the LLM drafts cases for (graph modes + cross-doc grey out when the
+        # corpus lacks the data). Created in build().
+        self.mode_checks: dict[str, ft.Checkbox] = {}
+        self.cross_checks: dict[str, ft.Checkbox] = {}
         # LLM model + temperature used for case generation.
         self.gen_model_dropdown: ft.Dropdown | None = None
         self.gen_temp_slider: ft.Slider | None = None
@@ -272,6 +277,24 @@ class DatasetTab:
         # nr. of cases the LLM button drafts (default 1 → a single page).
         self.gen_count = ft.TextField(value="1", width=80, dense=True)
         self.gen_spinner = ft.ProgressRing(visible=False, width=16, height=16, stroke_width=2)
+        # Generation targets: the six retrieval modes (lancedb_only ticked by
+        # default) + the two cross-doc kinds. Graph modes + cross-doc are greyed
+        # out by `_apply_gen_caps` when the active corpus can't support them.
+        _gen_mode_labels = [
+            ("lancedb_only", "Vector / text"),
+            ("neo4j_only", "Graph"),
+            ("auto", "Auto (classifier)"),
+            ("lancedb_then_neo4j", "Text then graph"),
+            ("neo4j_then_lancedb", "Graph then text"),
+            ("parallel_fused", "Parallel fused"),
+        ]
+        self.mode_checks = {
+            m: ft.Checkbox(label=lbl, value=(m == "lancedb_only")) for m, lbl in _gen_mode_labels
+        }
+        self.cross_checks = {
+            "related": ft.Checkbox(label="Cross-doc: shared entity", value=False),
+            "xref": ft.Checkbox(label="Cross-doc: xref-linked", value=False),
+        }
         # Draft-buffer pager + delete-X (602): shown only for a multi-page batch.
         self.page_prev = ft.IconButton(
             ft.Icons.CHEVRON_LEFT, tooltip="Previous case", on_click=self._on_prev_page
@@ -636,6 +659,25 @@ class DatasetTab:
                         ],
                         wrap=True,
                         spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    sub_section_title("Generate cases for these retrieval modes"),
+                    ft.Row(
+                        list(self.mode_checks.values())[:3],
+                        wrap=True,
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Row(
+                        list(self.mode_checks.values())[3:],
+                        wrap=True,
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Row(
+                        list(self.cross_checks.values()),
+                        wrap=True,
+                        spacing=12,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     sub_section_header("LLM model for case generation"),
@@ -1935,14 +1977,32 @@ class DatasetTab:
             return
         from knowledge_agent.evaluation.generator import (
             EvalGenerationConnectionError,
-            generate_advanced,
+            generate_targeted,
+            generation_capabilities,
         )
 
+        # Grey out the targets this corpus can't support, then take the ticked +
+        # still-enabled ones. Probed on each Generate so it tracks corpus changes.
+        self._apply_gen_caps(await generation_capabilities())
+        modes = [m for m, cb in self.mode_checks.items() if cb.value and not cb.disabled]
+        cross = [k for k, cb in self.cross_checks.items() if cb.value and not cb.disabled]
+        self.app.page.update()
+        if not (modes or cross):
+            self._set_status(
+                "Tick at least one retrieval mode or cross-doc target to generate for."
+            )
+            return
         self._set_busy(self.gen_button, self.gen_spinner, True)
-        self._set_status(f"drafting {n} candidate case(s) from the active corpus…")
+        self._set_status(
+            f"drafting {n} candidate case(s) across {len(modes) + len(cross)} target(s)…"
+        )
         try:
-            cases = await generate_advanced(
-                n, model=self._selected_gen_model(), temperature=self._selected_gen_temp()
+            cases = await generate_targeted(
+                n,
+                modes=modes,
+                cross_doc=cross,
+                model=self._selected_gen_model(),
+                temperature=self._selected_gen_temp(),
             )
         except EvalGenerationConnectionError as exc:
             # Network/connection failure — show the clear, retryable message.
@@ -1955,20 +2015,33 @@ class DatasetTab:
             return
         self._set_busy(self.gen_button, self.gen_spinner, False)
         if not cases:
-            self._set_status("no candidate generated (empty corpus or all passages too short)")
+            self._set_status("no candidate generated (no documents for the chosen targets)")
             return
         # Load the batch into the form buffer for review — nothing saved yet.
         self._load_drafts(self._snapshots_from_cases(cases))
         shortfall = ""
         if len(cases) < n:
-            shortfall = (
-                f" of {n} requested (one case per document; the corpus has "
-                "fewer usable docs, or a passage was skipped)"
-            )
+            shortfall = f" of {n} requested (the chosen targets ran out of documents)"
         tail = (
             "review the batch, then Add case(s)" if len(cases) > 1 else "review, then Add case(s)"
         )
         self._set_status(f"drafted {len(cases)} LLM candidate(s){shortfall} (origin=llm): {tail}")
+
+    def _apply_gen_caps(self, caps: dict[str, bool]) -> None:
+        """Grey out (and untick) the generation targets the corpus can't support:
+        the four graph modes need entities; each cross-doc box needs its edges.
+        The text modes (lancedb_only, auto) stay available."""
+        graph_ok = bool(caps.get("graph"))
+        for mode, cb in self.mode_checks.items():
+            needs_graph = mode not in ("lancedb_only", "auto")
+            cb.disabled = needs_graph and not graph_ok
+            if cb.disabled:
+                cb.value = False
+        self.cross_checks["related"].disabled = not caps.get("cross_related")
+        self.cross_checks["xref"].disabled = not caps.get("cross_xref")
+        for cb in self.cross_checks.values():
+            if cb.disabled:
+                cb.value = False
 
     async def _generate_gold_from_chat(self) -> None:
         """The 'Query from chat' + LLM path: keep the chat's distilled query as the

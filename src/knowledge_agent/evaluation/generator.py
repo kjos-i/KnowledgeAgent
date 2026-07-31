@@ -21,6 +21,7 @@ cross-provider model.
 from __future__ import annotations
 
 import logging
+import random
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
@@ -149,25 +150,6 @@ class GeneratedAdvancedCase(BaseModel):
     )
 
 
-_ADVANCED_SYSTEM = (
-    "You write evaluation cases for a retrieval-augmented QA system that searches "
-    "BOTH a text store and a knowledge graph. You are given a document's full "
-    "text and (when available) graph facts — entity relationships drawn from that "
-    "document. Write ONE high-quality case:\n"
-    "  - case_type: 'kg' when the best answer depends on a RELATIONSHIP between "
-    "entities (use the graph facts); 'hybrid' when it depends on a fact stated in "
-    "the TEXT.\n"
-    "  - question: one specific, self-contained question — natural, not "
-    "'according to the document'.\n"
-    "  - answer_points: the key facts a correct answer must contain.\n"
-    "  - keywords: a few salient terms a correct answer should include.\n"
-    "  - expected_entities: for a 'kg' case, the entity / relationship names the "
-    "graph rows should contain; leave empty for 'hybrid'.\n"
-    "  - category: a short grouping tag (Mechanism, Definition, Relationship, …).\n"
-    "Ground everything ONLY in the material provided — invent nothing. Prefer "
-    "'kg' when strong graph facts are present, otherwise 'hybrid'."
-)
-
 _ADVANCED_CROSS_SYSTEM = (
     "You write a CROSS-DOCUMENT evaluation case: a question answerable ONLY by "
     "COMBINING facts from the TWO documents provided (they share an entity). Same "
@@ -177,16 +159,83 @@ _ADVANCED_CROSS_SYSTEM = (
 )
 
 
-async def _sample_doc_ids(client: LanceClient, n: int) -> list[str]:
-    """Up to `n` indexed doc_ids (spread across the corpus, one per doc)."""
-    ids: list[str] = []
-    for doc in await client.list_indexed_docs():
-        did = doc.get("doc_id")
-        if did:
-            ids.append(did)
-        if len(ids) >= n:
-            break
-    return ids
+async def _all_doc_ids(client: LanceClient) -> list[str]:
+    """Every indexed doc_id — the eligible pool for the text modes."""
+    return [doc["doc_id"] for doc in await client.list_indexed_docs() if doc.get("doc_id")]
+
+
+async def _graph_eligible_docs(kg_client: Neo4jClient) -> list[str]:
+    """doc_ids that mention at least one entity — the eligible pool for the graph
+    modes (a graph case needs entities to ground a relationship question).
+    Best-effort: [] on any KG error."""
+    try:
+        rows = await kg_client.read_query(
+            "MATCH (:Entity)<-[:MENTIONS]-(:Chunk)-[:PART_OF]->(d) "
+            "RETURN DISTINCT d.doc_id AS doc_id"
+        )
+    except Exception as exc:  # broad: no graph / unreachable → no graph docs
+        logger.info("targeted: graph-eligible docs read failed: %r", exc)
+        return []
+    return [r["doc_id"] for r in rows if r.get("doc_id")]
+
+
+async def _l9_pairs(kg_client: Neo4jClient) -> list[tuple[str, str, list[str]]]:
+    """(doc_a, doc_b, shared_entities) from the L9 :RELATED_TO edges (docs that
+    share entities). Best-effort: [] on any KG error."""
+    try:
+        rows = await kg_client.read_query(
+            "MATCH (a)-[r:RELATED_TO]-(b) WHERE a.doc_id < b.doc_id "
+            "RETURN a.doc_id AS a, b.doc_id AS b, r.shared_entities AS shared"
+        )
+    except Exception as exc:  # broad: no L9 layer / unreachable
+        logger.info("targeted: L9 pair read failed: %r", exc)
+        return []
+    return [
+        (r["a"], r["b"], list(r.get("shared") or []))
+        for r in rows
+        if r.get("a") and r.get("b") and r["a"] != r["b"]
+    ]
+
+
+async def _l10_pairs(kg_client: Neo4jClient) -> list[tuple[str, str, list[str]]]:
+    """(doc_a, doc_b, shared_concepts) from the L10 :RELATED_BY_XREF edges (docs
+    linked because their entities share an ontology concept). Best-effort: []."""
+    try:
+        rows = await kg_client.read_query(
+            "MATCH (a)-[r:RELATED_BY_XREF]-(b) WHERE a.doc_id < b.doc_id "
+            "RETURN a.doc_id AS a, b.doc_id AS b, r.shared_concepts AS shared"
+        )
+    except Exception as exc:  # broad: no L10 layer / unreachable
+        logger.info("targeted: L10 pair read failed: %r", exc)
+        return []
+    return [
+        (r["a"], r["b"], list(r.get("shared") or []))
+        for r in rows
+        if r.get("a") and r.get("b") and r["a"] != r["b"]
+    ]
+
+
+async def generation_capabilities(kg_client: Neo4jClient | None = None) -> dict[str, bool]:
+    """Which generation targets the active corpus can support, for the GUI
+    checkbox grey-out. The text modes (lancedb_only, auto) are always available;
+    the graph modes need entities; the two cross-doc kinds need their edges.
+    Best-effort: a missing / unreachable graph leaves the graph targets off."""
+    caps = {"text": True, "graph": False, "cross_related": False, "cross_xref": False}
+    if kg_client is None:
+        try:
+            from knowledge_agent.kg.client import get_kg_client
+
+            kg_client = get_kg_client()
+        except Exception as exc:  # broad: no graph configured → text-only
+            logger.info("generation_capabilities: no KG client: %r", exc)
+            return caps
+    try:
+        caps["graph"] = (await kg_client.count_mentions()) > 0
+        caps["cross_related"] = (await kg_client.count_related_to_edges()) > 0
+        caps["cross_xref"] = (await kg_client.count_related_by_xref_edges()) > 0
+    except Exception as exc:  # broad: probe failed → leave graph targets off
+        logger.info("generation_capabilities: KG probe failed: %r", exc)
+    return caps
 
 
 async def _full_doc_text(client: LanceClient, doc_id: str, *, max_chars: int = 8000) -> str:
@@ -240,62 +289,14 @@ async def _doc_graph_facts(
     return facts[:max_facts]
 
 
-async def _cross_doc_pairs(kg_client: Neo4jClient, *, limit: int) -> list[tuple[str, str, str]]:
-    """(entity_key, doc_a, doc_b) for entities mentioned in >= 2 documents — the
-    seeds for cross-document cases. Best-effort: [] on any KG error."""
-    if limit <= 0:
-        return []
-    try:
-        rows = await kg_client.read_query(
-            "MATCH (e:Entity)<-[:MENTIONS]-(:Chunk)-[:PART_OF]->(d) "
-            "WITH e, collect(DISTINCT d.doc_id) AS docs "
-            "WHERE size(docs) >= 2 "
-            "RETURN e.key AS key, docs[0] AS a, docs[1] AS b "
-            "ORDER BY rand() LIMIT $limit",
-            limit=limit,
-        )
-    except Exception as exc:  # broad: no graph / pattern absent → no cross-doc
-        logger.info("advanced: cross-doc pair read failed: %r", exc)
-        return []
-    return [
-        (r["key"], r["a"], r["b"])
-        for r in rows
-        if r.get("key") and r.get("a") and r.get("b") and r["a"] != r["b"]
-    ]
-
-
 def _doc_context(doc_id: str, text: str, facts: list[str]) -> str:
     graph = "\n".join(f"- {f}" for f in facts) if facts else "(none for this document)"
     return f"DOCUMENT [{doc_id}]:\n{text}\n\nGRAPH FACTS (entity relationships):\n{graph}"
 
 
-def _cross_context(key: str, a: str, ta: str, b: str, tb: str) -> str:
-    return f"SHARED ENTITY: {key}\n\nDOCUMENT A [{a}]:\n{ta}\n\nDOCUMENT B [{b}]:\n{tb}"
-
-
-def _advanced_to_case(i: int, doc_ids: list[str], gen: GeneratedAdvancedCase) -> EvalCase | None:
-    """Map an LLM draft to a runnable `EvalCase`, pinning retrieval to the KG or
-    text leg per the chosen type (retrieval stays fully pinned, reproducible)."""
-    question = (gen.question or "").strip()
-    if not question:
-        return None
-    is_kg = gen.case_type == "kg" and bool(gen.expected_entities)
-    retrieval = {
-        **_pinned_retrieval(),
-        "retrieval_mode": "neo4j_only" if is_kg else "lancedb_only",
-    }
-    return EvalCase(
-        id=f"adv-{i:02d}-{_slug(question)}",
-        question=question,
-        expected_sources=list(doc_ids),
-        expected_answer_points=list(gen.answer_points),
-        required_keywords=list(gen.keywords),
-        expected_entities=list(gen.expected_entities) if is_kg else [],
-        origin="llm",
-        category=gen.category.strip() or ("kg" if is_kg else "generated"),
-        notes="Advanced LLM candidate — review before trusting.",
-        retrieval=retrieval,
-    )
+def _cross_context(shared: list[str], a: str, ta: str, b: str, tb: str) -> str:
+    shared_line = ", ".join(shared) if shared else "(shared context)"
+    return f"SHARED: {shared_line}\n\nDOCUMENT A [{a}]:\n{ta}\n\nDOCUMENT B [{b}]:\n{tb}"
 
 
 async def _draft(structured, system: str, human: str, label: str) -> GeneratedAdvancedCase | None:
@@ -308,32 +309,145 @@ async def _draft(structured, system: str, human: str, label: str) -> GeneratedAd
     except Exception as exc:
         if _is_connection_error(exc):
             raise EvalGenerationConnectionError(_CONN_MSG) from exc
-        logger.warning("advanced: skipping unit %s: %r", label, exc)
+        logger.warning("targeted: skipping unit %s: %r", label, exc)
         return None
 
 
-async def generate_advanced(
+# The six retrieval modes selectable as generation targets, split by their
+# eligible document pool: text modes draw from every doc; graph modes draw only
+# from docs that mention entities (so a relationship question can ground).
+_TEXT_MODES = ("lancedb_only", "auto")
+_GRAPH_MODES = ("neo4j_only", "lancedb_then_neo4j", "neo4j_then_lancedb", "parallel_fused")
+
+# Per-mode guidance inserted into the case-writing prompt so each generated
+# question suits the store(s) that mode runs.
+_MODE_GUIDANCE = {
+    "lancedb_only": (
+        "answerable from a fact stated in the document TEXT; leave expected_entities empty."
+    ),
+    "auto": (
+        "a natural question about the document (text- or relationship-based); "
+        "fill expected_entities only if it hinges on an entity relationship."
+    ),
+    "neo4j_only": (
+        "answerable from an entity RELATIONSHIP in the graph facts; fill "
+        "expected_entities with the relevant entity / relationship names."
+    ),
+    "lancedb_then_neo4j": (
+        "needing BOTH a fact from the text AND an entity relationship from the "
+        "graph facts; fill expected_entities."
+    ),
+    "neo4j_then_lancedb": (
+        "needing BOTH an entity relationship from the graph facts AND a fact "
+        "from the text; fill expected_entities."
+    ),
+    "parallel_fused": (
+        "drawing on BOTH the document text and an entity relationship from the "
+        "graph facts; fill expected_entities."
+    ),
+}
+
+
+def _mode_system(guidance: str) -> str:
+    """The case-writing system prompt for a mode target, with its guidance."""
+    return (
+        "You write ONE evaluation case for a retrieval-augmented QA system, from "
+        "the document (and any graph facts) provided. Write a question that is "
+        f"{guidance}\n"
+        "Also produce: answer_points (the key facts a correct answer must "
+        "contain), keywords (a few salient terms), expected_entities (entity / "
+        "relationship names for a graph-based question, empty otherwise), and a "
+        "short category tag. Ground everything ONLY in the material provided; "
+        "invent nothing. Make the question natural and self-contained (do NOT say "
+        "'according to the document')."
+    )
+
+
+def _targeted_to_case(
+    i: int, doc_ids: list[str], gen: GeneratedAdvancedCase, retrieval_mode: str
+) -> EvalCase | None:
+    """Map an LLM draft to a runnable `EvalCase`, pinning retrieval to the target
+    mode (the checkbox the case was generated for); every other knob comes from
+    the config baseline, so the case is fully pinned + reproducible."""
+    question = (gen.question or "").strip()
+    if not question:
+        return None
+    retrieval = {**_pinned_retrieval(), "retrieval_mode": retrieval_mode}
+    return EvalCase(
+        id=f"gen-{i:02d}-{_slug(question)}",
+        question=question,
+        expected_sources=list(doc_ids),
+        expected_answer_points=list(gen.answer_points),
+        required_keywords=list(gen.keywords),
+        expected_entities=list(gen.expected_entities),
+        origin="llm",
+        category=gen.category.strip() or retrieval_mode,
+        notes="LLM-generated candidate — review before trusting.",
+        retrieval=retrieval,
+    )
+
+
+async def _make_targeted_case(
+    target: dict, item, idx: int, per_case, lance_client, kg_client
+) -> EvalCase | None:
+    """Generate one case for a target from its dealt pool item: a doc_id for a
+    mode target, a (doc_a, doc_b, shared) tuple for a cross-doc target."""
+    if target["kind"] == "mode":
+        mode = target["mode"]
+        text = await _full_doc_text(lance_client, item)
+        if not text:
+            return None
+        facts = (
+            await _doc_graph_facts(kg_client, item)
+            if kg_client is not None and mode in _GRAPH_MODES
+            else []
+        )
+        gen = await _draft(
+            per_case, _mode_system(_MODE_GUIDANCE[mode]), _doc_context(item, text, facts), item
+        )
+        return _targeted_to_case(idx, [item], gen, mode) if gen else None
+    a, b, shared = item
+    ta, tb = await _full_doc_text(lance_client, a), await _full_doc_text(lance_client, b)
+    if not (ta and tb):
+        return None
+    gen = await _draft(
+        per_case, _ADVANCED_CROSS_SYSTEM, _cross_context(shared, a, ta, b, tb), f"{a}+{b}"
+    )
+    return _targeted_to_case(idx, [a, b], gen, "parallel_fused") if gen else None
+
+
+async def generate_targeted(
     n: int,
     *,
+    modes: list[str] | tuple[str, ...] = (),
+    cross_doc: list[str] | tuple[str, ...] = (),
     model: str | None = None,
     temperature: float = 0.3,
     lance_client: LanceClient | None = None,
     kg_client: Neo4jClient | None = None,
     llm: BaseChatModel | None = None,
+    rng: random.Random | None = None,
 ) -> list[EvalCase]:
-    """Draft up to `n` richer `origin="llm"` cases with full-document + knowledge-
-    graph grounding.
+    """Draft up to `n` `origin="llm"` cases across the chosen generation targets.
 
-    Per document: the WHOLE document text + that document's entity relationships
-    (from Neo4j). The LLM writes either a hybrid (text-answerable) or a KG
-    (relationship-answerable) case. When entities are shared across documents, a
-    slice of the batch is CROSS-DOCUMENT cases. Degrades to full-doc hybrid cases
-    when there's no graph. `lance_client` / `kg_client` / `llm` are injectable for
-    tests. A network failure raises `EvalGenerationConnectionError` (retryable)."""
+    `modes` is a subset of the six retrieval modes; `cross_doc` a subset of
+    {"related" (L9), "xref" (L10)}. Each target has its own eligible pool (all
+    docs for the text modes, entity-bearing docs for the graph modes, shared-doc
+    pairs for the cross-doc kinds), shuffled with `rng` (injectable for tests) and
+    dealt one item per case, round-robin across targets, so N splits evenly and a
+    target that runs dry rolls its remainder onto the others (coverage-first). A
+    doc can serve one case per target (independent pools), never twice in one
+    target. Each case pins `retrieval_mode` to its target (cross-doc ->
+    parallel_fused); other knobs come from the config baseline. Best-effort per
+    draft; a network failure raises `EvalGenerationConnectionError` (retryable)."""
     from knowledge_agent.config import get_settings
 
-    if n <= 0:
+    modes = list(dict.fromkeys(modes))
+    cross_doc = list(dict.fromkeys(cross_doc))
+    if n <= 0 or not (modes or cross_doc):
         return []
+    if rng is None:
+        rng = random.Random()
     if llm is None:
         model = model or get_settings().mode_classifier_model
         llm = get_llm_ref(model, temperature)
@@ -341,46 +455,51 @@ async def generate_advanced(
         from knowledge_agent.search.client import get_search_client
 
         lance_client = get_search_client()
-    if kg_client is None:
+    need_graph = any(m in _GRAPH_MODES for m in modes) or bool(cross_doc)
+    if kg_client is None and need_graph:
         try:
             from knowledge_agent.kg.client import get_kg_client
 
             kg_client = get_kg_client()
-        except Exception as exc:  # broad: no graph configured → hybrid-only
-            logger.info("advanced: KG client unavailable, hybrid-only: %r", exc)
+        except Exception as exc:  # broad: no graph → graph targets get empty pools
+            logger.info("targeted: KG client unavailable: %r", exc)
 
     per_case = with_retry(llm.with_structured_output(GeneratedAdvancedCase))
 
-    # Reserve a slice for cross-document cases when the graph supports them.
-    pairs = await _cross_doc_pairs(kg_client, limit=n // 4) if kg_client else []
-    doc_ids = await _sample_doc_ids(lance_client, n - len(pairs))
+    # Assemble the targets, each a shuffled pool dealt round-robin below.
+    targets: list[dict] = []
+    all_docs: list[str] | None = None
+    for mode in modes:
+        if mode in _TEXT_MODES:
+            if all_docs is None:
+                all_docs = await _all_doc_ids(lance_client)
+            pool: list = list(all_docs)
+        elif mode in _GRAPH_MODES:
+            pool = await _graph_eligible_docs(kg_client) if kg_client is not None else []
+        else:
+            continue
+        rng.shuffle(pool)
+        if pool:
+            targets.append({"kind": "mode", "mode": mode, "pool": pool, "i": 0})
+    for kind in cross_doc:
+        if kg_client is None:
+            continue
+        pairs = await (_l9_pairs(kg_client) if kind == "related" else _l10_pairs(kg_client))
+        rng.shuffle(pairs)
+        if pairs:
+            targets.append({"kind": "cross", "cross": kind, "pool": pairs, "i": 0})
 
     cases: list[EvalCase] = []
-    for doc_id in doc_ids:
-        text = await _full_doc_text(lance_client, doc_id)
-        if not text:
-            continue
-        facts = await _doc_graph_facts(kg_client, doc_id) if kg_client else []
-        gen = await _draft(per_case, _ADVANCED_SYSTEM, _doc_context(doc_id, text, facts), doc_id)
-        if gen is None:
-            continue
-        case = _advanced_to_case(len(cases), [doc_id], gen)
-        if case:
-            cases.append(case)
-
-    for key, a, b in pairs:
-        ta, tb = await _full_doc_text(lance_client, a), await _full_doc_text(lance_client, b)
-        if not (ta and tb):
-            continue
-        gen = await _draft(
-            per_case, _ADVANCED_CROSS_SYSTEM, _cross_context(key, a, ta, b, tb), f"{a}+{b}"
-        )
-        if gen is None:
-            continue
-        case = _advanced_to_case(len(cases), [a, b], gen)
-        if case:
-            cases.append(case)
-
+    while len(cases) < n and targets:
+        for t in list(targets):
+            if len(cases) >= n:
+                break
+            item = t["pool"][t["i"]]
+            t["i"] += 1
+            case = await _make_targeted_case(t, item, len(cases), per_case, lance_client, kg_client)
+            if case:
+                cases.append(case)
+        targets = [t for t in targets if t["i"] < len(t["pool"])]
     return cases
 
 
