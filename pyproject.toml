@@ -97,7 +97,10 @@ ka-gui = "knowledge_agent.gui.app:main"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=9.0.3,<10.0.0",
+    # Capped <9 because pytest-asyncio (<1, below) requires pytest<9; the two
+    # were mutually unsatisfiable at pytest>=9.0.3. Move both together later
+    # (pytest 9 needs pytest-asyncio>=1). The pytest CVE is dev-only tooling.
+    "pytest>=8.2,<9",
     "pytest-asyncio>=0.23,<1",
     "pytest-cov>=5",
     "ruff>=0.7.0",
