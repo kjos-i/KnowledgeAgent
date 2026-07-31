@@ -23,7 +23,7 @@ Run groups top to bottom for a full verify pass (cheapest and fastest first). Al
 - **Agent / eval / bulk / export**: smoke_agent, smoke_eval, smoke_bulk_ops, smoke_artifacts.
 - **Multimodal / extractors**: smoke_multimodal, smoke_multi_extractor.
 - **Provider install lifecycle**: smoke_install_llm_*, smoke_install_embedder_*, smoke_install_extractor, smoke_install_ontology.
-- **Security**: `smoke_security_leakage` (telemetry egress, secret-in-logs, keyring at-rest; runs locally, no LLM/Neo4j needed). `smoke_security_injection` (live prompt / Cypher / filter injection, needs the full stack) and `smoke_security_supplychain` (model-weight SHA verify, needs HF downloads) are the remaining two.
+- **Security**: `smoke_security_leakage` (telemetry egress, secret-in-logs, keyring at-rest; local, no LLM/Neo4j). `smoke_security_injection` (Cypher-guard battery, filter escaping, live Neo4j read-only belt; `--with-llm` adds agent prompt-injection). `smoke_security_supplychain` (pinned-SHA integrity + pickle flags; `--with-download` adds live SHA-enforcement).
 
 ## Audits (manual, periodic): each returns a DIFFERENT kind of information
 - **A. Adversarial correctness audit** (multi-agent): confirmed logic / correctness bugs and intent-vs-code mismatches, each verified by 2 or more independent skeptics before it is reported. Method: per-subsystem finders + 2 skeptics per finding + a synthesizer. Answers **"what is broken?"**
