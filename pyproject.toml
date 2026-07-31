@@ -20,6 +20,11 @@ dependencies = [
     "neo4j>=5,<6",
     "lancedb>=0.20,<1",
     "docling>=2.96.0,<3.0.0",
+    # Security floors for docling's transitive untrusted-file parsers (the PDF +
+    # image ingest surface). pip-audit (audit F) flagged CVEs in older versions;
+    # these minimums keep a fresh install patched. See CHECKS.md.
+    "pypdf>=6.14.2",
+    "pillow>=12.3.0",
     "httpx>=0.27,<1",
     "langchain>=1.3.1,<2.0.0",
     "langchain-core>=1.4.0,<2.0.0",
