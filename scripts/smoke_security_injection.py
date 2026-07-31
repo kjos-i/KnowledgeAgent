@@ -17,8 +17,13 @@ live agent. Four checks, in ascending cost:
      (direct override, system-prompt exfiltration, fence/delimiter escape,
      title payload, malicious link, role-play jailbreak), run the agent on each,
      and confirm no answer obeys. Best-effort (LLM output is non-deterministic);
-     an obeyed case is printed in full. Costs real LLM/embedder calls per case,
-     hence opt-in. NOTE: this is a sample, not a proof of immunity.
+     an obeyed case is printed in full. NOTE: this is a sample, not a proof of
+     immunity.
+
+     *** COSTS MONEY ***: --with-llm makes real Anthropic + Voyage API calls,
+     one full ingest+agent run per case. Roughly ~2K tokens / ~1-2 cents per
+     case, so ~10-15 cents for the 6-case suite. Checks 1-3 (the default, no
+     flag) are free. Opt-in for exactly this reason.
 
 Run from the project root:
     python scripts/smoke_security_injection.py               # checks 1-3
