@@ -11,19 +11,20 @@ Run groups top to bottom for a full verify pass (cheapest and fastest first). Al
 
 ## Deeper tests (on demand / before a release)
 - **Coverage** (`pytest --cov=knowledge_agent --cov-report=term-missing`): untested lines/paths.
-- **Integration** (`pytest -m integration`): real Neo4j test instance + LanceDB (plus keys); the only coverage for `kg/openalex_writes.py` and `kg/chunk_writes.py`.
-- **End-to-end** (`pytest -m e2e`): launches the Flet app.
+- **Integration** (`pytest -m integration`): real Neo4j test instance + LanceDB (plus keys); the only coverage for `kg/openalex_writes.py` and `kg/chunk_writes.py`. **💲 costs tokens** — embeds via Voyage and (for L6/L8 paths) calls the LLM extractor.
+- **End-to-end** (`pytest -m e2e`): launches the Flet app. App launch itself is free; **💲 only if** a test drives a live query / ingest through real providers.
 - **Fast subset** (`pytest -m "not slow"`): skip the over-1s tests.
 - **Security regression** (`pytest -m security`): the `security`-marked set (Cypher-guard, LanceDB filter escaping, secret redaction, prompt fence, KG provenance). A cross-cutting marker; the unit ones also run in the everyday `pytest`.
 - **Dependency CVEs** (`pip-audit`): known-vulnerable packages in the installed dependency tree. Advisory; run before a release. See audit **F**.
 
 ## Smoke scripts (manual, hit REAL services): `python scripts/smoke_*.py`
-- **Ingest / pipeline**: smoke_parse, smoke_pipeline, smoke_lancedb, smoke_metadata.
-- **KG layers L1 to L10**: smoke_kg_l1_l5, l6_entities, l7_xrefs_l10, l8_triples, l9_cross_doc.
-- **Agent / eval / bulk / export**: smoke_agent, smoke_eval, smoke_bulk_ops, smoke_artifacts.
-- **Multimodal / extractors**: smoke_multimodal, smoke_multi_extractor.
-- **Provider install lifecycle**: smoke_install_llm_*, smoke_install_embedder_*, smoke_install_extractor, smoke_install_ontology.
-- **Security**: `smoke_security_leakage` (telemetry egress, secret-in-logs, keyring at-rest; local, no LLM/Neo4j). `smoke_security_injection` (Cypher-guard battery, filter escaping, live Neo4j read-only belt; `--with-llm` adds a 6-technique agent prompt-injection suite). `smoke_security_supplychain` (pinned-SHA integrity + pickle flags; `--with-download` adds live SHA-enforcement).
+> **💲 = calls paid Anthropic/Voyage APIs and costs money to run** (embedding and/or LLM calls). **(free)** = local only, no tokens. Cost is usually cents, but it is real spend against your keys.
+- **Ingest / pipeline**: smoke_parse **(free — local docling)**; smoke_pipeline / smoke_lancedb / smoke_metadata **💲** (embed chunks + queries via Voyage).
+- **KG layers L1 to L10**: smoke_kg_l1_l5 **💲** (OpenAlex + embed), l6_entities **💲** (LLM entity extractor), l7_xrefs_l10 **(mostly free — ontology xrefs)**, l8_triples **💲** (LLM triples extractor), l9_cross_doc **💲** (embed similarity).
+- **Agent / eval / bulk / export**: smoke_agent **💲** (up to 4 LLM nodes + embed), smoke_eval **💲** (LLM-as-judge), smoke_bulk_ops **💲** (may re-embed / re-extract), smoke_artifacts **(free — formatting only)**.
+- **Multimodal / extractors**: smoke_multimodal **💲** (multimodal embed), smoke_multi_extractor **💲** (LLM extractors).
+- **Provider install lifecycle**: smoke_install_llm_*, smoke_install_embedder_*, smoke_install_extractor, smoke_install_ontology **(no tokens — downloads/installs only, uses bandwidth + disk)**.
+- **Security**: `smoke_security_leakage` **(free)** (telemetry egress, secret-in-logs, keyring at-rest; local, no LLM/Neo4j). `smoke_security_injection` **(free** by default; **💲 with `--with-llm`** — a 6-technique agent prompt-injection suite, ~10-15c) (Cypher-guard battery, filter escaping, live Neo4j read-only belt). `smoke_security_supplychain` **(free**; `--with-download` adds a tiny HF network fetch, no tokens) (pinned-SHA integrity + pickle flags).
 
 ## Audits (manual, periodic): each returns a DIFFERENT kind of information
 - **A. Adversarial correctness audit** (multi-agent): confirmed logic / correctness bugs and intent-vs-code mismatches, each verified by 2 or more independent skeptics before it is reported. Method: per-subsystem finders + 2 skeptics per finding + a synthesizer. Answers **"what is broken?"**
