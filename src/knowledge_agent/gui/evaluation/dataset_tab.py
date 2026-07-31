@@ -46,6 +46,7 @@ from knowledge_agent.gui._styles import (
     panel_box,
     panel_title,
     section_divider,
+    section_title,
     sub_section_header,
     sub_section_title,
 )
@@ -142,6 +143,9 @@ class DatasetTab:
         self.unfreeze_button: ft.TextButton | None = None
         self.frozen_indicator: ft.Text | None = None
         self.case_list: ft.Column | None = None
+        # Dynamic "Dataset cases - <name>" section title (right column). Shows
+        # "(no dataset)" until one is opened/created, then the file's name.
+        self.cases_title: ft.Text | None = None
         self.form: ft.Column | None = None
         self.status: ft.Text | None = None
         self.gen_count: ft.TextField | None = None
@@ -728,6 +732,9 @@ class DatasetTab:
         )
         # RIGHT: commit buttons + the suite toggle/panel on top, the full case
         # list below. The form itself is the preview now (no separate card).
+        # The dynamic "Dataset cases - <name>" title (seeded from the current
+        # dataset field, then kept in step by _render_list / _set_cases_title).
+        self.cases_title = section_title(self._cases_title_text())
         right_pane = panel_box(
             ft.Column(
                 [
@@ -748,7 +755,17 @@ class DatasetTab:
                     self.suite_panel,
                     section_divider(),
                     # ============ Section: Dataset cases ============
-                    section_header(self.app, "Dataset cases", key="eval_dataset.dataset_cases"),
+                    # Same layout as section_header (title + 3-tier (i)), built by
+                    # hand so the title stays mutable: it shows the loaded
+                    # dataset's name (or "(no dataset)"), updated in _render_list.
+                    ft.Row(
+                        [
+                            self.cases_title,
+                            info(self.app, "eval_dataset.dataset_cases"),
+                        ],
+                        spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
                     self.case_list,
                 ],
                 scroll=ft.ScrollMode.AUTO,
@@ -1277,9 +1294,25 @@ class DatasetTab:
 
     # ---- list -------------------------------------------------------------
 
+    def _cases_title_text(self) -> str:
+        """'Dataset cases - <name>' from the loaded dataset file's name, or
+        '(no dataset)' when none is open. The name is the file stem — what the
+        user browses to / names in the New dialog."""
+        val = self.dataset_field.value if self.dataset_field is not None else None
+        name = Path(val).stem if val else None
+        return f"Dataset cases - {name or '(no dataset)'}"
+
+    def _set_cases_title(self) -> None:
+        """Sync the dynamic cases-section title to the current dataset."""
+        if self.cases_title is not None:
+            self.cases_title.value = self._cases_title_text()
+
     def _render_list(self) -> None:
         if self.case_list is None:
             return
+        # Keep the "Dataset cases - <name>" header in step with the open dataset
+        # (this runs on open / new-dataset / case-select).
+        self._set_cases_title()
         # Shared renderer (same cards the Run tab shows read-only); here it's
         # editable — click a card or Edit to load it into the form, Delete to
         # remove it.

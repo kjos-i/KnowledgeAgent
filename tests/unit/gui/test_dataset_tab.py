@@ -55,6 +55,18 @@ def test_dataset_tab_builds(fake_app):
     assert DatasetTab(fake_app, coordinator=MagicMock()).build() is not None
 
 
+def test_cases_title_reflects_open_dataset(fake_app, tmp_path):
+    """The right-column 'Dataset cases' header shows '(no dataset)' when none is
+    open, then the dataset file's name once one is loaded/created."""
+    tab = _tab(fake_app)  # dataset_field cleared -> no dataset
+    tab._render_list()
+    assert tab.cases_title.value == "Dataset cases - (no dataset)"
+    # An opened / created dataset puts its path in the field.
+    tab.dataset_field.value = str(tmp_path / "my_gold_set.json")
+    tab._render_list()
+    assert tab.cases_title.value == "Dataset cases - my_gold_set"
+
+
 def test_gen_temp_slider_greyed_for_sampling_free_model(fake_app):
     """Picking a sampling-free case-generation model (e.g. Opus 4.8) greys
     out the generation temperature slider; a temp-taking model (Haiku 4.5)
