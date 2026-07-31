@@ -274,6 +274,7 @@ markers = [
     "integration: real-service tests — Neo4j Desktop test instance + LanceDB + Voyage. Opt in via `pytest -m integration`.",
     "e2e: end-to-end tests with the Flet app launched. Opt in via `pytest -m e2e`.",
     "slow: tests that take noticeably long (>1s). Filter via `pytest -m 'not slow'` for fast dev loop.",
+    "security: security regression tests (audit track F/G): Cypher-guard, LanceDB filter escaping, secret redaction, prompt fence, KG provenance. Cross-cutting marker; run all via `pytest -m security`.",
 ]
 
 [tool.ruff]

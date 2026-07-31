@@ -342,6 +342,10 @@ def _insert(
     placeholders = ", ".join("?" for _ in names)
     values = [row.get(name) for name in names]
     cursor = conn.execute(
-        f"INSERT INTO {table} ({', '.join(names)}) VALUES ({placeholders})", values
+        # `table` and `names` are internal schema constants (from the caller's
+        # fixed column spec), never user input; `values` is bound via
+        # placeholders. Verified false positive in the F security scan.
+        f"INSERT INTO {table} ({', '.join(names)}) VALUES ({placeholders})",  # nosec B608
+        values,
     )
     return int(cursor.lastrowid)

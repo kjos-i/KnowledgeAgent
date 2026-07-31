@@ -932,6 +932,32 @@ def test_synthesizer_llm_branch_passes_kg_hits_to_user_message():
     assert result["final_answer"].kg_sources[0].row == {"title": "Unique Title XYZ"}
 
 
+@pytest.mark.security
+def test_synthesizer_fences_untrusted_evidence():
+    """Retrieved chunk text is wrapped in explicit untrusted-evidence markers,
+    and the system prompt tells the model never to follow instructions inside
+    them (indirect prompt-injection mitigation, audit finding 5)."""
+    answer_obj = AgentAnswer(answer="ok", chunk_sources=[], kg_sources=[])
+    mock_llm = _mock_llm_returning(answer_obj)
+    mock_structured = mock_llm.with_structured_output.return_value
+    chunks = [RetrievedChunk(chunk_id="doc#0", doc_id="doc", text="hello world")]
+    with (
+        patch("knowledge_agent.nodes._get_llm", return_value=mock_llm),
+        patch("knowledge_agent.nodes.get_settings") as mock_settings,
+    ):
+        mock_settings.return_value.direct_retrieval = False
+        mock_settings.return_value.synthesizer_model = "claude-sonnet"
+        mock_settings.return_value.synthesizer_temperature = 0.0
+        asyncio.run(synthesizer_node({"query": "q", "retrieved_chunks": chunks}))
+    messages = mock_structured.ainvoke.call_args.args[0]
+    system_content = messages[0].content
+    human_content = messages[1].content
+    assert "BEGIN RETRIEVED EVIDENCE" in human_content
+    assert "END RETRIEVED EVIDENCE" in human_content
+    system_lower = system_content.lower()
+    assert "never" in system_lower and "instruction" in system_lower
+
+
 def test_synthesizer_direct_populates_multimodal_fields_on_chunk_sources():
     """Direct-retrieval bypass: every RetrievedChunk becomes a
     ChunkSource. content_type / image_ref / page must be threaded

@@ -405,6 +405,16 @@ async def test_update_doc_metadata_passes_doc_id_filter_and_values():
     assert table.updates == [("doc_id = 'abc-123'", fields)]
 
 
+@pytest.mark.security
+def test_sql_literal_escapes_single_quotes():
+    """String values are single-quoted with internal quotes doubled, so a
+    hostile value cannot break out of the WHERE-clause literal. The doc_id
+    filters route through this (audit finding 2)."""
+    assert _sql_literal("plain") == "'plain'"
+    assert _sql_literal("a'b") == "'a''b'"
+    assert _sql_literal("x'; DROP TABLE t; --") == "'x''; DROP TABLE t; --'"
+
+
 async def test_update_doc_metadata_uses_async_updates_kwarg_not_sync_values():
     """Regression guard for the silent-no-op bug: `update_doc_metadata`
     must call lancedb's async API with `updates=` (a column→value map),

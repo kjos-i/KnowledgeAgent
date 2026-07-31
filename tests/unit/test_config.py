@@ -108,6 +108,19 @@ def test_settings_minimal_required_construct_succeeds() -> None:
     assert s.lancedb_path == Path("/tmp/test-lance")
 
 
+@pytest.mark.security
+def test_secret_keys_never_leak_in_repr_or_dump() -> None:
+    """API keys + neo4j_password are SecretStr, so the raw value must never
+    surface in repr(), model_dump(), or model_dump_json() (audit finding 4).
+    It stays reachable only via an explicit get_secret_value()."""
+    raw = "sk-super-secret-DO-NOT-LEAK"
+    s = Settings(**_minimal_required(anthropic_api_key=raw))  # type: ignore[arg-type]
+    assert raw not in repr(s)
+    assert raw not in str(s.model_dump())
+    assert raw not in s.model_dump_json()
+    assert s.anthropic_api_key.get_secret_value() == raw
+
+
 def test_ollama_base_url_strips_trailing_slash() -> None:
     """Trailing slash(es) on ollama_base_url are stripped so a downstream
     f-string join like f"{base}/api/tags" can't yield `.../api//tags`."""

@@ -14,6 +14,7 @@ miss (e.g., keywords as substring of property names with non-word
 boundary chars, mixed-case keywords inside strings, etc.).
 """
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -142,6 +143,14 @@ def test_db_variable_is_not_a_false_positive():
     blocked and `db.*` procedures need CALL (already blocked), so a plain
     `MATCH (db:Database) RETURN db.name` read still passes."""
     assert is_cypher_read_only("MATCH (db:Database) RETURN db.name LIMIT 10")
+
+
+@pytest.mark.security
+def test_show_metadata_commands_rejected():
+    """SHOW USERS / DATABASES / INDEXES / CONSTRAINTS leak schema and security
+    metadata; the guard must block them (audit finding 1)."""
+    for cmd in ("SHOW USERS", "SHOW DATABASES", "SHOW INDEXES", "show constraints"):
+        assert not is_cypher_read_only(f"{cmd} YIELD * RETURN *"), f"{cmd!r} should reject"
 
 
 # ---- wrap_with_limit ----
