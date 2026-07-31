@@ -13,6 +13,57 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from knowledge_agent.gui.library.documents_view import DocumentsView
 
 
+def _doc(doc_id: str, status: str) -> dict:
+    """A minimal indexed-doc row sufficient for `_render_doc_card`."""
+    return {
+        "doc_id": doc_id,
+        "metadata_status": status,
+        "title": f"Title {doc_id}",
+        "source_path": rf"C:\corpus\{doc_id}.pdf",
+        "main_label": "Document",
+        "sub_label": None,
+        "n_chunks": 3,
+        "n_figures": 0,
+        "ingested_at": "2026-07-30T10:00:00",
+    }
+
+
+def test_matches_status_gates_known_statuses_by_the_ticked_set():
+    """A canonical status shows only when its box is ticked."""
+    assert DocumentsView._matches_status(_doc("d1", "enriched"), {"enriched"}) is True
+    assert DocumentsView._matches_status(_doc("d2", "baseline"), {"enriched"}) is False
+
+
+def test_matches_status_never_hides_unknown_or_blank():
+    """A blank / unrecognised status is always shown — the filter must never
+    silently hide a doc it doesn't have a checkbox for (the disappearing-docs
+    guard)."""
+    assert DocumentsView._matches_status(_doc("d1", "weird"), set()) is True
+    assert DocumentsView._matches_status(_doc("d2", ""), set()) is True
+    assert DocumentsView._matches_status({}, {"enriched"}) is True
+
+
+def test_status_checkboxes_filter_the_rendered_cards(fake_app):
+    """Unticking a status checkbox drops those cards from the rendered list;
+    all ticked (the default) shows everything."""
+    view = DocumentsView(fake_app)
+    view._loaded_rows = [_doc("d1", "enriched"), _doc("d2", "baseline")]
+    # Default: every status ticked -> both render.
+    view._render_rows()
+    assert len(view.doc_list.controls) == 2
+    # Untick 'baseline' -> only the enriched doc remains.
+    view.status_checks["baseline"].value = False
+    view._render_rows()
+    assert len(view.doc_list.controls) == 1
+    assert view.coverage_text.value == "(1 of 2 documents)"
+    # Untick everything -> the no-match message, not a card.
+    for cb in view.status_checks.values():
+        cb.value = False
+    view._render_rows()
+    assert len(view.doc_list.controls) == 1  # the message
+    assert "No documents match the selected statuses." in view.doc_list.controls[0].value
+
+
 async def test_do_delete_surfaces_exception_via_status_and_reloads():
     """B14: a delete that RAISES must surface via _set_op_status AND reload, not
     just log and return (which left the card looking deleted when it wasn't)."""

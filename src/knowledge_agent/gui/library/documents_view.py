@@ -155,6 +155,21 @@ class DocumentsView:
             on_click=self._on_refresh_clicked,
         )
         self.coverage_text = ft.Text("", size=14, color=ft.Colors.GREY_400)
+        # Status filter — one checkbox per canonical metadata status. Order +
+        # membership mirror search.schema METADATA_STATUS_VALUES via the local
+        # `_STATUS_COLORS` (kept in step there, and reused here to avoid pulling
+        # the pyarrow-heavy schema module into GUI startup). All ticked by
+        # default = show every status; untick to hide that status. The boxes OR
+        # among themselves and AND with the search box (see `_render_rows`), and
+        # reuse the search handler to re-render on toggle.
+        self.status_checks: dict[str, ft.Checkbox] = {
+            status: ft.Checkbox(
+                label=status.capitalize(),
+                value=True,
+                on_change=self._on_search_changed,
+            )
+            for status in _STATUS_COLORS
+        }
         # Per-doc op (re-ingest / delete) status. Always visible; falls back
         # to the idle placeholder so the line never blanks into an empty gap.
         self.op_status = ft.Text(_OP_STATUS_IDLE, size=12, color=ft.Colors.GREY_400)
@@ -186,6 +201,14 @@ class DocumentsView:
             expand=True,
             controls=[
                 labeled_field("Filter", self.search_field, trailing=self.refresh_button),
+                # Status filter: the four canonical statuses on one line, all
+                # ticked by default (show everything); untick to hide a status.
+                # No wrap — the four short boxes stay side by side on one row.
+                ft.Row(
+                    controls=list(self.status_checks.values()),
+                    spacing=12,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
                 ft.Row(
                     controls=[
                         ft.Text("Table contents:", size=12, color=ft.Colors.GREY_400),
@@ -293,6 +316,16 @@ class DocumentsView:
         hay = ((row.get("title") or "") + " " + (row.get("source_path") or "")).lower()
         return needle in hay
 
+    @staticmethod
+    def _matches_status(row: dict[str, Any], selected: set[str]) -> bool:
+        """Keep a row when its status is ticked. A canonical status (the four in
+        `_STATUS_COLORS`) is gated by its checkbox; a blank or unrecognised status
+        is always shown, so an unexpected value is never silently hidden."""
+        status = (row.get("metadata_status") or "").strip().lower()
+        if status in _STATUS_COLORS:
+            return status in selected
+        return True
+
     def _render_rows(self) -> None:
         """Render `doc_list` from `_loaded_rows` + the search filter.
 
@@ -309,20 +342,25 @@ class DocumentsView:
             self.coverage_text.value = "(0 documents)"
             return
         needle = (self.search_field.value or "").strip().lower()
-        filtered = [r for r in self._loaded_rows if self._matches_filter(r, needle)]
+        selected = {s for s, cb in self.status_checks.items() if cb.value}
+        filtered = [
+            r
+            for r in self._loaded_rows
+            if self._matches_filter(r, needle) and self._matches_status(r, selected)
+        ]
         total = len(self._loaded_rows)
-        if needle:
+        # "X of Y" whenever any filter (search or status) is narrowing the set.
+        if len(filtered) != total:
             self.coverage_text.value = f"({len(filtered)} of {total} documents)"
         else:
             self.coverage_text.value = f"({total} document{'s' if total != 1 else ''})"
         if not filtered:
-            self.doc_list.controls = [
-                ft.Text(
-                    f"No documents match '{needle}'.",
-                    italic=True,
-                    color=ft.Colors.GREY_500,
-                )
-            ]
+            msg = (
+                f"No documents match '{needle}'."
+                if needle
+                else "No documents match the selected statuses."
+            )
+            self.doc_list.controls = [ft.Text(msg, italic=True, color=ft.Colors.GREY_500)]
             return
         self.doc_list.controls = [self._render_doc_card(r) for r in filtered]
 
