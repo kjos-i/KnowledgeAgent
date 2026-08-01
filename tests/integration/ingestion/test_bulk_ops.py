@@ -651,7 +651,7 @@ async def test_bulk_backfill_cross_doc_runs_recompute_per_doc(
     await ingest_folder_execute(iplan, entities_cfg)
 
     cross_cfg = _cross_doc_corpus_config()
-    plan = await bulk_backfill_cross_doc_plan()
+    plan = await bulk_backfill_cross_doc_plan(cross_cfg)
     result = await bulk_backfill_cross_doc_execute(plan, cross_cfg)
     assert result.n_succeeded == 1
     assert result.n_failed == 0
