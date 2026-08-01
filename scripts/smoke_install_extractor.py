@@ -50,8 +50,8 @@ from _install_smoke_lib import (
     print_plan,
     print_result,
 )
-from knowledge_agent.entity_extractors.dispatcher import extract
 
+from knowledge_agent.entity_extractors import extract_union
 from knowledge_agent.entity_extractors.extractor_lifecycle import (
     install_extractor_execute,
     install_extractor_plan,
@@ -88,10 +88,10 @@ async def main() -> None:
 
     sample_text = "Marie Curie discovered radium at the Sorbonne in 1898."
     print(f"Input: {sample_text!r}")
-    mentions = extract(
-        text=sample_text,
-        entity_types=[],  # adapter defaults: PERSON, ORG, LOC, etc.
-        extractor=EXTRACTOR,
+    mentions = await extract_union(
+        sample_text,
+        [EXTRACTOR],
+        [],  # entity_types (adapter defaults: PERSON, ORG, LOC, etc.)
     )
     print(f"\nMentions found: {len(mentions)}")
     for m in mentions:

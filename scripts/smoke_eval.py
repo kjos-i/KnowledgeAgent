@@ -86,7 +86,12 @@ async def main() -> None:
                 question="What role does nutrition play in chronic disease?",
                 expected_sources=[doc_id],
                 required_keywords=["nutrition"],
-                retrieval=RetrievalSettings(retrieval_mode="lancedb_only", top_k=5),
+                retrieval=RetrievalSettings(
+                    retrieval_mode="lancedb_only",
+                    top_k=5,
+                    num_candidates=100,
+                    rrf_rank_constant=60,
+                ),
                 category="smoke",
                 origin="manual",
             )

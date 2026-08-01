@@ -54,6 +54,7 @@ from knowledge_agent.config import load_test_env
 
 load_test_env()
 
+from knowledge_agent.corpus_config import CorpusConfig  # noqa: E402
 from knowledge_agent.ingestion import triples_extractor  # noqa: E402
 from knowledge_agent.ingestion.ids import make_chunk_id  # noqa: E402
 from knowledge_agent.kg.client import get_kg_client  # noqa: E402
@@ -143,7 +144,7 @@ async def _seed_l5_and_l6(client) -> str:
         # Entities + :MENTIONS edges (one per entity, start_char=0 stub).
         for key, etype in SYNTHETIC_ENTITIES:
             await session.run(
-                f"MERGE (e:{ENTITY_LABEL} {{key: $key, type: $type}}) "
+                f"MERGE (e:{ENTITY_LABEL} {{key: $key, entity_type: $type}}) "
                 f"WITH e "
                 f"MATCH (c:{CHUNK_LABEL} {{chunk_id: $chunk_id}}) "
                 f"MERGE (c)-[m:MENTIONS]->(e) "
@@ -200,7 +201,13 @@ async def main() -> None:
     print(f"  entities: {len(SYNTHETIC_ENTITIES)}")
 
     print("Extracting triples via triples_extractor (Haiku call)...")
-    triples = triples_extractor.extract(SYNTHETIC_CHUNK_TEXT, SYNTHETIC_ENTITIES)
+    cfg = CorpusConfig()
+    triples = await triples_extractor.extract(
+        SYNTHETIC_CHUNK_TEXT,
+        SYNTHETIC_ENTITIES,
+        model=cfg.triples_extractor_model,
+        temperature=cfg.triples_extractor_temperature,
+    )
     print(f"  extractor returned {len(triples)} triples")
     for t in triples[:10]:
         print(f"    {t.subject_key!r:>30} -[:{t.predicate}]-> {t.object_key!r}")

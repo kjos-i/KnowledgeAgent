@@ -62,6 +62,7 @@ from knowledge_agent.config import load_test_env
 
 load_test_env()
 
+from knowledge_agent.corpus_config import CorpusConfig  # noqa: E402
 from knowledge_agent.entity_extractors import get_extractor  # noqa: E402
 from knowledge_agent.ingestion.ids import make_chunk_id  # noqa: E402
 from knowledge_agent.kg.client import get_kg_client  # noqa: E402
@@ -143,7 +144,7 @@ async def _show_state(client) -> None:
         result = await session.run(
             f"MATCH (c:{CHUNK_LABEL} {{chunk_id: $chunk_id}})"
             f"-[m:MENTIONS]->(e:{ENTITY_LABEL}) "
-            f"RETURN e.key AS key, e.type AS type, m.offset AS offset "
+            f"RETURN e.key AS key, e.entity_type AS type, m.offset AS offset "
             f"ORDER BY m.offset",
             chunk_id=chunk_id,
         )
@@ -187,7 +188,16 @@ async def main() -> None:
     print(f"  entity_types passed: {entity_types or '(adapter default)'}")
 
     print("Extracting mentions from synthetic chunk text...")
-    mentions = extractor.extract(SYNTHETIC_CHUNK_TEXT, entity_types)
+    if args.adapter == "llm":
+        cfg = CorpusConfig()
+        mentions = await extractor.extract(
+            SYNTHETIC_CHUNK_TEXT,
+            entity_types,
+            model=cfg.entity_extractor_model,
+            temperature=cfg.entity_extractor_temperature,
+        )
+    else:
+        mentions = await extractor.extract(SYNTHETIC_CHUNK_TEXT, entity_types)
     print(f"  extractor returned {len(mentions)} mentions")
     for m in mentions[:10]:
         offset_str = f"@{m.offset}" if m.offset is not None else "(no offset)"
@@ -207,7 +217,7 @@ async def main() -> None:
     print("In Neo4j Desktop -> Query, try:")
     print(
         f"  MATCH (c:Chunk {{chunk_id: '{chunk_id}'}})-[:MENTIONS]->(e:Entity) "
-        f"RETURN e.key, e.type ORDER BY e.type"
+        f"RETURN e.key, e.entity_type ORDER BY e.entity_type"
     )
     print(
         f"  MATCH (d:Document {{doc_id: '{SYNTHETIC_DOC_ID}'}}) "

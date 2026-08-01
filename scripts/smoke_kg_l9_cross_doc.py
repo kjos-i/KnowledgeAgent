@@ -117,7 +117,7 @@ async def _seed_doc(client, doc_id: str, entities: list[tuple[str, str]]) -> str
         )
         for key, etype in entities:
             await session.run(
-                f"MERGE (e:{ENTITY_LABEL} {{key: $key, type: $type}}) "
+                f"MERGE (e:{ENTITY_LABEL} {{key: $key, entity_type: $type}}) "
                 f"WITH e "
                 f"MATCH (c:{CHUNK_LABEL} {{chunk_id: $chunk_id}}) "
                 f"MERGE (c)-[m:MENTIONS]->(e) "
