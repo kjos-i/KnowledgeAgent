@@ -62,3 +62,6 @@ benchmarks/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local-only dev aid (kept on disk, not part of the public repo)
+CLAUDE.md
