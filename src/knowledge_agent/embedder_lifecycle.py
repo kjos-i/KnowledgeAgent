@@ -311,13 +311,19 @@ def _google_embed_is_installed() -> bool:
 
 
 def _hf_embed_libs_installed() -> bool:
-    """True iff `sentence-transformers` AND `torch` are importable.
+    """True iff `langchain_huggingface`, `sentence-transformers` AND `torch`
+    are all importable.
 
-    Both are pulled in by the `embed-huggingface` extra; we check
-    both because torch sometimes lingers from other extras (ASR /
-    extractors) — the HF embedder needs BOTH libs to function.
+    All three are pulled in by the `embed-huggingface` extra. We check all
+    three (not just sentence-transformers + torch) because the factory loads
+    the embedder through `langchain_huggingface.HuggingFaceEmbeddings` — if
+    that adapter is missing the row must NOT show green, or the user installs
+    "successfully" and then hits an ImportError on first embed. torch is also
+    verified independently because it sometimes lingers from other extras
+    (ASR / extractors).
     """
     try:
+        import langchain_huggingface  # noqa: F401
         import sentence_transformers  # noqa: F401
         import torch  # noqa: F401
     except ImportError:
@@ -357,7 +363,7 @@ EMBEDDER_PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
         "display_name": "HuggingFace (local)",
         "bundled": False,
         "is_installed_fn": _hf_embed_libs_installed,
-        "library_packages": ("sentence-transformers", "torch"),
+        "library_packages": ("langchain-huggingface", "sentence-transformers", "torch"),
         "provenance": _HF_EMBED_PROVENANCE,
         # HF provider's "default model" is the menu entry initially
         # picked; settings.hf_embedding_model holds the active choice.

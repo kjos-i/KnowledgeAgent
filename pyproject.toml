@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "LangGraph knowledge agent: hybrid retrieval (LanceDB) + knowledge graph (Neo4j)."
 requires-python = ">=3.13"
 authors = [{ name = "Ingrid Kjos" }]
-license = { text = "MIT" }
+license = { text = "PolyForm-Noncommercial-1.0.0" }
 keywords = ["langgraph", "rag", "graphrag", "knowledge-agent", "lancedb", "neo4j", "agent"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -245,6 +245,10 @@ embed-google = [
 # separately on first inference via HF cache. See
 # `embedder_lifecycle.py` for the 2-step UX (libs first, then model).
 embed-huggingface = [
+    # The LangChain adapter the factory imports (`HuggingFaceEmbeddings`).
+    # Without it the extra installs the engine but not the wrapper the code
+    # calls, so the first embed raises ImportError even after "install".
+    "langchain-huggingface>=0.3,<1",
     "sentence-transformers>=3,<4",
     # Consistent safe floor (torch>=2.6 => weights_only=True load default),
     # matching the pickle-weight extractor extras above.

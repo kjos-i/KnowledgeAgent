@@ -27,9 +27,8 @@ biomedical, but that is a content choice, never assume the app is biomed-only.
   This file does not duplicate it — it adds run/test instructions, a
   where-things-live index, and assistant-facing gotchas.
 - Per-module top-of-file docstrings are the canonical per-feature reference.
-- ⚠️ `README.md` is an outdated stub ("early scaffolding", "research articles",
-  L1–L2 only). Trust `ARCHITECTURE.md` and the code until the README is
-  refreshed.
+- `README.md` is the user-facing overview (install / quickstart / feature
+  summary) and is current.
 
 ## Running it
 
@@ -91,7 +90,8 @@ modules for how installs are planned/executed from the GUI.
 | Every runtime setting / knob | `config.py` (Pydantic Settings — SSOT) |
 | Per-corpus layer toggles / extractor / ontologies | `corpus_config.py` + each corpus's `corpus.toml` |
 | Agent loop / query topology (retrieval modes) | `graph.py` + `nodes.py`; per-run state in `state.py` |
-| Public data shapes (Mention, KGHit, RetrievedChunk, AgentAnswer) | `models.py` |
+| Public data shapes (KGHit, RetrievedChunk, AgentAnswer) | `models.py` |
+| `Mention` (NER output shape) | `entity_extractors/base.py` |
 | Ingest pipeline (parse → embed → write) | `ingestion/pipeline.py` |
 | Multi-doc operations (delete, backfill, sync, …) | `ingestion/bulk_ops.py` |
 | Parsing / format dispatch | `ingestion/parse.py` + `ingestion/parsers/` |

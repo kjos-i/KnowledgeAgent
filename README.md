@@ -8,6 +8,12 @@ back to the sources.
 Knowledge Agent is **domain-agnostic** — it ships a broad tag taxonomy and adapts
 to whatever documents you point it at, rather than being tied to one field.
 
+> **Status — late-stage development (v0.1.0), not production software.**
+> It runs end-to-end and is actively used, but it is **not** production-hardened:
+> it hasn't been security-audited or load-tested, some areas are still in flux,
+> and pieces may be missing or rough. Treat it as a research / development
+> preview rather than a finished, production-ready product.
+
 ## How it works
 
 Two complementary stores work together:
@@ -77,8 +83,11 @@ set through the GUI; per-corpus settings live in each corpus's `corpus.toml`.
 
 ## License & citation
 
-Released under the **MIT License** — see [LICENSE](LICENSE). Free to use, modify,
-and share, as long as the copyright notice is kept intact.
+Released under the **PolyForm Noncommercial License 1.0.0** — see [LICENSE](LICENSE).
+Free for **noncommercial use** (research, personal study, education, and other
+nonprofit/public-interest purposes), including the freedom to modify and share
+under the same terms. **Commercial use requires a separate license** from the
+copyright holder.
 
 If you use Knowledge Agent in your work, a citation is appreciated:
 

@@ -16,6 +16,7 @@ from knowledge_agent.embedder_lifecycle import (
     HF_EMBEDDING_MODELS,
     DownloadHFModelPlan,
     UninstallEmbedderProviderPlan,
+    _hf_embed_libs_installed,
     download_hf_model_execute,
     download_hf_model_plan,
     install_embedder_provider_execute,
@@ -275,6 +276,42 @@ def test_hf_download_execute_calls_snapshot_download_with_pinned_sha():
 def test_unknown_hf_model_raises():
     with pytest.raises(ValueError, match="Curated menu"):
         download_hf_model_plan("not/a-real-model")
+
+
+# ---- bug fix: HF embedder requires the langchain adapter ----
+
+
+def test_hf_uninstall_removes_langchain_adapter():
+    """The `embed-huggingface` extra installs `langchain-huggingface`, so
+    uninstall must remove it too (kept in sync with the pyproject extra)."""
+    assert "langchain-huggingface" in EMBEDDER_PROVIDER_REGISTRY["huggingface"]["library_packages"]
+
+
+def test_hf_embed_libs_installed_true_when_all_present():
+    with patch.dict(
+        "sys.modules",
+        {
+            "langchain_huggingface": MagicMock(),
+            "sentence_transformers": MagicMock(),
+            "torch": MagicMock(),
+        },
+    ):
+        assert _hf_embed_libs_installed() is True
+
+
+def test_hf_embed_libs_installed_false_when_adapter_missing():
+    """Regression: the factory loads via `langchain_huggingface`, so the engine
+    being present without that adapter must NOT read as installed (else the
+    Installs row goes green but the first embed raises ImportError)."""
+    with patch.dict(
+        "sys.modules",
+        {
+            "langchain_huggingface": None,  # import -> ImportError
+            "sentence_transformers": MagicMock(),
+            "torch": MagicMock(),
+        },
+    ):
+        assert _hf_embed_libs_installed() is False
 
 
 # ---- dimension-change guard ----

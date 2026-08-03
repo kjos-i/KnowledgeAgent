@@ -34,9 +34,12 @@ to them.
 
 ## License & citation
 
-Knowledge Agent is released under the **MIT License**. See the `LICENSE` file in
-the project for the full text. In short: free to use, modify, and share, as long
-as the copyright notice is kept intact.
+Knowledge Agent is released under the **PolyForm Noncommercial License 1.0.0**.
+See the `LICENSE` file in the project for the full text. In short: free for
+**noncommercial use** (research, personal study, education, and other
+nonprofit/public-interest purposes), including modifying and sharing under the
+same terms; **commercial use requires a separate license** from the copyright
+holder.
 
 If you use Knowledge Agent in your work, a citation is appreciated:
 

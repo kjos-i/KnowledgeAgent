@@ -27,7 +27,7 @@ src/knowledge_agent/
 ├── nodes.py                  # 6 LangGraph node functions (agent loop)
 ├── graph.py                  # LangGraph wiring
 ├── state.py                  # AgentState dataclass (per-invocation state)
-├── models.py                 # Public data shapes (Mention, KGHit, RetrievedChunk, ...)
+├── models.py                 # Public data shapes (KGHit, RetrievedChunk, ...)
 ├── errors.py                 # ErrorDetail — typed-error primitive
 ├── logging_setup.py          # Production-grade logging + crash handling
 ├── llm_factory.py            # Provider-agnostic LLM dispatch (4 providers)
@@ -37,10 +37,11 @@ src/knowledge_agent/
 ├── cli.py                    # Headless CLI — ka ingest / query / health / eval
 ├── health.py                 # Startup health checks (DB reachability, config)
 ├── artifacts.py              # Save / export answers + chats (md / txt / docx / json)
+├── corpus_config.py          # Per-corpus corpus.toml schema (labels, layers, knobs)
 │
 ├── ingestion/                # Document ingest pipeline
 │   ├── pipeline.py           # Per-doc orchestrator: parse → embed → write
-│   ├── bulk_ops.py           # 14 multi-doc operations (delete, backfill, sync, ...)
+│   ├── bulk_ops.py           # 17 multi-doc operations (delete, backfill, sync, ...)
 │   ├── parse.py              # Format dispatcher
 │   ├── parsers/              # docling_parser, code_parser, json_parser
 │   ├── parser_lifecycle.py   # parsers-asr / parsers-code install ops
@@ -56,13 +57,10 @@ src/knowledge_agent/
 │   ├── openalex_writes.py    # L1-L4: papers, authors, citations, topics
 │   ├── chunk_writes.py      # L5: per-chunk :Chunk nodes
 │   ├── entity_writes.py      # L6: extracted entities
-│   ├── ontologies/           # L7: 18 ontology importers + shared helpers/linking/xrefs
+│   ├── ontologies/           # L7: 18 importers + lifecycle.py (import/delete) + provenance.py + helpers/linking/xrefs
 │   ├── triples_writes.py     # L8: 15 typed entity-to-entity relations
 │   ├── cross_doc_writes.py   # L9: :RELATED_TO via shared entities
-│   ├── cross_doc_xrefs_writes.py  # L10: :RELATED_BY_XREF via shared canonicals
-│   ├── ontology_lifecycle.py # GUI plan/execute for ontology import/delete
-│   ├── ontology_provenance.py # OntologyProvenance dataclass
-│   └── corpus_config.py      # Per-corpus toml schema
+│   └── cross_doc_xrefs_writes.py  # L10: :RELATED_BY_XREF via shared canonicals
 │
 ├── entity_extractors/        # NER adapters (L6)
 │   ├── base.py               # Mention dataclass + adapter contract
