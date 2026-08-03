@@ -112,6 +112,8 @@ set through the GUI; per-corpus settings live in each corpus's `corpus.toml`.
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — how the system is organised, the
   ingest/query data flows, and the design decisions.
+- **[CLAUDE.md](CLAUDE.md)** — orientation for AI coding assistants working in the
+  repository.
 - In-app **Info** tabs cover the storage layout, the LanceDB + Neo4j schemas, and
   how to use each screen.
 

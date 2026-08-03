@@ -315,4 +315,4 @@ If you're picking this codebase up cold:
 4. Trace one query end-to-end: open [graph.py](src/knowledge_agent/graph.py), follow the LangGraph nodes through [nodes.py](src/knowledge_agent/nodes.py).
 5. For any layer you want to deep-dive, the per-module docstring is the canonical reference.
 
-If you're returning to it after a break: the relevant memory files in `.claude/projects/c--Users-kjosi-ResearcherAgent/memory/` capture decisions in conversational form. MEMORY.md is the index.
+If you're returning to it after a break: the relevant memory files in `.claude/projects/<project>/memory/` capture decisions in conversational form. MEMORY.md is the index.
