@@ -75,6 +75,9 @@ query in the chat; it runs on the graph (the store is pinned to graph-only).
   with a broad query first, e.g.
   `MATCH (n) RETURN labels(n), count(*) ORDER BY count(*) DESC`.
 - Always `RETURN` something: a bare `MATCH` shows nothing.
-- Keep it read-only: the runtime rejects any write (`CREATE`, `MERGE`, `DELETE`,
-  `DROP`, `SET`, `REMOVE`) plus `CALL` / `LOAD`, so a write query just returns
-  nothing. Ingestion is what writes the graph.
+- Keep it to a plain read: the runtime rejects any write (`CREATE`, `MERGE`,
+  `DELETE`, `DROP`, `SET`, `REMOVE`), the `SHOW` and `LOAD` commands, and every
+  procedure call (`CALL` is blocked outright, including read-only ones like
+  `db.labels()`, and the whole `apoc.` / `dbms.` namespace). A rejected query
+  returns nothing, so stick to `MATCH … RETURN …`. Ingestion is what writes the
+  graph.

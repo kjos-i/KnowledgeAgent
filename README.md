@@ -10,7 +10,8 @@ to whatever documents you point it at, rather than being tied to one field.
 
 > **Status — late-stage development (v0.1.0), not production software.**
 > It runs end-to-end and is actively used, but it is **not** production-hardened:
-> it hasn't been security-audited or load-tested, some areas are still in flux,
+> it hasn't had an external/independent security audit or load testing, the
+> **GUI is functional but not fully polished**, some areas are still in flux,
 > and pieces may be missing or rough. Treat it as a research / development
 > preview rather than a finished, production-ready product.
 
@@ -41,14 +42,21 @@ or both stores, and a language model synthesises a cited answer. The UI is a
   HunFlair2), ontology linking across 18 ontologies, typed relations, and
   cross-document links — each layer independently toggleable per corpus.
 - **Bring your own models** — Anthropic, OpenAI, Google, Voyage, Ollama (local),
-  and Hugging Face — installed on demand; no provider is bundled.
+  and Hugging Face — installed on demand; no provider is bundled. To run **fully
+  offline with no API keys**, install [Ollama](https://ollama.com) (a separate
+  binary) for the local LLM and use the local Hugging Face embedder; cloud
+  providers stay optional.
 - **Measure quality** — a built-in evaluation harness with registry-driven
   metrics, an optional LLM-as-judge panel, and JSON / CSV / SQLite reports.
 
 ## Install
 
-Requires **Python 3.13+** and a running **Neo4j** instance (Neo4j Desktop or a
-server). LanceDB is embedded — no setup.
+Requires **Python 3.13+** and a running **Neo4j** database. Neo4j is a separate
+install (it is not pip-installable): download **Neo4j Desktop** from
+[neo4j.com/download](https://neo4j.com/download/), create a local database, set a
+password, and start it. You point each corpus at its Neo4j connection when you
+create the corpus in the app. **LanceDB** (the vector store) is embedded, with no
+install and no server.
 
     pip install -e ".[dev]"
 

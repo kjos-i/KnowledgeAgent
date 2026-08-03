@@ -28,7 +28,10 @@ once, in **Library → Create New**, when you make it.
 
 Open **Keys** and paste the keys for the providers you'll use, for example an
 Anthropic key for the answering model and a Voyage key for embeddings. Prefer to
-run everything locally? Use **Ollama** and you can skip the keys.
+run everything locally? Use **Ollama** for the answering model and the local
+**HuggingFace** embedder, and you can skip the keys entirely. (Ollama covers only
+the answering model; ingest still needs an embedder, so a local embedder is what
+keeps it keyless.)
 
 <a id="installs"></a>
 ## 3. Install what you need

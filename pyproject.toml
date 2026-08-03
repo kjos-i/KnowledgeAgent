@@ -8,7 +8,8 @@ version = "0.1.0"
 description = "LangGraph knowledge agent: hybrid retrieval (LanceDB) + knowledge graph (Neo4j)."
 requires-python = ">=3.13"
 authors = [{ name = "Ingrid Kjos" }]
-license = { text = "PolyForm-Noncommercial-1.0.0" }
+license = "PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE"]
 keywords = ["langgraph", "rag", "graphrag", "knowledge-agent", "lancedb", "neo4j", "agent"]
 classifiers = [
     "Programming Language :: Python :: 3",

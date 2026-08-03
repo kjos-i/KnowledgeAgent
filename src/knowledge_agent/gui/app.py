@@ -5,7 +5,7 @@ Owns session state (`messages`, `last_answer`, `last_query`,
 (Send → chat-router → graph, Stop, Clear, Save chat, Save Result,
 Open Result). Page layout is top-level `ft.Tabs`:
 
-    [ Search ] [ Library ] [ Evaluation ] [ Installs ] [ Keys ] [ Settings ] [ Info ]
+    [ Search ] [ Library ] [ Evaluation ] [ Installs ] [ Keys ] [ Settings ] [ Log ] [ Info ]
 
 Search composes `ChatPanel` (left, always mounted) + `RightPanel`
 (right), where the right column is a View / Retrieval / LLM sub-tab
