@@ -11,7 +11,7 @@ to whatever documents you point it at, rather than being tied to one field.
 > **Status — late-stage development (v0.1.0), not production software.**
 > It runs end-to-end and is actively used, but it is **not** production-hardened:
 > it hasn't had an external/independent security audit or load testing, the
-> **GUI is functional but not fully polished**, some areas are still in flux,
+> GUI is functional but not fully polished, some areas are still in flux,
 > and pieces may be missing or rough. Treat it as a research / development
 > preview rather than a finished, production-ready product.
 
@@ -48,6 +48,26 @@ or both stores, and a language model synthesises a cited answer. The UI is a
   providers stay optional.
 - **Measure quality** — a built-in evaluation harness with registry-driven
   metrics, an optional LLM-as-judge panel, and JSON / CSV / SQLite reports.
+
+## A look at the app
+
+Short screen recordings of the desktop GUI.
+
+**Search → View** — ask a question, get a cited answer.
+
+![Search, View sub-tab](images/Search_View.gif)
+
+**Library → Create New** — start a new corpus.
+
+![Library, Create New sub-tab](images/Library_CreateNew.gif)
+
+**Installs** — add LLM providers, embedders, extractors, parsers, and ontologies.
+
+![Installs tab](images/Installs.gif)
+
+**Evaluation → Create test cases** — author evaluation cases.
+
+![Evaluation, Create test cases sub-tab](images/Evaluation_CreateTestCases.gif)
 
 ## Install
 

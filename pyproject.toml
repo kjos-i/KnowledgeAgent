@@ -6,6 +6,7 @@ build-backend = "hatchling.build"
 name = "knowledge-agent"
 version = "0.1.0"
 description = "LangGraph knowledge agent: hybrid retrieval (LanceDB) + knowledge graph (Neo4j)."
+readme = "README.md"
 requires-python = ">=3.13"
 authors = [{ name = "Ingrid Kjos" }]
 license = "PolyForm-Noncommercial-1.0.0"
