@@ -88,8 +88,22 @@ corpus needs, e.g.:
 
 ## Run
 
-- **GUI:** `ka-gui`
-- **CLI:** `ka ingest <folder>`, `ka query "..."`, `ka health`, `ka eval ...`
+- **GUI (`ka-gui`)** — the intended way to use the app, with the full feature
+  set: create corpora, install providers, manage keys, ingest, browse and edit
+  metadata, run bulk operations, chat with per-query retrieval tuning, and the
+  evaluation dashboards.
+- **CLI (`ka`)** — aimed at **developers and automation** (quick dev checks,
+  cron, CI, scripting), **not** everyday interactive use. It runs against a
+  corpus you already created in the GUI:
+    - `ka ingest <folder>` — ingest documents into an existing corpus
+    - `ka query "..."` — one-shot question, prints a cited answer
+    - `ka health` — liveness probe (Neo4j, LanceDB, provider keys)
+    - `ka eval ...` — run the evaluation harness over a dataset
+
+  The CLI does **not** cover creating a corpus, installs, key management,
+  metadata editing, bulk operations other than folder ingest (delete, re-embed,
+  KG backfill), the conversational chat, or the evaluation dashboards — use the
+  GUI for those.
 
 Configuration (database URIs, API keys, retrieval defaults) lives in `.env` or is
 set through the GUI; per-corpus settings live in each corpus's `corpus.toml`.
