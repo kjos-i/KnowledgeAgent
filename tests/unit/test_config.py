@@ -21,7 +21,7 @@ Notes on test isolation:
 
   - These tests pass `_env_file=None` to `Settings(...)` so they
     NEVER consult the developer's real `.env` at
-    `C:\\Users\\kjosi\\dotenv\\.env`. Required values come in via
+    `C:\\Users\\you\\dotenv\\.env`. Required values come in via
     kwargs.
   - Tests that hit `get_settings()` / `disable_env_file()` use
     `monkeypatch` to set env vars + clear the cache afterwards, so
