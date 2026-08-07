@@ -363,7 +363,12 @@ EMBEDDER_PROVIDER_REGISTRY: dict[str, dict[str, Any]] = {
         "display_name": "HuggingFace (local)",
         "bundled": False,
         "is_installed_fn": _hf_embed_libs_installed,
-        "library_packages": ("langchain-huggingface", "sentence-transformers", "torch"),
+        # torch is deliberately excluded from the pip-uninstall set: it is a
+        # shared BASE dependency (docling's document parsing, lancedb, and
+        # transformers all require it), so removing it when the user uninstalls
+        # the HF embedder would break the app. Only the HF-exclusive packages
+        # are removed. (Install detection stays via _hf_embed_libs_installed.)
+        "library_packages": ("langchain-huggingface", "sentence-transformers"),
         "provenance": _HF_EMBED_PROVENANCE,
         # HF provider's "default model" is the menu entry initially
         # picked; settings.hf_embedding_model holds the active choice.
