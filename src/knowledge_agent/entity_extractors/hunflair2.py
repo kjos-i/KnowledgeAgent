@@ -100,22 +100,22 @@ def _get_model():
 
     NO auto-download: raises `WeightsNotDownloadedError` if the pinned
     revision isn't on disk (2026-07-03 rule — weights are an explicit
-    user action via Library → Installs). Flair's
-    `PrefixedSequenceTagger.load` accepts a bare repo ID and resolves
-    it through the HF hub cache; when the pinned snapshot is present
-    it loads locally, no network call.
+    user action via Library → Installs). We hand Flair's
+    `PrefixedSequenceTagger.load` the pinned checkpoint FILE from the
+    models folder, so it loads locally with no network call and no
+    dependence on Flair's own `main`-pinned cache resolution.
 
     Pickle format: this checkpoint has no .safetensors file — loading
     inevitably uses pickle deserialisation. Install dialog warns the
     user before download.
     """
     from flair.models import PrefixedSequenceTagger
-    from huggingface_hub import hf_hub_download
 
     from knowledge_agent.entity_extractors.extractor_lifecycle import (
         _HUNFLAIR2_PROVENANCE,
         WeightsNotDownloadedError,
         _is_weights_downloaded,
+        _weights_dir,
     )
 
     if not _is_weights_downloaded(_HUNFLAIR2_PROVENANCE):
@@ -127,20 +127,14 @@ def _get_model():
         )
     # Load the PINNED checkpoint by local PATH, not the bare repo id.
     # `PrefixedSequenceTagger.load(MODEL_NAME)` routes through Flair's
-    # `hf_download`, which (a) targets Flair's OWN cache - not the HF-hub
-    # cache Installs populated via `snapshot_download` - and (b) pins nothing
-    # (revision defaults to `main`), so a moved/hostile upstream commit could
-    # be pickle-EXECUTED (this checkpoint has no safetensors). Resolve the
-    # exact pinned file from the local HF cache (guaranteed present by the
-    # guard above; `local_files_only` never fetches) and hand Flair the path,
-    # which `.load` loads as-is - no download, no `main`.
-    model_file = hf_hub_download(
-        repo_id=MODEL_NAME,
-        filename="pytorch_model.bin",
-        revision=MODEL_REVISION,
-        local_files_only=True,
-    )
-    return PrefixedSequenceTagger.load(model_file)
+    # `hf_download`, which pins nothing (revision defaults to `main`), so a
+    # moved/hostile upstream commit could be pickle-EXECUTED (this checkpoint
+    # has no safetensors). Instead hand Flair the exact file from the flat
+    # models folder Installs downloaded into (snapshot_download local_dir,
+    # guaranteed present by the guard above); `.load` loads it as-is - no
+    # download, no `main`, no HF cache lookup.
+    model_file = _weights_dir(_HUNFLAIR2_PROVENANCE) / "pytorch_model.bin"
+    return PrefixedSequenceTagger.load(str(model_file))
 
 
 def _build_sentence(text: str):

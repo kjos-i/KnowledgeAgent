@@ -4079,8 +4079,9 @@ INFO: dict[str, InfoText] = {
             "set restart_required on success. Uninstalling the active embedder "
             "(settings.embedding_provider) is blocked in the lifecycle.\n\n"
             "Voyage/OpenAI/Google are remote (require an API key, no local model "
-            "op). Only HuggingFace downloads weights (to the shared HF Hub cache, "
-            "the read-only box); it auto-downloads on first use, so there is no "
+            "op). Only HuggingFace downloads weights (to the models folder shown "
+            "in the read-only box, not the HuggingFace cache); it auto-downloads "
+            "on first use, so there is no "
             "explicit weight-download button here. The active embedder and model "
             "are set per corpus in the Embedding settings."
         ),
@@ -4153,7 +4154,9 @@ INFO: dict[str, InfoText] = {
             "Weights: download/delete via the HF snapshot ops; those results carry "
             "no restart_required (files on disk, loaded at inference, so no "
             "restart). No auto-download at first inference; extraction raises if "
-            "weights are absent. The read-only box resolves the HF Hub cache. "
+            "weights are absent. The read-only box resolves the models folder "
+            "(models_root) where weights are stored — one flat folder per model, "
+            "no HuggingFace cache/symlinks. "
             "LLM-based extraction is excluded from this list (it dispatches through "
             "the installed LLM provider; model chosen in the Ingest/corpus config)."
         ),

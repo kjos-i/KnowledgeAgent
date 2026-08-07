@@ -254,12 +254,16 @@ def test_hf_download_execute_short_circuits_when_libs_missing():
     assert result.download_ok is False
 
 
-def test_hf_download_execute_calls_snapshot_download_with_pinned_sha():
+def test_hf_download_execute_calls_snapshot_download_with_pinned_sha(tmp_path, monkeypatch):
     plan = DownloadHFModelPlan(
         model_id="BAAI/bge-m3",
         provenance=HF_EMBEDDING_MODELS["BAAI/bge-m3"],
         libs_installed=True,
     )
+    # Flat local_dir download: snapshot_download must target our per-model folder
+    # (no HF cache), pinned to the vetted SHA.
+    target = tmp_path / "BAAI__bge-m3__rev"
+    monkeypatch.setattr("knowledge_agent.embedder_lifecycle._hf_model_dir", lambda mid: target)
     fake_snapshot = MagicMock()
     with patch.dict(
         "sys.modules",
@@ -269,6 +273,7 @@ def test_hf_download_execute_calls_snapshot_download_with_pinned_sha():
     fake_snapshot.assert_called_once_with(
         repo_id="BAAI/bge-m3",
         revision=HF_EMBEDDING_MODELS["BAAI/bge-m3"].pinned_revision,
+        local_dir=str(target),
     )
     assert result.download_ok is True
 

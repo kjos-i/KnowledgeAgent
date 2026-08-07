@@ -679,13 +679,37 @@ def download_hf_model_plan(model_id: str) -> DownloadHFModelPlan:
     )
 
 
+def _hf_model_revision(model_id: str) -> str:
+    """Pinned revision for a curated embedding model; 'main' for an off-menu id.
+
+    Curated models pin an exact SHA (provenance-verified). An off-menu id has no
+    pin and resolves to 'main' — the download revision, encoded in the folder
+    name so a path load is the pinned copy.
+    """
+    prov = HF_EMBEDDING_MODELS.get(model_id)
+    return prov.pinned_revision if prov is not None else "main"
+
+
+def _hf_model_dir(model_id: str):
+    """Flat local folder holding this embedding model's weights.
+
+    Single source of the on-disk layout is `Settings.model_dir` — one flat copy
+    per pinned revision, NO HuggingFace cache/symlinks. Returns None when
+    settings are unreachable (e.g. an unconfigured GUI).
+    """
+    try:
+        return get_settings().model_dir(model_id, _hf_model_revision(model_id))
+    except Exception:
+        return None
+
+
 def download_hf_model_execute(plan: DownloadHFModelPlan) -> DownloadHFModelResult:
     """Pre-download the model via `huggingface_hub.snapshot_download`.
 
-    Pins to the menu entry's `pinned_revision` so the file landing
-    in cache matches what was provenance-verified. First inference
-    by `sentence-transformers` then reads from the cache without
-    needing network access.
+    Downloads flat into `Settings.model_dir` (one copy per pinned revision, no
+    HuggingFace cache/symlinks) pinned to the menu entry's `pinned_revision`, so
+    the folder matches what was provenance-verified. `sentence-transformers`
+    then loads straight from that folder path, no network access.
     """
     if not plan.libs_installed:
         return DownloadHFModelResult(
@@ -700,9 +724,21 @@ def download_hf_model_execute(plan: DownloadHFModelPlan) -> DownloadHFModelResul
     try:
         from huggingface_hub import snapshot_download
 
+        # Download flat into our own per-revision folder (no HF cache, no
+        # symlinks) — one copy, works on Windows without admin. `_hf_model_dir`
+        # is the single resolver the factory load path shares.
+        target = _hf_model_dir(plan.model_id)
+        if target is None:
+            return DownloadHFModelResult(
+                model_id=plan.model_id,
+                did_download=False,
+                download_ok=False,
+                error_output="could not resolve the models folder (settings unavailable).",
+            )
         snapshot_download(
             repo_id=plan.model_id,
             revision=plan.provenance.pinned_revision,
+            local_dir=str(target),
         )
         return DownloadHFModelResult(
             model_id=plan.model_id,

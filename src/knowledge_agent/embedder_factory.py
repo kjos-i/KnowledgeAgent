@@ -166,12 +166,17 @@ def _build_langchain_embedder(provider: str, model: str) -> Embeddings:
                 "GUI's Embedder Provider settings, or manually with "
                 "`pip install <this package>[embed-huggingface]`."
             ) from exc
-        # Pin the model revision so SentenceTransformer loads the vetted
-        # snapshot Installs downloaded, not a moved upstream `main`. Curated
-        # menu models carry a pinned_revision; an off-menu model has no known
-        # pin, so it loads unpinned (with a warning) rather than fail.
-        from knowledge_agent.embedder_lifecycle import HF_EMBEDDING_MODELS
+        # Load from the flat local folder Installs downloaded into: the folder
+        # name encodes the pinned SHA, so loading by path IS the vetted snapshot
+        # (no HF cache, no symlinks, no revision kwarg). If it isn't there yet,
+        # fall back to loading by model id — sentence-transformers lazily pulls
+        # into the HF cache, which the HF_HUB_DISABLE_SYMLINKS safety net keeps
+        # working on Windows.
+        from knowledge_agent.embedder_lifecycle import HF_EMBEDDING_MODELS, _hf_model_dir
 
+        model_path = _hf_model_dir(model)
+        if model_path is not None and model_path.exists():
+            return HuggingFaceEmbeddings(model_name=str(model_path))
         entry = HF_EMBEDDING_MODELS.get(model)
         model_kwargs: dict[str, Any] = {}
         if entry is not None:

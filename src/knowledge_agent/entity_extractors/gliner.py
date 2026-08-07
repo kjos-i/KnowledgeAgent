@@ -111,6 +111,7 @@ def _get_model():
         _GLINER_PROVENANCE,
         WeightsNotDownloadedError,
         _is_weights_downloaded,
+        _weights_dir,
     )
 
     if not _is_weights_downloaded(_GLINER_PROVENANCE):
@@ -120,7 +121,10 @@ def _get_model():
             "Open Library → Installs and press Download weights on "
             "the GLiNER row before running extraction.",
         )
-    return GLiNER.from_pretrained(MODEL_NAME, revision=MODEL_REVISION)
+    # Load from the flat local folder Installs downloaded into. The folder name
+    # encodes the pinned revision, so loading by path IS the vetted SHA (no
+    # revision kwarg, no network, no HF cache).
+    return GLiNER.from_pretrained(str(_weights_dir(_GLINER_PROVENANCE)))
 
 
 def _run_inference(text: str, entity_types: list[str]) -> list[Mention]:

@@ -49,6 +49,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from knowledge_agent import DISTRIBUTION_NAME
+from knowledge_agent.config import get_settings, model_dir_has_weights
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -291,12 +292,9 @@ EXTRACTOR_REGISTRY: dict[str, dict[str, Any]] = {
         "display_name": "GLiNER (zero-shot, multilingual)",
         "bundled": False,
         "pip_extras": "entities-gliner",
-        # Model weights auto-download from HF on first inference
-        # (HF cache, not pip-installed). No separate model_packages
-        # to uninstall via pip — delete_cache for gliner would mean
-        # clearing the HF cache directory, which is a future
-        # follow-up (currently model_packages stays empty so
-        # delete_cache is a no-op for gliner).
+        # Model weights are downloaded via Installs into the models folder
+        # (not pip-installed). No separate model_packages to uninstall via
+        # pip — delete-weights clears the model folder instead.
         "model_packages": (),
         "is_installed_fn": _gliner_is_installed,
         # Provenance surfaces in the install dialog before download.
@@ -309,7 +307,7 @@ EXTRACTOR_REGISTRY: dict[str, dict[str, Any]] = {
         "bundled": False,
         "pip_extras": "entities-gliner-biomed",
         # Same library as general gliner — pip de-duplicates if both
-        # extras are installed. HF cache holds the per-model weights.
+        # extras are installed. The models folder holds the per-model weights.
         "model_packages": (),
         "is_installed_fn": _gliner_biomed_is_installed,
         # Provenance flags safetensors=False — pickle exec risk
@@ -322,10 +320,9 @@ EXTRACTOR_REGISTRY: dict[str, dict[str, Any]] = {
         "display_name": "HunFlair2 (biomedical NER, all-or-nothing)",
         "bundled": False,
         "pip_extras": "entities-hunflair2",
-        # Flair model weights live in the HF cache; no pip
-        # model_packages to uninstall. Delete-cache for hunflair2
-        # would clear the HF cache for the pinned model — future
-        # follow-up; currently a no-op.
+        # Flair model weights live in the models folder; no pip
+        # model_packages to uninstall — delete-weights clears the model
+        # folder for the pinned model.
         "model_packages": (),
         "is_installed_fn": _hunflair2_is_installed,
         # Provenance flags safetensors=False — pickle exec risk
@@ -819,7 +816,7 @@ async def uninstall_extractor_execute(
     )
 
 
-# ---- weight download + delete (HF hub cache) ----
+# ---- weight download + delete (flat models folder) ----
 #
 # Split 2026-07-03: model weights are a separate axis from pip install.
 # `install_extractor` handles the pip package (library code + Python
@@ -852,78 +849,48 @@ class WeightsNotDownloadedError(RuntimeError):
         self.model_name = model_name
 
 
-def _weights_cache_dir(provenance: ModelProvenance):
-    """Return the HF hub cache directory for this extractor's model.
+def _weights_dir(provenance: ModelProvenance):
+    """Flat local folder for this extractor's weights (`Settings.model_dir`).
 
-    HF hub caches every downloaded repo under
-    `<HF_HUB_CACHE>/models--<org>--<model>/`. Splitting on "/" gives
-    us the two components. `HF_HUB_CACHE` is huggingface_hub's own
-    resolved default (honours HF_HOME + HF_HUB_CACHE env vars) —
-    reusing it means we never disagree with the library about where
-    weights actually land.
-
-    Returns None when `provenance` is None (bundled extractors have
-    no downloadable weights) or when the model name doesn't split
-    cleanly (defensive; every shipped provenance uses the canonical
-    `org/model` form).
+    One flat copy per pinned revision, NO HuggingFace cache/symlinks. Returns
+    None for bundled extractors (provenance None) or when settings are
+    unreachable, so the probes below can still report "not downloaded" without
+    raising.
     """
-    from pathlib import Path
-
     if provenance is None:
         return None
-    parts = provenance.model_name.split("/")
-    if len(parts) != 2:
-        return None
-    org, model = parts
     try:
-        from huggingface_hub import constants as _hf_constants
-
-        hub_cache = Path(_hf_constants.HF_HUB_CACHE)
-    except ImportError:
-        # huggingface_hub not installed — no weights could exist locally
-        # since nothing could download them. Fall back to the documented
-        # default so the caller can still report "not downloaded" without
-        # blowing up.
-        hub_cache = Path.home() / ".cache" / "huggingface" / "hub"
-    return hub_cache / f"models--{org}--{model}"
+        return get_settings().model_dir(provenance.model_name, provenance.pinned_revision)
+    except Exception:
+        return None
 
 
 def _is_weights_downloaded(provenance: ModelProvenance) -> bool:
-    """True iff the pinned revision's snapshot is materialised on disk.
+    """True iff this extractor's pinned weights folder holds a weight file.
 
-    HF snapshots live at `<cache_dir>/snapshots/<revision>/`. We check
-    for the specific pinned revision directory rather than "any
-    snapshot" so an older cached checkpoint doesn't masquerade as
-    ready — the adapter loads via the pinned SHA and would trigger
-    an unwanted download if the pin doesn't match.
-
-    Returns False when provenance is None (bundled) or when the cache
-    dir doesn't exist.
+    Flat local_dir layout (no HF `snapshots/`). Checks for an actual weight file
+    so a partial / metadata-only folder does not masquerade as ready — the
+    adapter loads by path and would otherwise try to fetch. The folder name
+    encodes the pinned revision, so a present folder IS the pinned copy. Returns
+    False when provenance is None (bundled). Never raises.
     """
-    cache_dir = _weights_cache_dir(provenance)
-    if cache_dir is None or not cache_dir.exists():
-        return False
-    snapshot_dir = cache_dir / "snapshots" / provenance.pinned_revision
-    return snapshot_dir.exists()
+    return model_dir_has_weights(_weights_dir(provenance))
 
 
 def _weights_size_bytes(provenance: ModelProvenance) -> int:
-    """Total on-disk bytes for this extractor's weights (0 when absent).
+    """Total on-disk bytes for this extractor's weights folder (0 when absent).
 
-    Sums every file under the cache dir (blobs + snapshots + refs).
-    Used by the Installs tab's status chip to show "downloaded
-    (245 MB)" per row.
+    Used by the Installs tab's status chip to show "downloaded (245 MB)".
     """
-    cache_dir = _weights_cache_dir(provenance)
-    if cache_dir is None or not cache_dir.exists():
+    model_dir = _weights_dir(provenance)
+    if model_dir is None or not model_dir.exists():
         return 0
     total = 0
-    for f in cache_dir.rglob("*"):
+    for f in model_dir.rglob("*"):
         if f.is_file():
             try:
                 total += f.stat().st_size
             except OSError:
-                # Symlink target moved, permissions changed — skip.
                 continue
     return total
 
@@ -1109,10 +1076,25 @@ async def download_extractor_weights_execute(
             on_disk_bytes=plan.on_disk_bytes,
         )
 
+    # Download flat into our own per-revision folder (no HF cache, no symlinks)
+    # — one copy, works on Windows without admin. The pinned revision is encoded
+    # in the folder name, so the later path-load IS the pinned copy. `_weights_dir`
+    # is the single resolver every path (detect / load / delete) shares.
+    target = _weights_dir(plan.provenance)
+    if target is None:
+        return DownloadExtractorWeightsResult(
+            extractor_name=plan.extractor_name,
+            did_download=False,
+            download_ok=False,
+            download_error="could not resolve the models folder (settings unavailable).",
+            on_disk_bytes=plan.on_disk_bytes,
+        )
+
     def _do_download() -> str:
         return snapshot_download(
             repo_id=plan.provenance.model_name,
             revision=plan.provenance.pinned_revision,
+            local_dir=str(target),
         )
 
     try:
@@ -1225,7 +1207,7 @@ def delete_extractor_weights_plan(
 async def delete_extractor_weights_execute(
     plan: DeleteExtractorWeightsPlan,
 ) -> DeleteExtractorWeightsResult:
-    """Remove the HF cache dir for this extractor's model.
+    """Remove the models-folder dir for this extractor's model.
 
     Bundled / no-weights extractors short-circuit as no-op successes.
     Delete runs in a worker thread — rmtree of a multi-GB dir can
@@ -1239,8 +1221,8 @@ async def delete_extractor_weights_execute(
             delete_error=None,
             freed_bytes=0,
         )
-    cache_dir = _weights_cache_dir(plan.provenance)
-    if cache_dir is None or not cache_dir.exists():
+    model_dir = _weights_dir(plan.provenance)
+    if model_dir is None or not model_dir.exists():
         return DeleteExtractorWeightsResult(
             extractor_name=plan.extractor_name,
             did_delete=False,
@@ -1252,7 +1234,7 @@ async def delete_extractor_weights_execute(
     import shutil
 
     def _do_delete() -> None:
-        shutil.rmtree(cache_dir)
+        shutil.rmtree(model_dir)
 
     freed = plan.on_disk_bytes
     try:

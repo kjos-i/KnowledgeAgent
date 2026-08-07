@@ -220,8 +220,11 @@ The **Installs** tab manages pieces that live *outside* any corpus folder and ar
 
 - **Adapters** (LLM providers, embedders, parsers, entity extractors): pip
   packages installed into your Python environment.
-- **Model weights:** the Hugging Face embedder, entity-extractor weights, and
-  Docling's Whisper model land in the shared **Hugging Face Hub cache**.
+- **Model weights:** the Hugging Face embedder and entity-extractor weights are
+  downloaded to the **models folder** (`models_root`) — one flat folder per
+  model, with no Hugging Face cache symlinks, so it works on Windows without
+  admin and never duplicates a model. Docling's Whisper model is fetched by
+  Docling into the shared **Hugging Face Hub cache**.
 - **Ollama models:** pulled into Ollama's own model store.
 - **Ontology source files:** downloaded to the **ontology downloads directory**
   you set in Installs (shared across corpora; blank = the backend default).

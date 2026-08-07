@@ -56,17 +56,19 @@ def test_model_revision_is_a_40_char_sha_not_a_branch():
 
 
 def test_get_model_loads_pinned_local_path_not_bare_repo_id():
-    """Security regression (model-pin bypass): `_get_model` must resolve the
-    PINNED checkpoint file (revision-locked, from the local HF cache) and hand
-    Flair the local PATH — never the bare repo id, which Flair's `hf_download`
-    resolves through `main` (in its own cache) and pickle-executes.
+    """Security regression (model-pin bypass): `_get_model` must hand Flair the
+    PINNED checkpoint FILE from the flat models folder — never the bare repo id,
+    which Flair's `hf_download` resolves through `main` (in its own cache) and
+    pickle-executes.
 
     Flair isn't installed at unit-test time, so `flair.models` is injected as
     a mock; the real model-load is exercised by the hunflair2 smoke.
     """
     import sys
+    from pathlib import Path
 
     fake_models = MagicMock()
+    model_dir = Path("/models/hunflair2__rev")
     hunflair2._get_model.cache_clear()
     try:
         with (
@@ -76,21 +78,15 @@ def test_get_model_loads_pinned_local_path_not_bare_repo_id():
                 return_value=True,
             ),
             patch(
-                "huggingface_hub.hf_hub_download",
-                return_value="/hf-cache/pinned/pytorch_model.bin",
-            ) as mock_dl,
+                "knowledge_agent.entity_extractors.extractor_lifecycle._weights_dir",
+                return_value=model_dir,
+            ),
         ):
             hunflair2._get_model()
-        # Resolved the pinned file from the local cache: revision-locked, no fetch.
-        mock_dl.assert_called_once()
-        kw = mock_dl.call_args.kwargs
-        assert kw["repo_id"] == hunflair2.MODEL_NAME
-        assert kw["filename"] == "pytorch_model.bin"
-        assert kw["revision"] == hunflair2.MODEL_REVISION
-        assert kw["local_files_only"] is True
-        # Loaded the local PATH, not the bare repo id (the pre-fix behaviour).
+        # Loaded the local PATH (the pinned file inside the models folder), not
+        # the bare repo id (the pre-fix behaviour that Flair resolves via `main`).
         fake_models.PrefixedSequenceTagger.load.assert_called_once_with(
-            "/hf-cache/pinned/pytorch_model.bin"
+            str(model_dir / "pytorch_model.bin")
         )
     finally:
         hunflair2._get_model.cache_clear()

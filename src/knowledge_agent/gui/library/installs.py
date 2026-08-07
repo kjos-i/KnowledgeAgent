@@ -15,8 +15,8 @@ location sits next to the installs that use it:
      `uninstall_llm_provider_execute`). The active-LLM choice lives in
      Search → LLM.
   2. **Embedding providers** — 4 rows, under a read-only "HuggingFace models"
-     location (the shared HF Hub cache; only the HF embedder downloads locally,
-     the other three are remote APIs). Install / Uninstall each embedder's
+     location (the models folder / `models_root`; only the HF embedder downloads
+     locally, the other three are remote APIs). Install / Uninstall each embedder's
      pip adapter (wraps `install_embedder_provider_execute` /
      `uninstall_embedder_provider_execute`). The active-embedder choice
      lives in the Embedding settings.
@@ -26,7 +26,7 @@ location sits next to the installs that use it:
      `install_parser_extra_execute` / `uninstall_parser_extra_execute`.
      Whisper weights auto-download inside Docling on first ingest use
      — disclosed in the row text rather than fought upstream.
-  4. **Entity extractors** — 3 rows, under a read-only "HF Hub cache"
+  4. **Entity extractors** — 3 rows, under a read-only "models folder"
      location (where downloaded weights land). Status = compound (pip package +
      pinned weights on disk). Two independent axes:
        - `Install`/`Uninstall` — pip package (wraps
@@ -188,12 +188,13 @@ def _source_link_button(url: str) -> ft.IconButton:
 
 
 def _resolve_hf_hub_cache_dir() -> Path | None:
-    """Return the huggingface_hub cache dir (where extractor weights land).
+    """Return the huggingface_hub cache dir (where Docling drops Whisper Turbo).
 
     Reuses `huggingface_hub.constants.HF_HUB_CACHE` so we never disagree
     with the library. Honours `HF_HOME` / `HF_HUB_CACHE` env overrides.
     None when `huggingface_hub` isn't installed — the row still renders
-    with an explanatory placeholder.
+    with an explanatory placeholder. Only the Whisper echo uses this now:
+    the HF embedder + extractor weights land in `models_root` (below).
     """
     try:
         from huggingface_hub import constants as _hf_constants
@@ -201,6 +202,21 @@ def _resolve_hf_hub_cache_dir() -> Path | None:
         return Path(_hf_constants.HF_HUB_CACHE)
     except ImportError:
         return None
+
+
+def _resolve_models_root() -> Path:
+    """Return `models_root` — where the HF embedder + entity-extractor weights
+    are downloaded (one flat folder per model, no HF cache/symlinks).
+
+    Falls back to the default location when settings can't be constructed (e.g.
+    an unconfigured GUI) so the read-only echo never blocks the tab render.
+    """
+    from knowledge_agent.config import app_models_dir, get_settings
+
+    try:
+        return get_settings().models_root
+    except Exception:
+        return app_models_dir()
 
 
 def _resolve_ollama_models_dir() -> Path:
@@ -292,11 +308,11 @@ class InstallsTab:
         # ACTUALLY land (the override when set, the backend default when the
         # field is blank), so a blank field isn't an invisible location.
         self.effective_downloads_display: ft.Text | None = None
-        # HF hub + Ollama models dirs — read-only. Third-party libraries
-        # own these locations; GUI just displays. The HF Hub cache is shared —
-        # extractor weights, the HF embedder's models, and Whisper Turbo all
-        # land there — so each of those sections gets its OWN display (a Flet
-        # control can't appear twice in the tree), all fed one resolved value.
+        # Models-folder + HF-cache + Ollama dirs — read-only. Third-party
+        # libraries own the HF-cache + Ollama locations; GUI just displays. The
+        # HF embedder models and extractor weights land in the models folder
+        # (models_root); Whisper Turbo lands in the shared HF Hub cache — so each
+        # section gets its OWN display (a Flet control can't appear twice).
         self.hf_hub_display: ft.Text | None = None
         self.embedder_hf_hub_display: ft.Text | None = None
         self.whisper_hf_hub_display: ft.Text | None = None
@@ -337,8 +353,9 @@ class InstallsTab:
             size=12,
             color=ft.Colors.GREY_300,
         )
-        # Same HF Hub cache path, echoed under Embedding providers (HF embedder
-        # models) and Parsers (Whisper Turbo) — separate controls, one value.
+        # Location echoes fed by _sync_downloads_dir: extractor weights + HF
+        # embedder models show the models folder; Whisper Turbo (Parsers) shows
+        # the HF Hub cache — separate controls.
         self.embedder_hf_hub_display = ft.Text("(checking…)", size=12, color=ft.Colors.GREY_300)
         self.whisper_hf_hub_display = ft.Text("(checking…)", size=12, color=ft.Colors.GREY_300)
         self.ollama_models_display = ft.Text(
@@ -532,7 +549,7 @@ class InstallsTab:
             )
         )
         # Only the HuggingFace embedder downloads models locally (Voyage / OpenAI
-        # / Google are remote APIs); they land in the shared HF Hub cache.
+        # / Google are remote APIs); they land in the models folder (models_root).
         controls.append(
             self._location_row("Stored on disk (HuggingFace models):", self.embedder_hf_hub_display)
         )
@@ -694,9 +711,9 @@ class InstallsTab:
     @staticmethod
     def _location_row(label: str, display: ft.Text) -> ft.Control:
         """A read-only 'Label: <path>' echo of a section's download location —
-        the shared shape for every "Stored on disk (…)" row (Ollama models, the
-        HF Hub cache under Embedding / Parsers / Extractors, and the effective
-        ontology dir), each sitting under the section it belongs to."""
+        the shared shape for every "Stored on disk (…)" row (the models folder
+        under Embedding / Extractors, the HF Hub cache under Parsers/Whisper,
+        Ollama models, and the effective ontology dir), each under its section."""
         return ft.Row(
             spacing=6,
             controls=[ft.Text(label, size=12, color=ft.Colors.GREY_400, width=280), display],
@@ -722,18 +739,19 @@ class InstallsTab:
             self.effective_downloads_display.value = (
                 str(effective) if effective is not None else "(could not resolve)"
             )
-        # One HF Hub cache path feeds all three read-only echoes (extractor
-        # weights, HF embedder models, Whisper Turbo) — resolve once, set each
-        # (distinct controls, one value; a control can't be shared in the tree).
-        hf = _resolve_hf_hub_cache_dir()
-        hf_text = "(huggingface_hub not installed)" if hf is None else str(hf)
-        for disp in (
-            self.hf_hub_display,
-            self.embedder_hf_hub_display,
-            self.whisper_hf_hub_display,
-        ):
+        # The HF embedder + entity-extractor weights we download ourselves land
+        # in `models_root` (flat folders, no HF cache) — both echoes show it.
+        models_root = str(_resolve_models_root())
+        for disp in (self.hf_hub_display, self.embedder_hf_hub_display):
             if disp is not None:
-                disp.value = hf_text
+                disp.value = models_root
+        # Whisper Turbo is pulled + cached by Docling/whisper itself (NOT routed
+        # through models_root), so its location echo stays the HF Hub cache.
+        hf = _resolve_hf_hub_cache_dir()
+        if self.whisper_hf_hub_display is not None:
+            self.whisper_hf_hub_display.value = (
+                "(huggingface_hub not installed)" if hf is None else str(hf)
+            )
         if self.ollama_models_display is not None:
             self.ollama_models_display.value = str(_resolve_ollama_models_dir())
 

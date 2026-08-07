@@ -10,12 +10,14 @@ fall back to the developer's keys.
 
 import asyncio
 import logging
+import os
+import sys
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, get_args
 
-from platformdirs import user_cache_dir
+from platformdirs import user_cache_dir, user_data_dir
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -61,6 +63,57 @@ EMBEDDING_PROVIDERS: tuple[EmbeddingProvider, ...] = get_args(EmbeddingProvider)
 # folders (cache / data / log) AND the keyring service. Defined here in the
 # leaf module so logging_setup + gui.config_store import it and can't drift.
 APP_NAME = "KnowledgeAgent"
+
+
+# Windows blocks symlink creation without admin / Developer Mode, which makes
+# huggingface_hub's default cache (blobs + snapshot symlinks) raise
+# `OSError(22, 'A required privilege is not held by the client')` mid-download.
+# We download the models we manage flat into `models_root` (no cache, no
+# symlinks — see `Settings.model_dir`), but a transitive HF pull we do NOT route
+# through `models_root` would still hit the shared cache. Tell huggingface_hub
+# to COPY instead of symlink so those succeed for non-admin desktop users. Set
+# before any `huggingface_hub` import (all HF imports here are lazy, so a
+# module-load side-effect is early enough); respect an explicit override.
+if sys.platform == "win32":
+    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
+
+
+def app_models_dir() -> Path:
+    """Return the default root for downloaded model weights.
+
+    `<user_data_dir>/KnowledgeAgent/models` — the OS-standard per-user data dir,
+    survives upgrades and needs no admin. The single default behind the
+    `models_root` setting; overridable via `MODELS_ROOT` (real `.env`) or
+    `.env.test` (test isolation -> `./test_downloads`). NOT created here — the
+    download path creates the per-model subfolder on demand.
+    """
+    return Path(user_data_dir(APP_NAME, appauthor=False)) / "models"
+
+
+# Weight-file suffixes a downloaded-model folder must contain to count as
+# "downloaded". A folder holding only config / tokenizer files (a partial or
+# metadata-only download) does NOT count. Shared by the embedder + extractor
+# lifecycles so "is it downloaded?" means the same thing on both sides.
+MODEL_WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pt", ".ckpt", ".gguf", ".onnx", ".h5")
+
+
+def model_dir_has_weights(model_dir: "Path | None") -> bool:
+    """True iff `model_dir` exists and holds at least one non-empty weight file.
+
+    Flat `local_dir` layout — files sit directly in the folder, no HuggingFace
+    `snapshots/` indirection and no symlinks to resolve. Never raises (a
+    permission / broken-file error on one entry is skipped).
+    """
+    if model_dir is None or not model_dir.is_dir():
+        return False
+    for f in model_dir.rglob("*"):
+        try:
+            if f.suffix.lower() in MODEL_WEIGHT_SUFFIXES and f.is_file() and f.stat().st_size > 0:
+                return True
+        except OSError:
+            continue
+    return False
+
 
 # Dev env files, resolved RELATIVE to the project root (gitignored, never
 # committed). No absolute/machine path lives in shipped config — a dev just
@@ -306,8 +359,8 @@ class Settings(BaseSettings):
             "Default `BAAI/bge-m3` is multilingual 1024-dim (~2.3 GB). "
             "Curated menu in `embedder_lifecycle.py` — picking one from "
             "the GUI updates this field AND triggers the model download "
-            "step. Manual edits skip the download; first inference will "
-            "auto-download via HF cache."
+            "step (into the models folder, `models_root`). Manual edits skip "
+            "that; first inference lazily downloads the model instead."
         ),
     )
 
@@ -527,6 +580,18 @@ class Settings(BaseSettings):
             ".env.test (smoke isolation). Created on first use."
         ),
     )
+    models_root: Path = Field(
+        default_factory=app_models_dir,
+        description=(
+            "Root directory for downloaded model weights (HuggingFace embedder "
+            "models, entity-extractor weights) - one flat folder per pinned "
+            "model, NO HuggingFace cache symlinks (so it works on Windows "
+            "without admin / Developer Mode and never duplicates a model on "
+            "disk). Defaults to <user_data_dir>/KnowledgeAgent/models. Override "
+            "via MODELS_ROOT in .env (real) / .env.test (test isolation -> "
+            "./test_downloads). Created on first download."
+        ),
+    )
     top_k: int = Field(
         default=5,
         ge=1,
@@ -615,6 +680,20 @@ class Settings(BaseSettings):
         if message is not None:
             raise ValueError(message)
         return self
+
+    def model_dir(self, repo_id: str, revision: str) -> Path:
+        """Flat on-disk folder for one downloaded model. The SINGLE definition
+        of the model-storage layout - download, is-downloaded, load, size, and
+        delete all resolve through here so they can never disagree.
+
+        `<models_root>/<org>__<model>__<revision[:12]>/`, one flat copy per
+        pinned revision (no HuggingFace blobs/snapshots): no symlinks (works on
+        Windows without admin) and no duplication. Encoding the revision in the
+        folder name means a path load IS the pinned copy - the same guarantee
+        the old HF-cache `snapshots/<revision>/` lookup gave, without the cache.
+        """
+        safe_repo = repo_id.replace("/", "__")
+        return self.models_root / f"{safe_repo}__{revision[:12]}"
 
     # ========================================================================
     # Neo4j (knowledge-graph store)
