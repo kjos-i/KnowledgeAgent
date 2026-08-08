@@ -7,7 +7,7 @@ docstring for the full step list. Differences here:
   - Installs the `llm-google` extra (langchain-google-genai).
   - Invokes `gemini-1.5-flash` (cheapest Gemini tier).
 
-REQUIRES `GOOGLE_API_KEY` in `.env` before running.
+REQUIRES `GOOGLE_API_KEY` in `.env.test` before running.
 
 Run from the project root:
     python scripts/smoke_install_llm_google.py
@@ -19,9 +19,16 @@ import asyncio
 import sys
 from pathlib import Path
 
+# Route this smoke through .env.test so its key + DB config resolve from the
+# isolated test box, never the real .env. Must run before any knowledge_agent
+# import that resolves get_settings().
+from knowledge_agent.config import load_test_env
+
+load_test_env()
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _install_smoke_lib import (
+from _install_smoke_lib import (  # noqa: E402
     bail_if_not_confirmed,
     confirm_no_default,
     header,
@@ -29,9 +36,9 @@ from _install_smoke_lib import (
     print_result,
 )
 
-from knowledge_agent import llm_factory
-from knowledge_agent.config import get_settings
-from knowledge_agent.llm_lifecycle import (
+from knowledge_agent import llm_factory  # noqa: E402
+from knowledge_agent.config import get_settings  # noqa: E402
+from knowledge_agent.llm_lifecycle import (  # noqa: E402
     install_llm_provider_execute,
     install_llm_provider_plan,
     uninstall_llm_provider_execute,
@@ -44,7 +51,7 @@ SMOKE_MODEL = "gemini-1.5-flash"
 
 async def main() -> None:
     if not get_settings().google_api_key:
-        print("GOOGLE_API_KEY is not set in .env. Add it before running this smoke.")
+        print("GOOGLE_API_KEY is not set in .env.test. Add it before running this smoke.")
         sys.exit(1)
 
     plan = await install_llm_provider_plan(PROVIDER)

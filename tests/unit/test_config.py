@@ -290,6 +290,11 @@ def test_check_window_ordering_helper_returns_message_on_violation() -> None:
 def test_disable_env_file_sets_flag_and_clears_cache(
     fresh_config_state: None,
 ) -> None:
+    # The unit-tier `_block_real_env_file` autouse fixture pre-sets this flag
+    # True for env isolation; this test exercises the False -> True transition,
+    # so establish the pre-state explicitly (fresh_config_state restores it).
+    config_module._env_file_disabled = False
+    get_settings.cache_clear()
     assert config_module._env_file_disabled is False
     disable_env_file()
     assert config_module._env_file_disabled is True

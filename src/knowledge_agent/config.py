@@ -952,14 +952,20 @@ def load_test_env() -> None:
     running, authentication fails (rather than silently writing test
     artefacts into the real corpus).
 
-    Populates `os.environ`; `override=True` so the test values win
-    over anything that pydantic-settings would later read from `.env`.
-    Also clears the `get_settings()` cache so any prior call gets
-    re-resolved against the test creds.
+    Populates `os.environ` from `.env.test` (`override=True`), then HARD-BLOCKS
+    the real `.env` via `disable_env_file()` so `get_settings()` consults ONLY
+    `os.environ` from here on. A value absent from `.env.test` therefore fails
+    loudly (a missing key, or a required-field / validator error) instead of
+    silently falling back to the developer's `.env` — tests and smokes must
+    never reach real credentials. Also clears the `get_settings()` cache so any
+    prior call is re-resolved against the test creds.
     """
     from dotenv import load_dotenv
 
     load_dotenv(_ENV_TEST_FILE, override=True)
+    # Never fall back to the real .env for anything .env.test omits: flip the
+    # same one-way switch the GUI uses so Settings reads os.environ only.
+    disable_env_file()
     get_settings.cache_clear()
 
 

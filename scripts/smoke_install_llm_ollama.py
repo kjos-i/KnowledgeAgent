@@ -26,9 +26,16 @@ import asyncio
 import sys
 from pathlib import Path
 
+# Route this smoke through .env.test so its config + any download resolve from
+# the isolated test box, never the real .env. Must run before any
+# knowledge_agent import that resolves get_settings().
+from knowledge_agent.config import load_test_env
+
+load_test_env()
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _install_smoke_lib import (
+from _install_smoke_lib import (  # noqa: E402
     bail_if_not_confirmed,
     confirm,
     confirm_no_default,
@@ -37,9 +44,9 @@ from _install_smoke_lib import (
     print_result,
 )
 
-from knowledge_agent import llm_factory
-from knowledge_agent.config import get_settings
-from knowledge_agent.llm_lifecycle import (
+from knowledge_agent import llm_factory  # noqa: E402
+from knowledge_agent.config import get_settings  # noqa: E402
+from knowledge_agent.llm_lifecycle import (  # noqa: E402
     OLLAMA_MODELS,
     _ollama_daemon_is_reachable,
     install_llm_provider_execute,
